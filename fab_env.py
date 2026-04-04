@@ -601,8 +601,9 @@ class FaBEnv:
                 self._log(f"    👁  Bone Basher hit — Intimidate! {defender.name} banishes {banished.name}.")
 
         if is_weapon and "Dawnblade" in card.name:
-            attacker.dawnblade_counters += 1
-            self._log(f"    ✨ Dawnblade hits! +1 power counter ({attacker.dawnblade_counters} total).")
+            if attacker.weapon_attack_count >= 1:
+                attacker.dawnblade_counters += 1
+                self._log(f"    ✨ Dawnblade hits twice this turn! +1 power counter ({attacker.dawnblade_counters} total).")
             if attacker.mentor_face_up:
                 attacker.action_points += 1
                 self._log(f"    🎓 Hala Goldenhelm! Sword hit — go again + lesson counter.")

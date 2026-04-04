@@ -119,10 +119,10 @@ class TestTurn1(unittest.TestCase):
         self.assertTrue(self.env.done)
 
     def test_rhinar_life_unchanged_after_turn1(self):
-        # Rhinar takes 3 (turn 4 Dawnblade) + 4 (turn 6 Dawnblade+counter) = 7.
-        # Rhinar ends the game at 13 life.
+        # Rhinar takes 3 (turn 4 Dawnblade) + 3 (turn 6 Dawnblade, no counter) = 6.
+        # Rhinar ends the game at 14 life.
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 13)
+        self.assertEqual(rhinar.life, 14)
 
     def test_dorinthea_banished_two_cards_from_hero_ability(self):
         """Rhinar's hero ability fires twice in turn 1 (Wild Ride + Bare Fangs both discard 6+).
@@ -150,21 +150,22 @@ class TestTurn2(unittest.TestCase):
     """
     Turn 2 — Dorinthea plays En Garde (pitched Warrior's Valor) and
     Warrior's Valor (pitched Thrust). No resources left to pay for Dawnblade (cost 1),
-    so she passes without swinging. Dawnblade hits in turns 4 and 6 for 2 counters total.
+    so she passes without swinging. Dawnblade only hits once per turn in this game,
+    so it never accumulates any counters.
     """
 
     def setUp(self):
         self.env = run_full_game()
 
     def test_rhinar_life_after_turn2(self):
-        # Rhinar takes 3 (turn 4) + 4 (turn 6) = 7 damage total, ends at 13.
+        # Rhinar takes 3 (turn 4) + 3 (turn 6, no counter) = 6 damage total, ends at 14.
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 13)
+        self.assertEqual(rhinar.life, 14)
 
     def test_dawnblade_counters_after_game(self):
-        """Dawnblade hits in turns 4 and 6 — 2 counters at game end."""
+        """Dawnblade never hits twice in one turn — 0 counters at game end."""
         dorinthea = self.env._game.players[1]
-        self.assertEqual(dorinthea.dawnblade_counters, 2)
+        self.assertEqual(dorinthea.dawnblade_counters, 0)
 
 
 class TestTurn3(unittest.TestCase):
@@ -202,14 +203,14 @@ class TestTurn4(unittest.TestCase):
         self.env = run_full_game()
 
     def test_rhinar_life_after_turn4(self):
-        # Dawnblade hits in turns 4 (3 power) and 6 (4 power, +1 counter) — Rhinar ends at 13 life.
+        # Dawnblade hits in turns 4 (3 power) and 6 (3 power, no counter) — Rhinar ends at 14 life.
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 13)
+        self.assertEqual(rhinar.life, 14)
 
-    def test_dawnblade_has_two_counters_after_turn4(self):
-        # Dawnblade hits in turns 4 and 6 — 2 counters at game end.
+    def test_dawnblade_has_no_counters(self):
+        # Dawnblade never hits twice in one turn — 0 counters at game end.
         dorinthea = self.env._game.players[1]
-        self.assertEqual(dorinthea.dawnblade_counters, 2)
+        self.assertEqual(dorinthea.dawnblade_counters, 0)
 
 
 class TestTurn3Final(unittest.TestCase):
@@ -231,9 +232,9 @@ class TestTurn3Final(unittest.TestCase):
         dorinthea = self.env._game.players[1]
         self.assertLessEqual(dorinthea.life, 0)
 
-    def test_rhinar_ends_at_twelve_life(self):
+    def test_rhinar_ends_at_fourteen_life(self):
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 13)
+        self.assertEqual(rhinar.life, 14)
 
     def test_game_ends_in_seven_turns(self):
         self.assertEqual(self.env._game.turn_number, 7)

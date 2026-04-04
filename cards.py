@@ -424,7 +424,7 @@ def build_dorinthea_equipment():
     """Dawnblade, Resplendent weapon + equipment set."""
     return [
         Card("Dawnblade, Resplendent", CardType.WEAPON, power=3, equip_slot=EquipSlot.WEAPON,
-             text="Once per Turn Action — 0: Attack. Whenever Dawnblade hits a hero, put a +1 power counter on it."),
+             text="Once per Turn Action — 0: Attack. If Dawnblade hits a hero twice in one turn, put a +1 power counter on it."),
         Card("Gallantry Gold", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.CHEST,
              text="Once per combat chain — 0: Your next weapon attack this turn gains +2 power. Destroy Gallantry Gold."),
         Card("Blossom of Spring", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.HEAD,
