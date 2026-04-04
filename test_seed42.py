@@ -119,10 +119,10 @@ class TestTurn1(unittest.TestCase):
         self.assertTrue(self.env.done)
 
     def test_rhinar_life_unchanged_after_turn1(self):
-        # Rhinar isn't hit until turn 4 (Dawnblade 3) and turn 6 (Dawnblade 5).
-        # Rhinar ends the game at 12 life (20 - 3 - 5 = 12).
+        # Rhinar takes 3 (turn 4 Dawnblade) + 4 (turn 4 Second Swing) + 5 (turn 6 Dawnblade) = 12.
+        # Rhinar ends the game at 8 life.
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 12)
+        self.assertEqual(rhinar.life, 8)
 
     def test_dorinthea_banished_two_cards_from_hero_ability(self):
         """Rhinar's hero ability fires twice in turn 1 (Wild Ride + Bare Fangs both discard 6+).
@@ -157,9 +157,9 @@ class TestTurn2(unittest.TestCase):
         self.env = run_full_game()
 
     def test_rhinar_life_after_turn2(self):
-        # Rhinar takes 3 (turn 4) + 5 (turn 6) = 8 damage total, ends at 12.
+        # Rhinar takes 3+4 (turn 4) + 5 (turn 6) = 12 damage total, ends at 8.
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 12)
+        self.assertEqual(rhinar.life, 8)
 
     def test_dawnblade_counters_after_game(self):
         """Dawnblade hits in turns 4 and 6 — 2 counters at game end."""
@@ -202,9 +202,9 @@ class TestTurn4(unittest.TestCase):
         self.env = run_full_game()
 
     def test_rhinar_life_after_turn4(self):
-        # Dawnblade hits in turns 4 and 6 — Rhinar ends at 12 life.
+        # Dawnblade hits in turns 4 and 6, Second Swing hits in turn 4 — Rhinar ends at 8 life.
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 12)
+        self.assertEqual(rhinar.life, 8)
 
     def test_dawnblade_has_two_counters_after_turn4(self):
         # Dawnblade hits in turns 4 and 6 — 2 counters at game end.
@@ -231,9 +231,9 @@ class TestTurn3Final(unittest.TestCase):
         dorinthea = self.env._game.players[1]
         self.assertLessEqual(dorinthea.life, 0)
 
-    def test_rhinar_ends_at_twelve_life(self):
+    def test_rhinar_ends_at_eight_life(self):
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 12)
+        self.assertEqual(rhinar.life, 8)
 
     def test_game_ends_in_seven_turns(self):
         self.assertEqual(self.env._game.turn_number, 7)

@@ -174,13 +174,15 @@ def legal_defend_actions(player: 'Player', attack_power: int) -> List[Action]:
     For tractability we generate: no block, each single card, pairs, and equipment combos.
     """
     from itertools import combinations
+    from cards import CardType
 
     actions: List[Action] = []
 
     # No block
     actions.append(Action(ActionType.DEFEND))
 
-    defenders = [(i, c) for i, c in enumerate(player.hand) if c.defense > 0]
+    defenders = [(i, c) for i, c in enumerate(player.hand)
+                 if c.defense > 0 and c.card_type != CardType.INSTANT]
     equip_slots = [slot for slot, eq in player.equipment.items() if eq.active and eq.defense > 0]
 
     # Single cards
