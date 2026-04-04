@@ -245,6 +245,7 @@ class FaBEnv:
                 if pc in active.hand:
                     active.pitch(pc)
 
+            active.resource_points -= card.cost
             active.action_points -= 1
             self._log(f"\n  ▶  {active.name} plays {card}"
                       + (f" (pitched: {', '.join(c.name for c in pitch_cards)})"

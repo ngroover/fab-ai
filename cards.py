@@ -264,10 +264,10 @@ def build_dorinthea_deck() -> List[Card]:
 
     # ── RED (Pitch 1) — 16 cards ──
 
-    # En Garde x2: cost 0, def 3, warrior action (not attack)
+    # En Garde x2: cost 1, def 3, warrior action (not attack)
     # Next weapon attack this turn gains +3 power. Go again.
     for _ in range(2):
-        cards.append(Card("En Garde", CardType.ACTION, cost=0, pitch=1,
+        cards.append(Card("En Garde", CardType.ACTION, cost=1, pitch=1,
                            power=0, defense=3, color=Color.RED, go_again=True,
                            text="Your next weapon attack this turn gains +3 power. Go again."))
 
@@ -314,10 +314,10 @@ def build_dorinthea_deck() -> List[Card]:
                            power=0, defense=3, color=Color.RED,
                            text="Target sword attack gains +3 power."))
 
-    # Warrior's Valor x2: cost 0, def 3, warrior action
+    # Warrior's Valor x2: cost 1, def 3, warrior action
     # Your next weapon attack gains +2 power and "If this hits, go again." Go again.
     for _ in range(2):
-        cards.append(Card("Warrior's Valor", CardType.ACTION, cost=0, pitch=1,
+        cards.append(Card("Warrior's Valor", CardType.ACTION, cost=1, pitch=1,
                            power=0, defense=3, color=Color.RED, go_again=True,
                            text="Your next weapon attack this turn gains +2 power and 'If this hits, this attack gains go again.' Go again."))
 

@@ -97,9 +97,9 @@ class TestTurn1(unittest.TestCase):
     Turn 1 — Rhinar attacks twice.
       - Wild Ride (cost 2): pitched Titanium Bauble [3], drew Wounded Bull,
         discarded Wounded Bull (6 power) → go again + hero intimidate
-      - Bare Fangs (cost 2): pitched Wild Ride [1] (1 leftover resource covered cost),
-        drew Smash with Big Tree, discarded it (7 power) → +2 power + hero intimidate
-    End of turn: Dorinthea at 8 life, Rhinar at 20.
+      - Bare Fangs (cost 2): pitched Wild Ride [1], drew Smash with Big Tree,
+        discarded Smash with Big Tree (7 power) → +2 power + hero intimidate
+    End of turn: Dorinthea at 6 life (6+8=14 damage), Rhinar at 20.
     """
 
     def setUp(self):
@@ -120,16 +120,16 @@ class TestTurn1(unittest.TestCase):
 
     def test_rhinar_life_unchanged_after_turn1(self):
         # Rhinar doesn't get hit in turn 1; life should be 20 going into turn 2.
-        # We verify indirectly: Rhinar ends game at 6 life, took 10+4=14 damage total.
+        # We verify indirectly: Rhinar ends game at 12 life, took 8 damage in turn 2.
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 6)
+        self.assertEqual(rhinar.life, 12)
 
     def test_dorinthea_banished_two_cards_from_hero_ability(self):
         """Rhinar's hero ability fires twice in turn 1 (Wild Ride + Bare Fangs both discard 6+).
         Per FaB rules, banished cards are returned to hand at end of each combat chain.
-        Dorinthea ends the game with 3 cards (used Thrust+Gallantry Gold to defend in turn 3)."""
+        Dorinthea makes no defensive plays, so she ends the game with a full 4-card hand."""
         dorinthea = self.env._game.players[1]
-        self.assertEqual(len(dorinthea.hand), 3)
+        self.assertEqual(len(dorinthea.hand), 4)
 
     def test_wild_ride_drew_and_discarded_wounded_bull(self):
         """Wounded Bull should be in Rhinar's graveyard (discarded by Wild Ride effect)."""
@@ -148,24 +148,23 @@ class TestTurn1(unittest.TestCase):
 
 class TestTurn2(unittest.TestCase):
     """
-    Turn 2 — Dorinthea plays En Garde (+3), Warrior's Valor x2 (+2 each).
-    Dawnblade swings for 3+3+2+2 = 10 power. Rhinar takes 10 damage → 10 life.
-    Dawnblade gains its first +1 power counter.
+    Turn 2 — Dorinthea plays En Garde (+3, pitched Warrior's Valor) and
+    Warrior's Valor (+2, pitched Thrust). Dawnblade swings for 3+2+3=8 power.
+    Rhinar takes 8 damage → 12 life. Dawnblade gains its first +1 power counter.
     """
 
     def setUp(self):
         self.env = run_full_game()
 
     def test_rhinar_life_after_turn2(self):
-        # Rhinar starts turn 2 at 20, takes 10 → 10 life.
-        # Then takes 4 more in turn 4 → 6 life at end of game.
+        # Rhinar starts turn 2 at 20, takes 8 → 12 life. Game ends in turn 3.
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 6)
+        self.assertEqual(rhinar.life, 12)
 
     def test_dawnblade_counters_after_game(self):
-        """Dawnblade should have 2 counters after hitting twice (turns 2 and 4)."""
+        """Dawnblade hits once (turn 2 only — game ends in turn 3), so 1 counter."""
         dorinthea = self.env._game.players[1]
-        self.assertEqual(dorinthea.dawnblade_counters, 2)
+        self.assertEqual(dorinthea.dawnblade_counters, 1)
 
 
 class TestTurn3(unittest.TestCase):
@@ -195,28 +194,29 @@ class TestTurn3(unittest.TestCase):
 
 class TestTurn4(unittest.TestCase):
     """
-    Turn 4 — Dorinthea plays Blade Flash (go again on weapon), swings Dawnblade.
-    Dawnblade now has 1 counter → 3+1 = 4 power. Rhinar takes 4 → 6 life.
-    Second Dawnblade counter added. Dorinthea stores Sigil of Solace in arsenal.
+    Game ends in turn 3. These checks verify final state post-game
+    (no turn 4 occurs with seed 42 under correct resource rules).
     """
 
     def setUp(self):
         self.env = run_full_game()
 
     def test_rhinar_life_after_turn4(self):
+        # Game over in turn 3 — Rhinar ends at 12 life.
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 6)
+        self.assertEqual(rhinar.life, 12)
 
     def test_dawnblade_has_two_counters_after_turn4(self):
+        # Dawnblade only hit once (turn 2) before game ended — 1 counter.
         dorinthea = self.env._game.players[1]
-        self.assertEqual(dorinthea.dawnblade_counters, 2)
+        self.assertEqual(dorinthea.dawnblade_counters, 1)
 
 
-class TestTurn5(unittest.TestCase):
+class TestTurn3Final(unittest.TestCase):
     """
-    Turn 5 — Rhinar plays Smash Instinct (Yellow, cost 2), pitched Clearing Bellow [3].
-    Smash Instinct has Intimidate — Dorinthea banishes Second Swing.
-    Smash Instinct hits for 6. Dorinthea: 6 - 6 = 0. Game over, Rhinar wins.
+    Turn 3 — Rhinar plays Wrecking Ball (cost 2, pitched Come to Fight [3]).
+    Drew Smash Instinct, discarded Dodge (power 0) — no hero ability, no intimidate.
+    Wrecking Ball hits for 6. Dorinthea: 6 - 6 = 0. Game over, Rhinar wins.
     """
 
     def setUp(self):
@@ -232,18 +232,17 @@ class TestTurn5(unittest.TestCase):
         dorinthea = self.env._game.players[1]
         self.assertLessEqual(dorinthea.life, 0)
 
-    def test_rhinar_ends_at_six_life(self):
+    def test_rhinar_ends_at_twelve_life(self):
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 6)
+        self.assertEqual(rhinar.life, 12)
 
-    def test_game_ends_in_five_turns(self):
-        self.assertEqual(self.env._game.turn_number, 5)
+    def test_game_ends_in_three_turns(self):
+        self.assertEqual(self.env._game.turn_number, 3)
 
-    def test_dorinthea_banished_one_card_at_game_end(self):
-        """Smash Instinct's Intimidate fires in turn 5 and the game ends immediately after.
-        The cleanup pass never runs, so 1 card remains in Dorinthea's banished zone."""
+    def test_dorinthea_no_cards_banished_at_game_end(self):
+        """Wrecking Ball discards Dodge (0 power) — no intimidate, no banished cards."""
         dorinthea = self.env._game.players[1]
-        self.assertEqual(len(dorinthea.banished), 1)
+        self.assertEqual(len(dorinthea.banished), 0)
 
 
 class TestResourceAccounting(unittest.TestCase):
