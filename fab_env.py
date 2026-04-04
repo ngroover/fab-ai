@@ -224,6 +224,10 @@ class FaBEnv:
             self._resolve_weapon_attack(active, opponent)
             return
 
+        if action.action_type == ActionType.ACTIVATE_EQUIPMENT:
+            self._resolve_equipment_activation(action.equip_slot, active)
+            return
+
         if action.action_type == ActionType.PLAY_CARD:
             # Snapshot pitch cards by index (descending to avoid shift)
             pitch_cards = self._snapshot_by_indices(active.hand, action.pitch_indices)
@@ -481,6 +485,18 @@ class FaBEnv:
                     self._log(f"    👁  Wrecking Ball — discarded 6+ power card, gains intimidate!")
 
         return power
+
+    def _resolve_equipment_activation(self, slot: str, active: Player):
+        """Resolve a once-per-turn equipment ability (no action point cost)."""
+        eq = active.equipment.get(slot)
+        if not eq or not eq.active or eq.used_this_turn:
+            return
+        eq.used_this_turn = True
+        name = eq.card.name
+        if name == "Blossom of Spring":
+            active.next_weapon_go_again = True
+            self._log(f"\n  ▶  {active.name} activates {name}.")
+            self._log(f"    🌸 Blossom of Spring — next weapon attack gains go again.")
 
     def _resolve_weapon_attack(self, attacker: Player, opponent: Player):
         """Initiate a weapon attack → triggers defend phase."""

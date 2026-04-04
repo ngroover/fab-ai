@@ -219,6 +219,12 @@ class DorintheiAgent:
 
     def select_action(self, obs: dict, legal: List[Action], player: 'Player',
                       opponent: 'Player') -> Action:
+        # Activate Blossom of Spring before first weapon swing
+        if not player.weapon_used_this_turn:
+            for a in legal:
+                if a.action_type == ActionType.ACTIVATE_EQUIPMENT:
+                    return a
+
         # Before weapon: setup
         if not player.weapon_used_this_turn:
             a = _find_play(legal, self._SETUP_CARDS, player)

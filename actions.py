@@ -30,11 +30,12 @@ if TYPE_CHECKING:
 
 
 class ActionType(Enum):
-    PLAY_CARD = auto()
-    WEAPON    = auto()
-    PASS      = auto()
-    DEFEND    = auto()   # used during the defend decision
-    ARSENAL   = auto()   # used during the arsenal decision
+    PLAY_CARD          = auto()
+    WEAPON             = auto()
+    PASS               = auto()
+    DEFEND             = auto()   # used during the defend decision
+    ARSENAL            = auto()   # used during the arsenal decision
+    ACTIVATE_EQUIPMENT = auto()   # activate an equipment's once-per-turn ability
 
 
 @dataclass
@@ -53,6 +54,9 @@ class Action:
     # ARSENAL field
     arsenal_hand_index: int = -1  # -1 means "don't store anything"
 
+    # ACTIVATE_EQUIPMENT field
+    equip_slot: str = ""  # e.g. "head"
+
     def __repr__(self):
         if self.action_type == ActionType.PLAY_CARD:
             src = "arsenal" if self.from_arsenal else f"hand[{self.card_index}]"
@@ -65,6 +69,8 @@ class Action:
             return f"Action(DEFEND hand={self.defend_hand_indices} equip={self.defend_equip_slots})"
         if self.action_type == ActionType.ARSENAL:
             return f"Action(ARSENAL store={self.arsenal_hand_index})"
+        if self.action_type == ActionType.ACTIVATE_EQUIPMENT:
+            return f"Action(ACTIVATE_EQUIPMENT slot={self.equip_slot})"
         return f"Action({self.action_type})"
 
 
@@ -163,6 +169,13 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
         available_resources = player.resource_points + sum(c.pitch for c in player.hand)
         if can_use and available_resources >= weapon_cost:
             actions.append(Action(ActionType.WEAPON))
+
+    # ── Equipment activations ──
+    # Blossom of Spring: Once per Turn — 0: next attack gains go again (no action point cost)
+    blossom = player.equipment.get("head")
+    if (blossom and blossom.active and not blossom.used_this_turn
+            and blossom.card.name == "Blossom of Spring"):
+        actions.append(Action(ActionType.ACTIVATE_EQUIPMENT, equip_slot="head"))
 
     # Always legal to pass
     actions.append(Action(ActionType.PASS))
