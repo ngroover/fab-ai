@@ -343,6 +343,9 @@ class FaBEnv:
         if go:
             attacker.action_points += 1
             self._log(f"    ↩  Go again! {attacker.name} gains 1 action point.")
+            if is_weapon:
+                # Weapon go again resets weapon_used_this_turn so it can re-fire once more
+                attacker.weapon_used_this_turn = False
 
         # Mentor check for Rhinar
         if not is_weapon and card.power >= 6 and attacker.mentor_face_up:
