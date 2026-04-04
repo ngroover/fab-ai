@@ -370,8 +370,10 @@ class FaBEnv:
 
         # Return banished cards (intimidate cleanup)
         if opponent.banished:
+            names = ", ".join(c.name for c in opponent.banished)
             opponent.hand.extend(opponent.banished)
             opponent.banished.clear()
+            self._log(f"    ↩  Banished cards returned to {opponent.name}'s hand: {names}.")
 
         # Pitch zone to deck bottom
         random.shuffle(active.pitch_zone)
