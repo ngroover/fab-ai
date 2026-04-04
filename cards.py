@@ -264,10 +264,10 @@ def build_dorinthea_deck() -> List[Card]:
 
     # ── RED (Pitch 1) — 16 cards ──
 
-    # En Garde x2: cost 0, def 3, warrior action (not attack)
+    # En Garde x2: cost 1, def 3, warrior action (not attack)
     # Next weapon attack this turn gains +3 power. Go again.
     for _ in range(2):
-        cards.append(Card("En Garde", CardType.ACTION, cost=0, pitch=1,
+        cards.append(Card("En Garde", CardType.ACTION, cost=1, pitch=1,
                            power=0, defense=3, color=Color.RED, go_again=True,
                            text="Your next weapon attack this turn gains +3 power. Go again."))
 
@@ -293,12 +293,12 @@ def build_dorinthea_deck() -> List[Card]:
                            power=0, defense=3, color=Color.RED,
                            text="Target attack gains +2 power. Reprise — If the defending hero defended with a card from hand, draw a card."))
 
-    # Second Swing x2: cost 1, power 4, def 3, attack action
-    # Reprise — if defender defended with card from hand, go again
+    # Second Swing x2: cost 1, def 3, warrior action (not an attack)
+    # Your next attack this turn gains +4 power. Go again.
     for _ in range(2):
-        cards.append(Card("Second Swing", CardType.ACTION_ATTACK, cost=1, pitch=1,
-                           power=4, defense=3, color=Color.RED,
-                           text="Reprise — If the defending hero defended with a card from hand, go again."))
+        cards.append(Card("Second Swing", CardType.ACTION, cost=1, pitch=1,
+                           power=0, defense=3, color=Color.RED, go_again=True,
+                           text="Your next attack this turn gains +4 power. Go again."))
 
     # Sharpen Steel x2: cost 0, def 3, instant
     # Target weapon attack gains +1 power.
@@ -314,10 +314,10 @@ def build_dorinthea_deck() -> List[Card]:
                            power=0, defense=3, color=Color.RED,
                            text="Target sword attack gains +3 power."))
 
-    # Warrior's Valor x2: cost 0, def 3, warrior action
+    # Warrior's Valor x2: cost 1, def 3, warrior action
     # Your next weapon attack gains +2 power and "If this hits, go again." Go again.
     for _ in range(2):
-        cards.append(Card("Warrior's Valor", CardType.ACTION, cost=0, pitch=1,
+        cards.append(Card("Warrior's Valor", CardType.ACTION, cost=1, pitch=1,
                            power=0, defense=3, color=Color.RED, go_again=True,
                            text="Your next weapon attack this turn gains +2 power and 'If this hits, this attack gains go again.' Go again."))
 
@@ -403,11 +403,11 @@ def build_dorinthea_deck() -> List[Card]:
                            power=0, defense=3, color=Color.BLUE,
                            text="Generic Defense Reaction."))
 
-    # Visit the Blacksmith x2: cost 0, def 3, generic action. Go again.
+    # Visit the Blacksmith x2: cost 0, def 2, generic action. Go again.
     # Next sword attack this turn gains +1 power.
     for _ in range(2):
         cards.append(Card("Visit the Blacksmith", CardType.ACTION, cost=0, pitch=3,
-                           power=0, defense=3, color=Color.BLUE, go_again=True,
+                           power=0, defense=2, color=Color.BLUE, go_again=True,
                            text="Your next sword attack this turn gains +1 power. Go again."))
 
     # Hala Goldenhelm x1: Mentor — starts face-down in arsenal
@@ -424,7 +424,7 @@ def build_dorinthea_equipment():
     """Dawnblade, Resplendent weapon + equipment set."""
     return [
         Card("Dawnblade, Resplendent", CardType.WEAPON, power=3, equip_slot=EquipSlot.WEAPON,
-             text="Once per Turn Action — 0: Attack. Whenever Dawnblade hits a hero, put a +1 power counter on it."),
+             text="Once per Turn Action — 0: Attack. If Dawnblade hits a hero twice in one turn, put a +1 power counter on it."),
         Card("Gallantry Gold", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.CHEST,
              text="Once per combat chain — 0: Your next weapon attack this turn gains +2 power. Destroy Gallantry Gold."),
         Card("Blossom of Spring", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.HEAD,

@@ -30,11 +30,12 @@ if TYPE_CHECKING:
 
 
 class ActionType(Enum):
-    PLAY_CARD = auto()
-    WEAPON    = auto()
-    PASS      = auto()
-    DEFEND    = auto()   # used during the defend decision
-    ARSENAL   = auto()   # used during the arsenal decision
+    PLAY_CARD          = auto()
+    WEAPON             = auto()
+    PASS               = auto()
+    DEFEND             = auto()   # used during the defend decision
+    ARSENAL            = auto()   # used during the arsenal decision
+    ACTIVATE_EQUIPMENT = auto()   # activate an equipment's once-per-turn ability
 
 
 @dataclass
@@ -53,6 +54,9 @@ class Action:
     # ARSENAL field
     arsenal_hand_index: int = -1  # -1 means "don't store anything"
 
+    # ACTIVATE_EQUIPMENT field
+    equip_slot: str = ""  # e.g. "head"
+
     def __repr__(self):
         if self.action_type == ActionType.PLAY_CARD:
             src = "arsenal" if self.from_arsenal else f"hand[{self.card_index}]"
@@ -65,6 +69,8 @@ class Action:
             return f"Action(DEFEND hand={self.defend_hand_indices} equip={self.defend_equip_slots})"
         if self.action_type == ActionType.ARSENAL:
             return f"Action(ARSENAL store={self.arsenal_hand_index})"
+        if self.action_type == ActionType.ACTIVATE_EQUIPMENT:
+            return f"Action(ACTIVATE_EQUIPMENT slot={self.equip_slot})"
         return f"Action({self.action_type})"
 
 
@@ -152,15 +158,24 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
     if player.weapon:
         from cards import CardType as CT
         is_dawnblade = "Dawnblade" in player.weapon.name
-        weapon_cost = 1 if "Bone Basher" in player.weapon.name else 0
+        weapon_cost = 0 if is_dawnblade else 1
         can_use = True
         if not is_dawnblade and player.weapon_used_this_turn:
             can_use = False
-        if is_dawnblade and player.weapon_used_this_turn and not player.next_weapon_go_again:
-            can_use = False
+        if is_dawnblade and player.weapon_used_this_turn:
+            # Dawnblade can attack again only if go again was granted AND the extra attack hasn't been used
+            if not (player.next_weapon_go_again or player.weapon_additional_attack):
+                can_use = False
         available_resources = player.resource_points + sum(c.pitch for c in player.hand)
         if can_use and available_resources >= weapon_cost:
             actions.append(Action(ActionType.WEAPON))
+
+    # ── Equipment activations ──
+    # Blossom of Spring: Once per Combat Chain — 0: gain 1 resource, then destroy
+    blossom = player.equipment.get("head")
+    if (blossom and blossom.active and not blossom.destroyed
+            and blossom.card.name == "Blossom of Spring"):
+        actions.append(Action(ActionType.ACTIVATE_EQUIPMENT, equip_slot="head"))
 
     # Always legal to pass
     actions.append(Action(ActionType.PASS))
@@ -174,13 +189,15 @@ def legal_defend_actions(player: 'Player', attack_power: int) -> List[Action]:
     For tractability we generate: no block, each single card, pairs, and equipment combos.
     """
     from itertools import combinations
+    from cards import CardType
 
     actions: List[Action] = []
 
     # No block
     actions.append(Action(ActionType.DEFEND))
 
-    defenders = [(i, c) for i, c in enumerate(player.hand) if c.defense > 0]
+    defenders = [(i, c) for i, c in enumerate(player.hand)
+                 if c.defense > 0 and c.card_type != CardType.INSTANT]
     equip_slots = [slot for slot, eq in player.equipment.items() if eq.active and eq.defense > 0]
 
     # Single cards
@@ -190,6 +207,15 @@ def legal_defend_actions(player: 'Player', attack_power: int) -> List[Action]:
     # Pairs of hand cards
     for (i, ci), (j, cj) in combinations(defenders, 2):
         actions.append(Action(ActionType.DEFEND, defend_hand_indices=[i, j]))
+
+    # Triples of hand cards
+    for (i, ci), (j, cj), (k, ck) in combinations(defenders, 3):
+        actions.append(Action(ActionType.DEFEND, defend_hand_indices=[i, j, k]))
+
+    # All four hand cards
+    if len(defenders) == 4:
+        indices = [i for i, _ in defenders]
+        actions.append(Action(ActionType.DEFEND, defend_hand_indices=indices))
 
     # Single equipment slots
     for slot in equip_slots:

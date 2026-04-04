@@ -149,7 +149,7 @@ class RhinarAgent:
         if player.life - attack_power > 8:
             return legal[0]  # no block (first action is always no-block)
 
-        damage_we_can_take = max(1, player.life - 6)
+        damage_we_can_take = max(0, player.life - 6)
         needed = max(0, attack_power - damage_we_can_take)
 
         best: Optional[Action] = None
@@ -212,12 +212,19 @@ class DorintheiAgent:
         "On a Knife Edge", "Blade Flash", "Hit and Run", "Visit the Blacksmith", "Sharpen Steel",
     ]
     _CHAIN_CARDS = [
-        "On a Knife Edge", "Blade Flash", "Hit and Run", "Glistening Steelblade", "En Garde",
+        "Second Swing", "On a Knife Edge", "Blade Flash", "Hit and Run", "Glistening Steelblade", "En Garde",
     ]
-    _ATTACK_CARDS = ["Second Swing", "Run Through", "Out for Blood", "Driving Blade"]
+
+    _ATTACK_CARDS = ["Run Through", "Out for Blood", "Driving Blade"]
 
     def select_action(self, obs: dict, legal: List[Action], player: 'Player',
                       opponent: 'Player') -> Action:
+        # Activate Blossom of Spring before first weapon swing
+        if not player.weapon_used_this_turn:
+            for a in legal:
+                if a.action_type == ActionType.ACTIVATE_EQUIPMENT:
+                    return a
+
         # Before weapon: setup
         if not player.weapon_used_this_turn:
             a = _find_play(legal, self._SETUP_CARDS, player)
@@ -253,12 +260,12 @@ class DorintheiAgent:
         if player.life - attack_power > 8:
             return legal[0]
 
-        damage_we_can_take = max(1, player.life - 6)
+        damage_we_can_take = max(0, player.life - 6)
         needed = max(0, attack_power - damage_we_can_take)
 
         # Prefer defense reactions / instants, then blues
         best: Optional[Action] = None
-        best_score = -1
+        best_score = float('-inf')
 
         for a in legal:
             if a.action_type != ActionType.DEFEND:
@@ -283,7 +290,34 @@ class DorintheiAgent:
                     best_score = score
                     best = a
 
-        return best if best else legal[0]
+        if best:
+            return best
+
+        # No full block found — if lethal, use the highest partial block available
+        if attack_power >= player.life:
+            best_partial = None
+            best_partial_def = 0
+            for a in legal:
+                if a.action_type != ActionType.DEFEND:
+                    continue
+                hand_def = sum(
+                    player.hand[i].defense
+                    for i in a.defend_hand_indices
+                    if 0 <= i < len(player.hand)
+                )
+                equip_def = sum(
+                    player.equipment[s].defense
+                    for s in a.defend_equip_slots
+                    if s in player.equipment and player.equipment[s].active
+                )
+                total = hand_def + equip_def
+                if total > best_partial_def:
+                    best_partial_def = total
+                    best_partial = a
+            if best_partial:
+                return best_partial
+
+        return legal[0]
 
     def select_arsenal(self, obs: dict, legal: List[Action], player: 'Player') -> Action:
         priority = ["Sigil of Solace", "On a Knife Edge", "Blade Flash", "Hit and Run",

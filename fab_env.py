@@ -224,6 +224,10 @@ class FaBEnv:
             self._resolve_weapon_attack(active, opponent)
             return
 
+        if action.action_type == ActionType.ACTIVATE_EQUIPMENT:
+            self._resolve_equipment_activation(action.equip_slot, active)
+            return
+
         if action.action_type == ActionType.PLAY_CARD:
             # Snapshot pitch cards by index (descending to avoid shift)
             pitch_cards = self._snapshot_by_indices(active.hand, action.pitch_indices)
@@ -245,6 +249,7 @@ class FaBEnv:
                 if pc in active.hand:
                     active.pitch(pc)
 
+            active.resource_points -= card.cost
             active.action_points -= 1
             self._log(f"\n  ▶  {active.name} plays {card}"
                       + (f" (pitched: {', '.join(c.name for c in pitch_cards)})"
@@ -284,12 +289,13 @@ class FaBEnv:
             if c in defender.hand:
                 defender.hand.remove(c)
 
-        # Compute power
+        # Compute power — use the value already set by _trigger_defend_phase
+        # (which includes any "when this attacks" bonuses, e.g. Bare Fangs +2)
         if is_weapon:
             power = attacker.get_effective_weapon_power()
             attacker.next_weapon_power_bonus = 0
         else:
-            power = card.power + attacker.next_brute_attack_bonus
+            power = self._pending_attack_power
             attacker.next_brute_attack_bonus = 0
 
         total_def = sum(c.defense for c in def_cards) + sum(e.defense for e in def_equip)
@@ -341,6 +347,9 @@ class FaBEnv:
         if go:
             attacker.action_points += 1
             self._log(f"    ↩  Go again! {attacker.name} gains 1 action point.")
+            if is_weapon and not attacker.weapon_additional_attack:
+                # Dawnblade: go again grants exactly one additional attack this turn
+                attacker.weapon_additional_attack = True
 
         # Mentor check for Rhinar
         if not is_weapon and card.power >= 6 and attacker.mentor_face_up:
@@ -368,8 +377,10 @@ class FaBEnv:
 
         # Return banished cards (intimidate cleanup)
         if opponent.banished:
+            names = ", ".join(c.name for c in opponent.banished)
             opponent.hand.extend(opponent.banished)
             opponent.banished.clear()
+            self._log(f"    ↩  Banished cards returned to {opponent.name}'s hand: {names}.")
 
         # Pitch zone to deck bottom
         random.shuffle(active.pitch_zone)
@@ -401,14 +412,7 @@ class FaBEnv:
         active = self._game.active
         active.reset_turn_resources()
 
-        # Blossom of Spring: activate at start of turn (once per game — gain 1 resource, then destroy)
-        blossom = active.equipment.get("head")
-        if blossom and not blossom.destroyed and "Blossom of Spring" in blossom.card.name:
-            active.resource_points += 1
-            blossom.destroyed = True
-            self._log(f"  🌸 Blossom of Spring — gain 1 resource. Blossom of Spring is destroyed.")
-
-        # Dorinthea hero ability
+        # Dorinthea hero ability: Dawnblade gains go again at start of each of her turns
         if "Dorinthea" in active.hero_name and active.weapon:
             active.next_weapon_go_again = True
             self._log(f"  ✨ Dorinthea's ability — Dawnblade gains go again this turn.")
@@ -418,6 +422,7 @@ class FaBEnv:
         self._log(f"{'═'*60}")
         self._log(f"  ♥  Life: {self._game.players[0].name}={self._game.players[0].life} "
                   f"| {self._game.players[1].name}={self._game.players[1].life}")
+        self._log(f"  🃏  Hand: {', '.join(str(c) for c in active.hand)}")
 
         self._phase = Phase.ATTACK
         self.agent_selection = f"agent_{self._game.active_player_idx}"
@@ -486,24 +491,43 @@ class FaBEnv:
 
         return power
 
+    def _resolve_equipment_activation(self, slot: str, active: Player):
+        """Resolve an equipment activate ability (no action point cost, then destroy)."""
+        eq = active.equipment.get(slot)
+        if not eq or not eq.active or eq.destroyed:
+            return
+        name = eq.card.name
+        if name == "Blossom of Spring":
+            active.resource_points += 1
+            eq.destroyed = True
+            self._log(f"\n  ▶  {active.name} activates {name}.")
+            self._log(f"    🌸 Blossom of Spring — gain 1 resource. Blossom of Spring is destroyed.")
+
     def _resolve_weapon_attack(self, attacker: Player, opponent: Player):
         """Initiate a weapon attack → triggers defend phase."""
         weapon = attacker.weapon
         if not weapon:
             return
 
-        weapon_cost = 1 if "Bone Basher" in weapon.name else 0
+        weapon_cost = 0 if "Dawnblade" in weapon.name else 1
+        pitched = []
         if weapon_cost > 0:
             pitchable = [c for c in attacker.hand if c.pitch > 0]
             total = 0
             for c in sorted(pitchable, key=lambda x: x.pitch, reverse=True):
                 if total >= weapon_cost:
                     break
+                pitched.append(c)
                 attacker.pitch(c)
                 total += c.pitch
 
+        pitch_str = f" (pitched: {', '.join(c.name for c in pitched)})" if pitched else ""
+        self._log(f"\n  ▶  {attacker.name} attacks with {weapon.name}{pitch_str}")
+
         attacker.action_points -= 1
         attacker.weapon_used_this_turn = True
+        if attacker.weapon_additional_attack:
+            attacker.weapon_additional_attack = False  # consume the one extra attack
 
         self._pending_attack = weapon
         self._pending_is_weapon = True
@@ -549,6 +573,13 @@ class FaBEnv:
         elif n == "Glistening Steelblade":
             active.next_weapon_go_again = True
             self._log(f"    ✨ Glistening Steelblade — next Dawnblade has go again + counter on hit.")
+
+        elif n == "Second Swing":
+            if active.weapon_attack_count >= 1:
+                active.next_weapon_power_bonus += 4
+                self._log(f"    ⚡ Second Swing — weapon has already swung, next attack gains +4 power.")
+            else:
+                self._log(f"    ⚡ Second Swing — no prior weapon attack this turn, +4 bonus does not apply.")
 
         elif n == "Slice and Dice":
             active.next_weapon_power_bonus += 1
@@ -596,8 +627,9 @@ class FaBEnv:
                 self._log(f"    👁  Bone Basher hit — Intimidate! {defender.name} banishes {banished.name}.")
 
         if is_weapon and "Dawnblade" in card.name:
-            attacker.dawnblade_counters += 1
-            self._log(f"    ✨ Dawnblade hits! +1 power counter ({attacker.dawnblade_counters} total).")
+            if attacker.weapon_attack_count >= 1:
+                attacker.dawnblade_counters += 1
+                self._log(f"    ✨ Dawnblade hits twice this turn! +1 power counter ({attacker.dawnblade_counters} total).")
             if attacker.mentor_face_up:
                 attacker.action_points += 1
                 self._log(f"    🎓 Hala Goldenhelm! Sword hit — go again + lesson counter.")
