@@ -330,10 +330,10 @@ class TestHeroAbility(unittest.TestCase):
                 action = legal[0]
             obs, _, _, _, _ = env.step(action)
 
-        # After turn 1: Wild Ride hit for 6 and Bare Fangs hit for 6 → Dorinthea at 8 life.
+        # After turn 1: Wild Ride hit for 6 and Bare Fangs hit for 8 → Dorinthea at 6 life.
         # Banished cards are returned within the same step (end of each combat chain),
         # so their effect cannot be observed via hand-size snapshots between steps.
-        self.assertEqual(dorinthea.life, 8)
+        self.assertEqual(dorinthea.life, 6)
 
 
 if __name__ == "__main__":

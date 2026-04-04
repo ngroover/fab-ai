@@ -284,12 +284,13 @@ class FaBEnv:
             if c in defender.hand:
                 defender.hand.remove(c)
 
-        # Compute power
+        # Compute power — use the value already set by _trigger_defend_phase
+        # (which includes any "when this attacks" bonuses, e.g. Bare Fangs +2)
         if is_weapon:
             power = attacker.get_effective_weapon_power()
             attacker.next_weapon_power_bonus = 0
         else:
-            power = card.power + attacker.next_brute_attack_bonus
+            power = self._pending_attack_power
             attacker.next_brute_attack_bonus = 0
 
         total_def = sum(c.defense for c in def_cards) + sum(e.defense for e in def_equip)
