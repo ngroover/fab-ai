@@ -152,7 +152,7 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
     if player.weapon:
         from cards import CardType as CT
         is_dawnblade = "Dawnblade" in player.weapon.name
-        weapon_cost = 1 if "Bone Basher" in player.weapon.name else 0
+        weapon_cost = 1
         can_use = True
         if not is_dawnblade and player.weapon_used_this_turn:
             can_use = False

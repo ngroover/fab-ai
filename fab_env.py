@@ -488,7 +488,7 @@ class FaBEnv:
         if not weapon:
             return
 
-        weapon_cost = 1 if "Bone Basher" in weapon.name else 0
+        weapon_cost = 1
         pitched = []
         if weapon_cost > 0:
             pitchable = [c for c in attacker.hand if c.pitch > 0]
