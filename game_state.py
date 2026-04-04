@@ -62,7 +62,7 @@ class Player:
         self.weapon_attack_count = 0      # for In the Swing / Slice and Dice
         self.next_weapon_go_again = False  # from On a Knife Edge, Blade Flash, etc.
         self.next_weapon_power_bonus = 0   # from En Garde, Sharpen Steel, etc.
-        self.next_attack_go_again = False  # from Come to Fight, Blossom of Spring
+        self.next_attack_go_again = False  # from Come to Fight
         self.next_brute_attack_bonus = 0   # from Beast Mode / Barraging Beatdown setup
         self.attacks_this_turn = 0
         # Mentor state

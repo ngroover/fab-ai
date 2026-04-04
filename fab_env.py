@@ -401,6 +401,13 @@ class FaBEnv:
         active = self._game.active
         active.reset_turn_resources()
 
+        # Blossom of Spring: activate at start of turn (once per game — gain 1 resource, then destroy)
+        blossom = active.equipment.get("head")
+        if blossom and not blossom.destroyed and "Blossom of Spring" in blossom.card.name:
+            active.resource_points += 1
+            blossom.destroyed = True
+            self._log(f"  🌸 Blossom of Spring — gain 1 resource. Blossom of Spring is destroyed.")
+
         # Dorinthea hero ability
         if "Dorinthea" in active.hero_name and active.weapon:
             active.next_weapon_go_again = True

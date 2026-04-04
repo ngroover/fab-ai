@@ -314,6 +314,13 @@ class FaBEngine:
         if attacker.arsenal and attacker.arsenal.card_type == CardType.MENTOR:
             self.handle_mentor(attacker)
 
+        # Blossom of Spring: activate at start of turn (once per game — gain 1 resource, then destroy)
+        blossom = attacker.equipment.get("head")
+        if blossom and not blossom.destroyed and "Blossom of Spring" in blossom.card.name:
+            attacker.resource_points += 1
+            blossom.destroyed = True
+            self.log(f"  🌸 Blossom of Spring — gain 1 resource. Blossom of Spring is destroyed.")
+
         # Dorinthea hero ability: Dawnblade gains go again at start of action phase
         if "Dorinthea" in attacker.hero_name and attacker.weapon:
             attacker.next_weapon_go_again = True
