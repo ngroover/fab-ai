@@ -343,9 +343,9 @@ class FaBEnv:
         if go:
             attacker.action_points += 1
             self._log(f"    ↩  Go again! {attacker.name} gains 1 action point.")
-            if is_weapon:
-                # Weapon go again resets weapon_used_this_turn so it can re-fire once more
-                attacker.weapon_used_this_turn = False
+            if is_weapon and not attacker.weapon_additional_attack:
+                # Dawnblade: go again grants exactly one additional attack this turn
+                attacker.weapon_additional_attack = True
 
         # Mentor check for Rhinar
         if not is_weapon and card.power >= 6 and attacker.mentor_face_up:
@@ -505,6 +505,8 @@ class FaBEnv:
 
         attacker.action_points -= 1
         attacker.weapon_used_this_turn = True
+        if attacker.weapon_additional_attack:
+            attacker.weapon_additional_attack = False  # consume the one extra attack
 
         self._pending_attack = weapon
         self._pending_is_weapon = True

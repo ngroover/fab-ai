@@ -156,8 +156,10 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
         can_use = True
         if not is_dawnblade and player.weapon_used_this_turn:
             can_use = False
-        if is_dawnblade and player.weapon_used_this_turn and not player.next_weapon_go_again:
-            can_use = False
+        if is_dawnblade and player.weapon_used_this_turn:
+            # Dawnblade can attack again only if go again was granted AND the extra attack hasn't been used
+            if not (player.next_weapon_go_again or player.weapon_additional_attack):
+                can_use = False
         available_resources = player.resource_points + sum(c.pitch for c in player.hand)
         if can_use and available_resources >= weapon_cost:
             actions.append(Action(ActionType.WEAPON))

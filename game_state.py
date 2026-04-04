@@ -65,6 +65,7 @@ class Player:
         self.next_attack_go_again = False  # from Come to Fight, Blossom of Spring
         self.next_brute_attack_bonus = 0   # from Beast Mode / Barraging Beatdown setup
         self.attacks_this_turn = 0
+        self.weapon_additional_attack = False  # Dawnblade: one extra attack when go again fires
         # Mentor state
         self.mentor_face_up = False
         self.mentor_lesson_counters = 0
@@ -120,6 +121,7 @@ class Player:
         self.next_attack_go_again = False
         self.next_brute_attack_bonus = 0
         self.attacks_this_turn = 0
+        self.weapon_additional_attack = False
         for eq in self.equipment.values():
             eq.reset_turn()
 
