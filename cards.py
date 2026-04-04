@@ -403,11 +403,11 @@ def build_dorinthea_deck() -> List[Card]:
                            power=0, defense=3, color=Color.BLUE,
                            text="Generic Defense Reaction."))
 
-    # Visit the Blacksmith x2: cost 0, def 3, generic action. Go again.
+    # Visit the Blacksmith x2: cost 0, def 2, generic action. Go again.
     # Next sword attack this turn gains +1 power.
     for _ in range(2):
         cards.append(Card("Visit the Blacksmith", CardType.ACTION, cost=0, pitch=3,
-                           power=0, defense=3, color=Color.BLUE, go_again=True,
+                           power=0, defense=2, color=Color.BLUE, go_again=True,
                            text="Your next sword attack this turn gains +1 power. Go again."))
 
     # Hala Goldenhelm x1: Mentor — starts face-down in arsenal
