@@ -208,13 +208,13 @@ class DorintheiAgent:
     """
 
     _SETUP_CARDS = [
-        "Glistening Steelblade", "En Garde", "Slice and Dice", "Warrior's Valor",
+        "Glistening Steelblade", "En Garde", "Slice and Dice", "Second Swing", "Warrior's Valor",
         "On a Knife Edge", "Blade Flash", "Hit and Run", "Visit the Blacksmith", "Sharpen Steel",
     ]
     _CHAIN_CARDS = [
         "On a Knife Edge", "Blade Flash", "Hit and Run", "Glistening Steelblade", "En Garde",
     ]
-    _ATTACK_CARDS = ["Second Swing", "Run Through", "Out for Blood", "Driving Blade"]
+    _ATTACK_CARDS = ["Run Through", "Out for Blood", "Driving Blade"]
 
     def select_action(self, obs: dict, legal: List[Action], player: 'Player',
                       opponent: 'Player') -> Action:

@@ -293,12 +293,12 @@ def build_dorinthea_deck() -> List[Card]:
                            power=0, defense=3, color=Color.RED,
                            text="Target attack gains +2 power. Reprise — If the defending hero defended with a card from hand, draw a card."))
 
-    # Second Swing x2: cost 1, power 4, def 3, attack action
-    # Reprise — if defender defended with card from hand, go again
+    # Second Swing x2: cost 1, def 3, warrior action (not an attack)
+    # Your next attack this turn gains +4 power. Go again.
     for _ in range(2):
-        cards.append(Card("Second Swing", CardType.ACTION_ATTACK, cost=1, pitch=1,
-                           power=4, defense=3, color=Color.RED,
-                           text="Reprise — If the defending hero defended with a card from hand, go again."))
+        cards.append(Card("Second Swing", CardType.ACTION, cost=1, pitch=1,
+                           power=0, defense=3, color=Color.RED, go_again=True,
+                           text="Your next attack this turn gains +4 power. Go again."))
 
     # Sharpen Steel x2: cost 0, def 3, instant
     # Target weapon attack gains +1 power.

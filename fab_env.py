@@ -403,11 +403,6 @@ class FaBEnv:
         active = self._game.active
         active.reset_turn_resources()
 
-        # Dorinthea hero ability
-        if "Dorinthea" in active.hero_name and active.weapon:
-            active.next_weapon_go_again = True
-            self._log(f"  ✨ Dorinthea's ability — Dawnblade gains go again this turn.")
-
         self._log(f"\n{'═'*60}")
         self._log(f"  TURN {self._game.turn_number} — {active.name} ({active.hero_name})")
         self._log(f"{'═'*60}")
@@ -550,6 +545,10 @@ class FaBEnv:
         elif n == "Glistening Steelblade":
             active.next_weapon_go_again = True
             self._log(f"    ✨ Glistening Steelblade — next Dawnblade has go again + counter on hit.")
+
+        elif n == "Second Swing":
+            active.next_weapon_power_bonus += 4
+            self._log(f"    ⚡ Second Swing — next attack gains +4 power.")
 
         elif n == "Slice and Dice":
             active.next_weapon_power_bonus += 1
