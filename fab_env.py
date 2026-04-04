@@ -412,6 +412,7 @@ class FaBEnv:
         self._log(f"{'═'*60}")
         self._log(f"  ♥  Life: {self._game.players[0].name}={self._game.players[0].life} "
                   f"| {self._game.players[1].name}={self._game.players[1].life}")
+        self._log(f"  🃏  Hand: {', '.join(str(c) for c in active.hand)}")
 
         self._phase = Phase.ATTACK
         self.agent_selection = f"agent_{self._game.active_player_idx}"
@@ -487,14 +488,19 @@ class FaBEnv:
             return
 
         weapon_cost = 1 if "Bone Basher" in weapon.name else 0
+        pitched = []
         if weapon_cost > 0:
             pitchable = [c for c in attacker.hand if c.pitch > 0]
             total = 0
             for c in sorted(pitchable, key=lambda x: x.pitch, reverse=True):
                 if total >= weapon_cost:
                     break
+                pitched.append(c)
                 attacker.pitch(c)
                 total += c.pitch
+
+        pitch_str = f" (pitched: {', '.join(c.name for c in pitched)})" if pitched else ""
+        self._log(f"\n  ▶  {attacker.name} attacks with {weapon.name}{pitch_str}")
 
         attacker.action_points -= 1
         attacker.weapon_used_this_turn = True
