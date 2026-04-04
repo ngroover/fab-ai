@@ -119,10 +119,10 @@ class TestTurn1(unittest.TestCase):
         self.assertTrue(self.env.done)
 
     def test_rhinar_life_unchanged_after_turn1(self):
-        # Rhinar takes 3 (turn 4 Dawnblade) + 3+3 (turn 6 double Dawnblade) = 9.
-        # Rhinar ends the game at 11 life.
+        # Rhinar takes 3 (turn 4 Dawnblade) + 3+3 (turn 6 double Dawnblade) = 9 early damage.
+        # Game goes long — Rhinar ends at 6 life.
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 11)
+        self.assertEqual(rhinar.life, 6)
 
     def test_dorinthea_banished_two_cards_from_hero_ability(self):
         """Rhinar's hero ability fires twice in turn 1 (Wild Ride + Bare Fangs both discard 6+).
@@ -156,9 +156,9 @@ class TestTurn2(unittest.TestCase):
         self.env = run_full_game()
 
     def test_rhinar_life_after_turn2(self):
-        # Rhinar takes 3 (turn 4) + 3+3 (turn 6 double swing) = 9 damage total, ends at 11.
+        # Game goes long after Dorinthea blocks turn 7 — Rhinar ends at 6 life.
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 11)
+        self.assertEqual(rhinar.life, 6)
 
     def test_dawnblade_counters_after_game(self):
         """Dawnblade hits twice in turn 6 — 1 counter at game end."""
@@ -201,9 +201,9 @@ class TestTurn4(unittest.TestCase):
         self.env = run_full_game()
 
     def test_rhinar_life_after_turn4(self):
-        # Dawnblade hits once in turn 4 (3 power), twice in turn 6 (3+3) — Rhinar ends at 11 life.
+        # Dawnblade hits once in turn 4 (3 power), twice in turn 6 (3+3). Game goes long — Rhinar ends at 6.
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 11)
+        self.assertEqual(rhinar.life, 6)
 
     def test_dawnblade_has_no_counters(self):
         # Dawnblade hits twice in turn 6 — 1 counter at game end.
@@ -230,12 +230,12 @@ class TestTurn3Final(unittest.TestCase):
         dorinthea = self.env._game.players[1]
         self.assertLessEqual(dorinthea.life, 0)
 
-    def test_rhinar_ends_at_eleven_life(self):
+    def test_rhinar_ends_at_six_life(self):
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 11)
+        self.assertEqual(rhinar.life, 6)
 
-    def test_game_ends_in_seven_turns(self):
-        self.assertEqual(self.env._game.turn_number, 7)
+    def test_game_ends_in_twenty_five_turns(self):
+        self.assertEqual(self.env._game.turn_number, 25)
 
     def test_dorinthea_no_cards_banished_at_game_end(self):
         """Smash with Big Tree has no intimidate — banished zone is empty at game end."""

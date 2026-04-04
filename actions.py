@@ -195,6 +195,15 @@ def legal_defend_actions(player: 'Player', attack_power: int) -> List[Action]:
     for (i, ci), (j, cj) in combinations(defenders, 2):
         actions.append(Action(ActionType.DEFEND, defend_hand_indices=[i, j]))
 
+    # Triples of hand cards
+    for (i, ci), (j, cj), (k, ck) in combinations(defenders, 3):
+        actions.append(Action(ActionType.DEFEND, defend_hand_indices=[i, j, k]))
+
+    # All four hand cards
+    if len(defenders) == 4:
+        indices = [i for i, _ in defenders]
+        actions.append(Action(ActionType.DEFEND, defend_hand_indices=indices))
+
     # Single equipment slots
     for slot in equip_slots:
         actions.append(Action(ActionType.DEFEND, defend_equip_slots=[slot]))
