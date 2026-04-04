@@ -149,7 +149,7 @@ class RhinarAgent:
         if player.life - attack_power > 8:
             return legal[0]  # no block (first action is always no-block)
 
-        damage_we_can_take = max(1, player.life - 6)
+        damage_we_can_take = max(0, player.life - 6)
         needed = max(0, attack_power - damage_we_can_take)
 
         best: Optional[Action] = None
@@ -253,12 +253,12 @@ class DorintheiAgent:
         if player.life - attack_power > 8:
             return legal[0]
 
-        damage_we_can_take = max(1, player.life - 6)
+        damage_we_can_take = max(0, player.life - 6)
         needed = max(0, attack_power - damage_we_can_take)
 
         # Prefer defense reactions / instants, then blues
         best: Optional[Action] = None
-        best_score = -1
+        best_score = float('-inf')
 
         for a in legal:
             if a.action_type != ActionType.DEFEND:

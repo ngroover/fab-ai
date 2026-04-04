@@ -119,10 +119,10 @@ class TestTurn1(unittest.TestCase):
         self.assertTrue(self.env.done)
 
     def test_rhinar_life_unchanged_after_turn1(self):
-        # Rhinar doesn't get hit in turn 1 or turn 2 (Dorinthea can't afford Dawnblade).
-        # Rhinar ends the game at 20 life.
+        # Rhinar isn't hit until turn 4 (Dawnblade 3) and turn 6 (Dawnblade 5).
+        # Rhinar ends the game at 12 life (20 - 3 - 5 = 12).
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 20)
+        self.assertEqual(rhinar.life, 12)
 
     def test_dorinthea_banished_two_cards_from_hero_ability(self):
         """Rhinar's hero ability fires twice in turn 1 (Wild Ride + Bare Fangs both discard 6+).
@@ -150,21 +150,21 @@ class TestTurn2(unittest.TestCase):
     """
     Turn 2 — Dorinthea plays En Garde (pitched Warrior's Valor) and
     Warrior's Valor (pitched Thrust). No resources left to pay for Dawnblade (cost 1),
-    so she passes without swinging. Rhinar stays at 20 life.
+    so she passes without swinging. Dawnblade hits in turns 4 and 6 for 2 counters total.
     """
 
     def setUp(self):
         self.env = run_full_game()
 
     def test_rhinar_life_after_turn2(self):
-        # Dorinthea can't afford Dawnblade — Rhinar ends game at 20 life.
+        # Rhinar takes 3 (turn 4) + 5 (turn 6) = 8 damage total, ends at 12.
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 20)
+        self.assertEqual(rhinar.life, 12)
 
     def test_dawnblade_counters_after_game(self):
-        """Dawnblade never swings — 0 counters at game end."""
+        """Dawnblade hits in turns 4 and 6 — 2 counters at game end."""
         dorinthea = self.env._game.players[1]
-        self.assertEqual(dorinthea.dawnblade_counters, 0)
+        self.assertEqual(dorinthea.dawnblade_counters, 2)
 
 
 class TestTurn3(unittest.TestCase):
@@ -202,21 +202,20 @@ class TestTurn4(unittest.TestCase):
         self.env = run_full_game()
 
     def test_rhinar_life_after_turn4(self):
-        # Game over in turn 3 — Rhinar ends at 20 life (never took damage).
+        # Dawnblade hits in turns 4 and 6 — Rhinar ends at 12 life.
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 20)
+        self.assertEqual(rhinar.life, 12)
 
     def test_dawnblade_has_two_counters_after_turn4(self):
-        # Dawnblade never swung — 0 counters.
+        # Dawnblade hits in turns 4 and 6 — 2 counters at game end.
         dorinthea = self.env._game.players[1]
-        self.assertEqual(dorinthea.dawnblade_counters, 0)
+        self.assertEqual(dorinthea.dawnblade_counters, 2)
 
 
 class TestTurn3Final(unittest.TestCase):
     """
-    Turn 3 — Rhinar plays Wrecking Ball (cost 2, pitched Come to Fight [3]).
-    Drew Smash Instinct, discarded Dodge (power 0) — no hero ability, no intimidate.
-    Wrecking Ball hits for 6. Dorinthea: 6 - 6 = 0. Game over, Rhinar wins.
+    Turn 7 — Rhinar plays Smash with Big Tree (7 power, pitched Bare Fangs + Pack Call).
+    Dorinthea doesn't defend (no blocking combo reaches 7). Life: 6 - 7 = -1. Rhinar wins.
     """
 
     def setUp(self):
@@ -232,15 +231,15 @@ class TestTurn3Final(unittest.TestCase):
         dorinthea = self.env._game.players[1]
         self.assertLessEqual(dorinthea.life, 0)
 
-    def test_rhinar_ends_at_twenty_life(self):
+    def test_rhinar_ends_at_twelve_life(self):
         rhinar = self.env._game.players[0]
-        self.assertEqual(rhinar.life, 20)
+        self.assertEqual(rhinar.life, 12)
 
-    def test_game_ends_in_three_turns(self):
-        self.assertEqual(self.env._game.turn_number, 3)
+    def test_game_ends_in_seven_turns(self):
+        self.assertEqual(self.env._game.turn_number, 7)
 
     def test_dorinthea_no_cards_banished_at_game_end(self):
-        """Wrecking Ball discards Dodge (0 power) — no intimidate, no banished cards."""
+        """Smash with Big Tree has no intimidate — banished zone is empty at game end."""
         dorinthea = self.env._game.players[1]
         self.assertEqual(len(dorinthea.banished), 0)
 
