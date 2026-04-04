@@ -547,8 +547,11 @@ class FaBEnv:
             self._log(f"    ✨ Glistening Steelblade — next Dawnblade has go again + counter on hit.")
 
         elif n == "Second Swing":
-            active.next_weapon_power_bonus += 4
-            self._log(f"    ⚡ Second Swing — next attack gains +4 power.")
+            if active.weapon_attack_count >= 1:
+                active.next_weapon_power_bonus += 4
+                self._log(f"    ⚡ Second Swing — weapon has already swung, next attack gains +4 power.")
+            else:
+                self._log(f"    ⚡ Second Swing — no prior weapon attack this turn, +4 bonus does not apply.")
 
         elif n == "Slice and Dice":
             active.next_weapon_power_bonus += 1
