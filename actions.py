@@ -136,6 +136,9 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
     for i, card in enumerate(player.hand):
         if card.card_type in (CardType.DEFENSE_REACTION, CardType.ATTACK_REACTION):
             continue  # reactions are played in the reaction step, not freely
+        # Second Swing requires a prior weapon attack this turn (Reprise-style restriction)
+        if card.name == "Second Swing" and player.weapon_attack_count == 0:
+            continue
         needed = max(0, card.cost - player.resource_points)
         if needed == 0:
             actions.append(Action(ActionType.PLAY_CARD, card_index=i))
