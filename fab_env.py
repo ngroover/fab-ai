@@ -587,9 +587,9 @@ class FaBEnv:
             self._log(f"    ⚡ En Garde — weapon gets +3 power.")
 
         elif n == "Warrior's Valor":
-            active.next_weapon_power_bonus += 2
+            active.next_weapon_power_bonus += 3
             active.next_weapon_go_again = True
-            self._log(f"    ⚡ Warrior's Valor — weapon gets +2 power and 'if hits, go again'.")
+            self._log(f"    ⚡ Warrior's Valor — weapon gets +3 power and 'if hits, go again'.")
 
         elif n in ("On a Knife Edge", "Blade Flash", "Hit and Run"):
             active.next_weapon_go_again = True
