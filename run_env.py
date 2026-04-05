@@ -11,19 +11,31 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import random
+from datetime import datetime
 from typing import Optional
 
 from fab_env import FaBEnv, Phase
 from agents import RhinarAgent, DorintheiAgent
 from actions import ActionType
 
+LOGS_DIR = os.path.join(os.path.dirname(__file__), "logs")
 
-def run_game(verbose: bool = True, seed: Optional[int] = None) -> Optional[str]:
+
+def _new_log_path(seed: Optional[int] = None) -> str:
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    seed_tag = f"_seed{seed}" if seed is not None else ""
+    return os.path.join(LOGS_DIR, f"game_{ts}{seed_tag}.log")
+
+
+def run_game(verbose: bool = True, seed: Optional[int] = None, save_log: bool = False) -> Optional[str]:
     """
     Run one complete game. Returns the winning agent id, or None for draw.
     """
-    env = FaBEnv(verbose=verbose)
+    log_file = _new_log_path(seed) if save_log else None
+    env = FaBEnv(verbose=verbose, log_file=log_file)
     obs, infos = env.reset(seed=seed)
 
     rhinar_agent = RhinarAgent()
@@ -67,6 +79,9 @@ def run_game(verbose: bool = True, seed: Optional[int] = None) -> Optional[str]:
     if verbose:
         env.render()
 
+    if log_file:
+        print(f"  📄 Log saved: {log_file}")
+
     return winner_agent
 
 
@@ -108,12 +123,13 @@ def main():
     parser.add_argument("--sim", type=int, default=0, help="Run N games in simulation mode")
     parser.add_argument("--quiet", action="store_true", help="Suppress play-by-play output")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for single game")
+    parser.add_argument("--log", action="store_true", help="Save game log to logs/ directory")
     args = parser.parse_args()
 
     if args.sim > 0:
         run_simulation(args.sim)
     else:
-        winner = run_game(verbose=not args.quiet, seed=args.seed)
+        winner = run_game(verbose=not args.quiet, seed=args.seed, save_log=args.log)
         if args.quiet:
             if winner:
                 hero = "Rhinar" if winner == "agent_0" else "Dorinthea"
