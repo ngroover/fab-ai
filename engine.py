@@ -200,6 +200,7 @@ class FaBEngine:
         to_pitch = pitch_for_cost(attacker, weapon_cost)
         for c in to_pitch:
             attacker.pitch(c)
+        attacker.resource_points -= weapon_cost
 
         attacker.action_points -= 1
         attacker.weapon_used_this_turn = True
@@ -345,6 +346,7 @@ class FaBEngine:
                 for pc in to_pitch:
                     if pc in attacker.hand:
                         attacker.pitch(pc)
+                attacker.resource_points -= card.cost
 
                 # Spend action point
                 attacker.action_points -= 1
