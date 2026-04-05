@@ -182,8 +182,8 @@ class FaBEngine:
         if attacker.action_points < 1:
             return False
 
-        # Bone Basher: once per turn (no go again mechanic to re-trigger)
-        # Dawnblade: can swing multiple times if given go again (Dorinthea's core mechanic)
+        # Bone Basher: once per turn only
+        # Dawnblade: can swing again if a card granted go again (next_weapon_go_again=True)
         is_dawnblade = "Dawnblade" in attacker.weapon.name
         if not is_dawnblade and attacker.weapon_used_this_turn:
             return False
@@ -322,11 +322,6 @@ class FaBEngine:
             blossom.destroyed = True
             self.log(f"  🌸 Blossom of Spring — gain 1 resource. Blossom of Spring is destroyed.")
 
-        # Dorinthea hero ability: Dawnblade gains go again at start of action phase
-        if "Dorinthea" in attacker.hero_name and attacker.weapon:
-            attacker.next_weapon_go_again = True
-            self.log(f"  ✨ Dorinthea's ability — Dawnblade gains go again this turn.")
-
         self.log(f"  ♥  Life: {attacker.name}={attacker.life} | {defender.name}={defender.life}")
         self.log(f"  🃏  Hand ({len(attacker.hand)}): {', '.join(str(c) for c in attacker.hand)}")
         if attacker.arsenal and attacker.arsenal.card_type != CardType.MENTOR:
@@ -378,17 +373,11 @@ class FaBEngine:
                                 break
 
             else:
-                # No more hand actions — try weapon
-                if not attacker.weapon_used_this_turn:
-                    used = self.try_weapon_attack(attacker, defender)
-                    if self.game.is_over():
-                        break
-                    if not used:
-                        break
-                elif attacker.next_weapon_go_again and not attacker.weapon_used_this_turn:
-                    # Shouldn't reach here but safety check
+                # No more hand actions — try weapon (or Dawnblade re-swing if go again was set)
+                used = self.try_weapon_attack(attacker, defender)
+                if self.game.is_over():
                     break
-                else:
+                if not used:
                     break
 
         # Try weapon if not used yet and we still have action points

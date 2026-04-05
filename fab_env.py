@@ -412,11 +412,6 @@ class FaBEnv:
         active = self._game.active
         active.reset_turn_resources()
 
-        # Dorinthea hero ability: Dawnblade gains go again at start of each of her turns
-        if "Dorinthea" in active.hero_name and active.weapon:
-            active.next_weapon_go_again = True
-            self._log(f"  ✨ Dorinthea's ability — Dawnblade gains go again this turn.")
-
         self._log(f"\n{'═'*60}")
         self._log(f"  TURN {self._game.turn_number} — {active.name} ({active.hero_name})")
         self._log(f"{'═'*60}")

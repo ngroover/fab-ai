@@ -165,18 +165,13 @@ def rhinar_choose_arsenal(player: Player) -> Optional[Card]:
 def dorinthea_choose_action(player: Player, opponent: Player) -> Optional[Tuple[Card, List[Card]]]:
     """
     Dorinthea's whole game plan: give Dawnblade go again, swing twice per turn.
-    Her hero ability already gives Dawnblade go again at start of turn.
-    So the first weapon swing is free — then she needs to SET UP a second swing.
+    Her hero ability allows Dawnblade to attack twice in a turn, but go again
+    must come from a card (Blade Flash, On a Knife Edge, En Garde, etc.).
 
-    Turn structure should be:
-    1. Swing Dawnblade (hero ability gave it go again already)
-    2. After it hits (go again from hero), play an enabler to give it go again AGAIN
-    3. Swing Dawnblade a third time if possible, etc.
-
-    Actually: Dorinthea prodigy gives go again at START. So:
-    - Weapon goes → if hits, can chain. Play enabler for another go again.
-    - If weapon hasn't swung yet: play enabler FIRST to boost the first swing,
-      then weapon swings with the buffs.
+    Turn structure:
+    1. Play a go-again enabler (sets next_weapon_go_again=True)
+    2. Swing Dawnblade — go again fires, granting +1 action point
+    3. Play another enabler if available, then swing again
 
     Priority before weapon swings:
     1. Power-boosting enablers (En Garde +3, Sharpen Steel +1) 
