@@ -1,11 +1,16 @@
 """
-run_env.py — run FaBEnv games using rule-based agents.
+run_env.py — run FaBEnv games using rule-based agents or a human player.
 
 Usage:
-  python run_env.py              # single verbose game
-  python run_env.py --quiet      # single game, result only
-  python run_env.py --sim 200    # 200-game simulation with win rates
-  python run_env.py --seed 42    # fixed seed for reproducibility
+  python run_env.py                        # single verbose game (both AI)
+  python run_env.py --quiet                # single game, result only
+  python run_env.py --sim 200              # 200-game simulation with win rates
+  python run_env.py --seed 42              # fixed seed for reproducibility
+  python run_env.py --human rhinar         # human plays Rhinar, AI plays Dorinthea
+  python run_env.py --human dorinthea      # human plays Dorinthea, AI plays Rhinar
+  python run_env.py --human both           # both players are human
+  python run_env.py --human 0              # same as --human rhinar (agent_0)
+  python run_env.py --human 1              # same as --human dorinthea (agent_1)
 """
 
 from __future__ import annotations
@@ -17,8 +22,28 @@ from datetime import datetime
 from typing import Optional
 
 from fab_env import FaBEnv, Phase
-from agents import RhinarAgent, DorintheiAgent
+from agents import RhinarAgent, DorintheiAgent, HumanAgent
 from actions import ActionType
+
+
+def _resolve_human_flags(human_arg: Optional[str]) -> tuple[bool, bool]:
+    """
+    Parse --human argument and return (rhinar_is_human, dorinthea_is_human).
+    Accepts: rhinar/0/agent_0  dorinthea/1/agent_1  both
+    """
+    if human_arg is None:
+        return False, False
+    v = human_arg.lower().strip()
+    if v in ("rhinar", "0", "agent_0"):
+        return True, False
+    if v in ("dorinthea", "1", "agent_1"):
+        return False, True
+    if v == "both":
+        return True, True
+    raise argparse.ArgumentTypeError(
+        f"Unknown --human value '{human_arg}'. "
+        "Use: rhinar, dorinthea, both, 0, 1, agent_0, or agent_1."
+    )
 
 LOGS_DIR = os.path.join(os.path.dirname(__file__), "logs")
 
@@ -30,16 +55,25 @@ def _new_log_path(seed: Optional[int] = None) -> str:
     return os.path.join(LOGS_DIR, f"game_{ts}{seed_tag}.log")
 
 
-def run_game(verbose: bool = True, seed: Optional[int] = None, save_log: bool = False) -> Optional[str]:
+def run_game(
+    verbose: bool = True,
+    seed: Optional[int] = None,
+    save_log: bool = False,
+    rhinar_is_human: bool = False,
+    dorinthea_is_human: bool = False,
+) -> Optional[str]:
     """
     Run one complete game. Returns the winning agent id, or None for draw.
+
+    rhinar_is_human / dorinthea_is_human control whether each hero is driven
+    by a HumanAgent (stdin prompts) or the rule-based AI.
     """
     log_file = _new_log_path(seed) if save_log else None
     env = FaBEnv(verbose=verbose, log_file=log_file)
     obs, infos = env.reset(seed=seed)
 
-    rhinar_agent = RhinarAgent()
-    dorinthea_agent = DorintheiAgent()
+    rhinar_agent = HumanAgent() if rhinar_is_human else RhinarAgent()
+    dorinthea_agent = HumanAgent() if dorinthea_is_human else DorintheiAgent()
 
     # agent_0 = Rhinar (player 0), agent_1 = Dorinthea (player 1)
     def get_agent(agent_id: str):
@@ -124,12 +158,31 @@ def main():
     parser.add_argument("--quiet", action="store_true", help="Suppress play-by-play output")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for single game")
     parser.add_argument("--log", action="store_true", help="Save game log to logs/ directory")
+    parser.add_argument(
+        "--human",
+        metavar="HERO",
+        default=None,
+        help=(
+            "Make one or both heroes human-controlled (interactive stdin). "
+            "Values: rhinar (or 0/agent_0), dorinthea (or 1/agent_1), both"
+        ),
+    )
     args = parser.parse_args()
 
+    rhinar_is_human, dorinthea_is_human = _resolve_human_flags(args.human)
+
     if args.sim > 0:
+        if rhinar_is_human or dorinthea_is_human:
+            parser.error("--sim cannot be used together with --human")
         run_simulation(args.sim)
     else:
-        winner = run_game(verbose=not args.quiet, seed=args.seed, save_log=args.log)
+        winner = run_game(
+            verbose=not args.quiet,
+            seed=args.seed,
+            save_log=args.log,
+            rhinar_is_human=rhinar_is_human,
+            dorinthea_is_human=dorinthea_is_human,
+        )
         if args.quiet:
             if winner:
                 hero = "Rhinar" if winner == "agent_0" else "Dorinthea"

@@ -6,6 +6,8 @@ Each agent implements:
 
 These are the same heuristics from ai.py, now decoupled from the engine.
 They can be used as baselines or opponents during RL training.
+
+HumanAgent prompts a human player via stdin for each decision.
 """
 
 from __future__ import annotations
@@ -337,3 +339,155 @@ class DorintheiAgent:
                     return a
         return next(a for a in legal if a.action_type == ActionType.ARSENAL
                     and a.arsenal_hand_index == -1)
+
+
+# ──────────────────────────────────────────────────────────────
+# Human agent (interactive stdin input)
+# ──────────────────────────────────────────────────────────────
+
+class HumanAgent:
+    """
+    Interactive agent that prompts the human player via stdin.
+
+    Supports all three decision phases:
+        select_action  — attack phase
+        select_defend  — defend phase
+        select_arsenal — end-of-turn arsenal storage
+    """
+
+    # ── Display helpers ──────────────────────────────────────
+
+    def _fmt_card(self, card) -> str:
+        parts = [card.name]
+        details = []
+        if card.cost:
+            details.append(f"cost:{card.cost}")
+        if card.pitch:
+            details.append(f"pitch:{card.pitch}")
+        if card.power:
+            details.append(f"pow:{card.power}")
+        if card.defense:
+            details.append(f"def:{card.defense}")
+        if card.go_again:
+            details.append("go-again")
+        if card.intimidate:
+            details.append("intimidate")
+        if details:
+            parts.append(f"({', '.join(details)})")
+        return " ".join(parts)
+
+    def _show_hand(self, player: 'Player'):
+        print("\n  Hand:")
+        if player.hand:
+            for i, c in enumerate(player.hand):
+                print(f"    [{i}] {self._fmt_card(c)}")
+        else:
+            print("    (empty)")
+        if player.arsenal:
+            print(f"  Arsenal: {self._fmt_card(player.arsenal)}")
+
+    def _show_equipment(self, player: 'Player'):
+        active = {slot: eq for slot, eq in player.equipment.items()
+                  if eq.active and eq.defense > 0}
+        if active:
+            print("  Equipment:")
+            for slot, eq in active.items():
+                print(f"    {slot}: {eq.card.name} (def:{eq.defense})")
+
+    def _show_stats(self, player: 'Player', opponent: 'Player'):
+        res_avail = player.resource_points + sum(c.pitch for c in player.hand)
+        print(f"\n  You ({player.name} / {player.hero_name}): "
+              f"{player.life} life | {player.action_points} action pt(s) | "
+              f"{player.resource_points} resources (total available: {res_avail})")
+        if player.weapon:
+            wp = player.get_effective_weapon_power()
+            print(f"  Weapon: {player.weapon.name} power {wp}"
+                  + (" [used]" if player.weapon_used_this_turn else ""))
+        print(f"  Opponent ({opponent.name} / {opponent.hero_name}): {opponent.life} life")
+
+    def _action_label(self, action: Action, player: 'Player') -> str:
+        if action.action_type == ActionType.PASS:
+            return "PASS (end action phase)"
+        if action.action_type == ActionType.WEAPON:
+            wp = player.get_effective_weapon_power()
+            return f"WEAPON — attack with {player.weapon.name} for {wp} power"
+        if action.action_type == ActionType.ACTIVATE_EQUIPMENT:
+            slot = action.equip_slot
+            eq = player.equipment.get(slot)
+            name = eq.card.name if eq else slot
+            return f"ACTIVATE equipment — {name} ({slot})"
+        if action.action_type == ActionType.PLAY_CARD:
+            if action.from_arsenal:
+                card = player.arsenal
+                src = "arsenal"
+            else:
+                card = player.hand[action.card_index]
+                src = f"hand[{action.card_index}]"
+            label = f"PLAY {self._fmt_card(card)} from {src}"
+            if action.pitch_indices:
+                pitched = [player.hand[i].name for i in action.pitch_indices]
+                label += f" — pitching: {', '.join(pitched)}"
+            return label
+        if action.action_type == ActionType.DEFEND:
+            if not action.defend_hand_indices and not action.defend_equip_slots:
+                return "NO BLOCK (take full damage)"
+            parts = []
+            total = 0
+            for i in action.defend_hand_indices:
+                if 0 <= i < len(player.hand):
+                    c = player.hand[i]
+                    parts.append(f"{c.name} (def:{c.defense})")
+                    total += c.defense
+            for slot in action.defend_equip_slots:
+                if slot in player.equipment:
+                    eq = player.equipment[slot]
+                    parts.append(f"{eq.card.name}/{slot} (def:{eq.defense})")
+                    total += eq.defense
+            return f"BLOCK — {', '.join(parts)} [total def: {total}]"
+        if action.action_type == ActionType.ARSENAL:
+            if action.arsenal_hand_index == -1:
+                return "DON'T store (no arsenal this turn)"
+            card = player.hand[action.arsenal_hand_index]
+            return f"STORE in arsenal — {self._fmt_card(card)}"
+        return str(action)
+
+    def _choose(self, legal: List[Action], player: 'Player', prompt: str) -> Action:
+        print(f"\n{prompt}")
+        for i, action in enumerate(legal):
+            print(f"  {i:>2}: {self._action_label(action, player)}")
+        while True:
+            try:
+                raw = input(f"\nYour choice (0–{len(legal) - 1}): ").strip()
+                idx = int(raw)
+                if 0 <= idx < len(legal):
+                    return legal[idx]
+                print(f"  Please enter a number between 0 and {len(legal) - 1}.")
+            except (ValueError, KeyboardInterrupt):
+                print("  Invalid input — enter the number of your chosen action.")
+
+    # ── Decision methods ─────────────────────────────────────
+
+    def select_action(self, obs: dict, legal: List[Action], player: 'Player',
+                      opponent: 'Player') -> Action:
+        print(f"\n{'═' * 60}")
+        print(f"  ATTACK PHASE — your turn")
+        self._show_stats(player, opponent)
+        self._show_hand(player)
+        self._show_equipment(player)
+        return self._choose(legal, player, "Choose an action:")
+
+    def select_defend(self, obs: dict, legal: List[Action], player: 'Player',
+                      attack_power: int) -> Action:
+        print(f"\n{'═' * 60}")
+        print(f"  DEFEND PHASE — incoming attack power: {attack_power}")
+        print(f"  Your life: {player.life}  (you would take {max(0, attack_power)} if unblocked)")
+        self._show_hand(player)
+        self._show_equipment(player)
+        return self._choose(legal, player, "Choose your defense:")
+
+    def select_arsenal(self, obs: dict, legal: List[Action], player: 'Player') -> Action:
+        print(f"\n{'═' * 60}")
+        print(f"  ARSENAL PHASE — end of your turn")
+        print(f"  Your life: {player.life}")
+        self._show_hand(player)
+        return self._choose(legal, player, "Store a card in arsenal?")
