@@ -16,7 +16,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, abort, render_template_string, request
+from flask import Flask, abort, redirect, render_template_string, request
 
 LOGS_DIR = Path(__file__).parent / "logs"
 
@@ -138,6 +138,42 @@ INDEX_TEMPLATE = """
         text-decoration: none;
     }
     .refresh-btn:hover { background: #2d3748; }
+    .run-section {
+        background: #1a202c;
+        border: 1px solid #2d3748;
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin-top: 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .run-section label { font-size: 0.85rem; color: #a0aec0; white-space: nowrap; }
+    .seed-input {
+        background: #0f1117;
+        border: 1px solid #4a5568;
+        border-radius: 6px;
+        color: #e2e8f0;
+        font-size: 0.85rem;
+        padding: 5px 10px;
+        width: 150px;
+        outline: none;
+    }
+    .seed-input:focus { border-color: #63b3ed; }
+    .seed-input::placeholder { color: #4a5568; }
+    .run-btn {
+        background: #2b6cb0;
+        border: none;
+        border-radius: 6px;
+        color: #fff;
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-weight: 600;
+        padding: 6px 18px;
+    }
+    .run-btn:hover { background: #3182ce; }
+    .run-btn:disabled { background: #4a5568; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -149,6 +185,13 @@ INDEX_TEMPLATE = """
     <a class="refresh-btn" href="/">↻ Refresh</a>
   </header>
   <div class="container">
+    <div class="run-section">
+      <form method="POST" action="/run" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%">
+        <label>▶ Run new game:</label>
+        <input type="number" name="seed" placeholder="seed (optional)" class="seed-input" min="0">
+        <button type="submit" class="run-btn" onclick="this.disabled=true;this.textContent='Running…';this.form.submit()">Run Game</button>
+      </form>
+    </div>
     {% if not logs %}
       <div class="empty">
         <div style="font-size:3rem;">📋</div>
@@ -413,6 +456,31 @@ def view_log(filename: str):
         line_count=len(text.splitlines()),
         size=_human_size(stat.st_size),
     )
+
+
+@app.route("/run", methods=["POST"])
+def run_game_route():
+    """Run a complete AI vs AI game, save the log, then open it."""
+    from run_env import run_game
+
+    seed_str = request.form.get("seed", "").strip()
+    seed = None
+    if seed_str:
+        try:
+            seed = int(seed_str)
+        except ValueError:
+            pass
+
+    # Snapshot existing logs so we can find the new one afterwards
+    existing = set(LOGS_DIR.glob("*.log")) if LOGS_DIR.exists() else set()
+
+    run_game(verbose=False, seed=seed, save_log=True)
+
+    new_logs = set(LOGS_DIR.glob("*.log")) - existing
+    if new_logs:
+        newest = max(new_logs, key=lambda p: p.stat().st_mtime)
+        return redirect(f"/log/{newest.name}")
+    return redirect("/")
 
 
 # ──────────────────────────────────────────────────────────────
