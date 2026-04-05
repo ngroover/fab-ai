@@ -16,7 +16,9 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, abort, redirect, render_template_string, request
+import threading
+
+from flask import Flask, abort, jsonify, redirect, render_template_string, request
 
 LOGS_DIR = Path(__file__).parent / "logs"
 
@@ -182,6 +184,7 @@ INDEX_TEMPLATE = """
       <h1>⚔️ FaB Game Logs</h1>
       <div class="subtitle">Flesh and Blood — Classic Battles</div>
     </div>
+    <a class="refresh-btn" href="/play" style="margin-right:6px;background:#1a365d;border-color:#2b4c7e;color:#90cdf4;">▶ Play</a>
     <a class="refresh-btn" href="/">↻ Refresh</a>
   </header>
   <div class="container">
@@ -481,6 +484,693 @@ def run_game_route():
         newest = max(new_logs, key=lambda p: p.stat().st_mtime)
         return redirect(f"/log/{newest.name}")
     return redirect("/")
+
+
+# ──────────────────────────────────────────────────────────────
+# Interactive play — session management
+# ──────────────────────────────────────────────────────────────
+
+class _GameCancelled(Exception):
+    pass
+
+
+class _WebHumanAgent:
+    """Drives a human player through the web UI instead of stdin."""
+
+    def __init__(self, session: '_GameSession', agent_id: str):
+        self.session = session
+        self.agent_id = agent_id
+
+    def _fmt_card(self, card) -> str:
+        details = []
+        if card.cost:      details.append(f"cost:{card.cost}")
+        if card.pitch:     details.append(f"pitch:{card.pitch}")
+        if card.power:     details.append(f"pow:{card.power}")
+        if card.defense:   details.append(f"def:{card.defense}")
+        if card.go_again:  details.append("go-again")
+        if card.intimidate: details.append("intimidate")
+        suffix = f" ({', '.join(details)})" if details else ""
+        return card.name + suffix
+
+    def _fmt_action(self, action, player) -> str:
+        from actions import ActionType
+        if action.action_type == ActionType.PASS:
+            return "PASS — end action phase"
+        if action.action_type == ActionType.WEAPON:
+            wp = player.get_effective_weapon_power()
+            return f"WEAPON — {player.weapon.name} for {wp} power"
+        if action.action_type == ActionType.ACTIVATE_EQUIPMENT:
+            eq = player.equipment.get(action.equip_slot)
+            name = eq.card.name if eq else action.equip_slot
+            return f"ACTIVATE — {name} ({action.equip_slot})"
+        if action.action_type == ActionType.PLAY_CARD:
+            if action.from_arsenal:
+                card, src = player.arsenal, "arsenal"
+            else:
+                card, src = player.hand[action.card_index], f"hand[{action.card_index}]"
+            label = f"PLAY {self._fmt_card(card)} from {src}"
+            if action.pitch_indices:
+                pitched = [player.hand[i].name for i in action.pitch_indices]
+                label += f" | pitch: {', '.join(pitched)}"
+            return label
+        if action.action_type == ActionType.DEFEND:
+            if not action.defend_hand_indices and not action.defend_equip_slots:
+                return "NO BLOCK — take full damage"
+            parts, total = [], 0
+            for i in action.defend_hand_indices:
+                if 0 <= i < len(player.hand):
+                    c = player.hand[i]
+                    parts.append(f"{c.name} (def:{c.defense})")
+                    total += c.defense
+            for slot in action.defend_equip_slots:
+                if slot in player.equipment:
+                    eq = player.equipment[slot]
+                    parts.append(f"{eq.card.name}/{slot} (def:{eq.defense})")
+                    total += eq.defense
+            return f"BLOCK — {', '.join(parts)} [total:{total}]"
+        if action.action_type == ActionType.ARSENAL:
+            if action.arsenal_hand_index == -1:
+                return "DON'T STORE — skip arsenal"
+            card = player.hand[action.arsenal_hand_index]
+            return f"STORE — {self._fmt_card(card)}"
+        return str(action)
+
+    def _pend(self, legal, player, phase, attack_power=0):
+        labels = [self._fmt_action(a, player) for a in legal]
+        self.session.set_pending(legal, labels, phase, self.agent_id, attack_power)
+        self.session.wait_for_choice()
+        return self.session.take_choice()
+
+    def select_action(self, obs, legal, player, opponent):
+        return self._pend(legal, player, "ATTACK")
+
+    def select_defend(self, obs, legal, player, attack_power):
+        return self._pend(legal, player, "DEFEND", attack_power)
+
+    def select_arsenal(self, obs, legal, player):
+        return self._pend(legal, player, "ARSENAL")
+
+
+class _GameSession:
+    """
+    Holds the state of one running interactive game.
+
+    The game runs in a background daemon thread. When a human decision is
+    needed, the game thread calls set_pending() then blocks on wait_for_choice().
+    The Flask thread calls submit_choice() which unblocks the game thread.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._choice_event = threading.Event()
+        self._reset_state()
+
+    def _reset_state(self):
+        self.status = "idle"        # idle | running | waiting_human | game_over
+        self.current_agent = None
+        self.phase = None
+        self.legal_labels: list = []
+        self._legal_actions: list = []
+        self.attack_power = 0
+        self.winner = None
+        self.player_stats: dict = {}
+        self.log_lines: list = []
+        self.log_total = 0
+        self.rhinar_is_human = False
+        self.dorinthea_is_human = False
+        self._cancelled = False
+        self._choice_idx = None
+
+    # ── called from Flask thread ──────────────────────────────
+
+    def reset(self):
+        with self._lock:
+            self._cancelled = True
+            self._reset_state()
+        self._choice_event.set()   # unblock any waiting game thread
+
+    def start(self, rhinar_is_human: bool, dorinthea_is_human: bool, seed):
+        self.reset()
+        with self._lock:
+            self._cancelled = False
+            self.status = "running"
+            self.rhinar_is_human = rhinar_is_human
+            self.dorinthea_is_human = dorinthea_is_human
+        self._choice_event.clear()
+        t = threading.Thread(
+            target=self._run,
+            args=(rhinar_is_human, dorinthea_is_human, seed),
+            daemon=True,
+        )
+        t.start()
+
+    def submit_choice(self, idx: int) -> bool:
+        with self._lock:
+            if self.status != "waiting_human":
+                return False
+            if not (0 <= idx < len(self._legal_actions)):
+                return False
+            self._choice_idx = idx
+            self.status = "running"
+        self._choice_event.set()
+        return True
+
+    def get_state_json(self) -> dict:
+        with self._lock:
+            return {
+                "status": self.status,
+                "current_agent": self.current_agent,
+                "phase": self.phase,
+                "legal_actions": [
+                    {"index": i, "label": lbl}
+                    for i, lbl in enumerate(self.legal_labels)
+                ],
+                "attack_power": self.attack_power,
+                "log": list(self.log_lines[-150:]),
+                "log_total": self.log_total,
+                "winner": self.winner,
+                "player_stats": dict(self.player_stats),
+                "rhinar_is_human": self.rhinar_is_human,
+                "dorinthea_is_human": self.dorinthea_is_human,
+            }
+
+    # ── called from game thread ───────────────────────────────
+
+    def append_log(self, msg: str):
+        with self._lock:
+            for line in msg.split("\n"):
+                if line.strip():
+                    self.log_lines.append(line)
+                    self.log_total += 1
+            if len(self.log_lines) > 500:
+                self.log_lines = self.log_lines[-500:]
+
+    def set_pending(self, legal, labels, phase, agent_id, attack_power=0):
+        with self._lock:
+            self._legal_actions = legal
+            self.legal_labels = labels
+            self.phase = phase
+            self.current_agent = agent_id
+            self.attack_power = attack_power
+            self.status = "waiting_human"
+        self._choice_event.clear()
+
+    def wait_for_choice(self):
+        self._choice_event.wait()
+
+    def take_choice(self):
+        with self._lock:
+            if self._cancelled:
+                raise _GameCancelled()
+            return self._legal_actions[self._choice_idx]
+
+    def _update_stats(self, env):
+        stats = {}
+        for i, p in enumerate(env._game.players):
+            stats[f"agent_{i}"] = {
+                "name": p.name,
+                "hero": p.hero_name,
+                "life": p.life,
+                "hand_size": len(p.hand),
+            }
+        with self._lock:
+            self.player_stats = stats
+
+    def _run(self, rhinar_is_human: bool, dorinthea_is_human: bool, seed):
+        try:
+            self._run_inner(rhinar_is_human, dorinthea_is_human, seed)
+        except _GameCancelled:
+            pass
+        except Exception as exc:
+            self.append_log(f"  ⚠  Game error: {exc}")
+            with self._lock:
+                self.status = "game_over"
+                self.winner = None
+
+    def _run_inner(self, rhinar_is_human, dorinthea_is_human, seed):
+        from fab_env import FaBEnv, Phase
+        from agents import RhinarAgent, DorintheiAgent
+
+        env = FaBEnv(verbose=False, log_callback=self.append_log)
+
+        rhinar_agent = (_WebHumanAgent(self, "agent_0") if rhinar_is_human
+                        else RhinarAgent())
+        dorinthea_agent = (_WebHumanAgent(self, "agent_1") if dorinthea_is_human
+                           else DorintheiAgent())
+
+        obs, _ = env.reset(seed=seed)
+
+        while not env.done:
+            agent_id = env.agent_selection
+            agent = rhinar_agent if agent_id == "agent_0" else dorinthea_agent
+            player_idx = int(agent_id[-1])
+            player = env._game.players[player_idx]
+            opponent = env._game.players[1 - player_idx]
+
+            legal = env.legal_actions()
+            if not legal:
+                break
+
+            self._update_stats(env)
+            with self._lock:
+                self.current_agent = agent_id
+                self.phase = env._phase.name
+
+            if env._phase == Phase.ATTACK:
+                action = agent.select_action(obs[agent_id], legal, player, opponent)
+            elif env._phase == Phase.DEFEND:
+                action = agent.select_defend(obs[agent_id], legal, player,
+                                             env._pending_attack_power)
+            elif env._phase == Phase.ARSENAL:
+                action = agent.select_arsenal(obs[agent_id], legal, player)
+            else:
+                action = legal[0]
+
+            obs, _, _, _, _ = env.step(action)
+            self._update_stats(env)
+
+        winner_name = None
+        for aid in env.agents:
+            if env._rewards.get(aid, 0) > 0:
+                winner_name = "Rhinar" if aid == "agent_0" else "Dorinthea"
+                break
+
+        with self._lock:
+            self.winner = winner_name
+            self.status = "game_over"
+
+
+_session = _GameSession()
+
+
+# ──────────────────────────────────────────────────────────────
+# Interactive play — HTML template
+# ──────────────────────────────────────────────────────────────
+
+PLAY_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FaB — Interactive Game</title>
+  <style>
+    {{ css }}
+
+    /* ── Setup form ──────────────────────────────────── */
+    #setup-area { padding: 16px; max-width: 480px; margin: 0 auto; }
+    .setup-card {
+      background: #1a202c; border: 1px solid #2d3748;
+      border-radius: 10px; padding: 20px;
+    }
+    .setup-card h2 { font-size: 1rem; font-weight: 700; margin-bottom: 16px; color: #f6e05e; }
+    .hero-row { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+    .hero-col { flex: 1; }
+    .hero-col h3 { font-size: 0.88rem; font-weight: 700; margin-bottom: 8px; color: #e2e8f0; }
+    .radio-group { display: flex; flex-direction: column; gap: 6px; }
+    .radio-label {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 0.83rem; cursor: pointer; color: #a0aec0;
+    }
+    .radio-label input { accent-color: #63b3ed; }
+    .vs-col { color: #4a5568; font-weight: 800; font-size: 1.1rem; }
+    .seed-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .seed-row label { font-size: 0.83rem; color: #a0aec0; white-space: nowrap; }
+    .start-btn {
+      width: 100%; padding: 10px; background: #2b6cb0;
+      border: none; border-radius: 8px; color: #fff;
+      font-size: 0.95rem; font-weight: 700; cursor: pointer; font-family: inherit;
+    }
+    .start-btn:hover { background: #3182ce; }
+    .start-btn:disabled { background: #4a5568; cursor: not-allowed; }
+
+    /* ── Stats bar ───────────────────────────────────── */
+    #stats-bar {
+      display: flex; align-items: stretch;
+      background: #1a202c; border-bottom: 1px solid #2d3748;
+      position: sticky; top: 48px; z-index: 5;
+    }
+    .player-box {
+      flex: 1; padding: 8px 12px;
+      border-right: 1px solid #2d3748;
+      transition: background 0.2s;
+    }
+    .player-box:last-child { border-right: none; }
+    .player-box.active { background: #1e3a5f; }
+    .player-name { font-weight: 700; font-size: 0.82rem; color: #e2e8f0; }
+    .player-life { font-size: 1.25rem; font-weight: 800; color: #fc8181; line-height: 1.2; }
+    .player-meta { font-size: 0.68rem; color: #718096; margin-top: 2px; }
+    .turn-box {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 6px 12px; border-right: 1px solid #2d3748;
+      min-width: 70px;
+    }
+    .turn-label { font-size: 0.65rem; color: #718096; text-transform: uppercase; }
+    .phase-label { font-size: 0.78rem; font-weight: 700; color: #f6e05e; }
+
+    /* ── Log area ────────────────────────────────────── */
+    #log-area {
+      font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+      font-size: 0.75rem; line-height: 1.5;
+      padding: 10px 14px; overflow-y: auto; height: 38vh;
+      background: #0a0e18; border-bottom: 1px solid #2d3748;
+      white-space: pre-wrap; word-break: break-word;
+    }
+
+    /* ── Action panel ────────────────────────────────── */
+    #action-panel { padding: 12px 14px; overflow-y: auto; max-height: calc(100vh - 38vh - 120px); }
+    .phase-info {
+      font-size: 0.8rem; font-weight: 700; color: #a0aec0;
+      margin-bottom: 10px; display: flex; align-items: center;
+      gap: 10px; flex-wrap: wrap;
+    }
+    .atk-badge {
+      background: #7b341e; color: #feb2b2;
+      padding: 2px 10px; border-radius: 12px; font-size: 0.75rem;
+    }
+    .action-btn {
+      display: block; width: 100%; text-align: left;
+      background: #1a365d; border: 1px solid #2b4c7e;
+      border-radius: 8px; color: #e2e8f0;
+      font-size: 0.82rem; padding: 9px 12px; margin-bottom: 7px;
+      cursor: pointer; font-family: inherit; transition: background 0.12s;
+    }
+    .action-btn:hover:not(:disabled) { background: #2a4c84; border-color: #4a80cc; }
+    .action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .action-btn.muted {
+      background: #2d3748; border-color: #4a5568; color: #a0aec0;
+    }
+    .action-btn.muted:hover:not(:disabled) { background: #3d4a5e; }
+    .ai-thinking {
+      color: #718096; font-size: 0.88rem; text-align: center;
+      padding: 14px 0; animation: pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+    .winner-msg {
+      font-size: 1.35rem; font-weight: 800; color: #f6e05e;
+      text-align: center; padding: 18px 0 10px;
+    }
+    .winner-msg.draw { color: #a0aec0; }
+    .new-game-btn {
+      display: block; width: 100%; padding: 10px;
+      background: #2d3748; border: 1px solid #4a5568;
+      border-radius: 8px; color: #e2e8f0;
+      font-size: 0.9rem; font-weight: 600;
+      cursor: pointer; font-family: inherit; margin-top: 6px;
+    }
+    .new-game-btn:hover { background: #3d4a5e; }
+
+    /* Log colouring (applied by JS) */
+    .turn-header   { color: #f6e05e; font-weight: bold; }
+    .life-line     { color: #fc8181; }
+    .attack-line   { color: #f6ad55; }
+    .defend-line   { color: #68d391; }
+    .damage-line   { color: #fc8181; font-weight: bold; }
+    .go-again-line { color: #76e4f7; }
+    .game-over     { color: #f6e05e; font-weight: bold; }
+    .wins-line     { color: #68d391; font-weight: bold; }
+    .draw-line     { color: #a0aec0; }
+    .pitch-line    { color: #b794f4; }
+    .hand-line     { color: #90cdf4; }
+    .store-line    { color: #e9d8fd; }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="back-link" href="/">← Logs</a>
+    <div style="flex:1">
+      <h1>⚔️ Interactive Game</h1>
+    </div>
+  </header>
+
+  <!-- ── Setup form ── -->
+  <div id="setup-area">
+    <div class="setup-card">
+      <h2>New Game</h2>
+      <form id="start-form">
+        <div class="hero-row">
+          <div class="hero-col">
+            <h3>🐾 Rhinar</h3>
+            <div class="radio-group">
+              <label class="radio-label">
+                <input type="radio" name="rhinar" value="human"> 👤 Human
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="rhinar" value="ai" checked> 🤖 AI
+              </label>
+            </div>
+          </div>
+          <div class="vs-col">VS</div>
+          <div class="hero-col">
+            <h3>⚔️ Dorinthea</h3>
+            <div class="radio-group">
+              <label class="radio-label">
+                <input type="radio" name="dorinthea" value="human"> 👤 Human
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="dorinthea" value="ai" checked> 🤖 AI
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="seed-row">
+          <label>Seed:</label>
+          <input type="number" name="seed" placeholder="random" min="0" class="seed-input">
+        </div>
+        <button type="submit" class="start-btn">▶ Start Game</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Game area ── -->
+  <div id="game-area" style="display:none">
+    <div id="stats-bar">
+      <div class="player-box" id="box-a0">
+        <div class="player-name" id="name-a0">Rhinar</div>
+        <div class="player-life" id="life-a0">❤️ 20</div>
+        <div class="player-meta" id="meta-a0"></div>
+      </div>
+      <div class="turn-box">
+        <div class="turn-label">Phase</div>
+        <div class="phase-label" id="phase-disp">—</div>
+      </div>
+      <div class="player-box" id="box-a1">
+        <div class="player-name" id="name-a1">Dorinthea</div>
+        <div class="player-life" id="life-a1">❤️ 20</div>
+        <div class="player-meta" id="meta-a1"></div>
+      </div>
+    </div>
+
+    <div id="log-area"></div>
+
+    <div id="action-panel">
+      <div id="status-msg"></div>
+      <div id="action-btns"></div>
+    </div>
+  </div>
+
+  <script>
+    let lastLogTotal = -1;
+    let polling = false;
+
+    // ── Polling ────────────────────────────────────────────────
+    async function poll() {
+      if (polling) return;
+      polling = true;
+      try {
+        const r = await fetch('/play/state');
+        if (!r.ok) return;
+        const s = await r.json();
+        updateUI(s);
+      } catch(e) { /* ignore network hiccups */ }
+      finally { polling = false; }
+    }
+
+    function updateUI(s) {
+      const idle = (s.status === 'idle');
+      document.getElementById('setup-area').style.display = idle ? '' : 'none';
+      document.getElementById('game-area').style.display  = idle ? 'none' : '';
+      if (idle) return;
+
+      updateStats(s);
+      updateLog(s);
+      updatePanel(s);
+    }
+
+    // ── Stats bar ──────────────────────────────────────────────
+    function updateStats(s) {
+      const agents = ['agent_0', 'agent_1'];
+      const suffixes = ['a0', 'a1'];
+      const humanFlags = [s.rhinar_is_human, s.dorinthea_is_human];
+
+      agents.forEach((aid, i) => {
+        const info = s.player_stats[aid];
+        const sfx = suffixes[i];
+        if (info) {
+          document.getElementById('name-' + sfx).textContent = info.name;
+          document.getElementById('life-' + sfx).textContent = '❤️ ' + info.life;
+          document.getElementById('meta-' + sfx).textContent =
+            (humanFlags[i] ? '👤 You' : '🤖 AI') + '  ·  🃏 ' + info.hand_size;
+        }
+        document.getElementById('box-' + sfx).classList
+          .toggle('active', aid === s.current_agent && s.status === 'waiting_human');
+      });
+
+      document.getElementById('phase-disp').textContent = s.phase || '—';
+    }
+
+    // ── Log area ───────────────────────────────────────────────
+    function updateLog(s) {
+      if (s.log_total === lastLogTotal) return;
+      lastLogTotal = s.log_total;
+
+      const area = document.getElementById('log-area');
+      const atBottom = area.scrollHeight - area.clientHeight <= area.scrollTop + 40;
+
+      area.innerHTML = s.log.map(line => {
+        const cls = classifyLine(line);
+        const esc = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return cls ? `<span class="${cls}">${esc}</span>` : esc;
+      }).join('\\n');
+
+      if (atBottom) area.scrollTop = area.scrollHeight;
+    }
+
+    function classifyLine(line) {
+      if (line.includes('══') || line.includes('★★')) return 'game-over';
+      if (line.includes('WINS!'))                       return 'wins-line';
+      if (line.includes('TURN ') && !line.includes('══')) return 'turn-header';
+      if (line.includes('Life:'))                       return 'life-line';
+      if (line.includes('takes') && line.includes('damage')) return 'damage-line';
+      if (line.includes('attacks with') || line.includes('⚔')) return 'attack-line';
+      if (line.includes('defends') || line.includes('blocks') || line.includes('🛡')) return 'defend-line';
+      if (line.includes('Go again') || line.includes('go again') || line.includes('↩')) return 'go-again-line';
+      if (line.includes('pitched') || line.includes('▶'))  return 'pitch-line';
+      if (line.includes('Hand:') || line.includes('draws') || line.includes('🃏')) return 'hand-line';
+      if (line.includes('stores') || line.includes('arsenal') || line.includes('📦')) return 'store-line';
+      if (line.includes('Draw') || line.includes('DRAW'))  return 'draw-line';
+      return null;
+    }
+
+    // ── Action panel ───────────────────────────────────────────
+    function updatePanel(s) {
+      const msg  = document.getElementById('status-msg');
+      const btns = document.getElementById('action-btns');
+
+      if (s.status === 'game_over') {
+        const w = s.winner;
+        msg.innerHTML = w
+          ? `<div class="winner-msg">🏆 ${w} wins!</div>`
+          : `<div class="winner-msg draw">⏱ Draw / Timeout</div>`;
+        btns.innerHTML = '<button class="new-game-btn" onclick="newGame()">← New Game</button>';
+        return;
+      }
+
+      if (s.status === 'waiting_human') {
+        const actorName = s.current_agent === 'agent_0' ? 'Rhinar' : 'Dorinthea';
+        let infoHtml = `<div class="phase-info">${actorName} — ${s.phase}`;
+        if (s.phase === 'DEFEND') {
+          infoHtml += ` <span class="atk-badge">⚔ Incoming: ${s.attack_power} power</span>`;
+        }
+        infoHtml += '</div>';
+        msg.innerHTML = infoHtml;
+
+        btns.innerHTML = s.legal_actions.map(a => {
+          const isMuted = a.label.startsWith('PASS') || a.label.startsWith('NO BLOCK')
+                       || a.label.startsWith("DON'T STORE");
+          const cls = 'action-btn' + (isMuted ? ' muted' : '');
+          return `<button class="${cls}" onclick="submitAction(${a.index})">${escHtml(a.label)}</button>`;
+        }).join('');
+        return;
+      }
+
+      // running / ai deciding
+      msg.innerHTML = '<div class="ai-thinking">⟳ AI is deciding…</div>';
+      btns.innerHTML = '';
+    }
+
+    // ── User actions ───────────────────────────────────────────
+    async function submitAction(idx) {
+      document.querySelectorAll('.action-btn').forEach(b => b.disabled = true);
+      try {
+        await fetch('/play/action', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({index: idx}),
+        });
+      } finally {
+        await poll();
+      }
+    }
+
+    function newGame() {
+      fetch('/play/reset', {method: 'POST'}).then(() => {
+        lastLogTotal = -1;
+        poll();
+      });
+    }
+
+    document.getElementById('start-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const btn = e.target.querySelector('button[type=submit]');
+      btn.disabled = true;
+      btn.textContent = 'Starting…';
+      await fetch('/play/start', {method: 'POST', body: new FormData(e.target)});
+      lastLogTotal = -1;
+      btn.disabled = false;
+      btn.textContent = '▶ Start Game';
+      poll();
+    });
+
+    function escHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    setInterval(poll, 500);
+    poll();
+  </script>
+</body>
+</html>
+"""
+
+
+# ──────────────────────────────────────────────────────────────
+# Interactive play — routes
+# ──────────────────────────────────────────────────────────────
+
+@app.route("/play")
+def play_page():
+    return render_template_string(PLAY_TEMPLATE, css=BASE_CSS)
+
+
+@app.route("/play/start", methods=["POST"])
+def play_start():
+    rhinar_human = request.form.get("rhinar") == "human"
+    dorinthea_human = request.form.get("dorinthea") == "human"
+    seed_str = request.form.get("seed", "").strip()
+    seed = int(seed_str) if seed_str.isdigit() else None
+    _session.start(rhinar_human, dorinthea_human, seed)
+    return jsonify({"ok": True})
+
+
+@app.route("/play/reset", methods=["POST"])
+def play_reset():
+    _session.reset()
+    return jsonify({"ok": True})
+
+
+@app.route("/play/state")
+def play_state():
+    return jsonify(_session.get_state_json())
+
+
+@app.route("/play/action", methods=["POST"])
+def play_action():
+    data = request.get_json(force=True) or {}
+    idx = data.get("index", -1)
+    ok = _session.submit_choice(int(idx))
+    return jsonify({"ok": ok})
 
 
 # ──────────────────────────────────────────────────────────────

@@ -94,9 +94,11 @@ class FaBEnv:
     metadata = {"name": "fab_classic_battles_v0"}
     MAX_TURNS = 80
 
-    def __init__(self, verbose: bool = False, log_file: Optional[str] = None):
+    def __init__(self, verbose: bool = False, log_file: Optional[str] = None,
+                 log_callback=None):
         self.verbose = verbose
         self._log_file = log_file
+        self._log_callback = log_callback
         self.agents = ["agent_0", "agent_1"]
         self._game: Optional[GameState] = None
         self._phase = Phase.START
@@ -741,6 +743,8 @@ class FaBEnv:
         if self._log_file:
             with open(self._log_file, "a", encoding="utf-8") as f:
                 f.write(msg + "\n")
+        if self._log_callback:
+            self._log_callback(msg)
 
     # ──────────────────────────────────────────────────────────
     # Convenience: render
