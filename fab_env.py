@@ -29,7 +29,9 @@ import copy
 from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple, Any
 
-from cards import Card, CardType, Color
+from cards import (Card, CardType, Color,
+                   build_rhinar_deck, build_rhinar_equipment,
+                   build_dorinthea_deck, build_dorinthea_equipment)
 from game_state import Player, GameState, Equipment
 from actions import (
     Action, ActionType,
@@ -53,6 +55,32 @@ class Phase(Enum):
 
 # ──────────────────────────────────────────────────────────────
 # FaBEnv
+def _make_rhinar() -> Player:
+    equip = build_rhinar_equipment()
+    return Player(
+        name="Rhinar",
+        hero_name="Rhinar (Young Brute)",
+        life=20,
+        intellect=4,
+        deck=build_rhinar_deck(),
+        equipment_list=equip[1:],
+        weapon=equip[0],
+    )
+
+
+def _make_dorinthea() -> Player:
+    equip = build_dorinthea_equipment()
+    return Player(
+        name="Dorinthea",
+        hero_name="Dorinthea, Quicksilver Prodigy",
+        life=20,
+        intellect=4,
+        deck=build_dorinthea_deck(),
+        equipment_list=equip[1:],
+        weapon=equip[0],
+    )
+
+
 # ──────────────────────────────────────────────────────────────
 
 class FaBEnv:
@@ -108,9 +136,8 @@ class FaBEnv:
         if seed is not None:
             random.seed(seed)
 
-        from main import make_rhinar, make_dorinthea
-        p0 = make_rhinar()
-        p1 = make_dorinthea()
+        p0 = _make_rhinar()
+        p1 = _make_dorinthea()
         self._game = GameState(p0, p1)
 
         # Opening hands
