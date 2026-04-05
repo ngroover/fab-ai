@@ -267,7 +267,7 @@ LOG_TEMPLATE = """
     <button class="size-btn" onclick="setSize('0.9rem')">M</button>
     <button class="size-btn" onclick="setSize('1rem')">L</button>
   </div>
-  <pre id="log-content">{{ rendered_content }}</pre>
+  <pre id="log-content">{{ rendered_content | safe }}</pre>
   <script>
     function setSize(s) {
       document.getElementById('log-content').style.fontSize = s;
