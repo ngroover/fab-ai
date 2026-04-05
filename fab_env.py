@@ -509,17 +509,19 @@ class FaBEnv:
         if not weapon:
             return
 
-        weapon_cost = 0 if "Dawnblade" in weapon.name else 1
+        weapon_cost = 1
+        needed = max(0, weapon_cost - attacker.resource_points)
         pitched = []
-        if weapon_cost > 0:
+        if needed > 0:
             pitchable = [c for c in attacker.hand if c.pitch > 0]
             total = 0
             for c in sorted(pitchable, key=lambda x: x.pitch, reverse=True):
-                if total >= weapon_cost:
+                if total >= needed:
                     break
                 pitched.append(c)
                 attacker.pitch(c)
                 total += c.pitch
+        attacker.resource_points -= weapon_cost
 
         pitch_str = f" (pitched: {', '.join(c.name for c in pitched)})" if pitched else ""
         self._log(f"\n  ▶  {attacker.name} attacks with {weapon.name}{pitch_str}")

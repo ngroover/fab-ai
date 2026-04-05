@@ -191,8 +191,8 @@ class FaBEngine:
         if is_dawnblade and attacker.weapon_used_this_turn and not attacker.next_weapon_go_again:
             return False
 
-        # Bone Basher costs 1, Dawnblade Resplendent costs 0
-        weapon_cost = 1 if "Bone Basher" in attacker.weapon.name else 0
+        # Both Bone Basher and Dawnblade Resplendent cost 1 to attack
+        weapon_cost = 1
 
         if not _can_afford_resource(attacker, weapon_cost):
             return False
@@ -488,7 +488,7 @@ def _should_use_weapon(player: Player) -> bool:
     if not player.weapon:
         return False
     is_dawnblade = "Dawnblade" in player.weapon.name
-    cost = 1 if "Bone Basher" in player.weapon.name else 0
+    cost = 1
     # Dawnblade can swing again if go again is queued, even if already used
     if is_dawnblade and player.weapon_used_this_turn and not player.next_weapon_go_again:
         return False
