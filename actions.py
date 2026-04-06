@@ -2,7 +2,7 @@
 Action space for the FaB gym environment.
 
 An "action" is one of:
-  - Play a card from hand (+ pitch cards to cover cost)
+  - Play a card from hand (two-step: first choose the card, then choose which cards to pitch)
   - Activate weapon attack
   - Pass (end action phase, move to end phase)
 
@@ -12,7 +12,8 @@ returns the list of Action objects valid right now. The agent picks an index int
 that list; the env decodes it.
 
 ActionType enum:
-  PLAY_CARD   — play card at hand_index, pitching pitch_indices
+  PLAY_CARD   — choose a card to play (card_index / from_arsenal); no pitch yet
+  PITCH       — (second step) choose which hand cards to pitch to cover the card's cost
   WEAPON      — activate weapon attack
   PASS        — end your action phase
   DEFEND      — during the defender's decision step: choose which cards/equip to use
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
 
 class ActionType(Enum):
     PLAY_CARD          = auto()
+    PITCH              = auto()   # second step: choose cards to pitch for the pending play
     WEAPON             = auto()
     PASS               = auto()
     DEFEND             = auto()   # used during the defend decision
@@ -42,9 +44,11 @@ class ActionType(Enum):
 class Action:
     action_type: ActionType
 
-    # PLAY_CARD fields
+    # PLAY_CARD fields (step 1: choose which card to play)
     card_index: int = -1          # index into player.hand (or -1 for arsenal card)
     from_arsenal: bool = False
+
+    # PITCH fields (step 2: choose which hand cards to pitch to cover the cost)
     pitch_indices: List[int] = field(default_factory=list)  # indices into player.hand
 
     # DEFEND fields
@@ -60,7 +64,9 @@ class Action:
     def __repr__(self):
         if self.action_type == ActionType.PLAY_CARD:
             src = "arsenal" if self.from_arsenal else f"hand[{self.card_index}]"
-            return f"Action(PLAY_CARD {src}, pitch={self.pitch_indices})"
+            return f"Action(PLAY_CARD {src})"
+        if self.action_type == ActionType.PITCH:
+            return f"Action(PITCH indices={self.pitch_indices})"
         if self.action_type == ActionType.WEAPON:
             return "Action(WEAPON)"
         if self.action_type == ActionType.PASS:
@@ -111,6 +117,8 @@ def _pitch_combinations(hand: List['Card'], exclude_idx: int, needed: int):
 def legal_attack_actions(player: 'Player') -> List[Action]:
     """
     All legal PLAY_CARD and WEAPON actions during the action phase.
+    PLAY_CARD actions only select which card to play; pitch choices come in a
+    separate PITCH step if the card's cost exceeds current resource_points.
     Also includes PASS.
     """
     from cards import CardType
@@ -126,17 +134,9 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
     ):
         card = player.arsenal
         needed = max(0, card.cost - player.resource_points)
-        if needed == 0:
+        total_pitch = sum(c.pitch for c in player.hand if c.pitch > 0)
+        if needed == 0 or total_pitch >= needed:
             actions.append(Action(ActionType.PLAY_CARD, card_index=-1, from_arsenal=True))
-        else:
-            for pitch_combo in _pitch_combinations(player.hand, exclude_idx=-999, needed=needed):
-                actions.append(Action(
-                    ActionType.PLAY_CARD,
-                    card_index=-1,
-                    from_arsenal=True,
-                    pitch_indices=pitch_combo,
-                ))
-                break  # one pitch combo per card keeps it tractable
 
     # ── Hand cards ──
     for i, card in enumerate(player.hand):
@@ -146,13 +146,11 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
         if needed == 0:
             actions.append(Action(ActionType.PLAY_CARD, card_index=i))
         else:
-            for pitch_combo in _pitch_combinations(player.hand, exclude_idx=i, needed=needed):
-                actions.append(Action(
-                    ActionType.PLAY_CARD,
-                    card_index=i,
-                    pitch_indices=pitch_combo,
-                ))
-                break
+            # Card costs more than current resources — playable only if hand can cover with pitch
+            pitchable_total = sum(c.pitch for j, c in enumerate(player.hand)
+                                  if j != i and c.pitch > 0)
+            if pitchable_total >= needed:
+                actions.append(Action(ActionType.PLAY_CARD, card_index=i))
 
     # ── Weapon ──
     if player.weapon:
@@ -180,6 +178,41 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
     # Always legal to pass
     actions.append(Action(ActionType.PASS))
     return actions
+
+
+def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
+    """
+    Legal PITCH actions for the second step of playing a card.
+    Called after the player chose which card to play (already removed from hand).
+    Returns pitch combinations that cover the remaining cost.
+    If already covered (resource_points >= cost), a single empty-pitch action is returned.
+    """
+    from itertools import combinations
+
+    needed = max(0, pending_card.cost - player.resource_points)
+
+    if needed == 0:
+        return [Action(ActionType.PITCH, pitch_indices=[])]
+
+    pitchable = [(i, c) for i, c in enumerate(player.hand) if c.pitch > 0]
+    # Sort descending so we find minimal combos first
+    pitchable.sort(key=lambda x: x[1].pitch, reverse=True)
+
+    actions: List[Action] = []
+    seen: set = set()
+
+    for size in range(1, len(pitchable) + 1):
+        for combo in combinations(pitchable, size):
+            total = sum(c.pitch for _, c in combo)
+            if total >= needed:
+                key = tuple(sorted(i for i, _ in combo))
+                if key not in seen:
+                    seen.add(key)
+                    actions.append(Action(ActionType.PITCH, pitch_indices=list(key)))
+        if actions and size >= 3:
+            break  # cap at 3-card combos for tractability
+
+    return actions if actions else [Action(ActionType.PITCH, pitch_indices=[])]
 
 
 def legal_defend_actions(player: 'Player', attack_power: int) -> List[Action]:

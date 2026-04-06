@@ -170,20 +170,22 @@ def encode_opponent_public(player: 'Player') -> List[float]:
     return obs
 
 
-def build_observation(player: 'Player', opponent: 'Player', game) -> dict:
+def build_observation(player: 'Player', opponent: 'Player', game,
+                      pending_card=None) -> dict:
     """
     Build the full observation dict for the active agent.
 
     Returns:
         {
-            "agent":    float list [PLAYER_OBS_SIZE],   # full self info
-            "opponent": float list [PLAYER_OBS_SIZE],   # public opponent info
-            "global":   float list [2],                 # [turn_number/80, is_first_turn]
-            "action_mask": list[bool],                  # filled in by env.step()
+            "agent":        float list [PLAYER_OBS_SIZE],   # full self info
+            "opponent":     float list [PLAYER_OBS_SIZE],   # public opponent info
+            "global":       float list [2],                 # [turn_number/80, is_first_turn]
+            "pending_card": float list [CARD_FEATURES],     # card committed to play (PITCH phase only)
         }
     """
     return {
-        "agent":    encode_player(player),
-        "opponent": encode_opponent_public(opponent),
-        "global":   [game.turn_number / 80.0, float(game.is_first_turn)],
+        "agent":        encode_player(player),
+        "opponent":     encode_opponent_public(opponent),
+        "global":       [game.turn_number / 80.0, float(game.is_first_turn)],
+        "pending_card": _encode_card(pending_card),  # all zeros when not in PITCH phase
     }
