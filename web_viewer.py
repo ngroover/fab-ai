@@ -985,6 +985,7 @@ PLAY_TEMPLATE = """
 
   <script>
     let lastLogTotal = -1;
+    let lastActionKey = null;
     let polling = false;
 
     // ── Polling ────────────────────────────────────────────────
@@ -1072,6 +1073,7 @@ PLAY_TEMPLATE = """
       const btns = document.getElementById('action-btns');
 
       if (s.status === 'game_over') {
+        lastActionKey = null;
         const w = s.winner;
         msg.innerHTML = w
           ? `<div class="winner-msg">🏆 ${w} wins!</div>`
@@ -1089,16 +1091,21 @@ PLAY_TEMPLATE = """
         infoHtml += '</div>';
         msg.innerHTML = infoHtml;
 
-        btns.innerHTML = s.legal_actions.map(a => {
-          const isMuted = a.label.startsWith('PASS') || a.label.startsWith('NO BLOCK')
-                       || a.label.startsWith("DON'T STORE");
-          const cls = 'action-btn' + (isMuted ? ' muted' : '');
-          return `<button class="${cls}" onclick="submitAction(${a.index})">${escHtml(a.label)}</button>`;
-        }).join('');
+        const actionKey = s.legal_actions.map(a => a.index + ':' + a.label).join('|');
+        if (actionKey !== lastActionKey) {
+          lastActionKey = actionKey;
+          btns.innerHTML = s.legal_actions.map(a => {
+            const isMuted = a.label.startsWith('PASS') || a.label.startsWith('NO BLOCK')
+                         || a.label.startsWith("DON'T STORE");
+            const cls = 'action-btn' + (isMuted ? ' muted' : '');
+            return `<button class="${cls}" onclick="submitAction(${a.index})">${escHtml(a.label)}</button>`;
+          }).join('');
+        }
         return;
       }
 
       // running / ai deciding
+      lastActionKey = null;
       msg.innerHTML = '<div class="ai-thinking">⟳ AI is deciding…</div>';
       btns.innerHTML = '';
     }
