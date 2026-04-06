@@ -49,6 +49,7 @@ class Card:
     go_again: bool = False
     text: str = ""
     intimidate: bool = False
+    no_block: bool = False
     equip_slot: Optional[EquipSlot] = None
 
     def __str__(self):
@@ -72,6 +73,8 @@ class Card:
             lines.append("    " + " | ".join(stats))
         if self.go_again:
             lines.append("    Go again")
+        if self.no_block:
+            lines.append("    No Block")
         if self.text:
             lines.append(f"    {self.text}")
         return "\n".join(lines)
@@ -101,12 +104,12 @@ def build_rhinar_deck() -> List[Card]:
                            power=6, defense=3, color=Color.RED, go_again=True, intimidate=True,
                            text="Go again. Intimidate."))
 
-    # Bare Fangs x2: cost 2, power 6, def 3
+    # Bare Fangs x2: cost 2, power 6, def 3, no block
     # When attacking: draw a card then discard a random card.
     # If discarded card has 6+ power, this gets +2 power.
     for _ in range(2):
         cards.append(Card("Bare Fangs", CardType.ACTION_ATTACK, cost=2, pitch=1,
-                           power=6, defense=3, color=Color.RED,
+                           power=6, defense=3, color=Color.RED, no_block=True,
                            text="When this attacks, draw a card then discard a random card. If discarded card has 6+ power, this gets +2 power."))
 
     # Beast Mode x2: cost 0, power 7, def 0, no block (non-attack action)
@@ -122,11 +125,11 @@ def build_rhinar_deck() -> List[Card]:
                            power=7, defense=2, color=Color.RED,
                            text="If Pack Hunt hits, create a Mutt token."))
 
-    # Wild Ride x2: cost 2, power 6, def 3, go again
+    # Wild Ride x2: cost 2, power 6, def 3, go again, no block
     # Draw a card then discard a random card. If discarded card 6+ power, go again
     for _ in range(2):
         cards.append(Card("Wild Ride", CardType.ACTION_ATTACK, cost=2, pitch=1,
-                           power=6, defense=3, color=Color.RED,
+                           power=6, defense=3, color=Color.RED, no_block=True,
                            text="When this attacks, draw a card then discard a random card. If discarded card has 6+ power, go again."))
 
     # Wrecking Ball x2: cost 3, power 6, def 3, intimidate on hit condition

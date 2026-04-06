@@ -230,7 +230,7 @@ def legal_defend_actions(player: 'Player', attack_power: int) -> List[Action]:
     actions.append(Action(ActionType.DEFEND))
 
     defenders = [(i, c) for i, c in enumerate(player.hand)
-                 if c.defense > 0 and c.card_type != CardType.INSTANT]
+                 if c.defense > 0 and c.card_type != CardType.INSTANT and not c.no_block]
     equip_slots = [slot for slot, eq in player.equipment.items() if eq.active and eq.defense > 0]
 
     # Single cards
