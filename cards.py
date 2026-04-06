@@ -21,6 +21,7 @@ class CardType(Enum):
     WEAPON = "Weapon"
     HERO = "Hero"
     MENTOR = "Mentor"
+    RESOURCE = "Resource"
 
 
 class Color(Enum):
@@ -96,47 +97,47 @@ def build_rhinar_deck() -> List[Card]:
     # Additional cost: discard a random card
     cards.append(Card("Alpha Rampage", CardType.ACTION_ATTACK, cost=3, pitch=1,
                        power=9, defense=3, color=Color.RED, intimidate=True,
-                       text="Rhinar Specialization. As an additional cost, discard a random card. Intimidate."))
+                       text="Rhinar Specialization. As an additional cost to play Alpha Rampage, discard a random card. When you attack with Alpha Rampage, intimidate."))
 
     # Awakening Bellow x2: cost 2, power 6, def 3, go again, intimidate
     for _ in range(2):
-        cards.append(Card("Awakening Bellow", CardType.ACTION_ATTACK, cost=2, pitch=1,
-                           power=6, defense=3, color=Color.RED, go_again=True, intimidate=True,
+        cards.append(Card("Awakening Bellow", CardType.ACTION, cost=1, pitch=1,
+                           power=0, defense=3, color=Color.RED, go_again=True, intimidate=True,
                            text="Go again. Intimidate."))
 
-    # Bare Fangs x2: cost 2, power 6, def 3, no block
+    # Bare Fangs x2: cost 2, power 6, def 0, no block
     # When attacking: draw a card then discard a random card.
     # If discarded card has 6+ power, this gets +2 power.
     for _ in range(2):
         cards.append(Card("Bare Fangs", CardType.ACTION_ATTACK, cost=2, pitch=1,
-                           power=6, defense=3, color=Color.RED, no_block=True,
-                           text="When this attacks, draw a card then discard a random card. If discarded card has 6+ power, this gets +2 power."))
+                           power=6, defense=0, color=Color.RED, no_block=True,
+                           text="When you attack with Bare Fangs, draw a card then discard a random card. If a card wth 6 or more power is discarded this way, Bare Fangs gets +2 power."))
 
-    # Beast Mode x2: cost 0, power 7, def 0, no block (non-attack action)
+    # Beast Mode x2: cost 3, power 6, def 3, (attack action)
     # Note: Beast Mode has no defense value and cannot block
     for _ in range(2):
-        cards.append(Card("Beast Mode", CardType.ACTION, cost=0, pitch=1,
-                           power=0, defense=0, color=Color.RED,
-                           text="Your next Brute attack action card this turn gains +3 power."))
+        cards.append(Card("Beast Mode", CardType.ACTION_ATTACK, cost=3, pitch=1,
+                           power=6, defense=3, color=Color.RED,
+                           text="If you have intimidated this turn, Beast Mode gains +2 power."))
 
-    # Pack Hunt x2: cost 3, power 7, def 2
+    # Pack Hunt x2: cost 2, power 6, def 3
     for _ in range(2):
-        cards.append(Card("Pack Hunt", CardType.ACTION_ATTACK, cost=3, pitch=1,
-                           power=7, defense=2, color=Color.RED,
-                           text="If Pack Hunt hits, create a Mutt token."))
+        cards.append(Card("Pack Hunt", CardType.ACTION_ATTACK, cost=2, pitch=1,
+                           power=6, defense=3, color=Color.RED, intimidate=True,
+                           text="When you attack with Pack Hunt, intimidate"))
 
-    # Wild Ride x2: cost 2, power 6, def 3, go again, no block
+    # Wild Ride x2: cost 2, power 6, def 0, may have go again, no block
     # Draw a card then discard a random card. If discarded card 6+ power, go again
     for _ in range(2):
         cards.append(Card("Wild Ride", CardType.ACTION_ATTACK, cost=2, pitch=1,
-                           power=6, defense=3, color=Color.RED, no_block=True,
-                           text="When this attacks, draw a card then discard a random card. If discarded card has 6+ power, go again."))
+                           power=6, defense=0, color=Color.RED, no_block=True,
+                           text="When you attack with Wild Ride, draw a card then discard a random card.  If a card with 6 or more power is discarded this way, Wild Ride gains go again."))
 
-    # Wrecking Ball x2: cost 3, power 6, def 3, intimidate on hit condition
+    # Wrecking Ball x2: cost 3, power 6, def 0, intimidate on hit condition, no_block
     for _ in range(2):
         cards.append(Card("Wrecking Ball", CardType.ACTION_ATTACK, cost=3, pitch=1,
-                           power=6, defense=3, color=Color.RED,
-                           text="When you attack with Wrecking Ball, draw a card then discard a random card. If discarded card has 6+ power, intimidate."))
+                           power=6, defense=0, color=Color.RED, no_block=True,
+                           text="When you attack with Wrecking Ball, draw a card then discard a random card. If a card with 6 or more power is discarded this way, intimidate."))
 
     # ── YELLOW (Pitch 2) — 14 cards ──
 
@@ -145,110 +146,109 @@ def build_rhinar_deck() -> List[Card]:
     for _ in range(2):
         cards.append(Card("Barraging Beatdown", CardType.ACTION, cost=0, pitch=2,
                            power=0, defense=3, color=Color.YELLOW, go_again=True, intimidate=True,
-                           text="Your next Brute attack this turn gains 'If defended by less than 2 non-equipment cards, gains +3 power.' Intimidate. Go again."))
+                           text="Intimidate, then your next Brute attack this turn gains 'While this attack is defended by less than 2 non-equipment cards it has +3 power'. Go again."))
 
-    # Muscle Mutt x2: cost 3, power 6, def 3
+    # Muscle Mutt x2: cost 3, power 6, def 2
     # Generic attack
     for _ in range(2):
         cards.append(Card("Muscle Mutt", CardType.ACTION_ATTACK, cost=3, pitch=2,
-                           power=6, defense=3, color=Color.YELLOW,
-                           text="If Muscle Mutt hits, create a Mutt token."))
+                           power=6, defense=2, color=Color.YELLOW,
+                           text=""))
 
     # Pack Call x2: cost 3, power 6, def 3
     # When you defend with Pack Call, reveal top card of deck; if 6+ power keep on top
     for _ in range(2):
         cards.append(Card("Pack Call", CardType.ACTION_ATTACK, cost=3, pitch=2,
                            power=6, defense=3, color=Color.YELLOW,
-                           text="When you defend with Pack Call, reveal the top card of your deck. If it has 6+ power, put it on top. Otherwise, bottom."))
+                           text="When you defend with Pack Call, reveal the top card of your deck. If it has 6 or more power, put it on top of your deck. Otherwise, put it on he bottom."))
 
-    # Raging Onslaught x2: cost 3, power 7, def 3
+    # Raging Onslaught x2: cost 3, power 6, def 3
     # If this hits, draw a card
     for _ in range(2):
         cards.append(Card("Raging Onslaught", CardType.ACTION_ATTACK, cost=3, pitch=2,
-                           power=7, defense=3, color=Color.YELLOW,
-                           text="If Raging Onslaught hits, draw a card."))
+                           power=6, defense=3, color=Color.YELLOW,
+                           text=""))
 
     # Smash Instinct x2: cost 2, power 6, def 3, intimidate
     for _ in range(2):
-        cards.append(Card("Smash Instinct", CardType.ACTION_ATTACK, cost=2, pitch=2,
+        cards.append(Card("Smash Instinct", CardType.ACTION_ATTACK, cost=3, pitch=2,
                            power=6, defense=3, color=Color.YELLOW, intimidate=True,
-                           text="Intimidate."))
+                           text="When you attack with Smash Instinct, intimidate."))
 
-    # Smash with Big Tree x2: cost 3, power 7, def 3
+    # Smash with Big Tree x2: cost 2, power 6, no_block
     for _ in range(2):
-        cards.append(Card("Smash with Big Tree", CardType.ACTION_ATTACK, cost=3, pitch=2,
-                           power=7, defense=3, color=Color.YELLOW,
-                           text="If Smash with Big Tree hits, your next attack this turn gains +2 power."))
+        cards.append(Card("Smash with Big Tree", CardType.ACTION_ATTACK, cost=2, pitch=2,
+                           power=6, defense=0, color=Color.YELLOW, no_block=True,
+                           text=""))
 
     # Wounded Bull x2: cost 2, power 6, def 3, go again
     for _ in range(2):
-        cards.append(Card("Wounded Bull", CardType.ACTION_ATTACK, cost=2, pitch=2,
-                           power=6, defense=3, color=Color.YELLOW, go_again=True,
-                           text="Go again."))
+        cards.append(Card("Wounded Bull", CardType.ACTION_ATTACK, cost=3, pitch=2,
+                           power=6, defense=2, color=Color.YELLOW
+                           text="When you play Wounded Bull, if you have less health than an opposing hero, it gains +1 power."))
 
     # ── BLUE (Pitch 3) — 12 cards ──
 
-    # Clearing Bellow x2: cost 1, power 5, def 3, go again, intimidate
+    # Clearing Bellow x2: cost 0, power 0, def 3, go again, intimidate
     for _ in range(2):
-        cards.append(Card("Clearing Bellow", CardType.ACTION_ATTACK, cost=1, pitch=3,
-                           power=5, defense=3, color=Color.BLUE, go_again=True, intimidate=True,
-                           text="Go again. Intimidate."))
+        cards.append(Card("Clearing Bellow", CardType.ACTION, cost=0, pitch=3,
+                           power=0, defense=3, color=Color.BLUE, go_again=True, intimidate=True,
+                           text="Intimidate.Go again."))
 
     # Come to Fight x2: cost 0, power 0, def 3
     # Non-attack action: your next attack this turn gains go again
     for _ in range(2):
-        cards.append(Card("Come to Fight", CardType.ACTION, cost=0, pitch=3,
+        cards.append(Card("Come to Fight", CardType.ACTION, cost=1, pitch=3,
                            power=0, defense=3, color=Color.BLUE,
-                           text="Your next attack this turn gains go again. Go again."))
+                           text="Your next attack action card you play this turn gains +1 power. Go again."))
 
-    # Dodge x2: cost 0, def 3 — defense reaction
+    # Dodge x2: cost 0, def 2 — defense reaction
     for _ in range(2):
         cards.append(Card("Dodge", CardType.DEFENSE_REACTION, cost=0, pitch=3,
-                           power=0, defense=3, color=Color.BLUE,
-                           text="Generic Defense Reaction."))
+                           power=0, defense=2, color=Color.BLUE,
+                           text=""))
 
     # Rally the Rearguard x2: cost 0, def 3 — defense reaction
     # When defending, if attacker has intimidated this turn, gain 2 life
     for _ in range(2):
-        cards.append(Card("Rally the Rearguard", CardType.DEFENSE_REACTION, cost=0, pitch=3,
-                           power=0, defense=3, color=Color.BLUE,
-                           text="If the attacking hero has intimidated this turn, gain 2 life."))
+        cards.append(Card("Rally the Rearguard", CardType.ACTION_ATTACK, cost=2, pitch=3,
+                           power=4, defense=2, color=Color.BLUE,
+                          text="Once per turn Instant - Discard a card: Rally the Rearguard gains +3 block.  Activate this ability only while Rally the Rearguard is defending."))
 
-    # Titanium Bauble x2: cost 0, def 0 — instant (can't block)
+    # Titanium Bauble x2: cost 0, pitch 3, def 3
     # Gain 1 resource point
     for _ in range(2):
-        cards.append(Card("Titanium Bauble", CardType.INSTANT, cost=0, pitch=3,
-                           power=0, defense=0, color=Color.BLUE,
-                           text="Gain 1 resource point."))
+        cards.append(Card("Titanium Bauble", CardType.RESOURCE, cost=0, pitch=3,
+                           power=0, defense=3, color=Color.BLUE,
+                           text=""))
 
-    # Wrecker Romp x2: cost 1, power 4, def 2, go again
+    # Wrecker Romp x2: cost 2, power 6, def 3
     for _ in range(2):
-        cards.append(Card("Wrecker Romp", CardType.ACTION_ATTACK, cost=1, pitch=3,
-                           power=4, defense=2, color=Color.BLUE, go_again=True))
+        cards.append(Card("Wrecker Romp", CardType.ACTION_ATTACK, cost=2, pitch=3,
+                           power=6, defense=3, color=Color.BLUE))
 
-    # Chief Ruk'utan x1: Mentor — starts face-down in arsenal
+    # Chief Ruk'utan x1: Mentor
     # When face-up: whenever you play a card with 6+ power, intimidate + lesson counter.
     # At 2 lesson counters: banish, search for Alpha Rampage, put face-up in arsenal.
     cards.append(Card("Chief Ruk'utan", CardType.MENTOR, cost=0, pitch=0,
                        power=0, defense=0,
-                       text="Mentor. While face-up in arsenal: whenever you play a 6+ power card, intimidate and put a lesson counter on him. At 2 lesson counters: banish, put Alpha Rampage face-up in arsenal."))
-
+                       text="While Ruk'utan is face down in arsenal, at the start of your turn, you may turn him face up.  While Ruk'utan is face up in arsenal, whenever ou play a card with 6 or more power, intimidate and put a lesson counter on him.  Then if there are 2 or more lesson counters on Rok'utan, banish him, search your deck for Alpha Rampage, put it face up in arsenal and shuffle."))
     return cards
 
 
 def build_rhinar_equipment():
     """Bone Basher weapon + equipment set."""
     return [
-        Card("Bone Basher", CardType.WEAPON, power=3, equip_slot=EquipSlot.WEAPON,
-             text="Once per Turn Action — 1: Attack. Go again. If this hits, intimidate."),
-        Card("Blossom of Spring", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.HEAD,
-             text="Once per Combat Chain — 0: Gain 1 resource. Destroy Blossom of Spring."),
-        Card("Bone Vizier", CardType.EQUIPMENT, defense=2, equip_slot=EquipSlot.CHEST,
-             text="Battleworn. When Bone Vizier defends, you may discard a card. If a card with 6+ power is discarded this way, intimidate."),
-        Card("Ironhide Gauntlet", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.ARMS,
-             text="Battleworn."),
-        Card("Ironhide Legs", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.LEGS,
-             text="Battleworn."),
+        Card("Bone Basher", CardType.WEAPON, power=4, equip_slot=EquipSlot.WEAPON,
+             text="Once per Turn Action — 2: Attack."),
+        Card("Blossom of Spring", CardType.EQUIPMENT, defense=0, equip_slot=EquipSlot.CHEST,
+             text="Action: Destroy Blossom of Spring: Gain 1 resource. Go again"),
+        Card("Bone Vizier", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.HEAD,
+             text="When Bone Vizier is destroyed, reveal the top card of your deck.  If it has 6 or more power, put it on the top of your deck. Otherwise, put it on the bottom. Blade Break"),
+        Card("Ironhide Gauntlet", CardType.EQUIPMENT, defense=0, equip_slot=EquipSlot.ARMS,
+             text="When you defend with Ironhide Gauntlet you may pay 1 resource.  If you do, it gains +2 block and 'When the combat chain closes, destroy Ironhide Gauntlets'"),
+        Card("Ironhide Legs", CardType.EQUIPMENT, defense=0, equip_slot=EquipSlot.LEGS,
+             text="When you defend with Ironhide Legs you may pay 1 resource.  If you do, it gains +2 block and 'When the combat chain closes, destroy Ironhide Legs'"),
     ]
 
 
