@@ -98,8 +98,10 @@ def run_game(
             action = agent.select_defend(obs[agent_id], legal, player, attack_power)
         elif env._phase == Phase.ARSENAL:
             action = agent.select_arsenal(obs[agent_id], legal, player)
+        elif env._phase == Phase.PITCH:
+            action = agent.select_pitch(obs[agent_id], legal, player,
+                                        env._pending_play_card)
         else:
-            from actions import Action
             action = legal[0]
 
         obs, rewards, terminations, truncations, infos = env.step(action)

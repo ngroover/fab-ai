@@ -533,6 +533,13 @@ class _WebHumanAgent:
                 pitched = [player.hand[i].name for i in action.pitch_indices]
                 label += f" | pitch: {', '.join(pitched)}"
             return label
+        if action.action_type == ActionType.PITCH:
+            if not action.pitch_indices:
+                return "PITCH — no cards needed (cost already covered)"
+            pitched = [player.hand[i] for i in action.pitch_indices if i < len(player.hand)]
+            names = [self._fmt_card(c) for c in pitched]
+            total = sum(c.pitch for c in pitched)
+            return f"PITCH — {', '.join(names)} (total: {total} resource{'s' if total != 1 else ''})"
         if action.action_type == ActionType.DEFEND:
             if not action.defend_hand_indices and not action.defend_equip_slots:
                 return "NO BLOCK — take full damage"
@@ -569,6 +576,9 @@ class _WebHumanAgent:
 
     def select_arsenal(self, obs, legal, player):
         return self._pend(legal, player, "ARSENAL")
+
+    def select_pitch(self, obs, legal, player, pending_card=None):
+        return self._pend(legal, player, "PITCH")
 
 
 class _GameSession:
@@ -743,6 +753,9 @@ class _GameSession:
                                              env._pending_attack_power)
             elif env._phase == Phase.ARSENAL:
                 action = agent.select_arsenal(obs[agent_id], legal, player)
+            elif env._phase == Phase.PITCH:
+                action = agent.select_pitch(obs[agent_id], legal, player,
+                                            env._pending_play_card)
             else:
                 action = legal[0]
 

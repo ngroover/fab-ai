@@ -199,6 +199,10 @@ class RhinarAgent:
         return next(a for a in legal if a.action_type == ActionType.ARSENAL
                     and a.arsenal_hand_index == -1)
 
+    def select_pitch(self, obs: dict, legal: List[Action], player: 'Player',
+                     pending_card=None) -> Action:
+        return legal[0]
+
 
 # ──────────────────────────────────────────────────────────────
 # Dorinthea agent
@@ -340,6 +344,10 @@ class DorintheiAgent:
         return next(a for a in legal if a.action_type == ActionType.ARSENAL
                     and a.arsenal_hand_index == -1)
 
+    def select_pitch(self, obs: dict, legal: List[Action], player: 'Player',
+                     pending_card=None) -> Action:
+        return legal[0]
+
 
 # ──────────────────────────────────────────────────────────────
 # Human agent (interactive stdin input)
@@ -444,6 +452,13 @@ class HumanAgent:
                     parts.append(f"{eq.card.name}/{slot} (def:{eq.defense})")
                     total += eq.defense
             return f"BLOCK — {', '.join(parts)} [total def: {total}]"
+        if action.action_type == ActionType.PITCH:
+            if not action.pitch_indices:
+                return "PITCH — no cards needed (cost already covered)"
+            pitched = [player.hand[i] for i in action.pitch_indices if i < len(player.hand)]
+            names = [self._fmt_card(c) for c in pitched]
+            total = sum(c.pitch for c in pitched)
+            return f"PITCH — {', '.join(names)} (total: {total} resource{'s' if total != 1 else ''})"
         if action.action_type == ActionType.ARSENAL:
             if action.arsenal_hand_index == -1:
                 return "DON'T store (no arsenal this turn)"
@@ -491,3 +506,14 @@ class HumanAgent:
         print(f"  Your life: {player.life}")
         self._show_hand(player)
         return self._choose(legal, player, "Store a card in arsenal?")
+
+    def select_pitch(self, obs: dict, legal: List[Action], player: 'Player',
+                     pending_card=None) -> Action:
+        print(f"\n{'═' * 60}")
+        card_str = f" for {pending_card.name}" if pending_card else ""
+        needed = max(0, pending_card.cost - player.resource_points) if pending_card else "?"
+        print(f"  PITCH PHASE — choose cards to pitch{card_str}")
+        print(f"  Resources still needed: {needed}")
+        print(f"  Current resources: {player.resource_points}")
+        self._show_hand(player)
+        return self._choose(legal, player, "Choose cards to pitch:")
