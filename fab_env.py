@@ -35,9 +35,10 @@ from cards import (Card, CardType, Color,
 from game_state import Player, GameState, Equipment
 from actions import (
     Action, ActionType,
-    legal_attack_actions, legal_defend_actions, legal_arsenal_actions,
+    legal_attack_actions, legal_pitch_actions,
+    legal_defend_actions, legal_arsenal_actions,
 )
-from observations import build_observation, PLAYER_OBS_SIZE
+from observations import build_observation, PLAYER_OBS_SIZE, CARD_FEATURES
 from spaces import Discrete, Box, Dict as DictSpace
 
 
@@ -48,6 +49,7 @@ from spaces import Discrete, Box, Dict as DictSpace
 class Phase(Enum):
     START   = auto()
     ATTACK  = auto()
+    PITCH   = auto()   # second step of playing a card: choose which cards to pitch
     DEFEND  = auto()
     ARSENAL = auto()
     END     = auto()
@@ -110,14 +112,18 @@ class FaBEnv:
         self._truncations: Dict[str, bool] = {"agent_0": False, "agent_1": False}
         self.agent_selection: str = "agent_0"
         self.done: bool = False
+        self._pending_play_card: Optional[Card] = None  # card chosen in PLAY_CARD step, awaiting pitch
 
         # Observation / action spaces (agent-specific but symmetric structure)
         obs_size = PLAYER_OBS_SIZE
         self.observation_spaces = {
             a: DictSpace({
-                "agent":    Box(0.0, 1.0, shape=(obs_size,)),
-                "opponent": Box(0.0, 1.0, shape=(obs_size,)),
-                "global":   Box(0.0, 1.0, shape=(2,)),
+                "agent":        Box(0.0, 1.0, shape=(obs_size,)),
+                "opponent":     Box(0.0, 1.0, shape=(obs_size,)),
+                "global":       Box(0.0, 1.0, shape=(2,)),
+                # During the PITCH phase, encodes the card the agent has committed to play.
+                # All zeros in every other phase.
+                "pending_card": Box(0.0, 1.0, shape=(CARD_FEATURES,)),
             })
             for a in self.agents
         }
@@ -183,6 +189,8 @@ class FaBEnv:
         # ── Dispatch by phase ──
         if self._phase == Phase.ATTACK:
             self._handle_attack_action(action, active, opponent)
+        elif self._phase == Phase.PITCH:
+            self._handle_pitch_action(action, active, opponent)
         elif self._phase == Phase.DEFEND:
             self._handle_defend_action(action, active, opponent)
         elif self._phase == Phase.ARSENAL:
@@ -210,6 +218,8 @@ class FaBEnv:
 
         if self._phase == Phase.ATTACK:
             return legal_attack_actions(active)
+        elif self._phase == Phase.PITCH:
+            return legal_pitch_actions(active, self._pending_play_card)
         elif self._phase == Phase.DEFEND:
             return legal_defend_actions(active, self._pending_attack_power)
         elif self._phase == Phase.ARSENAL:
@@ -221,30 +231,7 @@ class FaBEnv:
     # ──────────────────────────────────────────────────────────
 
     def _handle_attack_action(self, action: Action, active: Player, opponent: Player):
-        if action.action_type == ActionType.PASS:
-            self._log(f"  ▶  {active.name} passes.")
-            self._end_attack_phase(active, opponent)
-            return
-
-        # Pay pitches first
-        for pi in action.pitch_indices:
-            if 0 <= pi < len(active.hand):
-                active.pitch(active.hand[pi])  # NOTE: pitching mutates hand, indices shift!
-                # Rebuild pitch by name to avoid index drift — handled below
-
-        # Re-resolve pitch by re-checking (pitch already consumed resource_points above)
-        # Actually we need to be careful: pitch() removes from hand. Since we iterate indices
-        # in ascending order and remove from hand each time, we must pitch in reverse order.
-        # Reset and redo properly:
-        # (The above loop has a bug with shifting indices — fixed implementation below)
-
-        # Undo what we did and redo correctly
-        # Actually the Action stores indices at decision time — let's snapshot the cards
-        # by name before any mutation. We'll use a cleaner approach: snapshot the cards.
-        pass  # see _pay_pitches below
-
-    def _handle_attack_action(self, action: Action, active: Player, opponent: Player):
-        """Correct implementation of attack action handler."""
+        """Step 1 of card play: agent selects which card to play (or weapon/pass)."""
         if action.action_type == ActionType.PASS:
             self._log(f"  ▶  {active.name} passes.")
             self._end_attack_phase(active, opponent)
@@ -259,10 +246,7 @@ class FaBEnv:
             return
 
         if action.action_type == ActionType.PLAY_CARD:
-            # Snapshot pitch cards by index (descending to avoid shift)
-            pitch_cards = self._snapshot_by_indices(active.hand, action.pitch_indices)
-
-            # Get the card being played
+            # Remove the chosen card from hand / arsenal
             if action.from_arsenal and active.arsenal and active.arsenal.card_type != CardType.MENTOR:
                 card = active.arsenal
                 active.arsenal = None
@@ -274,30 +258,60 @@ class FaBEnv:
                 self._end_attack_phase(active, opponent)
                 return
 
-            # Pay pitches
-            for pc in pitch_cards:
-                if pc in active.hand:
-                    active.pitch(pc)
-
-            active.resource_points -= card.cost
             active.action_points -= 1
-            self._log(f"\n  ▶  {active.name} plays {card}"
-                      + (f" (pitched: {', '.join(c.name for c in pitch_cards)})"
-                         if pitch_cards else ""))
 
-            if card.card_type == CardType.INSTANT:
-                self._resolve_instant(card, active, opponent)
-            elif card.card_type == CardType.ACTION:
-                self._resolve_action(card, active, opponent)
-            elif card.card_type == CardType.ACTION_ATTACK:
-                # Trigger defend phase before resolving
-                self._pending_attack = card
-                self._pending_is_weapon = False
-                self._trigger_defend_phase(active, opponent)
-                return  # defend phase takes over; resolve_attack called after defend
+            needed = max(0, card.cost - active.resource_points)
+            if needed > 0:
+                # Cost not yet covered — transition to PITCH phase so agent picks pitches
+                self._pending_play_card = card
+                self._phase = Phase.PITCH
+                self._log(f"\n  ▶  {active.name} chooses to play {card} "
+                          f"(needs {needed} more resource{'s' if needed != 1 else ''})")
+                return  # PITCH handler will finish resolving the card
+
+            # Card is free (or resources already cover it) — resolve immediately
+            active.resource_points -= card.cost
+            self._log(f"\n  ▶  {active.name} plays {card}")
+            self._resolve_played_card(card, active, opponent)
+            return
 
         # After instant/action: if we still have action points, stay in ATTACK phase;
         # otherwise end turn.
+        if active.action_points <= 0:
+            self._end_attack_phase(active, opponent)
+
+    def _handle_pitch_action(self, action: Action, active: Player, opponent: Player):
+        """Step 2 of card play: agent selects which cards to pitch to cover the cost."""
+        card = self._pending_play_card
+        self._pending_play_card = None
+        self._phase = Phase.ATTACK  # restore before any early returns
+
+        # Execute the chosen pitches
+        pitch_cards = self._snapshot_by_indices(active.hand, action.pitch_indices)
+        for pc in pitch_cards:
+            if pc in active.hand:
+                active.pitch(pc)
+
+        active.resource_points -= card.cost
+        self._log(f"\n  ▶  {active.name} plays {card}"
+                  + (f" (pitched: {', '.join(c.name for c in pitch_cards)})"
+                     if pitch_cards else ""))
+
+        self._resolve_played_card(card, active, opponent)
+
+    def _resolve_played_card(self, card: Card, active: Player, opponent: Player):
+        """Dispatch card resolution after cost/pitch have been handled."""
+        if card.card_type == CardType.INSTANT:
+            self._resolve_instant(card, active, opponent)
+        elif card.card_type == CardType.ACTION:
+            self._resolve_action(card, active, opponent)
+        elif card.card_type == CardType.ACTION_ATTACK:
+            self._pending_attack = card
+            self._pending_is_weapon = False
+            self._trigger_defend_phase(active, opponent)
+            return  # defend phase takes over; returns to ATTACK after defend resolves
+
+        # After instant/action: end turn if no action points remain
         if active.action_points <= 0:
             self._end_attack_phase(active, opponent)
 
@@ -707,9 +721,14 @@ class FaBEnv:
         if self._game is None:
             return {a: {} for a in self.agents}
         p0, p1 = self._game.players
+        # Expose the pending card only to the agent that is currently in the PITCH phase
+        pending = self._pending_play_card if self._phase == Phase.PITCH else None
+        active_idx = int(self.agent_selection[-1]) if self.agent_selection else 0
         return {
-            "agent_0": build_observation(p0, p1, self._game),
-            "agent_1": build_observation(p1, p0, self._game),
+            "agent_0": build_observation(p0, p1, self._game,
+                                         pending_card=pending if active_idx == 0 else None),
+            "agent_1": build_observation(p1, p0, self._game,
+                                         pending_card=pending if active_idx == 1 else None),
         }
 
     def _finalize(self):
@@ -761,6 +780,10 @@ class FaBEnv:
               f"deck={len(p0.deck)} | weapon={p0.weapon.name if p0.weapon else 'none'}")
         print(f"  {p1.name}: {p1.life} life | hand={len(p1.hand)} | "
               f"deck={len(p1.deck)} | weapon={p1.weapon.name if p1.weapon else 'none'}")
+        if self._pending_play_card:
+            needed = max(0, self._pending_play_card.cost
+                         - self._game.players[int(self.agent_selection[-1])].resource_points)
+            print(f"  Pending play: {self._pending_play_card.name} (needs {needed} more resource(s))")
         if self._pending_attack:
             print(f"  Pending attack: {self._pending_attack.name} "
                   f"({self._pending_attack_power} power)")
