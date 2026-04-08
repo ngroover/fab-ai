@@ -56,8 +56,8 @@ def _find_play(legal: List[Action], card_names: List[str],
                 continue
             if a.from_arsenal:
                 card = player.arsenal
-            elif 0 <= a.card_index < len(player.hand):
-                card = player.hand[a.card_index]
+            elif a.card in player.hand:
+                card = a.card
             else:
                 continue
             if card and card.name == name:
@@ -113,8 +113,8 @@ class RhinarAgent:
                 continue
             if a.from_arsenal:
                 card = player.arsenal
-            elif 0 <= a.card_index < len(hand):
-                card = hand[a.card_index]
+            elif a.card in hand:
+                card = a.card
             else:
                 continue
             if card and card.card_type == CardType.ACTION_ATTACK:
@@ -429,8 +429,8 @@ class HumanAgent:
                 card = player.arsenal
                 src = "arsenal"
             else:
-                card = player.hand[action.card_index]
-                src = f"hand[{action.card_index}]"
+                card = action.card
+                src = f"hand"
             label = f"PLAY {self._fmt_card(card)} from {src}"
             if action.pitch_indices:
                 pitched = [player.hand[i].name for i in action.pitch_indices]

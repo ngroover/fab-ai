@@ -527,7 +527,7 @@ class _WebHumanAgent:
             if action.from_arsenal:
                 card, src = player.arsenal, "arsenal"
             else:
-                card, src = player.hand[action.card_index], f"hand[{action.card_index}]"
+                card, src = action.card, f"hand"
             label = f"PLAY {self._fmt_card(card)} from {src}"
             if action.pitch_indices:
                 pitched = [player.hand[i].name for i in action.pitch_indices]

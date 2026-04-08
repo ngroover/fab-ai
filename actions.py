@@ -12,7 +12,7 @@ returns the list of Action objects valid right now. The agent picks an index int
 that list; the env decodes it.
 
 ActionType enum:
-  PLAY_CARD   — choose a card to play (card_index / from_arsenal); no pitch yet
+  PLAY_CARD   — choose a card to play (from hand or from arsenal); no pitch yet
   PITCH       — (second step) choose which hand cards to pitch to cover the card's cost
   WEAPON      — activate weapon attack
   PASS        — end your action phase
@@ -45,7 +45,7 @@ class Action:
     action_type: ActionType
 
     # PLAY_CARD fields (step 1: choose which card to play)
-    card_index: int = -1          # index into player.hand (or -1 for arsenal card)
+    card: Optional[Card] = None
     from_arsenal: bool = False
 
     # PITCH fields (step 2: choose which hand cards to pitch to cover the cost)
@@ -63,7 +63,7 @@ class Action:
 
     def __repr__(self):
         if self.action_type == ActionType.PLAY_CARD:
-            src = "arsenal" if self.from_arsenal else f"hand[{self.card_index}]"
+            src = f"hand[{self.card.name}]"
             return f"Action(PLAY_CARD {src})"
         if self.action_type == ActionType.PITCH:
             return f"Action(PITCH indices={self.pitch_indices})"
@@ -136,7 +136,7 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
         needed = max(0, card.cost - player.resource_points)
         total_pitch = sum(c.pitch for c in player.hand if c.pitch > 0)
         if needed == 0 or total_pitch >= needed:
-            actions.append(Action(ActionType.PLAY_CARD, card_index=-1, from_arsenal=True))
+            actions.append(Action(ActionType.PLAY_CARD, card=player.arsenal, from_arsenal=True))
 
     # ── Hand cards ──
     for i, card in enumerate(player.hand):
@@ -144,13 +144,13 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
             continue  # reactions are played in the reaction step, not freely
         needed = max(0, card.cost - player.resource_points)
         if needed == 0:
-            actions.append(Action(ActionType.PLAY_CARD, card_index=i))
+            actions.append(Action(ActionType.PLAY_CARD, card=card))
         else:
             # Card costs more than current resources — playable only if hand can cover with pitch
             pitchable_total = sum(c.pitch for j, c in enumerate(player.hand)
                                   if j != i and c.pitch > 0)
             if pitchable_total >= needed:
-                actions.append(Action(ActionType.PLAY_CARD, card_index=i))
+                actions.append(Action(ActionType.PLAY_CARD, card=card))
 
     # ── Weapon ──
     if player.weapon:

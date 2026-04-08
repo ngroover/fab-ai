@@ -250,11 +250,11 @@ class FaBEnv:
             if action.from_arsenal and active.arsenal and active.arsenal.card_type != CardType.MENTOR:
                 card = active.arsenal
                 active.arsenal = None
-            elif 0 <= action.card_index < len(active.hand):
-                card = active.hand[action.card_index]
+            elif action.card in active.hand:
+                card = action.card
                 active.hand.remove(card)
             else:
-                self._log(f"  ⚠  Invalid card index {action.card_index}, passing.")
+                self._log(f"  ⚠  Invalid card {action.card}, passing.")
                 self._end_attack_phase(active, opponent)
                 return
 
