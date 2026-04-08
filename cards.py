@@ -184,7 +184,7 @@ def build_rhinar_deck() -> List[Card]:
     # Wounded Bull x2: cost 2, power 6, def 3, go again
     for _ in range(2):
         cards.append(Card("Wounded Bull", CardType.ACTION_ATTACK, cost=3, pitch=2,
-                           power=6, defense=2, color=Color.YELLOW
+                           power=6, defense=2, color=Color.YELLOW,
                            text="When you play Wounded Bull, if you have less health than an opposing hero, it gains +1 power."))
 
     # ── BLUE (Pitch 3) — 12 cards ──
@@ -267,19 +267,18 @@ def build_dorinthea_deck() -> List[Card]:
 
     # ── RED (Pitch 1) — 16 cards ──
 
-    # En Garde x2: cost 1, def 3, warrior action (not attack)
+    # En Garde x2: cost 1, def 3, warrior action (non-attack)
     # Next weapon attack this turn gains +3 power. Go again.
     for _ in range(2):
         cards.append(Card("En Garde", CardType.ACTION, cost=1, pitch=1,
                            power=0, defense=3, color=Color.RED, go_again=True,
                            text="Your next weapon attack this turn gains +3 power. Go again."))
 
-    # Flock of the Feather Walkers x2: cost 0, def 3, instant
-    # Target defending attack action card gets +2 defense
+    # Flock of the Feather Walkers x2: cost 1, def 2, 5 power attack
     for _ in range(2):
-        cards.append(Card("Flock of the Feather Walkers", CardType.INSTANT, cost=0, pitch=1,
-                           power=0, defense=3, color=Color.RED,
-                           text="Target defending attack action card gets +2 defense."))
+        cards.append(Card("Flock of the Feather Walkers", CardType.ACTION_ATTACK, cost=1, pitch=1,
+                           power=5, defense=2, color=Color.RED,
+                           text="As an additional cost to play Flock of the Feather Walkers, reveal a card in your hand with cost 1 or less.  When you attack with Flock of the Feather Walkers, create a Quicken token."))
 
     # In the Swing x2: cost 0, def 3, attack reaction
     # Play only if attacked 2+ times with weapons this turn.
@@ -290,31 +289,31 @@ def build_dorinthea_deck() -> List[Card]:
                            text="Play only if you have attacked 2 or more times with weapons this turn. Target weapon attack gains +3 power."))
 
     # Ironsong Response x2: cost 0, def 3, attack reaction
-    # Target attack gains +2 power. Reprise — if defender defended with card from hand, draw a card.
+    # Reprise - Target attack gains +3 power.
     for _ in range(2):
         cards.append(Card("Ironsong Response", CardType.ATTACK_REACTION, cost=0, pitch=1,
                            power=0, defense=3, color=Color.RED,
-                           text="Target attack gains +2 power. Reprise — If the defending hero defended with a card from hand, draw a card."))
+                           text="Reprise - If the defending hero has defended with a card from their hand this chain link, your weapon attack gains +3 power."))
 
-    # Second Swing x2: cost 1, def 3, warrior action (not an attack)
+    # Second Swing x2: cost 1, def 3, warrior action (non attack)
     # Your next attack this turn gains +4 power. Go again.
     for _ in range(2):
         cards.append(Card("Second Swing", CardType.ACTION, cost=1, pitch=1,
                            power=0, defense=3, color=Color.RED, go_again=True,
-                           text="Your next attack this turn gains +4 power. Go again."))
+                           text="If you have attacked with a weapon this turn, your next attack this turn gains +4 power. Go again."))
 
-    # Sharpen Steel x2: cost 0, def 3, instant
-    # Target weapon attack gains +1 power.
+    # Sharpen Steel x2: cost 0, def 3, action
+    # Target weapon attack gains +3 power.
     for _ in range(2):
-        cards.append(Card("Sharpen Steel", CardType.INSTANT, cost=0, pitch=1,
+        cards.append(Card("Sharpen Steel", CardType.ACTION, cost=0, pitch=1,
                            power=0, defense=3, color=Color.RED,
-                           text="Target weapon attack gains +1 power."))
+                           text="Your next weapon attack this turn gains +3 power. Go again."))
 
-    # Thrust x2: cost 0, def 3, attack reaction
+    # Thrust x2: cost 0, def 2, attack reaction
     # Target sword attack gains +3 power.
     for _ in range(2):
-        cards.append(Card("Thrust", CardType.ATTACK_REACTION, cost=0, pitch=1,
-                           power=0, defense=3, color=Color.RED,
+        cards.append(Card("Thrust", CardType.ATTACK_REACTION, cost=1, pitch=1,
+                           power=0, defense=2, color=Color.RED,
                            text="Target sword attack gains +3 power."))
 
     # Warrior's Valor x2: cost 1, def 3, warrior action
@@ -322,44 +321,42 @@ def build_dorinthea_deck() -> List[Card]:
     for _ in range(2):
         cards.append(Card("Warrior's Valor", CardType.ACTION, cost=1, pitch=1,
                            power=0, defense=3, color=Color.RED, go_again=True,
-                           text="Your next weapon attack this turn gains +3 power and 'If this hits, this attack gains go again.' Go again."))
+                           text="Your next weapon attack this turn gains +3 power and 'When this attack hits, it gains go again.' Go again."))
 
     # ── YELLOW (Pitch 2) — 11 cards ──
 
     # Driving Blade x2: cost 2, power 5, def 3
     # If this hits, your next weapon attack this turn gains go again.
     for _ in range(2):
-        cards.append(Card("Driving Blade", CardType.ACTION_ATTACK, cost=2, pitch=2,
-                           power=5, defense=3, color=Color.YELLOW,
-                           text="If Driving Blade hits, your next weapon attack this turn gains go again."))
+        cards.append(Card("Driving Blade", CardType.ACTION, cost=2, pitch=2,
+                           power=0, defense=3, color=Color.YELLOW,
+                           text="Your next weapon attack this turn gains +2 power and go again. Go again."))
 
     # Glistening Steelblade x1: cost 1, def 3, warrior action, Dorinthea spec
     # Next Dawnblade attack this turn has go again.
     # Whenever Dawnblade hits a hero this turn, put +1 power counter on it. Go again.
     cards.append(Card("Glistening Steelblade", CardType.ACTION, cost=1, pitch=2,
                        power=0, defense=3, color=Color.YELLOW, go_again=True,
-                       text="Dorinthea Specialization. Your next Dawnblade attack this turn has go again. Whenever Dawnblade hits a hero this turn, put a +1 power counter on it. Go again."))
+                       text="Dorinthea Specialization. Your next Dawnblade attack this turn has go again.  Whenever Dawnblade hits a hero this turn, put a +1 counter on it. Go again."))
 
     # On a Knife Edge x2: cost 0, def 3, warrior action
     # Next weapon attack gains go again. Go again.
     for _ in range(2):
         cards.append(Card("On a Knife Edge", CardType.ACTION, cost=0, pitch=2,
-                           power=0, defense=3, color=Color.YELLOW, go_again=True,
-                           text="Your next weapon attack this turn gains go again. Go again."))
+                           power=0, defense=2, color=Color.YELLOW, go_again=True,
+                           text="Your next sword attack this turn gains go again. Go again."))
 
     # Out for Blood x2: cost 2, power 5, def 3, warrior attack
-    # Reprise — if defender defended with card from hand, this gains +2 power.
     for _ in range(2):
-        cards.append(Card("Out for Blood", CardType.ACTION_ATTACK, cost=2, pitch=2,
-                           power=5, defense=3, color=Color.YELLOW,
-                           text="Reprise — If the defending hero defended with a card from hand, Out for Blood gains +2 power."))
+        cards.append(Card("Out for Blood", CardType.ATTACK_REACTION, cost=1, pitch=2,
+                           power=0, defense=3, color=Color.YELLOW,
+                           text="Target weaopn attack gains +2 power.  Reprise - If the defending hero has defended with a card from their hand this chain link, your next attack th is turn gains +1 power."))
 
-    # Run Through x2: cost 1, power 5, def 3, warrior attack
-    # Reprise — if defender defended with card from hand, draw a card.
+    # Run Through x2: cost 1, power 5, def 3, warrior attack reaction
     for _ in range(2):
-        cards.append(Card("Run Through", CardType.ACTION_ATTACK, cost=1, pitch=2,
-                           power=5, defense=3, color=Color.YELLOW,
-                           text="Reprise — If the defending hero defended with a card from hand, draw a card."))
+        cards.append(Card("Run Through", CardType.ATTACK_REACTION, cost=1, pitch=2,
+                           power=0, defense=3, color=Color.YELLOW,
+                           text="Target sword attack gains go again.  Your next sword attack this turn gains +2 power."))
 
     # Slice and Dice x2: cost 0, def 3, warrior action. Go again.
     # First weapon attack this turn gains +1 power.
@@ -367,58 +364,56 @@ def build_dorinthea_deck() -> List[Card]:
     for _ in range(2):
         cards.append(Card("Slice and Dice", CardType.ACTION, cost=0, pitch=2,
                            power=0, defense=3, color=Color.YELLOW, go_again=True,
-                           text="Whenever you attack with a sword or dagger this turn: first weapon attack gains +1 power, second weapon attack gains +2 power. Go again."))
+                           text="The first time you attack with a weapon this turn, if it's a sword or dagger it gains +1 power.  The second time you attack with a weapon this turn if it's a sword or dagger it gains +2 power.  Go again."))
 
     # ── BLUE (Pitch 3) — 12 cards ──
 
-    # Blade Flash x2: cost 0, def 3, warrior action. Go again.
-    # Next weapon attack this turn gains go again.
+    # Blade Flash x2: cost 0, def 2, warrior attack reaction
     for _ in range(2):
-        cards.append(Card("Blade Flash", CardType.ACTION, cost=0, pitch=3,
-                           power=0, defense=3, color=Color.BLUE, go_again=True,
-                           text="Your next weapon attack this turn gains go again. Go again."))
+        cards.append(Card("Blade Flash", CardType.ATTACK_REACTION, cost=1, pitch=3,
+                           power=0, defense=2, color=Color.BLUE,
+                           text="Target sword attack gains go again."))
 
     # Hit and Run x2: cost 0, def 3, warrior action. Go again.
     # Next weapon attack gains go again.
     for _ in range(2):
         cards.append(Card("Hit and Run", CardType.ACTION, cost=0, pitch=3,
                            power=0, defense=3, color=Color.BLUE, go_again=True,
-                           text="Your next weapon attack this turn gains go again. Go again."))
+                           text="Your next weapon attack this turn gains go again.  If you have attacked with a weapon this turn your next attack this turn gains +1 power.  Go again."))
 
-    # Sigil of Solace x2: cost 0, def 3, instant
-    # Gain 3 life.
+    # Sigil of Solace x2: cost 0,  instant
     for _ in range(2):
         cards.append(Card("Sigil of Solace", CardType.INSTANT, cost=0, pitch=3,
-                           power=0, defense=3, color=Color.BLUE,
-                           text="Gain 3 life."))
+                           power=0, defense=0, color=Color.BLUE, no_block=True,
+                           text="Gain 1 life."))
 
     # Titanium Bauble x2: cost 0, def 0, instant (can't block)
     # Gain 1 resource point.
     for _ in range(2):
-        cards.append(Card("Titanium Bauble", CardType.INSTANT, cost=0, pitch=3,
+        cards.append(Card("Titanium Bauble", CardType.RESOURCE, cost=0, pitch=3,
                            power=0, defense=0, color=Color.BLUE,
-                           text="Gain 1 resource point."))
+                           text=""))
 
     # Toughen Up x2: cost 0, def 3, defense reaction
     # Generic defense reaction.
     for _ in range(2):
-        cards.append(Card("Toughen Up", CardType.DEFENSE_REACTION, cost=0, pitch=3,
-                           power=0, defense=3, color=Color.BLUE,
-                           text="Generic Defense Reaction."))
+        cards.append(Card("Toughen Up", CardType.DEFENSE_REACTION, cost=2, pitch=3,
+                           power=0, defense=4, color=Color.BLUE,
+                           text=""))
 
     # Visit the Blacksmith x2: cost 0, def 2, generic action. Go again.
     # Next sword attack this turn gains +1 power.
     for _ in range(2):
         cards.append(Card("Visit the Blacksmith", CardType.ACTION, cost=0, pitch=3,
                            power=0, defense=2, color=Color.BLUE, go_again=True,
-                           text="Your next sword attack this turn gains +1 power. Go again."))
+                           text="Your next sword attack this turn gains +1 power."))
 
     # Hala Goldenhelm x1: Mentor — starts face-down in arsenal
     # When face-up: whenever a sword attack you control hits, it gains go again + lesson counter.
     # At 2 lesson counters: banish, search for Glistening Steelblade, put face-up in arsenal.
     cards.append(Card("Hala Goldenhelm", CardType.MENTOR, cost=0, pitch=0,
-                       power=0, defense=0,
-                       text="Mentor. While face-up in arsenal: whenever a sword attack you control hits, it gains go again and put a lesson counter on Hala. At 2 lesson counters: banish, put Glistening Steelblade face-up in arsenal."))
+                       power=0, defense=3,
+                       text="While Hala is face down in arsenal, at the start of your turn you may turn her face up.  While Hala is face up in arsenal, whenever a sword attack you control hits, it gains go again and put a lesson counter on Hala.  Then if there are 2 or more lesson counters on Hala banish her, search your deck for Glistening Steelblade, put it face up in arsenal, and shuffle."))
 
     return cards
 
