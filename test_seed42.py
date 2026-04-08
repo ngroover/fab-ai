@@ -64,32 +64,29 @@ class TestOpeningHand(unittest.TestCase):
     """Verify Rhinar's opening hand with seed 42."""
 
     def setUp(self):
-        random.seed(SEED)
-        from main import make_rhinar, make_dorinthea
-        from game_state import GameState
-        self.p0 = make_rhinar()
-        self.p1 = make_dorinthea()
-        self.game = GameState(self.p0, self.p1)
-        for p in self.game.players:
-            p.draw_to_intellect()
+        from fab_env import FaBEnv
+        self.env = FaBEnv(verbose=False)
+        self.game = self.env.reset(seed=SEED)[0]
+        self.rhinar_hand = self.env._game.players[0].hand
+        self.dorinthea_hand = self.env._game.players[1].hand
 
     def test_rhinar_hand_size(self):
-        self.assertEqual(len(self.p0.hand), 4)
+        self.assertEqual(len(self.rhinar_hand), 4)
 
     def test_rhinar_opening_hand_contains_wild_ride(self):
-        names = [c.name for c in self.p0.hand]
+        names = [c.name for c in self.rhinar_hand]
         self.assertIn("Wild Ride", names)
 
     def test_rhinar_opening_hand_contains_bare_fangs(self):
-        names = [c.name for c in self.p0.hand]
+        names = [c.name for c in self.rhinar_hand]
         self.assertIn("Bare Fangs", names)
 
     def test_rhinar_opening_hand_contains_titanium_bauble(self):
-        names = [c.name for c in self.p0.hand]
+        names = [c.name for c in self.rhinar_hand]
         self.assertIn("Titanium Bauble", names)
 
     def test_dorinthea_hand_size(self):
-        self.assertEqual(len(self.p1.hand), 4)
+        self.assertEqual(len(self.dorinthea_hand), 4)
 
 
 class TestTurn1(unittest.TestCase):
