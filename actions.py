@@ -170,10 +170,10 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
 
     # ── Equipment activations ──
     # Blossom of Spring: Once per Combat Chain — 0: gain 1 resource, then destroy
-    blossom = player.equipment.get("head")
+    blossom = player.equipment.get("chest")
     if (blossom and blossom.active and not blossom.destroyed
             and blossom.card.name == "Blossom of Spring"):
-        actions.append(Action(ActionType.ACTIVATE_EQUIPMENT, equip_slot="head"))
+        actions.append(Action(ActionType.ACTIVATE_EQUIPMENT, equip_slot="chest"))
 
     # Always legal to pass
     actions.append(Action(ActionType.PASS))
