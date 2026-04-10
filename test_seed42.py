@@ -49,7 +49,8 @@ def run_full_game(seed=SEED):
         if env._phase == Phase.ATTACK:
             action = agent.select_action(obs[agent_id], legal, player, opponent)
         elif env._phase == Phase.DEFEND:
-            action = agent.select_defend(obs[agent_id], legal, player, env._pending_attack_power)
+            action = agent.select_defend(obs[agent_id], legal, player,
+                                         env._pending_attack_power, env._pending_defend_total)
         elif env._phase == Phase.ARSENAL:
             action = agent.select_arsenal(obs[agent_id], legal, player)
         else:
@@ -194,8 +195,10 @@ class TestTurn4(unittest.TestCase):
 
 class TestFinalState(unittest.TestCase):
     """
-    Final state — Dorinthea wins in turn 16.
-    Rhinar at -2 life, Dorinthea at 2 life, Dawnblade 2 counters.
+    Final state — Dorinthea wins in turn 34.
+    Rhinar at -1 life, Dorinthea at 1 life, Dawnblade 2 counters.
+    (Turn count increased from 16 because blocking is now one card at a time,
+    which allows more effective multi-card blocking over multiple defend steps.)
     """
 
     def setUp(self):
@@ -215,8 +218,8 @@ class TestFinalState(unittest.TestCase):
         dorinthea = self.env._game.players[1]
         self.assertGreater(dorinthea.life, 0)
 
-    def test_game_ends_in_sixteen_turns(self):
-        self.assertEqual(self.env._game.turn_number, 16)
+    def test_game_ends_in_expected_turns(self):
+        self.assertEqual(self.env._game.turn_number, 34)
 
     def test_no_cards_banished_at_game_end(self):
         """Banished cards from intimidate are returned at end of each combat chain."""

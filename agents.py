@@ -143,16 +143,20 @@ class RhinarAgent:
         return _pass_action(legal)
 
     def select_defend(self, obs: dict, legal: List[Action], player: 'Player',
-                      attack_power: int) -> Action:
+                      attack_power: int, already_defense: int = 0) -> Action:
         """
-        Block if attack would leave us below 6 life.
-        Prefer blues / defense reactions. Use equipment as last resort.
+        Add one blocking card at a time until enough defense is accumulated,
+        then choose done. Prefers the card that most tightly covers remaining needed defense.
         """
-        if player.life - attack_power > 8:
-            return legal[0]  # no block (first action is always no-block)
+        effective_power = attack_power - already_defense
+        if player.life - effective_power > 8:
+            return legal[0]  # no block needed
 
         damage_we_can_take = max(0, player.life - 6)
-        needed = max(0, attack_power - damage_we_can_take)
+        needed = max(0, effective_power - damage_we_can_take)
+
+        if needed <= 0:
+            return legal[0]  # accumulated defense already sufficient
 
         best: Optional[Action] = None
         best_excess = float('inf')
@@ -160,6 +164,8 @@ class RhinarAgent:
         for a in legal:
             if a.action_type != ActionType.DEFEND:
                 continue
+            if not a.defend_hand_indices and not a.defend_equip_slots:
+                continue  # skip "done" option
             hand_def = sum(
                 player.hand[i].defense
                 for i in a.defend_hand_indices
@@ -171,7 +177,7 @@ class RhinarAgent:
                 if s in player.equipment and player.equipment[s].active
             )
             total = hand_def + equip_def
-            if total >= needed:
+            if total > 0:
                 excess = total - needed
                 if excess < best_excess:
                     best_excess = excess
@@ -262,20 +268,30 @@ class DorintheiAgent:
         return _pass_action(legal)
 
     def select_defend(self, obs: dict, legal: List[Action], player: 'Player',
-                      attack_power: int) -> Action:
-        if player.life - attack_power > 8:
+                      attack_power: int, already_defense: int = 0) -> Action:
+        """
+        Add one blocking card at a time. Prefers defense reactions; stops once
+        accumulated defense covers the needed threshold.
+        """
+        effective_power = attack_power - already_defense
+        if player.life - effective_power > 8:
             return legal[0]
 
         damage_we_can_take = max(0, player.life - 6)
-        needed = max(0, attack_power - damage_we_can_take)
+        needed = max(0, effective_power - damage_we_can_take)
 
-        # Prefer defense reactions / instants, then blues
+        if needed <= 0:
+            return legal[0]  # accumulated defense already sufficient
+
+        # Prefer defense reactions, then tightest single-card cover
         best: Optional[Action] = None
         best_score = float('-inf')
 
         for a in legal:
             if a.action_type != ActionType.DEFEND:
                 continue
+            if not a.defend_hand_indices and not a.defend_equip_slots:
+                continue  # skip "done" option
             hand_def = 0
             reaction_bonus = 0
             for i in a.defend_hand_indices:
@@ -299,12 +315,14 @@ class DorintheiAgent:
         if best:
             return best
 
-        # No full block found — if lethal, use the highest partial block available
-        if attack_power >= player.life:
+        # No single card covers remaining needed — if lethal, use highest partial block
+        if effective_power >= player.life:
             best_partial = None
             best_partial_def = 0
             for a in legal:
                 if a.action_type != ActionType.DEFEND:
+                    continue
+                if not a.defend_hand_indices and not a.defend_equip_slots:
                     continue
                 hand_def = sum(
                     player.hand[i].defense
@@ -438,7 +456,7 @@ class HumanAgent:
             return label
         if action.action_type == ActionType.DEFEND:
             if not action.defend_hand_indices and not action.defend_equip_slots:
-                return "NO BLOCK (take full damage)"
+                return "DONE — stop adding block cards"
             parts = []
             total = 0
             for i in action.defend_hand_indices:
@@ -451,7 +469,7 @@ class HumanAgent:
                     eq = player.equipment[slot]
                     parts.append(f"{eq.card.name}/{slot} (def:{eq.defense})")
                     total += eq.defense
-            return f"BLOCK — {', '.join(parts)} [total def: {total}]"
+            return f"ADD to defense — {', '.join(parts)} [+{total} def]"
         if action.action_type == ActionType.PITCH:
             if not action.pitch_indices:
                 return "PITCH — no cards needed (cost already covered)"
@@ -492,13 +510,17 @@ class HumanAgent:
         return self._choose(legal, player, "Choose an action:")
 
     def select_defend(self, obs: dict, legal: List[Action], player: 'Player',
-                      attack_power: int) -> Action:
+                      attack_power: int, already_defense: int = 0) -> Action:
         print(f"\n{'═' * 60}")
         print(f"  DEFEND PHASE — incoming attack power: {attack_power}")
-        print(f"  Your life: {player.life}  (you would take {max(0, attack_power)} if unblocked)")
+        if already_defense > 0:
+            remaining = max(0, attack_power - already_defense)
+            print(f"  Defending so far: {already_defense}  (damage if you stop now: {remaining})")
+        else:
+            print(f"  Your life: {player.life}  (damage if unblocked: {max(0, attack_power)})")
         self._show_hand(player)
         self._show_equipment(player)
-        return self._choose(legal, player, "Choose your defense:")
+        return self._choose(legal, player, "Add a card to your defense (or choose done):")
 
     def select_arsenal(self, obs: dict, legal: List[Action], player: 'Player') -> Action:
         print(f"\n{'═' * 60}")

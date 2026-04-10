@@ -113,6 +113,8 @@ class FaBEnv:
         self.agent_selection: str = "agent_0"
         self.done: bool = False
         self._pending_play_card: Optional[Card] = None  # card chosen in PLAY_CARD step, awaiting pitch
+        self._pending_defend_indices: List[int] = []     # hand indices accumulated during defend step
+        self._pending_defend_equip_slots: List[str] = [] # equip slots accumulated during defend step
 
         # Observation / action spaces (agent-specific but symmetric structure)
         obs_size = PLAYER_OBS_SIZE
@@ -221,7 +223,9 @@ class FaBEnv:
         elif self._phase == Phase.PITCH:
             return legal_pitch_actions(active, self._pending_play_card)
         elif self._phase == Phase.DEFEND:
-            return legal_defend_actions(active, self._pending_attack_power)
+            return legal_defend_actions(active, self._pending_attack_power,
+                                        self._pending_defend_indices,
+                                        self._pending_defend_equip_slots)
         elif self._phase == Phase.ARSENAL:
             return legal_arsenal_actions(active)
         return []
@@ -315,8 +319,42 @@ class FaBEnv:
         if active.action_points <= 0:
             self._end_attack_phase(active, opponent)
 
+    @property
+    def _pending_defend_total(self) -> int:
+        """Total defense value accumulated so far this defend step."""
+        agent = self.agent_selection
+        player_idx = int(agent[-1])
+        player = self._game.players[player_idx]
+        total = sum(
+            player.hand[i].defense
+            for i in self._pending_defend_indices
+            if 0 <= i < len(player.hand)
+        )
+        total += sum(
+            player.equipment[slot].defense
+            for slot in self._pending_defend_equip_slots
+            if slot in player.equipment and player.equipment[slot].active
+        )
+        return total
+
     def _handle_defend_action(self, action: Action, defender: Player, attacker: Player):
-        """Defender has chosen how to block the pending attack."""
+        """Defender picks one card at a time; empty action commits the accumulated block."""
+        # Single card/equipment addition — accumulate and stay in DEFEND phase
+        if action.defend_hand_indices or action.defend_equip_slots:
+            self._pending_defend_indices.extend(action.defend_hand_indices)
+            self._pending_defend_equip_slots.extend(action.defend_equip_slots)
+            return  # defender picks again next step
+
+        # Done — resolve with everything accumulated so far
+        full_action = Action(ActionType.DEFEND,
+                             defend_hand_indices=list(self._pending_defend_indices),
+                             defend_equip_slots=list(self._pending_defend_equip_slots))
+        self._pending_defend_indices = []
+        self._pending_defend_equip_slots = []
+        self._resolve_defend(full_action, defender, attacker)
+
+    def _resolve_defend(self, action: Action, defender: Player, attacker: Player):
+        """Resolve the defend step once all blocking cards have been chosen."""
         card = self._pending_attack
         is_weapon = self._pending_is_weapon
 
@@ -490,6 +528,8 @@ class FaBEnv:
             self._log(f"    👁  Intimidate! {defender.name} banishes {banished.name}.")
 
         self._pending_attack_power = power
+        self._pending_defend_indices = []
+        self._pending_defend_equip_slots = []
         defender_idx = 1 - self._game.active_player_idx
         self._phase = Phase.DEFEND
         self.agent_selection = f"agent_{defender_idx}"

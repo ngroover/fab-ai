@@ -215,51 +215,42 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
     return actions if actions else [Action(ActionType.PITCH, pitch_indices=[])]
 
 
-def legal_defend_actions(player: 'Player', attack_power: int) -> List[Action]:
+def legal_defend_actions(player: 'Player', attack_power: int,
+                         already_indices: List[int] = None,
+                         already_equip: List[str] = None) -> List[Action]:
     """
-    All legal DEFEND actions for the defender.
-    Includes no-block (empty defend) and all useful subsets.
-    For tractability we generate: no block, each single card, pairs, and equipment combos.
+    Legal DEFEND actions for one-card-at-a-time blocking.
+
+    Returns a "done" action plus one action per remaining blockable card/equip
+    that hasn't been committed yet this defend step.
+
+    already_indices / already_equip track cards already accumulated this step.
     """
-    from itertools import combinations
     from cards import CardType
+
+    if already_indices is None:
+        already_indices = []
+    if already_equip is None:
+        already_equip = []
 
     actions: List[Action] = []
 
-    # No block
+    # Done — commit all accumulated block cards (or take full damage if none chosen)
     actions.append(Action(ActionType.DEFEND))
 
     defenders = [(i, c) for i, c in enumerate(player.hand)
-                 if c.defense > 0 and c.card_type != CardType.INSTANT and not c.no_block]
-    equip_slots = [slot for slot, eq in player.equipment.items() if eq.active and eq.defense > 0]
+                 if c.defense > 0 and c.card_type != CardType.INSTANT and not c.no_block
+                 and i not in already_indices]
+    equip_slots = [slot for slot, eq in player.equipment.items()
+                   if eq.active and eq.defense > 0 and slot not in already_equip]
 
-    # Single cards
+    # One card at a time
     for i, c in defenders:
         actions.append(Action(ActionType.DEFEND, defend_hand_indices=[i]))
 
-    # Pairs of hand cards
-    for (i, ci), (j, cj) in combinations(defenders, 2):
-        actions.append(Action(ActionType.DEFEND, defend_hand_indices=[i, j]))
-
-    # Triples of hand cards
-    for (i, ci), (j, cj), (k, ck) in combinations(defenders, 3):
-        actions.append(Action(ActionType.DEFEND, defend_hand_indices=[i, j, k]))
-
-    # All four hand cards
-    if len(defenders) == 4:
-        indices = [i for i, _ in defenders]
-        actions.append(Action(ActionType.DEFEND, defend_hand_indices=indices))
-
-    # Single equipment slots
+    # One equipment slot at a time
     for slot in equip_slots:
         actions.append(Action(ActionType.DEFEND, defend_equip_slots=[slot]))
-
-    # Card + equipment
-    for i, c in defenders:
-        for slot in equip_slots:
-            actions.append(Action(ActionType.DEFEND,
-                                  defend_hand_indices=[i],
-                                  defend_equip_slots=[slot]))
 
     return actions
 
