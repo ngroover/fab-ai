@@ -465,7 +465,65 @@ def _build_card_catalog() -> list:
                     "hero": hero,
                     "card_class": c.card_class.value,
                 }
+
+    # Merge cards imported via import_cards.py (stored in the card_catalog table).
+    # Cards already defined in the Python-side catalog take precedence.
+    try:
+        for row in deck_db.get_catalog_cards():
+            if row["card_id"] not in seen:
+                seen[row["card_id"]] = {
+                    "card_id":   row["card_id"],
+                    "name":      row["name"],
+                    "card_type": row["card_type"],
+                    "cost":      row["cost"],
+                    "pitch":     row["pitch"],
+                    "power":     row["power"],
+                    "defense":   row["defense"],
+                    "color":     row["color"],
+                    "go_again":  bool(row["go_again"]),
+                    "text":      row["text"] or "",
+                    "intimidate": bool(row["intimidate"]),
+                    "no_block":  bool(row["no_block"]),
+                    "equip_slot": row["equip_slot"],
+                    "hero":      None,
+                    "card_class": row["card_class"],
+                }
+    except Exception:
+        # card_catalog table may not exist yet (before first import_cards run)
+        pass
+
     return list(seen.values())
+
+
+def _catalog_row_to_card(row: dict):
+    """Convert a card_catalog DB row into a Card dataclass instance."""
+    from cards import Card, CardType, Color, EquipSlot, CardClass
+
+    type_map   = {v.value: v for v in CardType}
+    color_map  = {"Red": Color.RED, "Yellow": Color.YELLOW, "Blue": Color.BLUE}
+    equip_map  = {
+        "head": EquipSlot.HEAD, "chest": EquipSlot.CHEST,
+        "arms": EquipSlot.ARMS, "legs":  EquipSlot.LEGS,
+        "weapon": EquipSlot.WEAPON,
+    }
+    class_map  = {v.value: v for v in CardClass}
+
+    return Card(
+        name      = row["name"],
+        card_type = type_map.get(row["card_type"], CardType.ACTION),
+        cost      = row["cost"],
+        pitch     = row["pitch"],
+        power     = row["power"],
+        defense   = row["defense"],
+        color     = color_map.get(row["color"]),
+        go_again  = bool(row["go_again"]),
+        text      = row["text"] or "",
+        intimidate= bool(row["intimidate"]),
+        no_block  = bool(row["no_block"]),
+        equip_slot= equip_map.get(row["equip_slot"]),
+        # Unknown classes (e.g. Ranger) fall back to Generic for game purposes
+        card_class= class_map.get(row["card_class"], CardClass.GENERIC),
+    )
 
 
 def _build_card_lookup() -> dict:
@@ -477,6 +535,15 @@ def _build_card_lookup() -> dict:
     ]:
         for c in card_list:
             lookup[c.card_id] = c
+
+    # Also include cards imported via import_cards.py
+    try:
+        for row in deck_db.get_catalog_cards():
+            if row["card_id"] not in lookup:
+                lookup[row["card_id"]] = _catalog_row_to_card(row)
+    except Exception:
+        pass
+
     return lookup
 
 

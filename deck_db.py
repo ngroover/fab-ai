@@ -56,6 +56,25 @@ def init_db() -> None:
                 quantity    INTEGER NOT NULL DEFAULT 1,
                 PRIMARY KEY (decklist_id, card_id)
             );
+
+            CREATE TABLE IF NOT EXISTS card_catalog (
+                card_id    TEXT    PRIMARY KEY,
+                name       TEXT    NOT NULL,
+                card_type  TEXT    NOT NULL,
+                cost       INTEGER NOT NULL DEFAULT 0,
+                pitch      INTEGER NOT NULL DEFAULT 0,
+                power      INTEGER NOT NULL DEFAULT 0,
+                defense    INTEGER NOT NULL DEFAULT 0,
+                color      TEXT,
+                go_again   INTEGER NOT NULL DEFAULT 0,
+                intimidate INTEGER NOT NULL DEFAULT 0,
+                no_block   INTEGER NOT NULL DEFAULT 0,
+                equip_slot TEXT,
+                card_class TEXT    NOT NULL DEFAULT 'Generic',
+                text       TEXT    NOT NULL DEFAULT '',
+                blitz_legal INTEGER NOT NULL DEFAULT 0,
+                cc_legal    INTEGER NOT NULL DEFAULT 0
+            );
         """)
 
 
@@ -140,3 +159,64 @@ def delete_deck(deck_id: int) -> bool:
     with _conn() as con:
         cur = con.execute("DELETE FROM decklists WHERE id = ?", (deck_id,))
     return cur.rowcount > 0
+
+
+# ── Card catalog (imported from external sources) ─────────────────────────────
+
+def upsert_catalog_cards(cards: List[dict]) -> int:
+    """
+    Insert or replace cards in the card_catalog table.
+
+    Parameters
+    ----------
+    cards : list of dicts with keys matching the card_catalog columns.
+
+    Returns the number of rows inserted/replaced.
+    """
+    with _conn() as con:
+        con.executemany(
+            """
+            INSERT OR REPLACE INTO card_catalog
+                (card_id, name, card_type, cost, pitch, power, defense,
+                 color, go_again, intimidate, no_block, equip_slot,
+                 card_class, text, blitz_legal, cc_legal)
+            VALUES
+                (:card_id, :name, :card_type, :cost, :pitch, :power, :defense,
+                 :color, :go_again, :intimidate, :no_block, :equip_slot,
+                 :card_class, :text, :blitz_legal, :cc_legal)
+            """,
+            cards,
+        )
+    return len(cards)
+
+
+def get_catalog_cards(card_classes: Optional[List[str]] = None) -> List[dict]:
+    """
+    Return all cards from the card_catalog table as dicts.
+
+    Parameters
+    ----------
+    card_classes : optional list of class names to filter by
+                   (e.g. ["Generic", "Brute", "Warrior"]).
+                   If None, all classes are returned.
+    """
+    with _conn() as con:
+        if card_classes:
+            placeholders = ",".join("?" * len(card_classes))
+            rows = con.execute(
+                f"SELECT * FROM card_catalog WHERE card_class IN ({placeholders})"
+                " ORDER BY name, pitch",
+                card_classes,
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT * FROM card_catalog ORDER BY name, pitch"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def clear_catalog_cards() -> int:
+    """Delete all rows from card_catalog.  Returns the number of rows deleted."""
+    with _conn() as con:
+        cur = con.execute("DELETE FROM card_catalog")
+    return cur.rowcount
