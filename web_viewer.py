@@ -20,6 +20,14 @@ import threading
 
 from flask import Flask, abort, jsonify, redirect, render_template_string, request
 
+import deck_db
+from cards import (
+    build_rhinar_deck, build_rhinar_equipment,
+    build_dorinthea_deck, build_dorinthea_equipment,
+)
+
+deck_db.init_db()
+
 LOGS_DIR = Path(__file__).parent / "logs"
 
 app = Flask(__name__)
@@ -184,6 +192,7 @@ INDEX_TEMPLATE = """
       <h1>⚔️ FaB Game Logs</h1>
       <div class="subtitle">Flesh and Blood — Classic Battles</div>
     </div>
+    <a class="refresh-btn" href="/decks" style="margin-right:6px;background:#276749;border-color:#2f855a;color:#9ae6b4;">🃏 Decks</a>
     <a class="refresh-btn" href="/play" style="margin-right:6px;background:#1a365d;border-color:#2b4c7e;color:#90cdf4;">▶ Play</a>
     <a class="refresh-btn" href="/">↻ Refresh</a>
   </header>
@@ -421,6 +430,629 @@ def _render_log(text: str) -> str:
             lines.append(escaped)
 
     return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────────────────────
+# Card catalog helpers
+# ──────────────────────────────────────────────────────────────
+
+def _build_card_catalog() -> list:
+    """Return a deduplicated list of all card templates as dicts, keyed by card_id."""
+    seen: dict = {}
+    sources = [
+        ("Rhinar", build_rhinar_deck()),
+        ("Rhinar", build_rhinar_equipment()),
+        ("Dorinthea", build_dorinthea_deck()),
+        ("Dorinthea", build_dorinthea_equipment()),
+    ]
+    for hero, card_list in sources:
+        for c in card_list:
+            if c.card_id not in seen:
+                seen[c.card_id] = {
+                    "card_id": c.card_id,
+                    "name": c.name,
+                    "card_type": c.card_type.value,
+                    "cost": c.cost,
+                    "pitch": c.pitch,
+                    "power": c.power,
+                    "defense": c.defense,
+                    "color": c.color.name.capitalize() if c.color else None,
+                    "go_again": c.go_again,
+                    "text": c.text,
+                    "intimidate": c.intimidate,
+                    "no_block": c.no_block,
+                    "equip_slot": c.equip_slot.value if c.equip_slot else None,
+                    "hero": hero,
+                }
+    return list(seen.values())
+
+
+# ──────────────────────────────────────────────────────────────
+# Deck builder HTML template
+# ──────────────────────────────────────────────────────────────
+
+DECKS_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deck Lists — FaB</title>
+  <style>
+    {{ css }}
+    .container { padding: 16px; max-width: 700px; margin: 0 auto; }
+    .deck-list { list-style: none; display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+    .deck-item {
+      background: #1a202c;
+      border: 1px solid #2d3748;
+      border-radius: 10px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .deck-item:hover { border-color: #4a5568; }
+    .deck-name { font-weight: 600; font-size: 0.95rem; flex: 1; }
+    .deck-meta { font-size: 0.78rem; color: #718096; }
+    .btn {
+      font-size: 0.8rem;
+      padding: 5px 14px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .btn-primary { background: #2b6cb0; color: #fff; }
+    .btn-primary:hover { background: #3182ce; }
+    .btn-danger { background: #742a2a; color: #feb2b2; }
+    .btn-danger:hover { background: #9b2c2c; }
+    .btn-sm { padding: 3px 10px; font-size: 0.75rem; }
+    .new-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #276749;
+      color: #9ae6b4;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 16px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .new-btn:hover { background: #2f855a; text-decoration: none; }
+    .empty { text-align: center; color: #718096; padding: 40px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>🃏 Deck Lists</h1>
+      <div class="subtitle">Flesh and Blood — Saved Decks</div>
+    </div>
+    <a class="back-link" href="/">← Home</a>
+    <a class="new-btn" href="/decks/builder">+ New Deck</a>
+  </header>
+  <div class="container">
+    {% if not decks %}
+      <div class="empty">
+        <div style="font-size:3rem;">🃏</div>
+        <p style="margin-top:12px;">No decks saved yet.</p>
+        <a class="new-btn" href="/decks/builder" style="margin-top:16px;display:inline-flex;">+ Build your first deck</a>
+      </div>
+    {% else %}
+      <ul class="deck-list">
+        {% for d in decks %}
+        <li class="deck-item">
+          <div style="flex:1">
+            <div class="deck-name">{{ d.name }}</div>
+            <div class="deck-meta">{{ d.hero }} · {{ d.updated_at[:10] }}</div>
+          </div>
+          <a class="btn btn-primary btn-sm" href="/decks/builder/{{ d.id }}">Edit</a>
+          <button class="btn btn-danger btn-sm" onclick="deleteDeck({{ d.id }}, this)">Delete</button>
+        </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+  <script>
+    async function deleteDeck(id, btn) {
+      if (!confirm('Delete this deck?')) return;
+      const res = await fetch('/api/decks/' + id, {method: 'DELETE'});
+      if (res.ok) { btn.closest('li').remove(); }
+      else { alert('Delete failed'); }
+    }
+  </script>
+</body>
+</html>
+"""
+
+DECK_BUILDER_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deck Builder — FaB</title>
+  <style>
+    {{ css }}
+    /* ── Layout ── */
+    .builder-layout {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      grid-template-rows: auto 1fr;
+      height: calc(100vh - 52px);
+    }
+    @media (max-width: 700px) {
+      .builder-layout {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto 1fr;
+        height: auto;
+      }
+      .deck-panel { order: -1; max-height: 280px; }
+    }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      grid-column: 1 / -1;
+      background: #111827;
+      border-bottom: 1px solid #2d3748;
+      padding: 8px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .deck-name-input {
+      background: #1a202c;
+      border: 1px solid #4a5568;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 0.9rem;
+      font-weight: 600;
+      padding: 5px 10px;
+      width: 200px;
+    }
+    .deck-name-input:focus { outline: none; border-color: #63b3ed; }
+    select.hero-select {
+      background: #1a202c;
+      border: 1px solid #4a5568;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 0.85rem;
+      padding: 5px 10px;
+    }
+    .save-btn {
+      background: #276749;
+      border: none;
+      border-radius: 6px;
+      color: #9ae6b4;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 6px 18px;
+    }
+    .save-btn:hover { background: #2f855a; }
+    .save-btn:disabled { background: #2d3748; color: #718096; cursor: not-allowed; }
+    .status-msg { font-size: 0.8rem; color: #68d391; }
+    .status-msg.err { color: #fc8181; }
+
+    /* ── Catalog panel ── */
+    .catalog-panel {
+      overflow-y: auto;
+      padding: 10px;
+      background: #0f1117;
+      border-right: 1px solid #2d3748;
+    }
+    .filter-bar {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .filter-bar input, .filter-bar select {
+      background: #1a202c;
+      border: 1px solid #4a5568;
+      border-radius: 5px;
+      color: #e2e8f0;
+      font-size: 0.78rem;
+      padding: 4px 8px;
+      flex: 1;
+      min-width: 80px;
+    }
+    .filter-bar input:focus, .filter-bar select:focus { outline: none; border-color: #63b3ed; }
+
+    .card-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      margin-bottom: 4px;
+      background: #1a202c;
+      border: 1px solid #2d3748;
+      cursor: default;
+    }
+    .card-row:hover { border-color: #4a5568; }
+    .card-row.in-deck { border-color: #276749; background: #1a2e22; }
+    .card-info { flex: 1; min-width: 0; }
+    .card-name { font-size: 0.85rem; font-weight: 600; color: #e2e8f0; }
+    .card-stats {
+      font-size: 0.7rem;
+      color: #718096;
+      margin-top: 2px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .pill {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 0.68rem;
+      font-weight: 600;
+    }
+    .pill-red    { background: #744210; color: #fbd38d; }
+    .pill-yellow { background: #744210; color: #fefcbf; }
+    .pill-blue   { background: #1a365d; color: #90cdf4; }
+    .pill-none   { background: #2d3748; color: #a0aec0; }
+    .add-btn {
+      width: 26px; height: 26px;
+      border-radius: 5px;
+      background: #276749;
+      color: #9ae6b4;
+      border: none;
+      font-size: 1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .add-btn:hover { background: #2f855a; }
+    .qty-badge {
+      background: #2b6cb0;
+      color: #90cdf4;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 1px 7px;
+      border-radius: 8px;
+      min-width: 22px;
+      text-align: center;
+    }
+
+    /* ── Deck panel ── */
+    .deck-panel {
+      display: flex;
+      flex-direction: column;
+      background: #111827;
+      overflow: hidden;
+    }
+    .deck-header {
+      padding: 8px 12px;
+      background: #1a202c;
+      border-bottom: 1px solid #2d3748;
+      font-size: 0.78rem;
+      color: #a0aec0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .deck-count {
+      font-weight: 700;
+      color: #f6e05e;
+    }
+    .deck-cards-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+    .deck-card-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 8px;
+      border-radius: 5px;
+      margin-bottom: 3px;
+      background: #1a202c;
+      border: 1px solid #2d3748;
+    }
+    .deck-card-name { flex: 1; font-size: 0.82rem; color: #e2e8f0; }
+    .qty-ctrl {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .qty-btn {
+      width: 20px; height: 20px;
+      border-radius: 4px;
+      border: 1px solid #4a5568;
+      background: #2d3748;
+      color: #e2e8f0;
+      font-size: 0.85rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .qty-btn:hover { background: #4a5568; }
+    .qty-num {
+      width: 22px;
+      text-align: center;
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #f6e05e;
+    }
+    .empty-deck {
+      text-align: center;
+      color: #4a5568;
+      padding: 40px 10px;
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>🔨 Deck Builder</h1>
+      <div class="subtitle">Flesh and Blood</div>
+    </div>
+    <a class="back-link" href="/decks">← Decks</a>
+  </header>
+
+  <div class="builder-layout">
+    <!-- ── Toolbar ── -->
+    <div class="toolbar">
+      <input id="deckName" class="deck-name-input" placeholder="Deck name…" value="{{ deck_name }}">
+      <select id="heroSelect" class="hero-select">
+        <option value="Rhinar" {% if hero == 'Rhinar' %}selected{% endif %}>Rhinar</option>
+        <option value="Dorinthea" {% if hero == 'Dorinthea' %}selected{% endif %}>Dorinthea</option>
+        <option value="Custom" {% if hero == 'Custom' %}selected{% endif %}>Custom</option>
+      </select>
+      <button class="save-btn" id="saveBtn" onclick="saveDeck()">💾 Save</button>
+      <span id="statusMsg" class="status-msg"></span>
+    </div>
+
+    <!-- ── Catalog panel ── -->
+    <div class="catalog-panel">
+      <div class="filter-bar">
+        <input id="searchInput" placeholder="Search cards…" oninput="renderCatalog()">
+        <select id="filterType" onchange="renderCatalog()">
+          <option value="">All types</option>
+          <option>Action - Attack</option>
+          <option>Action</option>
+          <option>Instant</option>
+          <option>Attack Reaction</option>
+          <option>Defense Reaction</option>
+          <option>Equipment</option>
+          <option>Weapon</option>
+          <option>Mentor</option>
+          <option>Resource</option>
+        </select>
+        <select id="filterColor" onchange="renderCatalog()">
+          <option value="">All colors</option>
+          <option>Red</option>
+          <option>Yellow</option>
+          <option>Blue</option>
+        </select>
+        <select id="filterHero" onchange="renderCatalog()">
+          <option value="">All heroes</option>
+          <option>Rhinar</option>
+          <option>Dorinthea</option>
+        </select>
+      </div>
+      <div id="catalogList"></div>
+    </div>
+
+    <!-- ── Deck panel ── -->
+    <div class="deck-panel">
+      <div class="deck-header">
+        <span>Deck</span>
+        <span class="deck-count" id="deckTotal">0</span>
+        <span>cards</span>
+      </div>
+      <div class="deck-cards-list" id="deckList">
+        <div class="empty-deck">Add cards from the catalog →</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── State ──────────────────────────────────────────────────
+    const ALL_CARDS = {{ cards_json }};
+    const DECK_ID   = {{ deck_id }};        // null for new deck
+    let deck = {{ deck_cards_json }};       // {card_id: quantity}
+
+    // ── Catalog rendering ──────────────────────────────────────
+    function renderCatalog() {
+      const q     = document.getElementById('searchInput').value.toLowerCase();
+      const fType = document.getElementById('filterType').value;
+      const fColor= document.getElementById('filterColor').value;
+      const fHero = document.getElementById('filterHero').value;
+
+      const filtered = ALL_CARDS.filter(c => {
+        if (q && !c.name.toLowerCase().includes(q)) return false;
+        if (fType  && c.card_type !== fType)               return false;
+        if (fColor && c.color !== fColor)                  return false;
+        if (fHero  && c.hero  !== fHero)                   return false;
+        return true;
+      });
+
+      const html = filtered.map(c => {
+        const qty = deck[c.card_id] || 0;
+        const inDeck = qty > 0 ? ' in-deck' : '';
+        const colorPill = c.color
+          ? `<span class="pill pill-${c.color.toLowerCase()}">${c.color}</span>`
+          : `<span class="pill pill-none">—</span>`;
+        const stats = [];
+        if (c.cost)    stats.push(`Cost ${c.cost}`);
+        if (c.pitch)   stats.push(`Pitch ${c.pitch}`);
+        if (c.power)   stats.push(`Pwr ${c.power}`);
+        if (c.defense) stats.push(`Def ${c.defense}`);
+        const qtyBadge = qty > 0 ? `<span class="qty-badge">${qty}</span>` : '';
+        return `
+          <div class="card-row${inDeck}" id="cr-${c.card_id}">
+            <div class="card-info">
+              <div class="card-name">${escHtml(c.name)}</div>
+              <div class="card-stats">
+                ${colorPill}
+                <span style="color:#a0aec0">${escHtml(c.card_type)}</span>
+                ${stats.map(s=>`<span>${s}</span>`).join('')}
+              </div>
+            </div>
+            ${qtyBadge}
+            <button class="add-btn" onclick="addCard('${c.card_id}')" title="Add to deck">+</button>
+          </div>`;
+      }).join('');
+
+      document.getElementById('catalogList').innerHTML = html || '<div style="color:#4a5568;padding:20px;text-align:center">No cards match</div>';
+    }
+
+    // ── Deck rendering ─────────────────────────────────────────
+    function renderDeck() {
+      const entries = Object.entries(deck).filter(([,q]) => q > 0);
+      const total = entries.reduce((s,[,q]) => s+q, 0);
+      document.getElementById('deckTotal').textContent = total;
+
+      if (entries.length === 0) {
+        document.getElementById('deckList').innerHTML = '<div class="empty-deck">Add cards from the catalog →</div>';
+        return;
+      }
+
+      // Sort by card name for readability
+      entries.sort(([a],[b]) => {
+        const na = ALL_CARDS.find(c=>c.card_id===a)?.name || a;
+        const nb = ALL_CARDS.find(c=>c.card_id===b)?.name || b;
+        return na.localeCompare(nb);
+      });
+
+      const html = entries.map(([cid, qty]) => {
+        const card = ALL_CARDS.find(c=>c.card_id===cid);
+        const name = card ? card.name : cid;
+        const colorPill = card && card.color
+          ? `<span class="pill pill-${card.color.toLowerCase()}" style="margin-right:4px">${card.color[0]}</span>`
+          : '';
+        return `
+          <div class="deck-card-row" id="dr-${cid}">
+            ${colorPill}
+            <span class="deck-card-name">${escHtml(name)}</span>
+            <div class="qty-ctrl">
+              <button class="qty-btn" onclick="changeQty('${cid}',-1)">−</button>
+              <span class="qty-num">${qty}</span>
+              <button class="qty-btn" onclick="changeQty('${cid}',+1)">+</button>
+            </div>
+          </div>`;
+      }).join('');
+
+      document.getElementById('deckList').innerHTML = html;
+    }
+
+    // ── Actions ────────────────────────────────────────────────
+    function addCard(cardId) {
+      deck[cardId] = (deck[cardId] || 0) + 1;
+      renderDeck();
+      // Update catalog row in place
+      const row = document.getElementById('cr-' + cardId);
+      if (row) {
+        row.classList.add('in-deck');
+        let badge = row.querySelector('.qty-badge');
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'qty-badge';
+          row.insertBefore(badge, row.querySelector('.add-btn'));
+        }
+        badge.textContent = deck[cardId];
+      }
+    }
+
+    function changeQty(cardId, delta) {
+      const cur = deck[cardId] || 0;
+      const next = Math.max(0, cur + delta);
+      if (next === 0) {
+        delete deck[cardId];
+      } else {
+        deck[cardId] = next;
+      }
+      renderDeck();
+      // Refresh catalog row
+      const row = document.getElementById('cr-' + cardId);
+      if (row) {
+        const badge = row.querySelector('.qty-badge');
+        const qty = deck[cardId] || 0;
+        if (qty === 0) {
+          row.classList.remove('in-deck');
+          if (badge) badge.remove();
+        } else {
+          row.classList.add('in-deck');
+          if (badge) badge.textContent = qty;
+        }
+      }
+    }
+
+    // ── Save ───────────────────────────────────────────────────
+    async function saveDeck() {
+      const name = document.getElementById('deckName').value.trim();
+      const hero = document.getElementById('heroSelect').value;
+      const msg  = document.getElementById('statusMsg');
+      const btn  = document.getElementById('saveBtn');
+
+      if (!name) { showStatus('Enter a deck name first', true); return; }
+
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+
+      const body = JSON.stringify({name, hero, cards: deck});
+      let res;
+      try {
+        if (DECK_ID) {
+          res = await fetch('/api/decks/' + DECK_ID, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body,
+          });
+        } else {
+          res = await fetch('/api/decks', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body,
+          });
+          if (res.ok) {
+            const data = await res.json();
+            // Redirect to the edit URL so subsequent saves go to PUT
+            history.replaceState(null, '', '/decks/builder/' + data.id);
+          }
+        }
+        if (res.ok) {
+          showStatus('Saved!', false);
+        } else {
+          showStatus('Save failed', true);
+        }
+      } catch(e) {
+        showStatus('Error: ' + e, true);
+      }
+      btn.disabled = false;
+      btn.textContent = '💾 Save';
+    }
+
+    function showStatus(text, isErr) {
+      const el = document.getElementById('statusMsg');
+      el.textContent = text;
+      el.className = 'status-msg' + (isErr ? ' err' : '');
+      setTimeout(() => { el.textContent = ''; }, 3000);
+    }
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // ── Init ───────────────────────────────────────────────────
+    renderCatalog();
+    renderDeck();
+  </script>
+</body>
+</html>
+"""
 
 
 # ──────────────────────────────────────────────────────────────
@@ -1191,6 +1823,100 @@ def play_action():
     idx = data.get("index", -1)
     ok = _session.submit_choice(int(idx))
     return jsonify({"ok": ok})
+
+
+# ──────────────────────────────────────────────────────────────
+# Deck builder routes
+# ──────────────────────────────────────────────────────────────
+
+@app.route("/decks")
+def decks_list():
+    decks = deck_db.list_decks()
+    return render_template_string(DECKS_TEMPLATE, css=BASE_CSS, decks=decks)
+
+
+@app.route("/decks/builder")
+@app.route("/decks/builder/<int:deck_id>")
+def deck_builder(deck_id: int = None):
+    import json
+
+    cards = _build_card_catalog()
+
+    if deck_id is not None:
+        saved = deck_db.get_deck(deck_id)
+        if saved is None:
+            abort(404)
+        deck_name = saved["name"]
+        hero = saved["hero"]
+        deck_cards = saved["cards"]
+    else:
+        deck_name = ""
+        hero = "Rhinar"
+        deck_cards = {}
+
+    return render_template_string(
+        DECK_BUILDER_TEMPLATE,
+        css=BASE_CSS,
+        cards_json=json.dumps(cards),
+        deck_id=json.dumps(deck_id),
+        deck_name=deck_name,
+        hero=hero,
+        deck_cards_json=json.dumps(deck_cards),
+    )
+
+
+# ── Deck API ───────────────────────────────────────────────────
+
+@app.route("/api/cards")
+def api_cards():
+    return jsonify(_build_card_catalog())
+
+
+@app.route("/api/decks", methods=["GET"])
+def api_list_decks():
+    return jsonify(deck_db.list_decks())
+
+
+@app.route("/api/decks", methods=["POST"])
+def api_create_deck():
+    data = request.get_json(force=True) or {}
+    name = (data.get("name") or "").strip()
+    hero = (data.get("hero") or "").strip()
+    cards = data.get("cards") or {}
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    deck_id = deck_db.create_deck(name, hero, cards)
+    return jsonify({"id": deck_id}), 201
+
+
+@app.route("/api/decks/<int:deck_id>", methods=["GET"])
+def api_get_deck(deck_id: int):
+    d = deck_db.get_deck(deck_id)
+    if d is None:
+        abort(404)
+    return jsonify(d)
+
+
+@app.route("/api/decks/<int:deck_id>", methods=["PUT"])
+def api_update_deck(deck_id: int):
+    data = request.get_json(force=True) or {}
+    name = (data.get("name") or "").strip()
+    hero = (data.get("hero") or "").strip()
+    cards = data.get("cards") or {}
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    ok = deck_db.update_deck(deck_id, name, hero, cards)
+    if not ok:
+        abort(404)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/decks/<int:deck_id>", methods=["DELETE"])
+def api_delete_deck(deck_id: int):
+    ok = deck_db.delete_deck(deck_id)
+    if not ok:
+        abort(404)
+    return jsonify({"ok": True})
 
 
 # ──────────────────────────────────────────────────────────────

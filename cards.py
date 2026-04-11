@@ -6,6 +6,7 @@ Rhinar deck: 40-card Blitz, young hero Rhinar (20 life, intellect 4)
 Dorinthea deck: 40-card Blitz, young hero Dorinthea, Quicksilver Prodigy (20 life, intellect 4)
 """
 
+import re
 from dataclasses import dataclass
 from typing import Optional, List
 from enum import Enum
@@ -52,6 +53,13 @@ class Card:
     intimidate: bool = False
     no_block: bool = False
     equip_slot: Optional[EquipSlot] = None
+
+    @property
+    def card_id(self) -> str:
+        """Stable identifier for this card template (name + color slug)."""
+        name_slug = re.sub(r"[^a-z0-9]+", "-", self.name.lower()).strip("-")
+        color_suffix = f"-{self.color.name.lower()}" if self.color else ""
+        return f"{name_slug}{color_suffix}"
 
     def __str__(self):
         parts = [self.name]
