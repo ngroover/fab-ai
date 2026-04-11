@@ -463,6 +463,7 @@ def _build_card_catalog() -> list:
                     "no_block": c.no_block,
                     "equip_slot": c.equip_slot.value if c.equip_slot else None,
                     "hero": hero,
+                    "card_class": c.card_class.value,
                 }
     return list(seen.values())
 
@@ -477,6 +478,28 @@ def _build_card_lookup() -> dict:
         for c in card_list:
             lookup[c.card_id] = c
     return lookup
+
+
+_HERO_CLASS = {"Rhinar": "Brute", "Dorinthea": "Warrior"}
+
+
+def _validate_deck_cards(hero: str, cards: dict) -> list[str]:
+    """
+    Return a list of card_id strings that are incompatible with `hero`.
+    A card is incompatible if it belongs to a different class (e.g. a
+    Warrior card in a Brute deck).  Generic cards and unknown heroes
+    are always allowed.
+    """
+    required_class = _HERO_CLASS.get(hero)
+    if not required_class:
+        return []
+    lookup = _build_card_lookup()
+    bad = []
+    for card_id in cards:
+        card = lookup.get(card_id)
+        if card and card.card_class.value not in ("Generic", required_class):
+            bad.append(card_id)
+    return bad
 
 
 def _player_from_deck(deck_record: dict, slot: int):
@@ -747,6 +770,11 @@ DECK_BUILDER_TEMPLATE = """
     .pill-yellow { background: #744210; color: #fefcbf; }
     .pill-blue   { background: #1a365d; color: #90cdf4; }
     .pill-none   { background: #2d3748; color: #a0aec0; }
+    .pill-brute   { background: #6b2737; color: #fed7d7; }
+    .pill-warrior { background: #1e3a5f; color: #bee3f8; }
+    .pill-generic { background: #2d3748; color: #a0aec0; }
+    .card-row.incompatible { opacity: 0.4; }
+    .card-row.incompatible .add-btn { background: #2d3748; color: #4a5568; cursor: not-allowed; }
     .add-btn {
       width: 26px; height: 26px;
       border-radius: 5px;
@@ -886,10 +914,11 @@ DECK_BUILDER_TEMPLATE = """
           <option>Yellow</option>
           <option>Blue</option>
         </select>
-        <select id="filterHero" onchange="renderCatalog()">
-          <option value="">All heroes</option>
-          <option>Rhinar</option>
-          <option>Dorinthea</option>
+        <select id="filterClass" onchange="renderCatalog()">
+          <option value="">All classes</option>
+          <option>Brute</option>
+          <option>Warrior</option>
+          <option>Generic</option>
         </select>
       </div>
       <div id="catalogList"></div>
@@ -914,45 +943,66 @@ DECK_BUILDER_TEMPLATE = """
     const DECK_ID   = {{ deck_id }};        // null for new deck
     let deck = {{ deck_cards_json | safe }};       // {card_id: quantity}
 
+    // ── Class compatibility ────────────────────────────────────
+    // Maps hero name -> the class of cards it can use (plus Generic)
+    const HERO_CLASS = { "Rhinar": "Brute", "Dorinthea": "Warrior" };
+
+    function currentHeroClass() {
+      return HERO_CLASS[document.getElementById('heroSelect').value] || null;
+    }
+
+    function isCompatible(card) {
+      const hc = currentHeroClass();
+      if (!hc) return true;                    // Custom hero: no restriction
+      return card.card_class === "Generic" || card.card_class === hc;
+    }
+
     // ── Catalog rendering ──────────────────────────────────────
     function renderCatalog() {
-      const q     = document.getElementById('searchInput').value.toLowerCase();
-      const fType = document.getElementById('filterType').value;
-      const fColor= document.getElementById('filterColor').value;
-      const fHero = document.getElementById('filterHero').value;
+      const q      = document.getElementById('searchInput').value.toLowerCase();
+      const fType  = document.getElementById('filterType').value;
+      const fColor = document.getElementById('filterColor').value;
+      const fClass = document.getElementById('filterClass').value;
 
       const filtered = ALL_CARDS.filter(c => {
         if (q && !c.name.toLowerCase().includes(q)) return false;
-        if (fType  && c.card_type !== fType)               return false;
-        if (fColor && c.color !== fColor)                  return false;
-        if (fHero  && c.hero  !== fHero)                   return false;
+        if (fType  && c.card_type   !== fType)      return false;
+        if (fColor && c.color       !== fColor)     return false;
+        if (fClass && c.card_class  !== fClass)     return false;
         return true;
       });
 
       const html = filtered.map(c => {
         const qty = deck[c.card_id] || 0;
+        const compat = isCompatible(c);
         const inDeck = qty > 0 ? ' in-deck' : '';
+        const incompatCls = !compat ? ' incompatible' : '';
         const colorPill = c.color
           ? `<span class="pill pill-${c.color.toLowerCase()}">${c.color}</span>`
           : `<span class="pill pill-none">—</span>`;
+        const classPill = `<span class="pill pill-${c.card_class.toLowerCase()}">${c.card_class}</span>`;
         const stats = [];
         if (c.cost)    stats.push(`Cost ${c.cost}`);
         if (c.pitch)   stats.push(`Pitch ${c.pitch}`);
         if (c.power)   stats.push(`Pwr ${c.power}`);
         if (c.defense) stats.push(`Def ${c.defense}`);
         const qtyBadge = qty > 0 ? `<span class="qty-badge">${qty}</span>` : '';
+        const addBtn = compat
+          ? `<button class="add-btn" onclick="addCard('${c.card_id}')" title="Add to deck">+</button>`
+          : `<button class="add-btn" disabled title="${c.card_class} cards cannot be added to this deck">✕</button>`;
         return `
-          <div class="card-row${inDeck}" id="cr-${c.card_id}">
+          <div class="card-row${inDeck}${incompatCls}" id="cr-${c.card_id}">
             <div class="card-info">
               <div class="card-name">${escHtml(c.name)}</div>
               <div class="card-stats">
                 ${colorPill}
+                ${classPill}
                 <span style="color:#a0aec0">${escHtml(c.card_type)}</span>
                 ${stats.map(s=>`<span>${s}</span>`).join('')}
               </div>
             </div>
             ${qtyBadge}
-            <button class="add-btn" onclick="addCard('${c.card_id}')" title="Add to deck">+</button>
+            ${addBtn}
           </div>`;
       }).join('');
 
@@ -1000,6 +1050,8 @@ DECK_BUILDER_TEMPLATE = """
 
     // ── Actions ────────────────────────────────────────────────
     function addCard(cardId) {
+      const card = ALL_CARDS.find(c => c.card_id === cardId);
+      if (card && !isCompatible(card)) return;   // guard against direct calls
       deck[cardId] = (deck[cardId] || 0) + 1;
       renderDeck();
       // Update catalog row in place
@@ -1097,6 +1149,7 @@ DECK_BUILDER_TEMPLATE = """
     }
 
     // ── Init ───────────────────────────────────────────────────
+    document.getElementById('heroSelect').addEventListener('change', renderCatalog);
     renderCatalog();
     renderDeck();
   </script>
@@ -1986,6 +2039,9 @@ def api_create_deck():
     cards = data.get("cards") or {}
     if not name:
         return jsonify({"error": "name required"}), 400
+    bad = _validate_deck_cards(hero, cards)
+    if bad:
+        return jsonify({"error": f"Cards not allowed in a {_HERO_CLASS.get(hero, hero)} deck: {bad}"}), 400
     deck_id = deck_db.create_deck(name, hero, cards)
     return jsonify({"id": deck_id}), 201
 
@@ -2006,6 +2062,9 @@ def api_update_deck(deck_id: int):
     cards = data.get("cards") or {}
     if not name:
         return jsonify({"error": "name required"}), 400
+    bad = _validate_deck_cards(hero, cards)
+    if bad:
+        return jsonify({"error": f"Cards not allowed in a {_HERO_CLASS.get(hero, hero)} deck: {bad}"}), 400
     ok = deck_db.update_deck(deck_id, name, hero, cards)
     if not ok:
         abort(404)
