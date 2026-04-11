@@ -910,9 +910,9 @@ DECK_BUILDER_TEMPLATE = """
 
   <script>
     // ── State ──────────────────────────────────────────────────
-    const ALL_CARDS = {{ cards_json }};
+    const ALL_CARDS = {{ cards_json | safe }};
     const DECK_ID   = {{ deck_id }};        // null for new deck
-    let deck = {{ deck_cards_json }};       // {card_id: quantity}
+    let deck = {{ deck_cards_json | safe }};       // {card_id: quantity}
 
     // ── Catalog rendering ──────────────────────────────────────
     function renderCatalog() {
