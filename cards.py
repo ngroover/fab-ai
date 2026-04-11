@@ -8,7 +8,7 @@ Dorinthea deck: 40-card Blitz, young hero Dorinthea, Quicksilver Prodigy (20 lif
 
 import re
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Dict, Optional, List
 from enum import Enum
 
 
@@ -440,3 +440,33 @@ def build_dorinthea_equipment():
         Card("Ironrot Legs", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.LEGS,
              text="Blade Break."),
     ]
+
+
+# ──────────────────────── CARD CATALOG ────────────────────────
+
+def _build_card_catalog() -> Dict[str, "Card"]:
+    """
+    Build a mapping of underscore-slugged card identifier -> Card for every
+    unique card template across both classic battle decks (main deck +
+    equipment).
+
+    Keys use underscores, e.g. ``bare_fangs_red``, ``dawnblade_resplendent``.
+    Duplicate copies of the same card (e.g. the two Bare Fangs in Rhinar's
+    deck) are collapsed to a single entry.
+    """
+    all_cards = (
+        build_rhinar_deck()
+        + build_rhinar_equipment()
+        + build_dorinthea_deck()
+        + build_dorinthea_equipment()
+    )
+    catalog: Dict[str, Card] = {}
+    for card in all_cards:
+        key = card.card_id.replace("-", "_")
+        if key not in catalog:
+            catalog[key] = card
+    return catalog
+
+
+# Maps underscore-slugged card_id -> Card, e.g. CARD_CATALOG["bare_fangs_red"]
+CARD_CATALOG: Dict[str, Card] = _build_card_catalog()
