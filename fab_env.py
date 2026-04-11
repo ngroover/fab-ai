@@ -136,9 +136,17 @@ class FaBEnv:
     # reset
     # ──────────────────────────────────────────────────────────
 
-    def reset(self, seed: Optional[int] = None) -> Tuple[Dict, Dict]:
+    def reset(self, seed: Optional[int] = None,
+              player0: Optional[Player] = None,
+              player1: Optional[Player] = None) -> Tuple[Dict, Dict]:
         """
         Reset the environment and return initial observations.
+
+        Parameters
+        ----------
+        player0, player1 : optional Player overrides.  When provided, these
+            replace the default Rhinar / Dorinthea players so custom decks
+            can be used without subclassing FaBEnv.
 
         Returns:
             obs   — {agent_id: observation_dict}
@@ -147,8 +155,8 @@ class FaBEnv:
         if seed is not None:
             random.seed(seed)
 
-        p0 = _make_rhinar()
-        p1 = _make_dorinthea()
+        p0 = player0 if player0 is not None else _make_rhinar()
+        p1 = player1 if player1 is not None else _make_dorinthea()
         self._game = GameState(p0, p1)
 
         # Opening hands

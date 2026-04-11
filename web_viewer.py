@@ -467,6 +467,56 @@ def _build_card_catalog() -> list:
     return list(seen.values())
 
 
+def _build_card_lookup() -> dict:
+    """Return {card_id: Card} for every card known to the game."""
+    lookup: dict = {}
+    for card_list in [
+        build_rhinar_deck(), build_rhinar_equipment(),
+        build_dorinthea_deck(), build_dorinthea_equipment(),
+    ]:
+        for c in card_list:
+            lookup[c.card_id] = c
+    return lookup
+
+
+def _player_from_deck(deck_record: dict, slot: int):
+    """
+    Build a Player from a saved deck record.
+
+    slot=0 → Rhinar hero stats + equipment
+    slot=1 → Dorinthea hero stats + equipment
+    """
+    from game_state import Player
+
+    lookup = _build_card_lookup()
+    deck_cards = []
+    for card_id, qty in deck_record["cards"].items():
+        card = lookup.get(card_id)
+        if card:
+            deck_cards.extend([card] * qty)
+
+    if slot == 0:
+        equip = build_rhinar_equipment()
+        return Player(
+            name=deck_record["name"],
+            hero_name="Rhinar (Young Brute)",
+            life=20, intellect=4,
+            deck=deck_cards,
+            equipment_list=equip[1:],
+            weapon=equip[0],
+        )
+    else:
+        equip = build_dorinthea_equipment()
+        return Player(
+            name=deck_record["name"],
+            hero_name="Dorinthea, Quicksilver Prodigy",
+            life=20, intellect=4,
+            deck=deck_cards,
+            equipment_list=equip[1:],
+            weapon=equip[0],
+        )
+
+
 # ──────────────────────────────────────────────────────────────
 # Deck builder HTML template
 # ──────────────────────────────────────────────────────────────
@@ -1251,7 +1301,8 @@ class _GameSession:
             self._reset_state()
         self._choice_event.set()   # unblock any waiting game thread
 
-    def start(self, rhinar_is_human: bool, dorinthea_is_human: bool, seed):
+    def start(self, rhinar_is_human: bool, dorinthea_is_human: bool, seed,
+              deck0_id: int = None, deck1_id: int = None):
         self.reset()
         with self._lock:
             self._cancelled = False
@@ -1261,7 +1312,7 @@ class _GameSession:
         self._choice_event.clear()
         t = threading.Thread(
             target=self._run,
-            args=(rhinar_is_human, dorinthea_is_human, seed),
+            args=(rhinar_is_human, dorinthea_is_human, seed, deck0_id, deck1_id),
             daemon=True,
         )
         t.start()
@@ -1338,9 +1389,10 @@ class _GameSession:
         with self._lock:
             self.player_stats = stats
 
-    def _run(self, rhinar_is_human: bool, dorinthea_is_human: bool, seed):
+    def _run(self, rhinar_is_human: bool, dorinthea_is_human: bool, seed,
+             deck0_id=None, deck1_id=None):
         try:
-            self._run_inner(rhinar_is_human, dorinthea_is_human, seed)
+            self._run_inner(rhinar_is_human, dorinthea_is_human, seed, deck0_id, deck1_id)
         except _GameCancelled:
             pass
         except Exception as exc:
@@ -1349,7 +1401,8 @@ class _GameSession:
                 self.status = "game_over"
                 self.winner = None
 
-    def _run_inner(self, rhinar_is_human, dorinthea_is_human, seed):
+    def _run_inner(self, rhinar_is_human, dorinthea_is_human, seed,
+                   deck0_id=None, deck1_id=None):
         from fab_env import FaBEnv, Phase
         from agents import RhinarAgent, DorintheiAgent
 
@@ -1360,7 +1413,19 @@ class _GameSession:
         dorinthea_agent = (_WebHumanAgent(self, "agent_1") if dorinthea_is_human
                            else DorintheiAgent())
 
-        obs, _ = env.reset(seed=seed)
+        # Build custom players if deck IDs were provided
+        p0 = None
+        p1 = None
+        if deck0_id is not None:
+            rec = deck_db.get_deck(deck0_id)
+            if rec:
+                p0 = _player_from_deck(rec, slot=0)
+        if deck1_id is not None:
+            rec = deck_db.get_deck(deck1_id)
+            if rec:
+                p1 = _player_from_deck(rec, slot=1)
+
+        obs, _ = env.reset(seed=seed, player0=p0, player1=p1)
 
         while not env.done:
             agent_id = env.agent_selection
@@ -1397,7 +1462,8 @@ class _GameSession:
         winner_name = None
         for aid in env.agents:
             if env._rewards.get(aid, 0) > 0:
-                winner_name = "Rhinar" if aid == "agent_0" else "Dorinthea"
+                idx = int(aid[-1])
+                winner_name = env._game.players[idx].name
                 break
 
         with self._lock:
@@ -1439,6 +1505,18 @@ PLAY_TEMPLATE = """
     }
     .radio-label input { accent-color: #63b3ed; }
     .vs-col { color: #4a5568; font-weight: 800; font-size: 1.1rem; }
+    .deck-select {
+      width: 100%;
+      background: #0f1117;
+      border: 1px solid #4a5568;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 0.8rem;
+      padding: 5px 8px;
+      margin-bottom: 10px;
+    }
+    .deck-select:focus { outline: none; border-color: #63b3ed; }
+    .slot-label { font-size: 0.72rem; color: #718096; margin-bottom: 4px; }
     .seed-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
     .seed-row label { font-size: 0.83rem; color: #a0aec0; white-space: nowrap; }
     .start-btn {
@@ -1556,7 +1634,16 @@ PLAY_TEMPLATE = """
       <form id="start-form">
         <div class="hero-row">
           <div class="hero-col">
-            <h3>🐾 Rhinar</h3>
+            <h3>🐾 Player 1 (Rhinar)</h3>
+            <div class="slot-label">Deck</div>
+            <select name="deck0" class="deck-select">
+              <option value="">Default Rhinar deck</option>
+              {% for d in saved_decks %}
+                {% if d.hero in ('Rhinar', 'Custom') %}
+                  <option value="{{ d.id }}">{{ d.name }}</option>
+                {% endif %}
+              {% endfor %}
+            </select>
             <div class="radio-group">
               <label class="radio-label">
                 <input type="radio" name="rhinar" value="human"> 👤 Human
@@ -1568,7 +1655,16 @@ PLAY_TEMPLATE = """
           </div>
           <div class="vs-col">VS</div>
           <div class="hero-col">
-            <h3>⚔️ Dorinthea</h3>
+            <h3>⚔️ Player 2 (Dorinthea)</h3>
+            <div class="slot-label">Deck</div>
+            <select name="deck1" class="deck-select">
+              <option value="">Default Dorinthea deck</option>
+              {% for d in saved_decks %}
+                {% if d.hero in ('Dorinthea', 'Custom') %}
+                  <option value="{{ d.id }}">{{ d.name }}</option>
+                {% endif %}
+              {% endfor %}
+            </select>
             <div class="radio-group">
               <label class="radio-label">
                 <input type="radio" name="dorinthea" value="human"> 👤 Human
@@ -1793,7 +1889,8 @@ PLAY_TEMPLATE = """
 
 @app.route("/play")
 def play_page():
-    return render_template_string(PLAY_TEMPLATE, css=BASE_CSS)
+    saved_decks = deck_db.list_decks()
+    return render_template_string(PLAY_TEMPLATE, css=BASE_CSS, saved_decks=saved_decks)
 
 
 @app.route("/play/start", methods=["POST"])
@@ -1802,7 +1899,11 @@ def play_start():
     dorinthea_human = request.form.get("dorinthea") == "human"
     seed_str = request.form.get("seed", "").strip()
     seed = int(seed_str) if seed_str.isdigit() else None
-    _session.start(rhinar_human, dorinthea_human, seed)
+    deck0_str = request.form.get("deck0", "").strip()
+    deck1_str = request.form.get("deck1", "").strip()
+    deck0_id = int(deck0_str) if deck0_str.isdigit() else None
+    deck1_id = int(deck1_str) if deck1_str.isdigit() else None
+    _session.start(rhinar_human, dorinthea_human, seed, deck0_id, deck1_id)
     return jsonify({"ok": True})
 
 
