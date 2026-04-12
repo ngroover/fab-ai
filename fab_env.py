@@ -113,6 +113,7 @@ class FaBEnv:
         self.agent_selection: str = "agent_0"
         self.done: bool = False
         self._pending_play_card: Optional[Card] = None  # card chosen in PLAY_CARD step, awaiting pitch
+        self._pitched_this_play: List[Card] = []         # cards pitched so far for the current pending card
         self._pending_defend_indices: List[int] = []     # hand indices accumulated during defend step
         self._pending_defend_equip_slots: List[str] = [] # equip slots accumulated during defend step
 
@@ -276,6 +277,7 @@ class FaBEnv:
             if needed > 0:
                 # Cost not yet covered — transition to PITCH phase so agent picks pitches
                 self._pending_play_card = card
+                self._pitched_this_play = []
                 self._phase = Phase.PITCH
                 self._log(f"\n  ▶  {active.name} chooses to play {card} "
                           f"(needs {needed} more resource{'s' if needed != 1 else ''})")
@@ -293,21 +295,33 @@ class FaBEnv:
             self._end_attack_phase(active, opponent)
 
     def _handle_pitch_action(self, action: Action, active: Player, opponent: Player):
-        """Step 2 of card play: agent selects which cards to pitch to cover the cost."""
+        """Sequential pitch step: agent pitches one card at a time to cover the cost.
+        Stays in PITCH phase until resource_points >= pending card's cost, then resolves."""
         card = self._pending_play_card
-        self._pending_play_card = None
-        self._phase = Phase.ATTACK  # restore before any early returns
 
-        # Execute the chosen pitches
-        pitch_cards = self._snapshot_by_indices(active.hand, action.pitch_indices)
-        for pc in pitch_cards:
-            if pc in active.hand:
-                active.pitch(pc)
+        if action.pitch_indices:
+            # Pitch the single selected card immediately
+            idx = action.pitch_indices[0]
+            if 0 <= idx < len(active.hand):
+                pc = active.hand[idx]
+                active.pitch(pc)  # removes from hand, adds pitch value to resource_points
+                self._pitched_this_play.append(pc)
+
+            # If cost still not covered, stay in PITCH phase for another card
+            if active.resource_points < card.cost:
+                return
+
+        # Cost is covered (or no pitchable cards remain) — resolve the card
+        self._pending_play_card = None
+        self._phase = Phase.ATTACK
 
         active.resource_points -= card.cost
+        pitched = self._pitched_this_play[:]
+        self._pitched_this_play = []
+
         self._log(f"\n  ▶  {active.name} plays {card}"
-                  + (f" (pitched: {', '.join(c.name for c in pitch_cards)})"
-                     if pitch_cards else ""))
+                  + (f" (pitched: {', '.join(c.name for c in pitched)})"
+                     if pitched else ""))
 
         self._resolve_played_card(card, active, opponent)
 

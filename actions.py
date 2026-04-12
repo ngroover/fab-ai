@@ -182,36 +182,23 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
 
 def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
     """
-    Legal PITCH actions for the second step of playing a card.
-    Called after the player chose which card to play (already removed from hand).
-    Returns pitch combinations that cover the remaining cost.
-    If already covered (resource_points >= cost), a single empty-pitch action is returned.
+    Legal PITCH actions for the sequential pitch step.
+    Returns one action per pitchable card in hand so the player selects cards
+    one at a time.  The phase repeats until resource_points >= pending_card.cost.
+    If cost is already covered, returns a single no-pitch action (safety net).
     """
-    from itertools import combinations
-
     needed = max(0, pending_card.cost - player.resource_points)
 
     if needed == 0:
         return [Action(ActionType.PITCH, pitch_indices=[])]
 
-    pitchable = [(i, c) for i, c in enumerate(player.hand) if c.pitch > 0]
-    # Sort descending so we find minimal combos first
-    pitchable.sort(key=lambda x: x[1].pitch, reverse=True)
-
-    actions: List[Action] = []
-    seen: set = set()
-
-    for size in range(1, len(pitchable) + 1):
-        for combo in combinations(pitchable, size):
-            total = sum(c.pitch for _, c in combo)
-            if total >= needed:
-                key = tuple(sorted(i for i, _ in combo))
-                if key not in seen:
-                    seen.add(key)
-                    actions.append(Action(ActionType.PITCH, pitch_indices=list(key)))
-        if actions and size >= 3:
-            break  # cap at 3-card combos for tractability
-
+    # Sort by descending pitch value so agents pitching greedily (legal[0]) pick
+    # the highest-value card first, minimising the number of pitch steps needed.
+    pitchable = sorted(
+        ((i, c) for i, c in enumerate(player.hand) if c.pitch > 0),
+        key=lambda x: (-x[1].pitch, x[0]),  # highest pitch first, then by index
+    )
+    actions = [Action(ActionType.PITCH, pitch_indices=[i]) for i, _ in pitchable]
     return actions if actions else [Action(ActionType.PITCH, pitch_indices=[])]
 
 
