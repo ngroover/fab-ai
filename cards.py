@@ -98,8 +98,7 @@ class Card:
 
 # ──────────────────────── RHINAR DECK ────────────────────────
 # Hero: Rhinar (young) — Life: 20, Intellect: 4
-# Weapon: Bone Basher (1H) — Once per Turn Action — 1: Attack. Go again.
-#         If Bone Basher hits, intimidate.
+# Weapon: Bone Basher (1H) — Once per Turn Action — 2: Attack.
 # Equipment: Blossom of Spring (head), Bone Vizier (chest),
 #            Ironhide Gauntlet (arms), Ironhide Legs (legs)
 
@@ -268,7 +267,7 @@ def build_rhinar_equipment():
     return [
         Card("Bone Basher", CardType.WEAPON, cost=2, power=4, equip_slot=EquipSlot.WEAPON,
              card_class=CardClass.BRUTE,
-             text="Once per Turn Action — 2: Attack. If Bone Basher hits, intimidate."),
+             text="Once per Turn Action — 2: Attack."),
         Card("Blossom of Spring", CardType.EQUIPMENT, defense=0, equip_slot=EquipSlot.CHEST,
              text="Action: Destroy Blossom of Spring: Gain 1 resource. Go again"),
         Card("Bone Vizier", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.HEAD,

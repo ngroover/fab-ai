@@ -766,13 +766,6 @@ class FaBEnv:
         active.action_points += 1  # instants don't consume action points
 
     def _on_hit(self, card: Card, attacker: Player, defender: Player, is_weapon: bool):
-        if is_weapon and "Bone Basher" in card.name:
-            if len(defender.hand) > 0:
-                banished = self._rng.choice(defender.hand)
-                defender.hand.remove(banished)
-                defender.banished.append(banished)
-                self._log(f"    👁  Bone Basher hit — Intimidate! {defender.name} banishes {banished.name}.")
-
         if is_weapon and "Dawnblade" in card.name:
             if attacker.weapon_attack_count >= 1:
                 attacker.dawnblade_counters += 1
