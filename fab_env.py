@@ -57,7 +57,7 @@ class Phase(Enum):
 
 # ──────────────────────────────────────────────────────────────
 # FaBEnv
-def _make_rhinar() -> Player:
+def _make_rhinar(rng: Optional[random.Random] = None) -> Player:
     equip = build_rhinar_equipment()
     return Player(
         name="Rhinar",
@@ -67,10 +67,11 @@ def _make_rhinar() -> Player:
         deck=build_rhinar_deck(),
         equipment_list=equip[1:],
         weapon=equip[0],
+        rng=rng,
     )
 
 
-def _make_dorinthea() -> Player:
+def _make_dorinthea(rng: Optional[random.Random] = None) -> Player:
     equip = build_dorinthea_equipment()
     return Player(
         name="Dorinthea",
@@ -80,6 +81,7 @@ def _make_dorinthea() -> Player:
         deck=build_dorinthea_deck(),
         equipment_list=equip[1:],
         weapon=equip[0],
+        rng=rng,
     )
 
 
@@ -116,6 +118,8 @@ class FaBEnv:
         self._pitched_this_play: List[Card] = []         # cards pitched so far for the current pending card
         self._pending_defend_indices: List[int] = []     # hand indices accumulated during defend step
         self._pending_defend_equip_slots: List[str] = [] # equip slots accumulated during defend step
+        # Isolated RNG — seeded in reset() so game randomness is never shared with external code.
+        self._rng: random.Random = random.Random()
 
         # Observation / action spaces (agent-specific but symmetric structure)
         obs_size = PLAYER_OBS_SIZE
@@ -153,11 +157,10 @@ class FaBEnv:
             obs   — {agent_id: observation_dict}
             infos — {agent_id: {}}
         """
-        if seed is not None:
-            random.seed(seed)
+        self._rng = random.Random(seed)
 
-        p0 = player0 if player0 is not None else _make_rhinar()
-        p1 = player1 if player1 is not None else _make_dorinthea()
+        p0 = player0 if player0 is not None else _make_rhinar(self._rng)
+        p1 = player1 if player1 is not None else _make_dorinthea(self._rng)
         self._game = GameState(p0, p1)
 
         # Opening hands
@@ -487,7 +490,7 @@ class FaBEnv:
             self._log(f"    ↩  Banished cards returned to {opponent.name}'s hand: {names}.")
 
         # Pitch zone to deck bottom
-        random.shuffle(active.pitch_zone)
+        self._rng.shuffle(active.pitch_zone)
         active.deck.extend(active.pitch_zone)
         active.pitch_zone.clear()
         active.resource_points = 0
@@ -544,7 +547,7 @@ class FaBEnv:
 
         # Intimidate fires before defend
         if self._pending_attack.intimidate and len(defender.hand) > 0:
-            banished = random.choice(defender.hand)
+            banished = self._rng.choice(defender.hand)
             defender.hand.remove(banished)
             defender.banished.append(banished)
             self._log(f"    👁  Intimidate! {defender.name} banishes {banished.name}.")
@@ -572,7 +575,7 @@ class FaBEnv:
                 self._log(f"    🎴 {n} — drew {drawn.name}.")
 
             if attacker.hand:
-                discarded = random.choice(attacker.hand)
+                discarded = self._rng.choice(attacker.hand)
                 attacker.hand.remove(discarded)
                 attacker.graveyard.append(discarded)
                 self._log(f"    🎲 {n} — randomly discarded {discarded.name} "
@@ -646,7 +649,7 @@ class FaBEnv:
         if n == "Barraging Beatdown":
             active.next_brute_attack_bonus = 3
             if len(opponent.hand) > 0:
-                banished = random.choice(opponent.hand)
+                banished = self._rng.choice(opponent.hand)
                 opponent.hand.remove(banished)
                 opponent.banished.append(banished)
                 self._log(f"    👁  Barraging Beatdown — Intimidate! {opponent.name} banishes {banished.name}.")
@@ -724,7 +727,7 @@ class FaBEnv:
     def _on_hit(self, card: Card, attacker: Player, defender: Player, is_weapon: bool):
         if is_weapon and "Bone Basher" in card.name:
             if len(defender.hand) > 0:
-                banished = random.choice(defender.hand)
+                banished = self._rng.choice(defender.hand)
                 defender.hand.remove(banished)
                 defender.banished.append(banished)
                 self._log(f"    👁  Bone Basher hit — Intimidate! {defender.name} banishes {banished.name}.")
@@ -764,7 +767,7 @@ class FaBEnv:
             if target:
                 player.deck.remove(target)
                 player.arsenal = target
-                random.shuffle(player.deck)
+                self._rng.shuffle(player.deck)
                 self._log(f"    🎓 Mentor fires! {target.name} placed face-up in arsenal.")
 
     # ──────────────────────────────────────────────────────────

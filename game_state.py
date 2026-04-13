@@ -4,7 +4,7 @@ Both heroes are young heroes — 20 life, intellect 4, Blitz format.
 """
 
 import random
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Union
 from cards import Card, CardType, EquipSlot, Color
 
 
@@ -28,14 +28,17 @@ class Equipment:
 
 class Player:
     def __init__(self, name: str, hero_name: str, life: int, intellect: int,
-                 deck: List[Card], equipment_list: List[Card], weapon: Card):
+                 deck: List[Card], equipment_list: List[Card], weapon: Card,
+                 rng: Optional[random.Random] = None):
         self.name = name
         self.hero_name = hero_name
         self.life = life
         self.intellect = intellect
+        # Use the provided isolated RNG, or fall back to the global random module.
+        self._rng: Union[random.Random, object] = rng if rng is not None else random
 
         self.deck: List[Card] = deck[:]
-        random.shuffle(self.deck)
+        self._rng.shuffle(self.deck)
 
         self.hand: List[Card] = []
         self.graveyard: List[Card] = []
@@ -76,7 +79,7 @@ class Player:
                 if self.graveyard:
                     self.deck = self.graveyard[:]
                     self.graveyard = []
-                    random.shuffle(self.deck)
+                    self._rng.shuffle(self.deck)
                     print(f"  [{self.name}] Deck empty — shuffled graveyard back in.")
                 else:
                     print(f"  [{self.name}] No cards left to draw!")
@@ -126,7 +129,7 @@ class Player:
             eq.reset_turn()
 
     def end_phase(self):
-        random.shuffle(self.pitch_zone)
+        self._rng.shuffle(self.pitch_zone)
         self.deck.extend(self.pitch_zone)
         self.pitch_zone.clear()
         self.action_points = 0
