@@ -160,8 +160,22 @@ class FaBEnv:
         """
         self._rng = random.Random(seed)
 
-        p0 = player0 if player0 is not None else _make_rhinar(self._rng)
-        p1 = player1 if player1 is not None else _make_dorinthea(self._rng)
+        # When pre-built players are provided (e.g. custom decks from the web
+        # viewer), their decks were already shuffled during Player.__init__
+        # using the unseeded global random module.  Re-shuffle them now with
+        # the freshly seeded RNG so the deck order is fully deterministic.
+        if player0 is not None:
+            p0 = player0
+            self._rng.shuffle(p0.deck)
+        else:
+            p0 = _make_rhinar(self._rng)
+
+        if player1 is not None:
+            p1 = player1
+            self._rng.shuffle(p1.deck)
+        else:
+            p1 = _make_dorinthea(self._rng)
+
         self._game = GameState(p0, p1, rng=self._rng)
 
         # Opening hands
