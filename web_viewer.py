@@ -1719,6 +1719,17 @@ PLAY_TEMPLATE = """
       cursor: pointer; font-family: inherit; margin-top: 6px;
     }
     .new-game-btn:hover { background: #3d4a5e; }
+    #quit-bar {
+      display: flex; justify-content: flex-end;
+      padding: 4px 12px 0;
+    }
+    .quit-btn {
+      background: none; border: 1px solid #4a5568;
+      border-radius: 6px; color: #718096;
+      font-size: 0.78rem; font-family: inherit;
+      padding: 3px 10px; cursor: pointer;
+    }
+    .quit-btn:hover { background: #2d3748; color: #e2e8f0; border-color: #718096; }
 
     /* Log colouring (applied by JS) */
     .turn-header   { color: #f6e05e; font-weight: bold; }
@@ -1813,6 +1824,10 @@ PLAY_TEMPLATE = """
         <div class="player-life" id="life-a1">❤️ 20</div>
         <div class="player-meta" id="meta-a1"></div>
       </div>
+    </div>
+
+    <div id="quit-bar">
+      <button class="quit-btn" onclick="quitGame()">✕ Quit &amp; New Game</button>
     </div>
 
     <div id="log-area"></div>
@@ -1969,6 +1984,11 @@ PLAY_TEMPLATE = """
         lastLogTotal = -1;
         poll();
       });
+    }
+
+    function quitGame() {
+      if (!confirm('Quit the current game and start a new one?')) return;
+      newGame();
     }
 
     document.getElementById('start-form').addEventListener('submit', async e => {
