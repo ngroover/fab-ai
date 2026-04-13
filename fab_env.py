@@ -613,7 +613,7 @@ class FaBEnv:
         if not weapon:
             return
 
-        weapon_cost = 1
+        weapon_cost = weapon.cost
         needed = max(0, weapon_cost - attacker.resource_points)
         pitched = []
         if needed > 0:
