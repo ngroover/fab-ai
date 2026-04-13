@@ -528,14 +528,20 @@ class FaBEnv:
         active.action_points = 0
 
         # Draw up
+        hand_size_before = len(active.hand)
         active.draw_to_intellect()
-        self._log(f"\n  🔄  {active.name} draws to {active.intellect}. "
+        drawn = active.hand[hand_size_before:]
+        drawn_str = f": {', '.join(c.name for c in drawn)}" if drawn else " (none)"
+        self._log(f"\n  🔄  {active.name} draws to {active.intellect}{drawn_str}. "
                   f"Hand: {len(active.hand)}, Deck: {len(active.deck)}")
 
         # First turn: defender draws too
         if self._game.is_first_turn:
+            opp_hand_size_before = len(opponent.hand)
             opponent.draw_to_intellect()
-            self._log(f"  🔄  (First turn) {opponent.name} also draws to {opponent.intellect}.")
+            opp_drawn = opponent.hand[opp_hand_size_before:]
+            opp_drawn_str = f": {', '.join(c.name for c in opp_drawn)}" if opp_drawn else " (none)"
+            self._log(f"  🔄  (First turn) {opponent.name} also draws to {opponent.intellect}{opp_drawn_str}.")
 
         # Switch turns
         self._game.is_first_turn = False
