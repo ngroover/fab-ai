@@ -144,7 +144,13 @@ class Player:
 
 
 class GameState:
-    def __init__(self, player1: Player, player2: Player):
+    def __init__(self, player1: Player, player2: Player,
+                 rng: Optional[random.Random] = None):
+        self.rng: random.Random = rng if rng is not None else random.Random()
+        # Both players share the single game rng — overwrite any per-player rng
+        # that was set during construction.
+        for p in (player1, player2):
+            p._rng = self.rng
         self.players = [player1, player2]
         self.turn_number = 1
         self.active_player_idx = 0

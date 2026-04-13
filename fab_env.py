@@ -161,7 +161,7 @@ class FaBEnv:
 
         p0 = player0 if player0 is not None else _make_rhinar(self._rng)
         p1 = player1 if player1 is not None else _make_dorinthea(self._rng)
-        self._game = GameState(p0, p1)
+        self._game = GameState(p0, p1, rng=self._rng)
 
         # Opening hands
         for p in self._game.players:
