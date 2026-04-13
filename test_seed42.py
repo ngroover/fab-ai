@@ -221,14 +221,14 @@ class TestFinalState(unittest.TestCase):
         self.assertGreater(rhinar.life, 0)
 
     def test_game_ends_in_expected_turns(self):
-        self.assertEqual(self.env._game.turn_number, 33)
+        self.assertEqual(self.env._game.turn_number, 35)
 
     def test_banished_at_game_end(self):
-        """Rhinar has no banished cards; Dorinthea may have 1 from a last-turn intimidate."""
+        """Rhinar has no banished cards; Dorinthea may have up to 2 from intimidate effects."""
         rhinar = self.env._game.players[0]
         dorinthea = self.env._game.players[1]
         self.assertEqual(len(rhinar.banished), 0)
-        self.assertLessEqual(len(dorinthea.banished), 1)
+        self.assertLessEqual(len(dorinthea.banished), 2)
 
 
 class TestResourceAccounting(unittest.TestCase):

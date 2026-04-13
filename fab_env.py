@@ -116,6 +116,7 @@ class FaBEnv:
         self.done: bool = False
         self._pending_play_card: Optional[Card] = None  # card chosen in PLAY_CARD step, awaiting pitch
         self._pitched_this_play: List[Card] = []         # cards pitched so far for the current pending card
+        self._pending_weapon_attack: bool = False        # True when PITCH phase is for a weapon attack
         self._pending_defend_indices: List[int] = []     # hand indices accumulated during defend step
         self._pending_defend_equip_slots: List[str] = [] # equip slots accumulated during defend step
         # Isolated RNG — seeded in reset() so game randomness is never shared with external code.
@@ -254,6 +255,18 @@ class FaBEnv:
             return
 
         if action.action_type == ActionType.WEAPON:
+            weapon = active.weapon
+            if weapon:
+                needed = max(0, weapon.cost - active.resource_points)
+                if needed > 0:
+                    # Transition to PITCH phase so agent picks which cards to pitch
+                    self._pending_play_card = weapon
+                    self._pitched_this_play = []
+                    self._pending_weapon_attack = True
+                    self._phase = Phase.PITCH
+                    self._log(f"\n  ▶  {active.name} chooses to attack with {weapon.name} "
+                              f"(needs {needed} more resource{'s' if needed != 1 else ''})")
+                    return
             self._resolve_weapon_attack(active, opponent)
             return
 
@@ -317,11 +330,15 @@ class FaBEnv:
         # Cost is covered (or no pitchable cards remain) — resolve the card
         self._pending_play_card = None
         self._phase = Phase.ATTACK
-
-        active.resource_points -= card.cost
         pitched = self._pitched_this_play[:]
         self._pitched_this_play = []
 
+        if self._pending_weapon_attack:
+            self._pending_weapon_attack = False
+            self._resolve_weapon_attack(active, opponent, pitched)
+            return
+
+        active.resource_points -= card.cost
         self._log(f"\n  ▶  {active.name} plays {card}"
                   + (f" (pitched: {', '.join(c.name for c in pitched)})"
                      if pitched else ""))
@@ -607,24 +624,34 @@ class FaBEnv:
             self._log(f"\n  ▶  {active.name} activates {name}.")
             self._log(f"    🌸 Blossom of Spring — gain 1 resource. Blossom of Spring is destroyed.")
 
-    def _resolve_weapon_attack(self, attacker: Player, opponent: Player):
-        """Initiate a weapon attack → triggers defend phase."""
+    def _resolve_weapon_attack(self, attacker: Player, opponent: Player,
+                               pre_pitched: Optional[List[Card]] = None):
+        """Initiate a weapon attack → triggers defend phase.
+
+        pre_pitched: cards already pitched during the PITCH phase; when provided
+        the auto-pitch logic is skipped since resources are already covered.
+        """
         weapon = attacker.weapon
         if not weapon:
             return
 
         weapon_cost = weapon.cost
-        needed = max(0, weapon_cost - attacker.resource_points)
-        pitched = []
-        if needed > 0:
-            pitchable = [c for c in attacker.hand if c.pitch > 0]
-            total = 0
-            for c in sorted(pitchable, key=lambda x: x.pitch, reverse=True):
-                if total >= needed:
-                    break
-                pitched.append(c)
-                attacker.pitch(c)
-                total += c.pitch
+        if pre_pitched is not None:
+            # Pitching was handled interactively in the PITCH phase
+            pitched = pre_pitched
+        else:
+            # No PITCH phase was used — auto-pitch to cover the cost (free or already covered)
+            needed = max(0, weapon_cost - attacker.resource_points)
+            pitched = []
+            if needed > 0:
+                pitchable = [c for c in attacker.hand if c.pitch > 0]
+                total = 0
+                for c in sorted(pitchable, key=lambda x: x.pitch, reverse=True):
+                    if total >= needed:
+                        break
+                    pitched.append(c)
+                    attacker.pitch(c)
+                    total += c.pitch
         attacker.resource_points -= weapon_cost
 
         pitch_str = f" (pitched: {', '.join(c.name for c in pitched)})" if pitched else ""
