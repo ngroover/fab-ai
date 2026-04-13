@@ -579,15 +579,24 @@ class FaBEnv:
             power = self._pending_attack.power + attacker.next_brute_attack_bonus
 
         # "When this attacks" effects fire here, before the defend step
+        extra_intimidate = 0
         if not self._pending_is_weapon:
-            power = self._on_attack(self._pending_attack, attacker, defender, power)
+            power, extra_intimidate = self._on_attack(self._pending_attack, attacker, defender, power)
 
-        # Intimidate fires before defend
-        if self._pending_attack.intimidate and len(defender.hand) > 0:
-            banished = self._rng.choice(defender.hand)
-            defender.hand.remove(banished)
-            defender.banished.append(banished)
-            self._log(f"    👁  Intimidate! {defender.name} banishes {banished.name}.")
+        # Count intimidate triggers: permanent keyword + conditional card effect + Rhinar hero ability
+        intimidate_count = (1 if self._pending_attack.intimidate else 0) + extra_intimidate
+        if not self._pending_is_weapon and "Rhinar" in attacker.hero_name:
+            if self._pending_attack.power >= 6:
+                intimidate_count += 1
+                self._log(f"    👁  Rhinar hero ability — {attacker.name} plays 6+ power, intimidate!")
+
+        # Apply each intimidate trigger before defend
+        for _ in range(intimidate_count):
+            if len(defender.hand) > 0:
+                banished = self._rng.choice(defender.hand)
+                defender.hand.remove(banished)
+                defender.banished.append(banished)
+                self._log(f"    👁  Intimidate! {defender.name} banishes {banished.name}.")
 
         self._pending_attack_power = power
         self._pending_defend_indices = []
@@ -597,12 +606,13 @@ class FaBEnv:
         self.agent_selection = f"agent_{defender_idx}"
         self._log(f"\n    ⚔  {attacker.name} attacks with {self._pending_attack.name} — {power} power")
 
-    def _on_attack(self, card, attacker: Player, defender: Player, power: int) -> int:
+    def _on_attack(self, card, attacker: Player, defender: Player, power: int) -> Tuple[int, int]:
         """
-        Resolve 'when this attacks' effects. Returns (possibly modified) power.
+        Resolve 'when this attacks' effects. Returns (possibly modified power, extra intimidate count).
         These fire at the attack step, before the defender chooses blocks.
         """
         n = card.name
+        extra_intimidate = 0
 
         # Wild Ride, Bare Fangs, Wrecking Ball — draw a card then discard a random card.
         if n in ("Wild Ride", "Bare Fangs", "Wrecking Ball"):
@@ -627,10 +637,10 @@ class FaBEnv:
                     self._pending_attack_power = power
                     self._log(f"    ⚡ Bare Fangs — discarded 6+ power card, +2 power! ({power} total)")
                 elif n == "Wrecking Ball" and strong:
-                    card.intimidate = True
-                    self._log(f"    👁  Wrecking Ball — discarded 6+ power card, gains intimidate!")
+                    extra_intimidate = 1
+                    self._log(f"    👁  Wrecking Ball — discarded 6+ power card, intimidate!")
 
-        return power
+        return power, extra_intimidate
 
     def _resolve_equipment_activation(self, slot: str, active: Player):
         """Resolve an equipment activate ability (no action point cost, then destroy)."""

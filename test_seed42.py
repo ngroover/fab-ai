@@ -195,12 +195,10 @@ class TestTurn4(unittest.TestCase):
 
 class TestFinalState(unittest.TestCase):
     """
-    Final state — Rhinar wins in turn 33.
-    Dorinthea at -1 life, Rhinar at 7 life, Dawnblade 0 counters.
-    (Turn count extended because blocking is one card at a time,
-    allowing more effective multi-card blocking over multiple defend steps.
-    Pitching is also one card at a time, which preserves the same card choices
-    since agents greedily pick the highest-pitch card first.)
+    Final state — Rhinar wins in turn 9.
+    Dorinthea at -3 life, Rhinar at 6 life.
+    Rhinar's hero ability (6+ power card → intimidate) strips Dorinthea's
+    blocking options, accelerating the game end significantly.
     """
 
     def setUp(self):
@@ -221,14 +219,14 @@ class TestFinalState(unittest.TestCase):
         self.assertGreater(rhinar.life, 0)
 
     def test_game_ends_in_expected_turns(self):
-        self.assertEqual(self.env._game.turn_number, 35)
+        self.assertEqual(self.env._game.turn_number, 9)
 
     def test_banished_at_game_end(self):
-        """Rhinar has no banished cards; Dorinthea may have up to 2 from intimidate effects."""
+        """Rhinar has no banished cards; Dorinthea has 3 banished from intimidate triggers."""
         rhinar = self.env._game.players[0]
         dorinthea = self.env._game.players[1]
         self.assertEqual(len(rhinar.banished), 0)
-        self.assertLessEqual(len(dorinthea.banished), 2)
+        self.assertEqual(len(dorinthea.banished), 3)
 
 
 class TestResourceAccounting(unittest.TestCase):
