@@ -27,17 +27,27 @@ class Equipment:
 
 
 class Player:
-    def __init__(self, name: str, hero_name: str, life: int, intellect: int,
+    def __init__(self, name: str, life: int, intellect: int,
                  deck: List[Card], equipment_list: List[Card], weapon: Card,
-                 rng: Optional[random.Random] = None):
+                 hero_name: str = "", rng: Optional[random.Random] = None):
         self.name = name
-        self.hero_name = hero_name
         self.life = life
         self.intellect = intellect
         # Use the provided isolated RNG, or fall back to the global random module.
         self._rng: Union[random.Random, object] = rng if rng is not None else random
 
-        self.deck: List[Card] = deck[:]
+        # Pull the hero card out of the deck before shuffling.
+        self.hero_card: Optional[Card] = None
+        play_deck: List[Card] = []
+        for c in deck:
+            if c.card_type == CardType.HERO:
+                self.hero_card = c
+            else:
+                play_deck.append(c)
+
+        self.hero_name = hero_name or (self.hero_card.name if self.hero_card else name)
+
+        self.deck: List[Card] = play_deck
         self._rng.shuffle(self.deck)
 
         self.hand: List[Card] = []

@@ -105,6 +105,10 @@ class Card:
 def build_rhinar_deck() -> List[Card]:
     cards = []
 
+    # ── Hero card (extracted before shuffling) ──
+    cards.append(Card("Rhinar (Young Brute)", CardType.HERO, card_class=CardClass.BRUTE,
+                       text="Young Hero. Life 20, Intellect 4."))
+
     # ── RED (Pitch 1) — 13 cards ──
 
     # Alpha Rampage: cost 3, power 9, def 3, intimidate, Rhinar spec
@@ -294,6 +298,10 @@ def build_rhinar_equipment():
 
 def build_dorinthea_deck() -> List[Card]:
     cards = []
+
+    # ── Hero card (extracted before shuffling) ──
+    cards.append(Card("Dorinthea, Quicksilver Prodigy", CardType.HERO, card_class=CardClass.WARRIOR,
+                       text="Young Hero. Life 20, Intellect 4. Whenever Dawnblade hits a hero, put a +1 power counter on Dawnblade."))
 
     # ── RED (Pitch 1) — 16 cards ──
 

@@ -62,7 +62,6 @@ def _make_rhinar(rng: Optional[random.Random] = None) -> Player:
     equip = build_rhinar_equipment()
     return Player(
         name="Rhinar",
-        hero_name="Rhinar (Young Brute)",
         life=20,
         intellect=4,
         deck=build_rhinar_deck(),
@@ -76,7 +75,6 @@ def _make_dorinthea(rng: Optional[random.Random] = None) -> Player:
     equip = build_dorinthea_equipment()
     return Player(
         name="Dorinthea",
-        hero_name="Dorinthea, Quicksilver Prodigy",
         life=20,
         intellect=4,
         deck=build_dorinthea_deck(),
