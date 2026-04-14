@@ -209,6 +209,9 @@ class RhinarAgent:
                      pending_card=None) -> Action:
         return legal[0]
 
+    def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
+        return legal[0]
+
 
 # ──────────────────────────────────────────────────────────────
 # Dorinthea agent
@@ -364,6 +367,9 @@ class DorintheiAgent:
 
     def select_pitch(self, obs: dict, legal: List[Action], player: 'Player',
                      pending_card=None) -> Action:
+        return legal[0]
+
+    def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
         return legal[0]
 
 
@@ -539,3 +545,8 @@ class HumanAgent:
         print(f"  Current resources: {player.resource_points}")
         self._show_hand(player)
         return self._choose(legal, player, "Choose cards to pitch:")
+
+    def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
+        print(f"\n{'═' * 60}")
+        print(f"  CHOOSE FIRST — you won the coin flip!")
+        return self._choose(legal, player, "Go first or second?")

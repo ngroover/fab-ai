@@ -1360,6 +1360,10 @@ class _WebHumanAgent:
                 return "DON'T STORE — skip arsenal"
             card = player.hand[action.arsenal_hand_index]
             return f"STORE — {self._fmt_card(card)}"
+        if action.action_type == ActionType.GO_FIRST:
+            return "GO FIRST — you take the first turn"
+        if action.action_type == ActionType.GO_SECOND:
+            return "GO SECOND — opponent takes the first turn"
         return str(action)
 
     def _pend(self, legal, player, phase, attack_power=0):
@@ -1379,6 +1383,9 @@ class _WebHumanAgent:
 
     def select_pitch(self, obs, legal, player, pending_card=None):
         return self._pend(legal, player, "PITCH")
+
+    def select_choose_first(self, legal, player):
+        return self._pend(legal, player, "CHOOSE_FIRST")
 
 
 class _GameSession:
@@ -1559,7 +1566,9 @@ class _GameSession:
                 self.current_agent = agent_id
                 self.phase = env._phase.name
 
-            if env._phase == Phase.ATTACK:
+            if env._phase == Phase.CHOOSE_FIRST:
+                action = agent.select_choose_first(legal, player)
+            elif env._phase == Phase.ATTACK:
                 action = agent.select_action(obs[agent_id], legal, player, opponent)
             elif env._phase == Phase.DEFEND:
                 action = agent.select_defend(obs[agent_id], legal, player,
