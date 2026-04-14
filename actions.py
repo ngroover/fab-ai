@@ -40,6 +40,7 @@ class ActionType(Enum):
     ACTIVATE_EQUIPMENT = auto()   # activate an equipment's once-per-turn ability
     GO_FIRST           = auto()   # CHOOSE_FIRST phase: choosing player elects to go first
     GO_SECOND          = auto()   # CHOOSE_FIRST phase: choosing player elects to go second
+    PASS_PRIORITY      = auto()   # INSTANT phase: player passes priority without playing
 
 
 @dataclass
@@ -83,6 +84,8 @@ class Action:
             return "Action(GO_FIRST)"
         if self.action_type == ActionType.GO_SECOND:
             return "Action(GO_SECOND)"
+        if self.action_type == ActionType.PASS_PRIORITY:
+            return "Action(PASS_PRIORITY)"
         return f"Action({self.action_type})"
 
 
@@ -278,3 +281,36 @@ def legal_arsenal_actions(player: 'Player') -> List[Action]:
 def legal_choose_first_actions() -> List[Action]:
     """CHOOSE_FIRST phase: the randomly selected player picks whether to go first or second."""
     return [Action(ActionType.GO_FIRST), Action(ActionType.GO_SECOND)]
+
+
+def legal_instant_actions(player: 'Player') -> List[Action]:
+    """
+    Legal actions during an INSTANT window. Either player may play an instant
+    from hand (paying its cost), or pass priority. When both players pass
+    consecutively, the top of the instant stack resolves; when the stack is
+    empty and both pass, play returns to the phase that opened the window.
+
+    PASS_PRIORITY is always listed first so agents that default to ``legal[0]``
+    gracefully close the window.
+    """
+    from cards import CardType
+
+    actions: List[Action] = [Action(ActionType.PASS_PRIORITY)]
+
+    seen: set = set()
+    for card in player.hand:
+        if card.card_type != CardType.INSTANT:
+            continue
+        if card.name in seen:
+            continue
+        seen.add(card.name)
+        needed = max(0, card.cost - player.resource_points)
+        if needed == 0:
+            actions.append(Action(ActionType.PLAY_CARD, card=card))
+            continue
+        # Does the rest of hand have enough pitch to cover the cost?
+        pitchable_total = sum(c.pitch for c in player.hand
+                              if c is not card and c.pitch > 0)
+        if pitchable_total >= needed:
+            actions.append(Action(ActionType.PLAY_CARD, card=card))
+    return actions

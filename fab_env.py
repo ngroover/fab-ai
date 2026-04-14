@@ -38,6 +38,7 @@ from actions import (
     Action, ActionType,
     legal_attack_actions, legal_pitch_actions,
     legal_defend_actions, legal_arsenal_actions, legal_choose_first_actions,
+    legal_instant_actions,
 )
 from observations import build_observation, PLAYER_OBS_SIZE, CARD_FEATURES
 from spaces import Discrete, Box, Dict as DictSpace
@@ -53,6 +54,7 @@ class Phase(Enum):
     ATTACK       = auto()
     PITCH        = auto()   # second step of playing a card: choose which cards to pitch
     DEFEND       = auto()
+    INSTANT      = auto()   # either player may play instants onto a stack; LIFO resolution
     ARSENAL      = auto()
     END          = auto()
 
@@ -117,9 +119,17 @@ class FaBEnv:
         self._pending_play_card: Optional[Card] = None  # card chosen in PLAY_CARD step, awaiting pitch
         self._pitched_this_play: List[Card] = []         # cards pitched so far for the current pending card
         self._pending_weapon_attack: bool = False        # True when PITCH phase is for a weapon attack
+        self._pending_instant_play: bool = False         # True when PITCH phase is for an instant played during the INSTANT window
+        self._pending_instant_player_idx: int = 0        # which player is paying for / owns the pending instant
         self._pending_defend_indices: List[int] = []     # hand indices accumulated during defend step
         self._pending_defend_equip_slots: List[str] = [] # equip slots accumulated during defend step
         self._choosing_player_idx: int = 0               # player who won the coin flip in CHOOSE_FIRST
+        # Instant stack & priority bookkeeping — only meaningful in Phase.INSTANT
+        self._instant_stack: List[Tuple[int, Card]] = []  # LIFO of (owner_idx, card)
+        self._instant_priority_idx: int = 0
+        self._instant_passes: int = 0                     # consecutive passes since last stack change
+        self._instant_return_phase: Optional[Phase] = None
+        self._instant_return_agent_idx: int = 0
         # Isolated RNG — seeded in reset() so game randomness is never shared with external code.
         self._rng: random.Random = random.Random()
 
@@ -175,6 +185,15 @@ class FaBEnv:
         self._truncations = {"agent_0": False, "agent_1": False}
         self.done = False
 
+        # Reset instant-window bookkeeping
+        self._instant_stack = []
+        self._instant_priority_idx = 0
+        self._instant_passes = 0
+        self._instant_return_phase = None
+        self._instant_return_agent_idx = 0
+        self._pending_instant_play = False
+        self._pending_instant_player_idx = 0
+
         # Randomly select which player gets to choose who goes first
         self._choosing_player_idx = self._rng.randint(0, 1)
         self._phase = Phase.CHOOSE_FIRST
@@ -217,6 +236,8 @@ class FaBEnv:
             self._handle_pitch_action(action, active, opponent)
         elif self._phase == Phase.DEFEND:
             self._handle_defend_action(action, active, opponent)
+        elif self._phase == Phase.INSTANT:
+            self._handle_instant_action(action, active, opponent)
         elif self._phase == Phase.ARSENAL:
             self._handle_arsenal_action(action, active, opponent)
 
@@ -250,6 +271,8 @@ class FaBEnv:
             return legal_defend_actions(active, self._pending_attack_power,
                                         self._pending_defend_indices,
                                         self._pending_defend_equip_slots)
+        elif self._phase == Phase.INSTANT:
+            return legal_instant_actions(active)
         elif self._phase == Phase.ARSENAL:
             return legal_arsenal_actions(active)
         return []
@@ -351,9 +374,23 @@ class FaBEnv:
 
         # Cost is covered (or no pitchable cards remain) — resolve the card
         self._pending_play_card = None
-        self._phase = Phase.ATTACK
         pitched = self._pitched_this_play[:]
         self._pitched_this_play = []
+
+        if self._pending_instant_play:
+            # Instant played during an INSTANT window — pay cost and push to stack,
+            # then return to INSTANT phase with priority handed to the opponent.
+            self._pending_instant_play = False
+            owner_idx = self._pending_instant_player_idx
+            active.resource_points -= card.cost
+            self._log(f"\n    ▶  {active.name} plays {card}"
+                      + (f" (pitched: {', '.join(c.name for c in pitched)})"
+                         if pitched else ""))
+            self._phase = Phase.INSTANT
+            self._push_instant_to_stack(card, owner_idx)
+            return
+
+        self._phase = Phase.ATTACK
 
         if self._pending_weapon_attack:
             self._pending_weapon_attack = False
@@ -504,9 +541,11 @@ class FaBEnv:
         self._pending_attack = None
         self._pending_is_weapon = False
 
-        # Return to attacker's action phase
-        self._phase = Phase.ATTACK
-        self.agent_selection = f"agent_{self._game.active_player_idx}"
+        # Open an instant window before returning control to the attacker.
+        self._enter_instant_phase(
+            return_phase=Phase.ATTACK,
+            return_agent_idx=self._game.active_player_idx,
+        )
 
     def _handle_arsenal_action(self, action: Action, active: Player, opponent: Player):
         """Store a card (or nothing) in arsenal, then complete end phase."""
@@ -557,6 +596,139 @@ class FaBEnv:
         self._begin_turn()
 
     # ──────────────────────────────────────────────────────────
+    # Internal: instant-window handling
+    # ──────────────────────────────────────────────────────────
+
+    def _enter_instant_phase(self, return_phase: "Phase", return_agent_idx: int) -> None:
+        """Open an instant window. Either player may play instants onto a LIFO
+        stack, paying pitch costs as usual. When both players pass priority in
+        succession with cards on the stack, the top resolves; when both pass
+        with an empty stack, play returns to *return_phase* with
+        *return_agent_idx* receiving control.
+
+        The active turn player receives priority first.
+        """
+        self._instant_return_phase = return_phase
+        self._instant_return_agent_idx = return_agent_idx
+        self._instant_passes = 0
+        self._instant_priority_idx = self._game.active_player_idx
+        self._phase = Phase.INSTANT
+        self.agent_selection = f"agent_{self._instant_priority_idx}"
+        priority_name = self._game.players[self._instant_priority_idx].name
+        self._log(f"    ⏸  Instant window opens (priority: {priority_name}).")
+
+    def _exit_instant_phase(self) -> None:
+        """Close the instant window and return to the phase that opened it."""
+        return_phase = self._instant_return_phase
+        return_agent_idx = self._instant_return_agent_idx
+        self._instant_return_phase = None
+        self._instant_passes = 0
+        self._phase = return_phase if return_phase is not None else Phase.ATTACK
+        self.agent_selection = f"agent_{return_agent_idx}"
+        self._log(f"    ▶  Instant window closes.")
+
+    def _push_instant_to_stack(self, card: "Card", owner_idx: int) -> None:
+        """Place *card* onto the instant stack owned by *owner_idx*, then pass
+        priority to the opponent so they may respond."""
+        self._instant_stack.append((owner_idx, card))
+        owner_name = self._game.players[owner_idx].name
+        self._log(f"    📌  {owner_name} puts {card.name} on the stack "
+                  f"(stack size: {len(self._instant_stack)}).")
+        self._instant_passes = 0
+        self._instant_priority_idx = 1 - owner_idx
+        self.agent_selection = f"agent_{self._instant_priority_idx}"
+
+    def _resolve_instant_from_stack(self, card: "Card", owner: "Player",
+                                    opponent: "Player") -> None:
+        """Resolve an instant that was previously placed on the stack.
+        Unlike ``_resolve_instant``, this does not grant the owner an action
+        point — the card is resolving outside their action phase."""
+        n = card.name
+        if n == "Sigil of Solace":
+            owner.gain_life(3)
+            self._log(f"    💚 Sigil of Solace resolves — {owner.name} gains 3 life "
+                      f"({owner.life}).")
+        elif n == "Titanium Bauble":
+            owner.resource_points += 1
+            self._log(f"    💰 Titanium Bauble resolves — {owner.name} gains 1 resource.")
+        elif n == "Sharpen Steel":
+            owner.next_weapon_power_bonus += 1
+            self._log(f"    ⚡ Sharpen Steel resolves — next weapon attack gains +1 power.")
+        elif n == "Flock of the Feather Walkers":
+            self._log(f"    🦅 Flock of the Feather Walkers resolves.")
+        else:
+            self._log(f"    ✨ {n} resolves.")
+        owner.graveyard.append(card)
+
+    def _resolve_top_of_stack(self) -> None:
+        """Pop and resolve the topmost instant on the stack (LIFO)."""
+        owner_idx, card = self._instant_stack.pop()
+        owner = self._game.players[owner_idx]
+        opp = self._game.players[1 - owner_idx]
+        self._resolve_instant_from_stack(card, owner, opp)
+
+    def _handle_instant_action(self, action: Action, active: Player,
+                                opponent: Player) -> None:
+        """Priority-holder action inside an instant window."""
+        if action.action_type == ActionType.PASS_PRIORITY:
+            self._instant_passes += 1
+            if self._instant_passes >= 2:
+                if self._instant_stack:
+                    # Both players passed with cards on the stack — resolve top.
+                    self._resolve_top_of_stack()
+                    self._instant_passes = 0
+                    self._instant_priority_idx = self._game.active_player_idx
+                    self.agent_selection = f"agent_{self._instant_priority_idx}"
+                else:
+                    # Both passed with empty stack — close the window.
+                    self._exit_instant_phase()
+            else:
+                # Hand priority to the other player.
+                self._instant_priority_idx = 1 - self._instant_priority_idx
+                self.agent_selection = f"agent_{self._instant_priority_idx}"
+            return
+
+        if action.action_type == ActionType.PLAY_CARD:
+            card = action.card
+            if card is None or card not in active.hand:
+                # Invalid selection — treat as a pass.
+                self._log(f"  ⚠  Invalid instant selection; passing priority.")
+                self._instant_passes += 1
+                self._instant_priority_idx = 1 - self._instant_priority_idx
+                self.agent_selection = f"agent_{self._instant_priority_idx}"
+                return
+            if card.card_type != CardType.INSTANT:
+                self._log(f"  ⚠  {card.name} is not an instant; passing priority.")
+                self._instant_passes += 1
+                self._instant_priority_idx = 1 - self._instant_priority_idx
+                self.agent_selection = f"agent_{self._instant_priority_idx}"
+                return
+
+            active.hand.remove(card)
+            needed = max(0, card.cost - active.resource_points)
+            if needed > 0:
+                # Transition to PITCH to cover the instant's cost.
+                self._pending_play_card = card
+                self._pitched_this_play = []
+                self._pending_instant_play = True
+                self._pending_instant_player_idx = self._instant_priority_idx
+                self._phase = Phase.PITCH
+                self._log(f"\n    ▶  {active.name} plays {card} "
+                          f"(needs {needed} more resource{'s' if needed != 1 else ''})")
+                return
+
+            # Free / already paid — push directly to the stack.
+            active.resource_points -= card.cost
+            self._log(f"\n    ▶  {active.name} plays {card}")
+            self._push_instant_to_stack(card, self._instant_priority_idx)
+            return
+
+        # Unknown action in instant phase — treat as a pass to keep the game moving.
+        self._instant_passes += 1
+        self._instant_priority_idx = 1 - self._instant_priority_idx
+        self.agent_selection = f"agent_{self._instant_priority_idx}"
+
+    # ──────────────────────────────────────────────────────────
     # Internal: turn management
     # ──────────────────────────────────────────────────────────
 
@@ -575,9 +747,12 @@ class FaBEnv:
         self.agent_selection = f"agent_{self._game.active_player_idx}"
 
     def _end_attack_phase(self, active: Player, opponent: Player):
-        """Active player has passed — move to arsenal phase."""
-        self._phase = Phase.ARSENAL
-        # agent_selection stays as the active player for the arsenal decision
+        """Active player has passed — open an end-of-turn instant window, then arsenal."""
+        self._enter_instant_phase(
+            return_phase=Phase.ARSENAL,
+            return_agent_idx=self._game.active_player_idx,
+        )
+        # agent_selection is set by _enter_instant_phase to the priority holder.
 
     def _trigger_defend_phase(self, attacker: Player, defender: Player):
         """Set up the defend phase so the defender can choose blocks."""
