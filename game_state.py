@@ -6,6 +6,7 @@ Both heroes are young heroes — 20 life, intellect 4, Blitz format.
 import random
 from typing import List, Optional, Dict, Union
 from cards import Card, CardType, EquipSlot, Color
+from card_effects import CardEffect
 
 
 class Equipment:
@@ -46,6 +47,9 @@ class Player:
                 play_deck.append(c)
 
         self.hero_name = hero_name or (self.hero_card.name if self.hero_card else name)
+
+        # Collect triggered effects from the hero card so they are active for the whole game.
+        self.active_effects: List[CardEffect] = list(self.hero_card.effects) if self.hero_card else []
 
         self.deck: List[Card] = play_deck
         self._rng.shuffle(self.deck)

@@ -32,6 +32,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from cards import (Card, CardType, Color,
                    build_rhinar_deck, build_rhinar_equipment,
                    build_dorinthea_deck, build_dorinthea_equipment)
+from card_effects import EffectTrigger, EffectAction
 from game_state import Player, GameState, Equipment
 from actions import (
     Action, ActionType,
@@ -590,12 +591,8 @@ class FaBEnv:
         if not self._pending_is_weapon:
             power, extra_intimidate = self._on_attack(self._pending_attack, attacker, defender, power)
 
-        # Count intimidate triggers: permanent keyword + conditional card effect + Rhinar hero ability
+        # Count intimidate triggers: permanent keyword + conditional card effect
         intimidate_count = (1 if self._pending_attack.intimidate else 0) + extra_intimidate
-        if not self._pending_is_weapon and "Rhinar" in attacker.hero_name:
-            if self._pending_attack.power >= 6:
-                intimidate_count += 1
-                self._log(f"    👁  Rhinar hero ability — {attacker.name} plays 6+ power, intimidate!")
 
         # Apply each intimidate trigger before defend
         for _ in range(intimidate_count):
@@ -635,6 +632,8 @@ class FaBEnv:
                 self._log(f"    🎲 {n} — randomly discarded {discarded.name} "
                           f"(power: {discarded.power}).")
 
+                self._fire_effects(EffectTrigger.ON_DISCARD, {"card": discarded}, attacker, defender)
+
                 strong = discarded.power >= 6
                 if n == "Wild Ride" and strong:
                     card.go_again = True
@@ -648,6 +647,26 @@ class FaBEnv:
                     self._log(f"    👁  Wrecking Ball — discarded 6+ power card, intimidate!")
 
         return power, extra_intimidate
+
+    def _fire_effects(self, trigger: EffectTrigger, context: Dict[str, Any],
+                      player: Player, opponent: Player) -> None:
+        """Fire all active effects on *player* that match *trigger* and *context*.
+
+        The environment calls this at every relevant game event (e.g. a discard).
+        Effect resolution is fully generic — no card names are checked here.
+        """
+        for effect in player.active_effects:
+            if not effect.matches(trigger, context):
+                continue
+            if effect.action == EffectAction.INTIMIDATE:
+                if opponent.hand:
+                    banished = self._rng.choice(opponent.hand)
+                    opponent.hand.remove(banished)
+                    opponent.banished.append(banished)
+                    self._log(
+                        f"    👁  {player.name} hero ability fires ({trigger.name}) — "
+                        f"intimidate! {opponent.name} banishes {banished.name}."
+                    )
 
     def _resolve_equipment_activation(self, slot: str, active: Player):
         """Resolve an equipment activate ability (no action point cost, then destroy)."""

@@ -7,9 +7,11 @@ Dorinthea deck: 40-card Blitz, young hero Dorinthea, Quicksilver Prodigy (20 lif
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Optional, List
 from enum import Enum
+
+from card_effects import CardEffect, EffectTrigger, EffectAction
 
 
 class CardType(Enum):
@@ -60,6 +62,7 @@ class Card:
     no_block: bool = False
     equip_slot: Optional[EquipSlot] = None
     card_class: CardClass = CardClass.GENERIC
+    effects: List[CardEffect] = field(default_factory=list)
 
     @property
     def card_id(self) -> str:
@@ -107,7 +110,14 @@ def build_rhinar_deck() -> List[Card]:
 
     # ── Hero card (extracted before shuffling) ──
     cards.append(Card("Rhinar (Young Brute)", CardType.HERO, card_class=CardClass.BRUTE,
-                       text="Young Hero. Life 20, Intellect 4. Whenever you discard a card with 6 or more power during your action phase, intimidate."))
+                       text="Young Hero. Life 20, Intellect 4. Whenever you discard a card with 6 or more power during your action phase, intimidate.",
+                       effects=[
+                           CardEffect(
+                               trigger=EffectTrigger.ON_DISCARD,
+                               action=EffectAction.INTIMIDATE,
+                               condition=lambda ctx: ctx.get("card") is not None and ctx["card"].power >= 6,
+                           )
+                       ]))
 
     # ── RED (Pitch 1) — 13 cards ──
 
