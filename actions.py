@@ -145,9 +145,13 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
             actions.append(Action(ActionType.PLAY_CARD, card=player.arsenal, from_arsenal=True))
 
     # ── Hand cards ──
+    seen_play_names: set = set()
     for i, card in enumerate(player.hand):
         if card.card_type in (CardType.DEFENSE_REACTION, CardType.ATTACK_REACTION):
             continue  # reactions are played in the reaction step, not freely
+        if card.name in seen_play_names:
+            continue  # duplicate card — same choice regardless of which copy is picked
+        seen_play_names.add(card.name)
         needed = max(0, card.cost - player.resource_points)
         if needed == 0:
             actions.append(Action(ActionType.PLAY_CARD, card=card))
@@ -204,7 +208,13 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
         ((i, c) for i, c in enumerate(player.hand) if c.pitch > 0),
         key=lambda x: (-x[1].pitch, x[0]),  # highest pitch first, then by index
     )
-    actions = [Action(ActionType.PITCH, pitch_indices=[i]) for i, _ in pitchable]
+    seen_pitch_names: set = set()
+    actions = []
+    for i, c in pitchable:
+        if c.name in seen_pitch_names:
+            continue  # duplicate card — same pitch value regardless of which copy is picked
+        seen_pitch_names.add(c.name)
+        actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
     return actions if actions else [Action(ActionType.PITCH, pitch_indices=[])]
 
 
@@ -237,8 +247,12 @@ def legal_defend_actions(player: 'Player', attack_power: int,
     equip_slots = [slot for slot, eq in player.equipment.items()
                    if eq.active and eq.defense > 0 and slot not in already_equip]
 
-    # One card at a time
+    # One card at a time — deduplicate identical cards (same choice regardless of copy)
+    seen_defend_names: set = set()
     for i, c in defenders:
+        if c.name in seen_defend_names:
+            continue
+        seen_defend_names.add(c.name)
         actions.append(Action(ActionType.DEFEND, defend_hand_indices=[i]))
 
     # One equipment slot at a time
@@ -252,7 +266,11 @@ def legal_arsenal_actions(player: 'Player') -> List[Action]:
     """End-of-turn: store a card or store nothing."""
     actions = [Action(ActionType.ARSENAL, arsenal_hand_index=-1)]  # don't store
     if not player.arsenal:
-        for i in range(len(player.hand)):
+        seen_arsenal_names: set = set()
+        for i, card in enumerate(player.hand):
+            if card.name in seen_arsenal_names:
+                continue  # duplicate card — same choice regardless of which copy is stored
+            seen_arsenal_names.add(card.name)
             actions.append(Action(ActionType.ARSENAL, arsenal_hand_index=i))
     return actions
 
