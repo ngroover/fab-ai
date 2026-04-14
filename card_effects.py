@@ -34,7 +34,10 @@ class EffectTrigger(Enum):
 
 class EffectAction(Enum):
     """Actions executed when a matching effect fires."""
-    INTIMIDATE = auto()   # opponent banishes a random card from hand until end of turn
+    INTIMIDATE             = auto()   # opponent banishes a random card from hand until end of turn
+    DRAW_DISCARD_GO_AGAIN  = auto()   # draw a card, discard random; if 6+ power discarded → go again
+    DRAW_DISCARD_POWER_BONUS = auto() # draw a card, discard random; if 6+ power discarded → +2 power
+    DRAW_DISCARD_INTIMIDATE  = auto() # draw a card, discard random; if 6+ power discarded → intimidate
 
 
 @dataclass

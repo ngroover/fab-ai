@@ -586,66 +586,19 @@ class FaBEnv:
         else:
             power = self._pending_attack.power + attacker.next_brute_attack_bonus
 
-        # "When this attacks" effects fire here, before the defend step
-        extra_intimidate = 0
-        if not self._pending_is_weapon:
-            power, extra_intimidate = self._on_attack(self._pending_attack, attacker, defender, power)
-            # Fire ON_ATTACK card effects (e.g. permanent intimidate keyword)
-            self._apply_card_effects(self._pending_attack, EffectTrigger.ON_ATTACK, {}, attacker, defender)
-
-        # Apply conditional intimidate (e.g. Wrecking Ball)
-        for _ in range(extra_intimidate):
-            if defender.hand:
-                banished = self._rng.choice(defender.hand)
-                defender.hand.remove(banished)
-                defender.banished.append(banished)
-                self._log(f"    👁  Intimidate! {defender.name} banishes {banished.name}.")
-
+        # Set power before firing ON_ATTACK card effects so they can modify it directly
         self._pending_attack_power = power
         self._pending_defend_indices = []
         self._pending_defend_equip_slots = []
+
+        if not self._pending_is_weapon:
+            # Fire ON_ATTACK card effects (draw-discard, permanent intimidate, etc.)
+            self._apply_card_effects(self._pending_attack, EffectTrigger.ON_ATTACK, {}, attacker, defender)
+
         defender_idx = 1 - self._game.active_player_idx
         self._phase = Phase.DEFEND
         self.agent_selection = f"agent_{defender_idx}"
-        self._log(f"\n    ⚔  {attacker.name} attacks with {self._pending_attack.name} — {power} power")
-
-    def _on_attack(self, card, attacker: Player, defender: Player, power: int) -> Tuple[int, int]:
-        """
-        Resolve 'when this attacks' effects. Returns (possibly modified power, extra intimidate count).
-        These fire at the attack step, before the defender chooses blocks.
-        """
-        n = card.name
-        extra_intimidate = 0
-
-        # Wild Ride, Bare Fangs, Wrecking Ball — draw a card then discard a random card.
-        if n in ("Wild Ride", "Bare Fangs", "Wrecking Ball"):
-            attacker.draw(1)
-            drawn = attacker.hand[-1] if attacker.hand else None
-            if drawn:
-                self._log(f"    🎴 {n} — drew {drawn.name}.")
-
-            if attacker.hand:
-                discarded = self._rng.choice(attacker.hand)
-                attacker.hand.remove(discarded)
-                attacker.graveyard.append(discarded)
-                self._log(f"    🎲 {n} — randomly discarded {discarded.name} "
-                          f"(power: {discarded.power}).")
-
-                self._fire_effects(EffectTrigger.ON_DISCARD, {"card": discarded}, attacker, defender)
-
-                strong = discarded.power >= 6
-                if n == "Wild Ride" and strong:
-                    card.go_again = True
-                    self._log(f"    ↩  Wild Ride — discarded card has 6+ power, gains go again!")
-                elif n == "Bare Fangs" and strong:
-                    power += 2
-                    self._pending_attack_power = power
-                    self._log(f"    ⚡ Bare Fangs — discarded 6+ power card, +2 power! ({power} total)")
-                elif n == "Wrecking Ball" and strong:
-                    extra_intimidate = 1
-                    self._log(f"    👁  Wrecking Ball — discarded 6+ power card, intimidate!")
-
-        return power, extra_intimidate
+        self._log(f"\n    ⚔  {attacker.name} attacks with {self._pending_attack.name} — {self._pending_attack_power} power")
 
     def _fire_effects(self, trigger: EffectTrigger, context: Dict[str, Any],
                       player: Player, opponent: Player) -> None:
@@ -679,6 +632,35 @@ class FaBEnv:
                     opponent.hand.remove(banished)
                     opponent.banished.append(banished)
                     self._log(f"    👁  Intimidate! {opponent.name} banishes {banished.name}.")
+            elif effect.action in (EffectAction.DRAW_DISCARD_GO_AGAIN,
+                                   EffectAction.DRAW_DISCARD_POWER_BONUS,
+                                   EffectAction.DRAW_DISCARD_INTIMIDATE):
+                active.draw(1)
+                drawn = active.hand[-1] if active.hand else None
+                if drawn:
+                    self._log(f"    🎴 {card.name} — drew {drawn.name}.")
+                if active.hand:
+                    discarded = self._rng.choice(active.hand)
+                    active.hand.remove(discarded)
+                    active.graveyard.append(discarded)
+                    self._log(f"    🎲 {card.name} — randomly discarded {discarded.name} "
+                              f"(power: {discarded.power}).")
+                    self._fire_effects(EffectTrigger.ON_DISCARD, {"card": discarded}, active, opponent)
+                    if discarded.power >= 6:
+                        if effect.action == EffectAction.DRAW_DISCARD_GO_AGAIN:
+                            card.go_again = True
+                            self._log(f"    ↩  {card.name} — discarded 6+ power card, gains go again!")
+                        elif effect.action == EffectAction.DRAW_DISCARD_POWER_BONUS:
+                            self._pending_attack_power += 2
+                            self._log(f"    ⚡ {card.name} — discarded 6+ power card, +2 power! "
+                                      f"({self._pending_attack_power} total)")
+                        elif effect.action == EffectAction.DRAW_DISCARD_INTIMIDATE:
+                            if opponent.hand:
+                                banished = self._rng.choice(opponent.hand)
+                                opponent.hand.remove(banished)
+                                opponent.banished.append(banished)
+                                self._log(f"    👁  {card.name} — discarded 6+ power card, intimidate! "
+                                          f"{opponent.name} banishes {banished.name}.")
 
     def _resolve_equipment_activation(self, slot: str, active: Player):
         """Resolve an equipment activate ability (no action point cost, then destroy)."""

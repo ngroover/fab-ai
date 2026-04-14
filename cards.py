@@ -143,7 +143,8 @@ def build_rhinar_deck() -> List[Card]:
         cards.append(Card("Bare Fangs", CardType.ACTION_ATTACK, cost=2, pitch=1,
                            power=6, defense=0, color=Color.RED, no_block=True,
                            card_class=CardClass.BRUTE,
-                           text="When you attack with Bare Fangs, draw a card then discard a random card. If a card wth 6 or more power is discarded this way, Bare Fangs gets +2 power."))
+                           text="When you attack with Bare Fangs, draw a card then discard a random card. If a card wth 6 or more power is discarded this way, Bare Fangs gets +2 power.",
+                           effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.DRAW_DISCARD_POWER_BONUS)]))
 
     # Beast Mode x2: cost 3, power 6, def 3, (attack action)
     # Note: Beast Mode has no defense value and cannot block
@@ -167,14 +168,16 @@ def build_rhinar_deck() -> List[Card]:
         cards.append(Card("Wild Ride", CardType.ACTION_ATTACK, cost=2, pitch=1,
                            power=6, defense=0, color=Color.RED, no_block=True,
                            card_class=CardClass.BRUTE,
-                           text="When you attack with Wild Ride, draw a card then discard a random card.  If a card with 6 or more power is discarded this way, Wild Ride gains go again."))
+                           text="When you attack with Wild Ride, draw a card then discard a random card.  If a card with 6 or more power is discarded this way, Wild Ride gains go again.",
+                           effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.DRAW_DISCARD_GO_AGAIN)]))
 
     # Wrecking Ball x2: cost 3, power 6, def 0, intimidate on hit condition, no_block
     for _ in range(2):
         cards.append(Card("Wrecking Ball", CardType.ACTION_ATTACK, cost=3, pitch=1,
                            power=6, defense=0, color=Color.RED, no_block=True,
                            card_class=CardClass.BRUTE,
-                           text="When you attack with Wrecking Ball, draw a card then discard a random card. If a card with 6 or more power is discarded this way, intimidate."))
+                           text="When you attack with Wrecking Ball, draw a card then discard a random card. If a card with 6 or more power is discarded this way, intimidate.",
+                           effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.DRAW_DISCARD_INTIMIDATE)]))
 
     # ── YELLOW (Pitch 2) — 14 cards ──
 
