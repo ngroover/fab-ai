@@ -1984,6 +1984,7 @@ PLAY_TEMPLATE = """
           body: JSON.stringify({index: idx}),
         });
       } finally {
+        lastActionKey = null;  // force button re-render even if labels are unchanged
         await poll();
       }
     }
