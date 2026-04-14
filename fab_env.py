@@ -36,7 +36,7 @@ from game_state import Player, GameState, Equipment
 from actions import (
     Action, ActionType,
     legal_attack_actions, legal_pitch_actions,
-    legal_defend_actions, legal_arsenal_actions,
+    legal_defend_actions, legal_arsenal_actions, legal_choose_first_actions,
 )
 from observations import build_observation, PLAYER_OBS_SIZE, CARD_FEATURES
 from spaces import Discrete, Box, Dict as DictSpace
@@ -47,12 +47,13 @@ from spaces import Discrete, Box, Dict as DictSpace
 # ──────────────────────────────────────────────────────────────
 
 class Phase(Enum):
-    START   = auto()
-    ATTACK  = auto()
-    PITCH   = auto()   # second step of playing a card: choose which cards to pitch
-    DEFEND  = auto()
-    ARSENAL = auto()
-    END     = auto()
+    START        = auto()
+    CHOOSE_FIRST = auto()  # pre-game: randomly selected player chooses who goes first
+    ATTACK       = auto()
+    PITCH        = auto()   # second step of playing a card: choose which cards to pitch
+    DEFEND       = auto()
+    ARSENAL      = auto()
+    END          = auto()
 
 
 # ──────────────────────────────────────────────────────────────
@@ -119,6 +120,7 @@ class FaBEnv:
         self._pending_weapon_attack: bool = False        # True when PITCH phase is for a weapon attack
         self._pending_defend_indices: List[int] = []     # hand indices accumulated during defend step
         self._pending_defend_equip_slots: List[str] = [] # equip slots accumulated during defend step
+        self._choosing_player_idx: int = 0               # player who won the coin flip in CHOOSE_FIRST
         # Isolated RNG — seeded in reset() so game randomness is never shared with external code.
         self._rng: random.Random = random.Random()
 
@@ -174,8 +176,13 @@ class FaBEnv:
         self._truncations = {"agent_0": False, "agent_1": False}
         self.done = False
 
-        # Start with player 0's action phase
-        self._begin_turn()
+        # Randomly select which player gets to choose who goes first
+        self._choosing_player_idx = self._rng.randint(0, 1)
+        self._phase = Phase.CHOOSE_FIRST
+        self.agent_selection = f"agent_{self._choosing_player_idx}"
+        self._log(f"  🪙  Coin flip — agent_{self._choosing_player_idx} "
+                  f"({self._game.players[self._choosing_player_idx].name}) "
+                  f"chooses who goes first.")
 
         obs = self._get_obs()
         infos = {a: {} for a in self.agents}
@@ -203,7 +210,9 @@ class FaBEnv:
         self._rewards = {"agent_0": 0.0, "agent_1": 0.0}  # zero out each step
 
         # ── Dispatch by phase ──
-        if self._phase == Phase.ATTACK:
+        if self._phase == Phase.CHOOSE_FIRST:
+            self._handle_choose_first_action(action)
+        elif self._phase == Phase.ATTACK:
             self._handle_attack_action(action, active, opponent)
         elif self._phase == Phase.PITCH:
             self._handle_pitch_action(action, active, opponent)
@@ -232,7 +241,9 @@ class FaBEnv:
         active_idx = int(agent[-1])
         active = self._game.players[active_idx]
 
-        if self._phase == Phase.ATTACK:
+        if self._phase == Phase.CHOOSE_FIRST:
+            return legal_choose_first_actions()
+        elif self._phase == Phase.ATTACK:
             return legal_attack_actions(active)
         elif self._phase == Phase.PITCH:
             return legal_pitch_actions(active, self._pending_play_card)
@@ -247,6 +258,17 @@ class FaBEnv:
     # ──────────────────────────────────────────────────────────
     # Internal: action handlers
     # ──────────────────────────────────────────────────────────
+
+    def _handle_choose_first_action(self, action: Action):
+        """Pre-game: the coin-flip winner chooses who goes first."""
+        if action.action_type == ActionType.GO_FIRST:
+            self._game.active_player_idx = self._choosing_player_idx
+        else:  # GO_SECOND
+            self._game.active_player_idx = 1 - self._choosing_player_idx
+        chooser = self._game.players[self._choosing_player_idx]
+        first = self._game.active
+        self._log(f"  ▶  {chooser.name} chooses: {first.name} goes first.")
+        self._begin_turn()
 
     def _handle_attack_action(self, action: Action, active: Player, opponent: Player):
         """Step 1 of card play: agent selects which card to play (or weapon/pass)."""

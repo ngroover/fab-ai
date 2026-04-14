@@ -38,6 +38,8 @@ class ActionType(Enum):
     DEFEND             = auto()   # used during the defend decision
     ARSENAL            = auto()   # used during the arsenal decision
     ACTIVATE_EQUIPMENT = auto()   # activate an equipment's once-per-turn ability
+    GO_FIRST           = auto()   # CHOOSE_FIRST phase: choosing player elects to go first
+    GO_SECOND          = auto()   # CHOOSE_FIRST phase: choosing player elects to go second
 
 
 @dataclass
@@ -77,6 +79,10 @@ class Action:
             return f"Action(ARSENAL store={self.arsenal_hand_index})"
         if self.action_type == ActionType.ACTIVATE_EQUIPMENT:
             return f"Action(ACTIVATE_EQUIPMENT slot={self.equip_slot})"
+        if self.action_type == ActionType.GO_FIRST:
+            return "Action(GO_FIRST)"
+        if self.action_type == ActionType.GO_SECOND:
+            return "Action(GO_SECOND)"
         return f"Action({self.action_type})"
 
 
@@ -249,3 +255,8 @@ def legal_arsenal_actions(player: 'Player') -> List[Action]:
         for i in range(len(player.hand)):
             actions.append(Action(ActionType.ARSENAL, arsenal_hand_index=i))
     return actions
+
+
+def legal_choose_first_actions() -> List[Action]:
+    """CHOOSE_FIRST phase: the randomly selected player picks whether to go first or second."""
+    return [Action(ActionType.GO_FIRST), Action(ActionType.GO_SECOND)]
