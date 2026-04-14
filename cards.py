@@ -107,7 +107,7 @@ def build_rhinar_deck() -> List[Card]:
 
     # ── Hero card (extracted before shuffling) ──
     cards.append(Card("Rhinar (Young Brute)", CardType.HERO, card_class=CardClass.BRUTE,
-                       text="Young Hero. Life 20, Intellect 4."))
+                       text="Young Hero. Life 20, Intellect 4. Whenever you discard a card with 6 or more power during your action phase, intimidate."))
 
     # ── RED (Pitch 1) — 13 cards ──
 
@@ -301,7 +301,7 @@ def build_dorinthea_deck() -> List[Card]:
 
     # ── Hero card (extracted before shuffling) ──
     cards.append(Card("Dorinthea, Quicksilver Prodigy", CardType.HERO, card_class=CardClass.WARRIOR,
-                       text="Young Hero. Life 20, Intellect 4. Whenever Dawnblade hits a hero, put a +1 power counter on Dawnblade."))
+                       text="Young Hero. Life 20, Intellect 4. The first time Dawnblade, Resplendent gains go again each turn, you may attack and additional time with it this turn."))
 
     # ── RED (Pitch 1) — 16 cards ──
 
