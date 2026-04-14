@@ -25,6 +25,7 @@ from cards import (
     build_rhinar_deck, build_rhinar_equipment,
     build_dorinthea_deck, build_dorinthea_equipment,
 )
+from card_effects import EffectAction
 
 deck_db.init_db()
 
@@ -459,7 +460,7 @@ def _build_card_catalog() -> list:
                     "color": c.color.name.capitalize() if c.color else None,
                     "go_again": c.go_again,
                     "text": c.text,
-                    "intimidate": c.intimidate,
+                    "intimidate": any(e.action == EffectAction.INTIMIDATE for e in c.effects),
                     "no_block": c.no_block,
                     "equip_slot": c.equip_slot.value if c.equip_slot else None,
                     "hero": hero,
@@ -482,7 +483,7 @@ def _build_card_catalog() -> list:
                     "color":     row["color"],
                     "go_again":  bool(row["go_again"]),
                     "text":      row["text"] or "",
-                    "intimidate": bool(row["intimidate"]),
+                    "intimidate": bool(row["intimidate"]),  # DB-sourced; no Card field
                     "no_block":  bool(row["no_block"]),
                     "equip_slot": row["equip_slot"],
                     "hero":      None,
@@ -518,7 +519,6 @@ def _catalog_row_to_card(row: dict):
         color     = color_map.get(row["color"]),
         go_again  = bool(row["go_again"]),
         text      = row["text"] or "",
-        intimidate= bool(row["intimidate"]),
         no_block  = bool(row["no_block"]),
         equip_slot= equip_map.get(row["equip_slot"]),
         # Unknown classes (e.g. Ranger) fall back to Generic for game purposes
@@ -1308,7 +1308,7 @@ class _WebHumanAgent:
         if card.power:     details.append(f"pow:{card.power}")
         if card.defense:   details.append(f"def:{card.defense}")
         if card.go_again:  details.append("go-again")
-        if card.intimidate: details.append("intimidate")
+        if any(e.action == EffectAction.INTIMIDATE for e in card.effects): details.append("intimidate")
         suffix = f" ({', '.join(details)})" if details else ""
         return card.name + suffix
 

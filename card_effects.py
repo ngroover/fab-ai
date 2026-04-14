@@ -28,6 +28,8 @@ from typing import Optional, Callable, Any, Dict
 class EffectTrigger(Enum):
     """Events that can activate a card effect."""
     ON_DISCARD = auto()   # a card is discarded from hand during the action phase
+    ON_ATTACK  = auto()   # fired when an attack card is declared (before defend step)
+    ON_PLAY    = auto()   # fired when a non-attack action card is played
 
 
 class EffectAction(Enum):

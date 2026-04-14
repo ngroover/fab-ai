@@ -15,6 +15,7 @@ from typing import List, Optional, TYPE_CHECKING
 
 from actions import Action, ActionType
 from cards import CardType, Color
+from card_effects import EffectAction
 
 if TYPE_CHECKING:
     from game_state import Player
@@ -121,7 +122,7 @@ class RhinarAgent:
                 score = card.power + player.next_brute_attack_bonus
                 if card.go_again:
                     score += 1
-                if card.intimidate:
+                if any(e.action == EffectAction.INTIMIDATE for e in card.effects):
                     score += 1
                 attack_actions.append((score, a))
 
@@ -402,7 +403,7 @@ class HumanAgent:
             details.append(f"def:{card.defense}")
         if card.go_again:
             details.append("go-again")
-        if card.intimidate:
+        if any(e.action == EffectAction.INTIMIDATE for e in card.effects):
             details.append("intimidate")
         if details:
             parts.append(f"({', '.join(details)})")

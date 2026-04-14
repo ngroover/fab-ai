@@ -58,7 +58,6 @@ class Card:
     color: Optional[Color] = None
     go_again: bool = False
     text: str = ""
-    intimidate: bool = False
     no_block: bool = False
     equip_slot: Optional[EquipSlot] = None
     card_class: CardClass = CardClass.GENERIC
@@ -124,16 +123,18 @@ def build_rhinar_deck() -> List[Card]:
     # Alpha Rampage: cost 3, power 9, def 3, intimidate, Rhinar spec
     # Additional cost: discard a random card
     cards.append(Card("Alpha Rampage", CardType.ACTION_ATTACK, cost=3, pitch=1,
-                       power=9, defense=3, color=Color.RED, intimidate=True,
+                       power=9, defense=3, color=Color.RED,
                        card_class=CardClass.BRUTE,
-                       text="Rhinar Specialization. As an additional cost to play Alpha Rampage, discard a random card. When you attack with Alpha Rampage, intimidate."))
+                       text="Rhinar Specialization. As an additional cost to play Alpha Rampage, discard a random card. When you attack with Alpha Rampage, intimidate.",
+                       effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.INTIMIDATE)]))
 
     # Awakening Bellow x2: cost 2, power 6, def 3, go again, intimidate
     for _ in range(2):
         cards.append(Card("Awakening Bellow", CardType.ACTION, cost=1, pitch=1,
-                           power=0, defense=3, color=Color.RED, go_again=True, intimidate=True,
+                           power=0, defense=3, color=Color.RED, go_again=True,
                            card_class=CardClass.BRUTE,
-                           text="Go again. Intimidate."))
+                           text="Go again. Intimidate.",
+                           effects=[CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.INTIMIDATE)]))
 
     # Bare Fangs x2: cost 2, power 6, def 0, no block
     # When attacking: draw a card then discard a random card.
@@ -155,9 +156,10 @@ def build_rhinar_deck() -> List[Card]:
     # Pack Hunt x2: cost 2, power 6, def 3
     for _ in range(2):
         cards.append(Card("Pack Hunt", CardType.ACTION_ATTACK, cost=2, pitch=1,
-                           power=6, defense=3, color=Color.RED, intimidate=True,
+                           power=6, defense=3, color=Color.RED,
                            card_class=CardClass.BRUTE,
-                           text="When you attack with Pack Hunt, intimidate"))
+                           text="When you attack with Pack Hunt, intimidate",
+                           effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.INTIMIDATE)]))
 
     # Wild Ride x2: cost 2, power 6, def 0, may have go again, no block
     # Draw a card then discard a random card. If discarded card 6+ power, go again
@@ -180,9 +182,10 @@ def build_rhinar_deck() -> List[Card]:
     # Non-attack action: next Brute attack gains conditional +3 power
     for _ in range(2):
         cards.append(Card("Barraging Beatdown", CardType.ACTION, cost=0, pitch=2,
-                           power=0, defense=3, color=Color.YELLOW, go_again=True, intimidate=True,
+                           power=0, defense=3, color=Color.YELLOW, go_again=True,
                            card_class=CardClass.BRUTE,
-                           text="Intimidate, then your next Brute attack this turn gains 'While this attack is defended by less than 2 non-equipment cards it has +3 power'. Go again."))
+                           text="Intimidate, then your next Brute attack this turn gains 'While this attack is defended by less than 2 non-equipment cards it has +3 power'. Go again.",
+                           effects=[CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.INTIMIDATE)]))
 
     # Muscle Mutt x2: cost 3, power 6, def 2
     for _ in range(2):
@@ -209,9 +212,10 @@ def build_rhinar_deck() -> List[Card]:
     # Smash Instinct x2: cost 2, power 6, def 3, intimidate
     for _ in range(2):
         cards.append(Card("Smash Instinct", CardType.ACTION_ATTACK, cost=3, pitch=2,
-                           power=6, defense=3, color=Color.YELLOW, intimidate=True,
+                           power=6, defense=3, color=Color.YELLOW,
                            card_class=CardClass.BRUTE,
-                           text="When you attack with Smash Instinct, intimidate."))
+                           text="When you attack with Smash Instinct, intimidate.",
+                           effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.INTIMIDATE)]))
 
     # Smash with Big Tree x2: cost 2, power 6, no_block
     for _ in range(2):
@@ -232,9 +236,10 @@ def build_rhinar_deck() -> List[Card]:
     # Clearing Bellow x2: cost 0, power 0, def 3, go again, intimidate
     for _ in range(2):
         cards.append(Card("Clearing Bellow", CardType.ACTION, cost=0, pitch=3,
-                           power=0, defense=3, color=Color.BLUE, go_again=True, intimidate=True,
+                           power=0, defense=3, color=Color.BLUE, go_again=True,
                            card_class=CardClass.BRUTE,
-                           text="Intimidate.Go again."))
+                           text="Intimidate.Go again.",
+                           effects=[CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.INTIMIDATE)]))
 
     # Come to Fight x2: cost 0, power 0, def 3 — Generic
     for _ in range(2):

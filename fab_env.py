@@ -590,13 +590,12 @@ class FaBEnv:
         extra_intimidate = 0
         if not self._pending_is_weapon:
             power, extra_intimidate = self._on_attack(self._pending_attack, attacker, defender, power)
+            # Fire ON_ATTACK card effects (e.g. permanent intimidate keyword)
+            self._apply_card_effects(self._pending_attack, EffectTrigger.ON_ATTACK, {}, attacker, defender)
 
-        # Count intimidate triggers: permanent keyword + conditional card effect
-        intimidate_count = (1 if self._pending_attack.intimidate else 0) + extra_intimidate
-
-        # Apply each intimidate trigger before defend
-        for _ in range(intimidate_count):
-            if len(defender.hand) > 0:
+        # Apply conditional intimidate (e.g. Wrecking Ball)
+        for _ in range(extra_intimidate):
+            if defender.hand:
                 banished = self._rng.choice(defender.hand)
                 defender.hand.remove(banished)
                 defender.banished.append(banished)
@@ -668,6 +667,19 @@ class FaBEnv:
                         f"intimidate! {opponent.name} banishes {banished.name}."
                     )
 
+    def _apply_card_effects(self, card: Card, trigger: EffectTrigger, context: Dict[str, Any],
+                             active: Player, opponent: Player) -> None:
+        """Fire all effects on *card* that match *trigger* and *context*."""
+        for effect in card.effects:
+            if not effect.matches(trigger, context):
+                continue
+            if effect.action == EffectAction.INTIMIDATE:
+                if opponent.hand:
+                    banished = self._rng.choice(opponent.hand)
+                    opponent.hand.remove(banished)
+                    opponent.banished.append(banished)
+                    self._log(f"    👁  Intimidate! {opponent.name} banishes {banished.name}.")
+
     def _resolve_equipment_activation(self, slot: str, active: Player):
         """Resolve an equipment activate ability (no action point cost, then destroy)."""
         eq = active.equipment.get(slot)
@@ -731,11 +743,6 @@ class FaBEnv:
 
         if n == "Barraging Beatdown":
             active.next_brute_attack_bonus = 3
-            if len(opponent.hand) > 0:
-                banished = self._rng.choice(opponent.hand)
-                opponent.hand.remove(banished)
-                opponent.banished.append(banished)
-                self._log(f"    👁  Barraging Beatdown — Intimidate! {opponent.name} banishes {banished.name}.")
             self._log(f"    ⚡ Next Brute attack gains conditional +3 power.")
 
         elif n == "Beast Mode":
@@ -785,6 +792,9 @@ class FaBEnv:
         elif n == "Titanium Bauble":
             active.resource_points += 1
             self._log(f"    💰 Titanium Bauble — gain 1 resource ({active.resource_points} total).")
+
+        # Fire ON_PLAY card effects (e.g. intimidate keyword on non-attack actions)
+        self._apply_card_effects(card, EffectTrigger.ON_PLAY, {}, active, opponent)
 
         if card.go_again:
             active.action_points += 1
