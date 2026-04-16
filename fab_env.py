@@ -245,6 +245,33 @@ class FaBEnv:
         if self._game.is_over() or self._game.turn_number > self.MAX_TURNS:
             self._finalize()
 
+        # ── Auto-execute forced (single-legal-action) states ──
+        while not self.done:
+            forced = self.legal_actions()
+            if len(forced) != 1:
+                break
+            auto_action = forced[0]
+            auto_agent = self.agent_selection
+            auto_active_idx = int(auto_agent[-1])
+            auto_active = self._game.players[auto_active_idx]
+            auto_opponent = self._game.players[1 - auto_active_idx]
+
+            if self._phase == Phase.CHOOSE_FIRST:
+                self._handle_choose_first_action(auto_action)
+            elif self._phase == Phase.ATTACK:
+                self._handle_attack_action(auto_action, auto_active, auto_opponent)
+            elif self._phase == Phase.PITCH:
+                self._handle_pitch_action(auto_action, auto_active, auto_opponent)
+            elif self._phase == Phase.DEFEND:
+                self._handle_defend_action(auto_action, auto_active, auto_opponent)
+            elif self._phase == Phase.INSTANT:
+                self._handle_instant_action(auto_action, auto_active, auto_opponent)
+            elif self._phase == Phase.ARSENAL:
+                self._handle_arsenal_action(auto_action, auto_active, auto_opponent)
+
+            if self._game.is_over() or self._game.turn_number > self.MAX_TURNS:
+                self._finalize()
+
         obs = self._get_obs()
         infos = {a: {"legal_actions": self.legal_actions()} for a in self.agents}
         return obs, dict(self._rewards), dict(self._terminations), dict(self._truncations), infos
