@@ -403,6 +403,15 @@ class FaBEnv:
 
     def _handle_defend_action(self, action: Action, defender: Player, attacker: Player):
         """Defender picks one card at a time; empty action commits the accumulated block."""
+        # Instant played during the reaction window — resolve it and stay in DEFEND phase
+        if action.action_type == ActionType.PLAY_CARD:
+            card = action.card
+            if card in defender.hand:
+                defender.hand.remove(card)
+            self._resolve_instant(card, defender, attacker)
+            defender.action_points = 0  # action points don't apply during defend
+            return  # stay in DEFEND phase
+
         # Single card/equipment addition — accumulate and stay in DEFEND phase
         if action.defend_hand_indices or action.defend_equip_slots:
             self._pending_defend_indices.extend(action.defend_hand_indices)
@@ -786,8 +795,8 @@ class FaBEnv:
     def _resolve_instant(self, card: Card, active: Player, opponent: Player):
         n = card.name
         if n == "Sigil of Solace":
-            active.gain_life(3)
-            self._log(f"    💚 Sigil of Solace — {active.name} gains 3 life ({active.life}).")
+            active.gain_life(1)
+            self._log(f"    💚 Sigil of Solace — {active.name} gains 1 life ({active.life}).")
         elif n == "Titanium Bauble":
             active.resource_points += 1
             self._log(f"    💰 Titanium Bauble — gain 1 resource.")
