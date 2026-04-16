@@ -276,7 +276,16 @@ class DorintheiAgent:
         """
         Add one blocking card at a time. Prefers defense reactions; stops once
         accumulated defense covers the needed threshold.
+
+        Also plays Sigil of Solace (0-cost instant) during the reaction window
+        when life is low enough that gaining 1 life matters.
         """
+        # Play 0-cost instants in the reaction window if life is tight
+        for a in legal:
+            if a.action_type == ActionType.PLAY_CARD and a.card is not None:
+                if a.card.name == "Sigil of Solace" and player.life <= 6:
+                    return a
+
         effective_power = attack_power - already_defense
         if player.life - effective_power > 8:
             return legal[0]
