@@ -210,6 +210,11 @@ class RhinarAgent:
                      pending_card=None) -> Action:
         return legal[0]
 
+    def select_instant(self, obs: dict, legal: List[Action], player: 'Player',
+                        attack_power: int = 0) -> Action:
+        """INSTANT phase: Rhinar has no instants to play — always pass priority."""
+        return legal[0]  # PASS_PRIORITY
+
     def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
         return legal[0]
 
@@ -379,6 +384,16 @@ class DorintheiAgent:
                      pending_card=None) -> Action:
         return legal[0]
 
+    def select_instant(self, obs: dict, legal: List[Action], player: 'Player',
+                        attack_power: int = 0) -> Action:
+        """INSTANT phase: play 0-cost Sigil of Solace when life is tight,
+        otherwise pass priority."""
+        for a in legal:
+            if a.action_type == ActionType.PLAY_CARD and a.card is not None:
+                if a.card.name == "Sigil of Solace" and player.life <= 6:
+                    return a
+        return legal[0]  # PASS_PRIORITY
+
     def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
         return legal[0]
 
@@ -450,6 +465,8 @@ class HumanAgent:
     def _action_label(self, action: Action, player: 'Player') -> str:
         if action.action_type == ActionType.PASS:
             return "PASS (end action phase)"
+        if action.action_type == ActionType.PASS_PRIORITY:
+            return "PASS PRIORITY (let the stack resolve)"
         if action.action_type == ActionType.WEAPON:
             wp = player.get_effective_weapon_power()
             return f"WEAPON — attack with {player.weapon.name} for {wp} power"
@@ -555,6 +572,16 @@ class HumanAgent:
         print(f"  Current resources: {player.resource_points}")
         self._show_hand(player)
         return self._choose(legal, player, "Choose cards to pitch:")
+
+    def select_instant(self, obs: dict, legal: List[Action], player: 'Player',
+                        attack_power: int = 0) -> Action:
+        print(f"\n{'═' * 60}")
+        print(f"  INSTANT WINDOW — {player.name}")
+        if attack_power > 0:
+            print(f"  ⚔ Incoming attack: {attack_power} power")
+        print(f"  Your life: {player.life} | resources: {player.resource_points}")
+        self._show_hand(player)
+        return self._choose(legal, player, "Play an instant or pass priority:")
 
     def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
         print(f"\n{'═' * 60}")

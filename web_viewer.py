@@ -1316,6 +1316,8 @@ class _WebHumanAgent:
         from actions import ActionType
         if action.action_type == ActionType.PASS:
             return "PASS — end action phase"
+        if action.action_type == ActionType.PASS_PRIORITY:
+            return "PASS PRIORITY — let the stack resolve"
         if action.action_type == ActionType.WEAPON:
             wp = player.get_effective_weapon_power()
             return f"WEAPON — {player.weapon.name} for {wp} power"
@@ -1383,6 +1385,9 @@ class _WebHumanAgent:
 
     def select_pitch(self, obs, legal, player, pending_card=None):
         return self._pend(legal, player, "PITCH")
+
+    def select_instant(self, obs, legal, player, attack_power=0):
+        return self._pend(legal, player, "INSTANT", attack_power)
 
     def select_choose_first(self, legal, player):
         return self._pend(legal, player, "CHOOSE_FIRST")
@@ -1573,6 +1578,13 @@ class _GameSession:
             elif env._phase == Phase.DEFEND:
                 action = agent.select_defend(obs[agent_id], legal, player,
                                              env._pending_attack_power)
+            elif env._phase == Phase.INSTANT:
+                # Only expose attack_power when the window is an attack
+                # reaction (pending attack set); end-of-combat / end-of-turn
+                # windows should show no incoming-power badge.
+                ap = (env._pending_attack_power
+                      if env._pending_attack is not None else 0)
+                action = agent.select_instant(obs[agent_id], legal, player, ap)
             elif env._phase == Phase.ARSENAL:
                 action = agent.select_arsenal(obs[agent_id], legal, player)
             elif env._phase == Phase.PITCH:
@@ -1951,6 +1963,8 @@ PLAY_TEMPLATE = """
         let infoHtml = `<div class="phase-info">${actorName} — ${s.phase}`;
         if (s.phase === 'DEFEND') {
           infoHtml += ` <span class="atk-badge">⚔ Incoming: ${s.attack_power} power</span>`;
+        } else if (s.phase === 'INSTANT' && s.attack_power > 0) {
+          infoHtml += ` <span class="atk-badge">⏸ Reaction window (incoming: ${s.attack_power} power)</span>`;
         }
         infoHtml += '</div>';
         msg.innerHTML = infoHtml;

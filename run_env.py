@@ -97,6 +97,10 @@ def run_game(
             attack_power = env._pending_attack_power
             already_defense = env._pending_defend_total
             action = agent.select_defend(obs[agent_id], legal, player, attack_power, already_defense)
+        elif env._phase == Phase.INSTANT:
+            ap = (env._pending_attack_power
+                  if env._pending_attack is not None else 0)
+            action = agent.select_instant(obs[agent_id], legal, player, ap)
         elif env._phase == Phase.ARSENAL:
             action = agent.select_arsenal(obs[agent_id], legal, player)
         elif env._phase == Phase.PITCH:
