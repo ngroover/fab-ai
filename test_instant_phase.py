@@ -133,8 +133,8 @@ class TestSigilOfSolaceOnStack(unittest.TestCase):
         self.assertEqual(env._phase, Phase.INSTANT)
         self.assertEqual(len(env._instant_stack), 0)
         self.assertEqual(env.agent_selection, "agent_0")
-        self.assertEqual(env._game.players[1].life, 15,
-                         "Sigil of Solace should gain 3 life on resolution")
+        self.assertEqual(env._game.players[1].life, 13,
+                         "Sigil of Solace should gain 1 life on resolution")
         # Card moved to graveyard.
         self.assertIn("Sigil of Solace",
                       [c.name for c in env._game.players[1].graveyard])
@@ -179,17 +179,17 @@ class TestLIFOResolution(unittest.TestCase):
         self.assertEqual(env._instant_stack[0][0], 0)
         self.assertEqual(env._instant_stack[1][0], 1)
 
-        # Both pass — top (p1's) resolves first → p1 gains 3 life.
+        # Both pass — top (p1's) resolves first → p1 gains 1 life.
         env.step(Action(ActionType.PASS_PRIORITY))
         env.step(Action(ActionType.PASS_PRIORITY))
-        self.assertEqual(env._game.players[1].life, 13)
+        self.assertEqual(env._game.players[1].life, 11)
         self.assertEqual(env._game.players[0].life, 10)
         self.assertEqual(len(env._instant_stack), 1)
 
         # Another pair of passes — p0's sigil resolves.
         env.step(Action(ActionType.PASS_PRIORITY))
         env.step(Action(ActionType.PASS_PRIORITY))
-        self.assertEqual(env._game.players[0].life, 13)
+        self.assertEqual(env._game.players[0].life, 11)
         self.assertEqual(len(env._instant_stack), 0)
 
 

@@ -244,17 +244,9 @@ def legal_defend_actions(player: 'Player', attack_power: int,
     # Done — commit all accumulated block cards (or take full damage if none chosen)
     actions.append(Action(ActionType.DEFEND))
 
-    # Instants can be played during the reaction window before committing blocks
-    seen_instant_names: set = set()
-    for i, card in enumerate(player.hand):
-        if card.card_type != CardType.INSTANT:
-            continue
-        if card.name in seen_instant_names:
-            continue
-        if max(0, card.cost - player.resource_points) == 0:
-            seen_instant_names.add(card.name)
-            actions.append(Action(ActionType.PLAY_CARD, card=card))
-
+    # NOTE: instants are NOT offered here. They are played during the attack
+    # reaction INSTANT window (opened before DEFEND begins) where they go on
+    # the stack and resolve in LIFO order. Blocking cards do not use the stack.
     defenders = [(i, c) for i, c in enumerate(player.hand)
                  if c.defense > 0 and c.card_type != CardType.INSTANT and not c.no_block
                  and i not in already_indices]

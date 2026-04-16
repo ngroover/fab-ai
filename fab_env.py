@@ -439,16 +439,13 @@ class FaBEnv:
         return total
 
     def _handle_defend_action(self, action: Action, defender: Player, attacker: Player):
-        """Defender picks one card at a time; empty action commits the accumulated block."""
-        # Instant played during the reaction window — resolve it and stay in DEFEND phase
-        if action.action_type == ActionType.PLAY_CARD:
-            card = action.card
-            if card in defender.hand:
-                defender.hand.remove(card)
-            self._resolve_instant(card, defender, attacker)
-            defender.action_points = 0  # action points don't apply during defend
-            return  # stay in DEFEND phase
+        """Defender picks one card at a time; empty action commits the accumulated block.
 
+        Instants are NOT played here — they go through the attack reaction
+        INSTANT window (opened before this DEFEND phase begins) and resolve
+        off the stack. Blocking cards are committed directly and do not use
+        the stack at all.
+        """
         # Single card/equipment addition — accumulate and stay in DEFEND phase
         if action.defend_hand_indices or action.defend_equip_slots:
             self._pending_defend_indices.extend(action.defend_hand_indices)
@@ -608,33 +605,61 @@ class FaBEnv:
     # Internal: instant-window handling
     # ──────────────────────────────────────────────────────────
 
-    def _enter_instant_phase(self, return_phase: "Phase", return_agent_idx: int) -> None:
+    def _enter_instant_phase(self, return_phase: "Phase", return_agent_idx: int,
+                              priority_idx: Optional[int] = None) -> None:
         """Open an instant window. Either player may play instants onto a LIFO
         stack, paying pitch costs as usual. When both players pass priority in
         succession with cards on the stack, the top resolves; when both pass
         with an empty stack, play returns to *return_phase* with
         *return_agent_idx* receiving control.
 
-        The active turn player receives priority first.
+        By default the active turn player receives priority first. Callers can
+        override via *priority_idx* — for attack reaction windows the defender
+        reacts first, since the attack was declared against them.
         """
         self._instant_return_phase = return_phase
         self._instant_return_agent_idx = return_agent_idx
         self._instant_passes = 0
-        self._instant_priority_idx = self._game.active_player_idx
+        if priority_idx is None:
+            priority_idx = self._game.active_player_idx
+        self._instant_priority_idx = priority_idx
         self._phase = Phase.INSTANT
         self.agent_selection = f"agent_{self._instant_priority_idx}"
         priority_name = self._game.players[self._instant_priority_idx].name
         self._log(f"    ⏸  Instant window opens (priority: {priority_name}).")
 
     def _exit_instant_phase(self) -> None:
-        """Close the instant window and return to the phase that opened it."""
+        """Close the instant window and return to the phase that opened it.
+
+        If the window was opened as an attack reaction (``return_phase ==
+        Phase.DEFEND``) and an attack is still pending, the attack's
+        ``ON_ATTACK`` triggered effects fire now — AFTER any instants that
+        were played in reaction have already resolved off the stack. This is
+        what makes Sigil of Solace (gain life) resolve before Wild Ride's
+        draw-discard / intimidate effect.
+        """
         return_phase = self._instant_return_phase
         return_agent_idx = self._instant_return_agent_idx
         self._instant_return_phase = None
         self._instant_passes = 0
+        self._log(f"    ▶  Instant window closes.")
+
+        if return_phase == Phase.DEFEND and self._pending_attack is not None:
+            attacker = self._game.active
+            defender = self._game.players[1 - self._game.active_player_idx]
+            # Fire the attack's ON_ATTACK triggered ability (non-weapon attacks
+            # only — weapons don't have card-level ON_ATTACK effects here).
+            if not self._pending_is_weapon:
+                self._apply_card_effects(
+                    self._pending_attack, EffectTrigger.ON_ATTACK, {},
+                    attacker, defender,
+                )
+            self._phase = Phase.DEFEND
+            self.agent_selection = f"agent_{return_agent_idx}"
+            return
+
         self._phase = return_phase if return_phase is not None else Phase.ATTACK
         self.agent_selection = f"agent_{return_agent_idx}"
-        self._log(f"    ▶  Instant window closes.")
 
     def _push_instant_to_stack(self, card: "Card", owner_idx: int) -> None:
         """Place *card* onto the instant stack owned by *owner_idx*, then pass
@@ -654,8 +679,8 @@ class FaBEnv:
         point — the card is resolving outside their action phase."""
         n = card.name
         if n == "Sigil of Solace":
-            owner.gain_life(3)
-            self._log(f"    💚 Sigil of Solace resolves — {owner.name} gains 3 life "
+            owner.gain_life(1)
+            self._log(f"    💚 Sigil of Solace resolves — {owner.name} gains 1 life "
                       f"({owner.life}).")
         elif n == "Titanium Bauble":
             owner.resource_points += 1
@@ -764,25 +789,40 @@ class FaBEnv:
         # agent_selection is set by _enter_instant_phase to the priority holder.
 
     def _trigger_defend_phase(self, attacker: Player, defender: Player):
-        """Set up the defend phase so the defender can choose blocks."""
+        """Open an attack reaction instant window, then (after it closes) enter
+        the DEFEND phase.
+
+        The attack's ``ON_ATTACK`` triggered ability does NOT fire here — it
+        fires when the reaction window closes (see ``_exit_instant_phase``).
+        This lets the defender respond with instants that resolve BEFORE the
+        attack's own effects (e.g., playing Sigil of Solace to gain life
+        before Wild Ride's draw-discard triggers).
+        """
         if self._pending_is_weapon:
             power = attacker.get_effective_weapon_power()
         else:
             power = self._pending_attack.power + attacker.next_brute_attack_bonus
 
-        # Set power before firing ON_ATTACK card effects so they can modify it directly
+        # Baseline power; ON_ATTACK effects fired at window close may further
+        # modify _pending_attack_power (e.g., DRAW_DISCARD_POWER_BONUS adds +2).
         self._pending_attack_power = power
         self._pending_defend_indices = []
         self._pending_defend_equip_slots = []
 
-        if not self._pending_is_weapon:
-            # Fire ON_ATTACK card effects (draw-discard, permanent intimidate, etc.)
-            self._apply_card_effects(self._pending_attack, EffectTrigger.ON_ATTACK, {}, attacker, defender)
+        self._log(f"\n    ⚔  {attacker.name} attacks with "
+                  f"{self._pending_attack.name} — {power} power")
 
+        # Open an attack reaction INSTANT window. Defender reacts first since
+        # the attack was declared against them, and either player may play
+        # instants onto the stack. When both pass with an empty stack the
+        # window closes, ON_ATTACK triggers fire, and the defender gets the
+        # DEFEND step to choose blocks.
         defender_idx = 1 - self._game.active_player_idx
-        self._phase = Phase.DEFEND
-        self.agent_selection = f"agent_{defender_idx}"
-        self._log(f"\n    ⚔  {attacker.name} attacks with {self._pending_attack.name} — {self._pending_attack_power} power")
+        self._enter_instant_phase(
+            return_phase=Phase.DEFEND,
+            return_agent_idx=defender_idx,
+            priority_idx=defender_idx,
+        )
 
     def _fire_effects(self, trigger: EffectTrigger, context: Dict[str, Any],
                       player: Player, opponent: Player) -> None:
