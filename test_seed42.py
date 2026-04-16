@@ -323,5 +323,77 @@ class TestHeroAbility(unittest.TestCase):
         self.assertLessEqual(min_life, 8)  # Dorinthea took both hits, ending turn 1 at 6 life
 
 
+class TestInstantWindowTurn1(unittest.TestCase):
+    """Seed 42, Rhinar's turn 1: an INSTANT window opens after Wild Ride is
+    declared.  Dorinthea holds no instants so her only legal choice is
+    PASS_PRIORITY, which is correct behaviour.  This test pins that the window
+    opens, that priority belongs to the defender first, and that no illegal
+    PLAY_CARD actions leak in when the defender has nothing to play."""
+
+    def _advance_to_instant_window(self):
+        env = FaBEnv(verbose=False)
+        env.reset(seed=SEED)
+
+        # Rhinar goes first
+        legal = env.legal_actions()
+        go_first = next(a for a in legal if a.action_type == ActionType.GO_FIRST)
+        env.step(go_first)
+
+        # Rhinar plays Wild Ride
+        legal = env.legal_actions()
+        wild_ride = next(
+            a for a in legal
+            if a.action_type == ActionType.PLAY_CARD and a.card.name == "Wild Ride"
+        )
+        env.step(wild_ride)
+
+        # Pay Wild Ride's cost
+        while env._phase == Phase.PITCH:
+            env.step(env.legal_actions()[0])
+
+        return env
+
+    def test_instant_window_opens_after_wild_ride(self):
+        env = self._advance_to_instant_window()
+        self.assertEqual(env._phase, Phase.INSTANT)
+
+    def test_defender_has_priority_first(self):
+        env = self._advance_to_instant_window()
+        self.assertEqual(env.agent_selection, "agent_1")
+
+    def test_pending_attack_is_wild_ride(self):
+        env = self._advance_to_instant_window()
+        self.assertIsNotNone(env._pending_attack)
+        self.assertEqual(env._pending_attack.name, "Wild Ride")
+
+    def test_stack_empty_at_window_start(self):
+        env = self._advance_to_instant_window()
+        self.assertEqual(len(env._instant_stack), 0)
+
+    def test_dorinthea_has_no_instants_so_only_pass_priority(self):
+        """Dorinthea's seed-42 hand has no instants; PASS_PRIORITY is the sole
+        legal action and no spurious PLAY_CARD actions are offered."""
+        env = self._advance_to_instant_window()
+        dorinthea = env._game.players[1]
+        from cards import CardType
+        instant_names = [c.name for c in dorinthea.hand if c.card_type == CardType.INSTANT]
+        self.assertEqual(instant_names, [], "Dorinthea has no instants in hand at seed 42")
+
+        legal = env.legal_actions()
+        play_card_actions = [a for a in legal if a.action_type == ActionType.PLAY_CARD]
+        self.assertEqual(play_card_actions, [],
+                         f"No PLAY_CARD should be offered with no instants; got {legal}")
+        self.assertTrue(any(a.action_type == ActionType.PASS_PRIORITY for a in legal))
+
+    def test_window_closes_and_defend_phase_starts(self):
+        """Both players pass with an empty stack → window closes → DEFEND."""
+        from actions import Action
+        env = self._advance_to_instant_window()
+        env.step(Action(ActionType.PASS_PRIORITY))  # Dorinthea passes
+        env.step(Action(ActionType.PASS_PRIORITY))  # Rhinar passes → window closes
+        self.assertEqual(env._phase, Phase.DEFEND)
+        self.assertEqual(env.agent_selection, "agent_1")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
