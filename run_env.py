@@ -22,8 +22,26 @@ from datetime import datetime
 from typing import Optional
 
 from fab_env import FaBEnv, Phase
-from agents import RhinarAgent, DorintheiAgent, HumanAgent
+from agents import RhinarAgent, DorintheiAgent, HumanAgent, RandomAgent
 from actions import ActionType
+
+_AGENT_CHOICES = ("rhinar", "dorinthea", "random", "human")
+
+
+def _make_agent(name: str):
+    """Return an agent instance for the given name string."""
+    name = name.lower().strip()
+    if name == "rhinar":
+        return RhinarAgent()
+    if name == "dorinthea":
+        return DorintheiAgent()
+    if name == "random":
+        return RandomAgent()
+    if name == "human":
+        return HumanAgent()
+    raise argparse.ArgumentTypeError(
+        f"Unknown agent '{name}'. Choose from: {', '.join(_AGENT_CHOICES)}"
+    )
 
 
 def _resolve_human_flags(human_arg: Optional[str]) -> tuple[bool, bool]:
@@ -61,19 +79,27 @@ def run_game(
     save_log: bool = False,
     rhinar_is_human: bool = False,
     dorinthea_is_human: bool = False,
+    agent0=None,
+    agent1=None,
 ) -> Optional[str]:
     """
     Run one complete game. Returns the winning agent id, or None for draw.
 
-    rhinar_is_human / dorinthea_is_human control whether each hero is driven
-    by a HumanAgent (stdin prompts) or the rule-based AI.
+    agent0 / agent1 accept any agent instance (RhinarAgent, DorintheiAgent,
+    RandomAgent, HumanAgent, or custom).  When provided they take precedence
+    over rhinar_is_human / dorinthea_is_human.
     """
     log_file = _new_log_path(seed) if save_log else None
     env = FaBEnv(verbose=verbose, log_file=log_file)
     obs, infos = env.reset(seed=seed)
 
-    rhinar_agent = HumanAgent() if rhinar_is_human else RhinarAgent()
-    dorinthea_agent = HumanAgent() if dorinthea_is_human else DorintheiAgent()
+    if agent0 is None:
+        agent0 = HumanAgent() if rhinar_is_human else RhinarAgent()
+    if agent1 is None:
+        agent1 = HumanAgent() if dorinthea_is_human else DorintheiAgent()
+
+    rhinar_agent = agent0
+    dorinthea_agent = agent1
 
     # agent_0 = Rhinar (player 0), agent_1 = Dorinthea (player 1)
     def get_agent(agent_id: str):
@@ -166,21 +192,44 @@ def main():
     parser.add_argument("--seed", type=int, default=None, help="Random seed for single game")
     parser.add_argument("--log", action="store_true", help="Save game log to logs/ directory")
     parser.add_argument(
+        "--agent0",
+        metavar="AGENT",
+        default=None,
+        help=f"Agent for player 0 (Rhinar slot). Choices: {', '.join(_AGENT_CHOICES)}",
+    )
+    parser.add_argument(
+        "--agent1",
+        metavar="AGENT",
+        default=None,
+        help=f"Agent for player 1 (Dorinthea slot). Choices: {', '.join(_AGENT_CHOICES)}",
+    )
+    parser.add_argument(
         "--human",
         metavar="HERO",
         default=None,
         help=(
             "Make one or both heroes human-controlled (interactive stdin). "
-            "Values: rhinar (or 0/agent_0), dorinthea (or 1/agent_1), both"
+            "Values: rhinar (or 0/agent_0), dorinthea (or 1/agent_1), both. "
+            "Overridden by --agent0/--agent1 when both are specified."
         ),
     )
     args = parser.parse_args()
 
     rhinar_is_human, dorinthea_is_human = _resolve_human_flags(args.human)
 
+    agent0 = _make_agent(args.agent0) if args.agent0 else None
+    agent1 = _make_agent(args.agent1) if args.agent1 else None
+
+    any_human = (
+        (agent0 is not None and isinstance(agent0, HumanAgent))
+        or (agent1 is not None and isinstance(agent1, HumanAgent))
+        or rhinar_is_human
+        or dorinthea_is_human
+    )
+
     if args.sim > 0:
-        if rhinar_is_human or dorinthea_is_human:
-            parser.error("--sim cannot be used together with --human")
+        if any_human:
+            parser.error("--sim cannot be used together with a human agent")
         run_simulation(args.sim)
     else:
         winner = run_game(
@@ -189,6 +238,8 @@ def main():
             save_log=args.log,
             rhinar_is_human=rhinar_is_human,
             dorinthea_is_human=dorinthea_is_human,
+            agent0=agent0,
+            agent1=agent1,
         )
         if args.quiet:
             if winner:

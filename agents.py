@@ -11,6 +11,7 @@ HumanAgent prompts a human player via stdin for each decision.
 """
 
 from __future__ import annotations
+import random as _random_module
 from typing import List, Optional, TYPE_CHECKING
 
 from actions import Action, ActionType
@@ -396,6 +397,45 @@ class DorintheiAgent:
 
     def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
         return legal[0]
+
+
+# ──────────────────────────────────────────────────────────────
+# Random agent (hero-agnostic, isolated RNG)
+# ──────────────────────────────────────────────────────────────
+
+class RandomAgent:
+    """
+    Selects uniformly at random from legal actions for every decision.
+
+    Uses a private random.Random instance so its choices never disturb the
+    game-state RNG (deck shuffles, coin flips, etc.).
+    """
+
+    def __init__(self, seed: Optional[int] = None):
+        self._rng = _random_module.Random(seed)
+
+    def select_action(self, obs: dict, legal: List[Action], player: 'Player',
+                      opponent: 'Player') -> Action:
+        return self._rng.choice(legal)
+
+    def select_defend(self, obs: dict, legal: List[Action], player: 'Player',
+                      attack_power: int, already_defense: int = 0) -> Action:
+        return self._rng.choice(legal)
+
+    def select_arsenal(self, obs: dict, legal: List[Action],
+                       player: 'Player') -> Action:
+        return self._rng.choice(legal)
+
+    def select_pitch(self, obs: dict, legal: List[Action], player: 'Player',
+                     pending_card=None) -> Action:
+        return self._rng.choice(legal)
+
+    def select_instant(self, obs: dict, legal: List[Action], player: 'Player',
+                       attack_power: int = 0) -> Action:
+        return self._rng.choice(legal)
+
+    def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
+        return self._rng.choice(legal)
 
 
 # ──────────────────────────────────────────────────────────────
