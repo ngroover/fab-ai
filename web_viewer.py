@@ -2,10 +2,15 @@
 web_viewer.py — Mobile-friendly web UI for viewing FaB game logs.
 
 Usage:
-  python web_viewer.py             # serves on http://0.0.0.0:5000
-  python web_viewer.py --port 8080 # custom port
+  python web_viewer.py                                      # http on port 5000
+  python web_viewer.py --port 8080                          # custom port
+  python web_viewer.py --ssl-cert cert.pem --ssl-key key.pem  # HTTPS
 
-Open http://<your-machine-ip>:5000 on your phone to browse logs.
+Generate a self-signed cert (dev only):
+  openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes \
+    -subj "/CN=localhost"
+
+Open https://<your-machine-ip>:5000 on your phone to browse logs.
 Generate logs with:  python run_env.py --log
 """
 
@@ -2196,12 +2201,26 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="FaB Game Log Web Viewer")
     parser.add_argument("--port", type=int, default=5000, help="Port to listen on (default: 5000)")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
+    parser.add_argument("--ssl-cert", metavar="CERT", help="Path to SSL certificate file (PEM) to enable HTTPS")
+    parser.add_argument("--ssl-key", metavar="KEY", help="Path to SSL private key file (PEM) to enable HTTPS")
     args = parser.parse_args()
 
+    ssl_context = None
+    if args.ssl_cert or args.ssl_key:
+        if not args.ssl_cert or not args.ssl_key:
+            parser.error("--ssl-cert and --ssl-key must both be provided to enable HTTPS")
+        import ssl as _ssl
+        ssl_context = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
+        ssl_context.load_cert_chain(certfile=args.ssl_cert, keyfile=args.ssl_key)
+
+    scheme = "https" if ssl_context else "http"
     print(f"\n  FaB Game Log Viewer")
     print(f"  ───────────────────")
     print(f"  Serving logs from: {LOGS_DIR}")
-    print(f"  Open on your phone: http://<your-ip>:{args.port}")
-    print(f"  Local:              http://localhost:{args.port}\n")
+    print(f"  Open on your phone: {scheme}://<your-ip>:{args.port}")
+    print(f"  Local:              {scheme}://localhost:{args.port}")
+    if ssl_context:
+        print(f"  SSL:                enabled")
+    print()
 
-    app.run(host=args.host, port=args.port, debug=False)
+    app.run(host=args.host, port=args.port, debug=False, ssl_context=ssl_context)
