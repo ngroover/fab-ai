@@ -2209,9 +2209,7 @@ if __name__ == "__main__":
     if args.ssl_cert or args.ssl_key:
         if not args.ssl_cert or not args.ssl_key:
             parser.error("--ssl-cert and --ssl-key must both be provided to enable HTTPS")
-        import ssl as _ssl
-        ssl_context = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
-        ssl_context.load_cert_chain(certfile=args.ssl_cert, keyfile=args.ssl_key)
+        ssl_context = (args.ssl_cert, args.ssl_key)
 
     scheme = "https" if ssl_context else "http"
     print(f"\n  FaB Game Log Viewer")
