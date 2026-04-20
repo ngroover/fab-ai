@@ -1118,6 +1118,9 @@ class FaBEnv:
             elif effect.action == EffectAction.WEAPON_ATTACK_POWER_BONUS:
                 active.next_weapon_power_bonus += effect.magnitude
                 self._log(f"    ⚡ {card.name} — weapon has already swung, next attack gains +{effect.magnitude} power.")
+            elif effect.action == EffectAction.WEAPON_ATTACK_BONUS_PER_SWING:
+                active.slice_and_dice_active = True
+                self._log(f"    ⚡ {card.name} — first weapon attack +1, second weapon attack +2 power this turn.")
             elif effect.action in (EffectAction.DRAW_DISCARD_GO_AGAIN,
                                    EffectAction.DRAW_DISCARD_POWER_BONUS,
                                    EffectAction.DRAW_DISCARD_INTIMIDATE):
@@ -1237,10 +1240,6 @@ class FaBEnv:
         elif n == "Glistening Steelblade":
             active.next_weapon_go_again = True
             self._log(f"    ✨ Glistening Steelblade — next Dawnblade has go again + counter on hit.")
-
-        elif n == "Slice and Dice":
-            active.next_weapon_power_bonus += 1
-            self._log(f"    ⚡ Slice and Dice — weapon attacks get +1/+2 power this turn.")
 
         elif n == "Visit the Blacksmith":
             active.next_weapon_power_bonus += 1

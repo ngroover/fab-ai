@@ -433,7 +433,9 @@ def build_dorinthea_deck() -> List[Card]:
         cards.append(Card("Slice and Dice", CardType.ACTION, cost=0, pitch=2,
                            power=0, defense=3, color=Color.YELLOW, go_again=True,
                            card_class=CardClass.WARRIOR,
-                           text="The first time you attack with a weapon this turn, if it's a sword or dagger it gains +1 power.  The second time you attack with a weapon this turn if it's a sword or dagger it gains +2 power.  Go again."))
+                           text="The first time you attack with a weapon this turn, if it's a sword or dagger it gains +1 power.  The second time you attack with a weapon this turn if it's a sword or dagger it gains +2 power.  Go again.",
+                           effects=[CardEffect(trigger=EffectTrigger.ON_PLAY,
+                                               action=EffectAction.WEAPON_ATTACK_BONUS_PER_SWING)]))
 
     # ── BLUE (Pitch 3) — 12 cards ──
 

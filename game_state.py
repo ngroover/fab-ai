@@ -77,6 +77,7 @@ class Player:
         self.weapon_attack_count = 0      # for In the Swing / Slice and Dice
         self.next_weapon_go_again = False  # from On a Knife Edge, Blade Flash, etc.
         self.next_weapon_power_bonus = 0   # from En Garde, Sharpen Steel, etc.
+        self.slice_and_dice_active = False # from Slice and Dice: +1 1st weapon, +2 2nd weapon
         self.next_attack_go_again = False  # from Come to Fight
         self.next_brute_attack_bonus = 0   # from Beast Mode / Barraging Beatdown setup
         self.attacks_this_turn = 0
@@ -131,6 +132,7 @@ class Player:
         self.weapon_attack_count = 0
         self.next_weapon_go_again = False
         self.next_weapon_power_bonus = 0
+        self.slice_and_dice_active = False
         self.next_attack_go_again = False
         self.next_brute_attack_bonus = 0
         self.attacks_this_turn = 0
@@ -150,7 +152,13 @@ class Player:
         base = self.weapon.power if self.weapon else 0
         if self.weapon and "Dawnblade" in self.weapon.name and self.weapon_attack_count >= 1:
             base += 1  # second attack gains +1 power until end of turn
-        return base + self.next_weapon_power_bonus
+        bonus = self.next_weapon_power_bonus
+        if self.slice_and_dice_active:
+            if self.weapon_attack_count == 0:
+                bonus += 1
+            elif self.weapon_attack_count == 1:
+                bonus += 2
+        return base + bonus
 
 
 class GameState:
