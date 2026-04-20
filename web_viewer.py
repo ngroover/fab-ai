@@ -1394,6 +1394,9 @@ class _WebHumanAgent:
     def select_instant(self, obs, legal, player, attack_power=0):
         return self._pend(legal, player, "INSTANT", attack_power)
 
+    def select_reaction(self, obs, legal, player, attack_power=0):
+        return self._pend(legal, player, "REACTION", attack_power)
+
     def select_choose_first(self, legal, player):
         return self._pend(legal, player, "CHOOSE_FIRST")
 
@@ -1590,6 +1593,9 @@ class _GameSession:
                 ap = (env._pending_attack_power
                       if env._pending_attack is not None else 0)
                 action = agent.select_instant(obs[agent_id], legal, player, ap)
+            elif env._phase == Phase.REACTION:
+                action = agent.select_reaction(obs[agent_id], legal, player,
+                                               env._pending_attack_power)
             elif env._phase == Phase.ARSENAL:
                 action = agent.select_arsenal(obs[agent_id], legal, player)
             elif env._phase == Phase.PITCH:
