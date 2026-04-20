@@ -696,7 +696,6 @@ class FaBEnv:
         self._phase = Phase.INSTANT
         self.agent_selection = f"agent_{self._instant_priority_idx}"
         priority_name = self._game.players[self._instant_priority_idx].name
-        self._log(f"    ⏸  Instant window opens (priority: {priority_name}).")
 
     def _exit_instant_phase(self) -> None:
         """Close the instant window and return to the phase that opened it.
@@ -712,7 +711,6 @@ class FaBEnv:
         return_agent_idx = self._instant_return_agent_idx
         self._instant_return_phase = None
         self._instant_passes = 0
-        self._log(f"    ▶  Instant window closes.")
 
         if return_phase == Phase.DEFEND and self._pending_attack is not None:
             attacker = self._game.active
