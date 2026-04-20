@@ -27,17 +27,19 @@ from typing import Optional, Callable, Any, Dict
 
 class EffectTrigger(Enum):
     """Events that can activate a card effect."""
-    ON_DISCARD = auto()   # a card is discarded from hand during the action phase
-    ON_ATTACK  = auto()   # fired when an attack card is declared (before defend step)
-    ON_PLAY    = auto()   # fired when a non-attack action card is played
+    ON_DISCARD         = auto()   # a card is discarded from hand during the action phase
+    ON_ATTACK          = auto()   # fired when an attack card is declared (before defend step)
+    ON_PLAY            = auto()   # fired when a non-attack action card is played
+    ON_ATTACK_REACTION = auto()   # fired when this card resolves as an attack reaction
 
 
 class EffectAction(Enum):
     """Actions executed when a matching effect fires."""
-    INTIMIDATE             = auto()   # opponent banishes a random card from hand until end of turn
-    DRAW_DISCARD_GO_AGAIN  = auto()   # draw a card, discard random; if 6+ power discarded → go again
-    DRAW_DISCARD_POWER_BONUS = auto() # draw a card, discard random; if 6+ power discarded → +2 power
-    DRAW_DISCARD_INTIMIDATE  = auto() # draw a card, discard random; if 6+ power discarded → intimidate
+    INTIMIDATE               = auto()   # opponent banishes a random card from hand until end of turn
+    DRAW_DISCARD_GO_AGAIN    = auto()   # draw a card, discard random; if 6+ power discarded → go again
+    DRAW_DISCARD_POWER_BONUS = auto()   # draw a card, discard random; if 6+ power discarded → +2 power
+    DRAW_DISCARD_INTIMIDATE  = auto()   # draw a card, discard random; if 6+ power discarded → intimidate
+    ATTACK_POWER_BOOST       = auto()   # target attack gains +magnitude power (see CardEffect.magnitude)
 
 
 @dataclass
@@ -50,6 +52,8 @@ class CardEffect:
         The event that causes this effect to fire.
     action:
         What happens when it fires.
+    magnitude:
+        Numeric parameter used by actions such as ATTACK_POWER_BOOST.
     condition:
         Optional callable that receives the event context dict and returns
         True if the effect should fire.  When absent, the effect fires on
@@ -58,6 +62,7 @@ class CardEffect:
 
     trigger: EffectTrigger
     action: EffectAction
+    magnitude: int = 0
     condition: Optional[Callable[[Dict[str, Any]], bool]] = field(
         default=None, compare=False
     )
