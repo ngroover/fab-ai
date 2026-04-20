@@ -138,8 +138,10 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
         return [Action(ActionType.PASS)]
 
     # ── Arsenal card ──
-    if player.arsenal and player.arsenal.card_type not in (
-        __import__('cards').CardType.MENTOR,
+    if player.arsenal and player.arsenal.card_type in (
+        __import__('cards').CardType.ACTION_ATTACK,
+        __import__('cards').CardType.INSTANT,
+        __import__('cards').CardType.ACTION,
     ):
         card = player.arsenal
         needed = max(0, card.cost - player.resource_points)
