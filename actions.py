@@ -302,7 +302,11 @@ def legal_reaction_actions(player: 'Player', attacker_idx: int,
     is_attacker = priority_idx == attacker_idx
     seen: set = set()
 
-    for card in player.hand:
+    candidates = list(player.hand)
+    if player.arsenal is not None:
+        candidates.append(player.arsenal)
+
+    for card in candidates:
         if card.name in seen:
             continue
 
@@ -316,14 +320,15 @@ def legal_reaction_actions(player: 'Player', attacker_idx: int,
             continue
 
         seen.add(card.name)
+        from_arsenal = card is player.arsenal
         needed = max(0, card.cost - player.resource_points)
         if needed == 0:
-            actions.append(Action(ActionType.PLAY_CARD, card=card))
+            actions.append(Action(ActionType.PLAY_CARD, card=card, from_arsenal=from_arsenal))
         else:
             pitchable_total = sum(c.pitch for c in player.hand
                                   if c is not card and c.pitch > 0)
             if pitchable_total >= needed:
-                actions.append(Action(ActionType.PLAY_CARD, card=card))
+                actions.append(Action(ActionType.PLAY_CARD, card=card, from_arsenal=from_arsenal))
 
     return actions
 
