@@ -606,8 +606,8 @@ class FaBEnv:
         if go:
             attacker.action_points += 1
             self._log(f"    ↩  Go again! {attacker.name} gains 1 action point.")
-            if is_weapon and not attacker.weapon_additional_attack:
-                # Dawnblade: go again grants exactly one additional attack this turn
+            if is_weapon and not attacker.weapon_additional_attack and attacker.weapon_attack_count == 1:
+                # Only the first weapon attack's go-again grants an additional attack slot
                 attacker.weapon_additional_attack = True
 
         # Mentor check for Rhinar
