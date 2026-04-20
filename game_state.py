@@ -117,11 +117,12 @@ class Player:
     def take_damage(self, amount: int, source_name: str = ""):
         if amount <= 0:
             return
+        old_life = self.life
         self.life -= amount
         if source_name:
-            print(f"  💥 {self.name} takes {amount} damage from {source_name}! (Life: {self.life})")
+            print(f"  💥 {self.name} takes {amount} damage from {source_name}! (Life: {old_life} → {self.life})")
         else:
-            print(f"  💥 {self.name} takes {amount} damage! (Life: {self.life})")
+            print(f"  💥 {self.name} takes {amount} damage! (Life: {old_life} → {self.life})")
 
     def is_dead(self) -> bool:
         return self.life <= 0
