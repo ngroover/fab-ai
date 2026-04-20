@@ -972,7 +972,9 @@ class FaBEnv:
 
         if action.action_type == ActionType.PLAY_CARD:
             card = action.card
-            if card is None or card not in active.hand:
+            in_hand = card is not None and card in active.hand
+            in_arsenal = card is not None and card is active.arsenal
+            if not in_hand and not in_arsenal:
                 self._log(f"  ⚠  Invalid reaction card; passing priority.")
                 self._reaction_passes += 1
                 self._reaction_priority_idx = 1 - self._reaction_priority_idx
@@ -994,7 +996,10 @@ class FaBEnv:
                 self.agent_selection = f"agent_{self._reaction_priority_idx}"
                 return
 
-            active.hand.remove(card)
+            if in_arsenal:
+                active.arsenal = None
+            else:
+                active.hand.remove(card)
             needed = max(0, card.cost - active.resource_points)
             if needed > 0:
                 self._pending_play_card = card
