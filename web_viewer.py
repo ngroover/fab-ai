@@ -409,10 +409,10 @@ def _render_log(text: str) -> str:
             cls = "wins-line"
         elif "TURN" in raw and "══" not in raw:
             cls = "turn-header"
-        elif "♥" in raw or "Life:" in raw:
-            cls = "life-line"
         elif "takes" in raw and "damage" in raw:
             cls = "damage-line"
+        elif "♥" in raw or "Life:" in raw:
+            cls = "life-line"
         elif "⚔" in raw or "attacks" in raw:
             cls = "attack-line"
         elif "🛡" in raw or "defends" in raw or "blocks" in raw:
@@ -1942,8 +1942,8 @@ PLAY_TEMPLATE = """
       if (line.includes('══') || line.includes('★★')) return 'game-over';
       if (line.includes('WINS!'))                       return 'wins-line';
       if (line.includes('TURN ') && !line.includes('══')) return 'turn-header';
-      if (line.includes('Life:'))                       return 'life-line';
       if (line.includes('takes') && line.includes('damage')) return 'damage-line';
+      if (line.includes('Life:'))                       return 'life-line';
       if (line.includes('attacks with') || line.includes('⚔')) return 'attack-line';
       if (line.includes('defends') || line.includes('blocks') || line.includes('🛡')) return 'defend-line';
       if (line.includes('Go again') || line.includes('go again') || line.includes('↩')) return 'go-again-line';

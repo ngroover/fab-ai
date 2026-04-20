@@ -569,7 +569,8 @@ class FaBEnv:
         damage = max(0, power - total_def)
         hit = damage > 0
         if hit:
-            defender.take_damage(damage, card.name)
+            _, old_life, new_life = defender.take_damage(damage, card.name)
+            self._log(f"    💥  {defender.name} takes {damage} damage from {card.name}! (Life: {old_life} → {new_life})")
             # Small shaping reward: damaging opponent
             atk_agent = f"agent_{self._game.active_player_idx}"
             self._rewards[atk_agent] += damage * 0.01

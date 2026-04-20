@@ -114,15 +114,12 @@ class Player:
     def gain_life(self, amount: int):
         self.life = min(self.life + amount, 40)  # cap at starting life in Blitz
 
-    def take_damage(self, amount: int, source_name: str = ""):
+    def take_damage(self, amount: int, source_name: str = "") -> tuple:
         if amount <= 0:
-            return
+            return (0, self.life, self.life)
         old_life = self.life
         self.life -= amount
-        if source_name:
-            print(f"  💥 {self.name} takes {amount} damage from {source_name}! (Life: {old_life} → {self.life})")
-        else:
-            print(f"  💥 {self.name} takes {amount} damage! (Life: {old_life} → {self.life})")
+        return (amount, old_life, self.life)
 
     def is_dead(self) -> bool:
         return self.life <= 0
