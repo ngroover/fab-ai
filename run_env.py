@@ -123,6 +123,10 @@ def run_game(
             attack_power = env._pending_attack_power
             already_defense = env._pending_defend_total
             action = agent.select_defend(obs[agent_id], legal, player, attack_power, already_defense)
+        elif env._phase == Phase.REACTION:
+            ap = env._pending_attack_power
+            is_attacker = player_idx == env._reaction_attacker_idx
+            action = agent.select_reaction(obs[agent_id], legal, player, ap, is_attacker)
         elif env._phase == Phase.INSTANT:
             ap = (env._pending_attack_power
                   if env._pending_attack is not None else 0)

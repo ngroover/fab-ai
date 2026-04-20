@@ -286,6 +286,48 @@ def legal_choose_first_actions() -> List[Action]:
     return [Action(ActionType.GO_FIRST), Action(ActionType.GO_SECOND)]
 
 
+def legal_reaction_actions(player: 'Player', attacker_idx: int,
+                           priority_idx: int) -> List[Action]:
+    """
+    Legal actions during the reaction phase (between defender committing blocks
+    and combat damage resolution).
+
+    Attacker may play ATTACK_REACTION or INSTANT cards.
+    Defender may play DEFENSE_REACTION or INSTANT cards.
+    Either player may always pass priority.
+    """
+    from cards import CardType
+
+    actions: List[Action] = [Action(ActionType.PASS_PRIORITY)]
+    is_attacker = priority_idx == attacker_idx
+    seen: set = set()
+
+    for card in player.hand:
+        if card.name in seen:
+            continue
+
+        if card.card_type == CardType.INSTANT:
+            pass  # either player may play instants
+        elif card.card_type == CardType.ATTACK_REACTION and is_attacker:
+            pass
+        elif card.card_type == CardType.DEFENSE_REACTION and not is_attacker:
+            pass
+        else:
+            continue
+
+        seen.add(card.name)
+        needed = max(0, card.cost - player.resource_points)
+        if needed == 0:
+            actions.append(Action(ActionType.PLAY_CARD, card=card))
+        else:
+            pitchable_total = sum(c.pitch for c in player.hand
+                                  if c is not card and c.pitch > 0)
+            if pitchable_total >= needed:
+                actions.append(Action(ActionType.PLAY_CARD, card=card))
+
+    return actions
+
+
 def legal_instant_actions(player: 'Player') -> List[Action]:
     """
     Legal actions during an INSTANT window. Either player may play an instant

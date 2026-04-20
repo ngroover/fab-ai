@@ -38,7 +38,7 @@ from actions import (
     Action, ActionType,
     legal_attack_actions, legal_pitch_actions,
     legal_defend_actions, legal_arsenal_actions, legal_choose_first_actions,
-    legal_instant_actions,
+    legal_instant_actions, legal_reaction_actions,
 )
 from observations import build_observation, PLAYER_OBS_SIZE, CARD_FEATURES
 from spaces import Discrete, Box, Dict as DictSpace
@@ -54,6 +54,7 @@ class Phase(Enum):
     ATTACK       = auto()
     PITCH        = auto()   # second step of playing a card: choose which cards to pitch
     DEFEND       = auto()
+    REACTION     = auto()   # after defender commits blocks: attacker plays attack reactions, then defender plays defense reactions
     INSTANT      = auto()   # either player may play instants onto a stack; LIFO resolution
     ARSENAL      = auto()
     END          = auto()
@@ -130,6 +131,14 @@ class FaBEnv:
         self._instant_passes: int = 0                     # consecutive passes since last stack change
         self._instant_return_phase: Optional[Phase] = None
         self._instant_return_agent_idx: int = 0
+        # Reaction phase bookkeeping — only meaningful in Phase.REACTION
+        self._reaction_priority_idx: int = 0
+        self._reaction_passes: int = 0
+        self._reaction_attacker_idx: int = 0
+        self._reaction_defense_bonus: int = 0             # defense from resolved defense reactions
+        self._committed_defend_action: Optional[Action] = None
+        self._pending_reaction_play: bool = False         # True when PITCH phase is paying for a reaction card
+        self._pending_reaction_player_idx: int = 0
         # Isolated RNG — seeded in reset() so game randomness is never shared with external code.
         self._rng: random.Random = random.Random()
 
@@ -193,6 +202,14 @@ class FaBEnv:
         self._instant_return_agent_idx = 0
         self._pending_instant_play = False
         self._pending_instant_player_idx = 0
+        # Reset reaction-phase bookkeeping
+        self._reaction_priority_idx = 0
+        self._reaction_passes = 0
+        self._reaction_attacker_idx = 0
+        self._reaction_defense_bonus = 0
+        self._committed_defend_action = None
+        self._pending_reaction_play = False
+        self._pending_reaction_player_idx = 0
 
         # Randomly select which player gets to choose who goes first
         self._choosing_player_idx = self._rng.randint(0, 1)
@@ -236,6 +253,8 @@ class FaBEnv:
             self._handle_pitch_action(action, active, opponent)
         elif self._phase == Phase.DEFEND:
             self._handle_defend_action(action, active, opponent)
+        elif self._phase == Phase.REACTION:
+            self._handle_reaction_action(action, active, opponent)
         elif self._phase == Phase.INSTANT:
             self._handle_instant_action(action, active, opponent)
         elif self._phase == Phase.ARSENAL:
@@ -264,6 +283,8 @@ class FaBEnv:
                 self._handle_pitch_action(auto_action, auto_active, auto_opponent)
             elif self._phase == Phase.DEFEND:
                 self._handle_defend_action(auto_action, auto_active, auto_opponent)
+            elif self._phase == Phase.REACTION:
+                self._handle_reaction_action(auto_action, auto_active, auto_opponent)
             elif self._phase == Phase.INSTANT:
                 self._handle_instant_action(auto_action, auto_active, auto_opponent)
             elif self._phase == Phase.ARSENAL:
@@ -298,6 +319,9 @@ class FaBEnv:
             return legal_defend_actions(active, self._pending_attack_power,
                                         self._pending_defend_indices,
                                         self._pending_defend_equip_slots)
+        elif self._phase == Phase.REACTION:
+            return legal_reaction_actions(active, self._reaction_attacker_idx,
+                                          self._reaction_priority_idx)
         elif self._phase == Phase.INSTANT:
             return legal_instant_actions(active)
         elif self._phase == Phase.ARSENAL:
@@ -417,6 +441,18 @@ class FaBEnv:
             self._push_instant_to_stack(card, owner_idx)
             return
 
+        if self._pending_reaction_play:
+            # Card played during REACTION window — push to stack and return to REACTION.
+            self._pending_reaction_play = False
+            owner_idx = self._pending_reaction_player_idx
+            active.resource_points -= card.cost
+            self._log(f"\n    ▶  {active.name} plays {card}"
+                      + (f" (pitched: {', '.join(c.name for c in pitched)})"
+                         if pitched else ""))
+            self._phase = Phase.REACTION
+            self._push_reaction_to_stack(card, owner_idx)
+            return
+
         self._phase = Phase.ATTACK
 
         if self._pending_weapon_attack:
@@ -479,16 +515,20 @@ class FaBEnv:
             self._pending_defend_equip_slots.extend(action.defend_equip_slots)
             return  # defender picks again next step
 
-        # Done — resolve with everything accumulated so far
+        # Done — commit blocks and open the reaction window before resolving combat
         full_action = Action(ActionType.DEFEND,
                              defend_hand_indices=list(self._pending_defend_indices),
                              defend_equip_slots=list(self._pending_defend_equip_slots))
         self._pending_defend_indices = []
         self._pending_defend_equip_slots = []
-        self._resolve_defend(full_action, defender, attacker)
+        self._committed_defend_action = full_action
+        attacker_idx = self._game.active_player_idx
+        defender_idx = 1 - attacker_idx
+        self._enter_reaction_phase(attacker_idx, defender_idx)
 
-    def _resolve_defend(self, action: Action, defender: Player, attacker: Player):
-        """Resolve the defend step once all blocking cards have been chosen."""
+    def _resolve_defend(self, action: Action, defender: Player, attacker: Player,
+                        reaction_defense_bonus: int = 0):
+        """Resolve the defend step once all blocking cards and reactions have been resolved."""
         card = self._pending_attack
         is_weapon = self._pending_is_weapon
 
@@ -505,20 +545,23 @@ class FaBEnv:
             if c in defender.hand:
                 defender.hand.remove(c)
 
-        # Compute power — use the value already set by _trigger_defend_phase
-        # (which includes any "when this attacks" bonuses, e.g. Bare Fangs +2)
+        # Use the power stored when the attack was declared. It already includes
+        # weapon bonuses (set by _trigger_defend_phase) and any modifications from
+        # reaction cards (e.g. Thrust +3, Out for Blood +2).
+        power = self._pending_attack_power
         if is_weapon:
-            power = attacker.get_effective_weapon_power()
             attacker.next_weapon_power_bonus = 0
         else:
-            power = self._pending_attack_power
             attacker.next_brute_attack_bonus = 0
 
-        total_def = sum(c.defense for c in def_cards) + sum(e.defense for e in def_equip)
+        total_def = (sum(c.defense for c in def_cards) + sum(e.defense for e in def_equip)
+                     + reaction_defense_bonus)
 
-        if def_cards or def_equip:
+        if def_cards or def_equip or reaction_defense_bonus:
             names = [c.name for c in def_cards] + [e.card.name for e in def_equip]
-            self._log(f"    🛡  {defender.name} defends: {', '.join(names)} (def: {total_def})")
+            bonus_str = f" +{reaction_defense_bonus} from reactions" if reaction_defense_bonus else ""
+            self._log(f"    🛡  {defender.name} defends: {', '.join(names) if names else '(none)'} "
+                      f"(def: {total_def}{bonus_str})")
         else:
             self._log(f"    🛡  {defender.name} does not defend.")
 
@@ -788,6 +831,185 @@ class FaBEnv:
         self._instant_passes += 1
         self._instant_priority_idx = 1 - self._instant_priority_idx
         self.agent_selection = f"agent_{self._instant_priority_idx}"
+
+    # ──────────────────────────────────────────────────────────
+    # Internal: reaction-phase handling
+    # ──────────────────────────────────────────────────────────
+
+    def _enter_reaction_phase(self, attacker_idx: int, defender_idx: int) -> None:
+        """Open the reaction window after the defender commits blocks.
+
+        Attacker gets priority first and may play ATTACK_REACTION or INSTANT cards.
+        When the attacker passes, priority shifts to the defender who may play
+        DEFENSE_REACTION or INSTANT cards. When both players pass consecutively
+        with an empty stack, combat resolves. Cards on the stack resolve LIFO,
+        just like the instant window.
+        """
+        self._reaction_attacker_idx = attacker_idx
+        self._reaction_priority_idx = attacker_idx
+        self._reaction_passes = 0
+        self._reaction_defense_bonus = 0
+        self._instant_stack = []  # fresh stack for this reaction window
+        self._phase = Phase.REACTION
+        self.agent_selection = f"agent_{attacker_idx}"
+        attacker_name = self._game.players[attacker_idx].name
+        self._log(f"    ⚔  Reaction phase opens (priority: {attacker_name}).")
+
+    def _exit_reaction_phase(self) -> None:
+        """Close the reaction window and resolve combat."""
+        self._log(f"    ▶  Reaction phase closes.")
+        attacker_idx = self._reaction_attacker_idx
+        defender_idx = 1 - attacker_idx
+        attacker = self._game.players[attacker_idx]
+        defender = self._game.players[defender_idx]
+        committed = self._committed_defend_action
+        self._committed_defend_action = None
+        self._resolve_defend(committed, defender, attacker,
+                             reaction_defense_bonus=self._reaction_defense_bonus)
+
+    def _push_reaction_to_stack(self, card: "Card", owner_idx: int) -> None:
+        """Place *card* on the reaction stack and pass priority to the opponent."""
+        self._instant_stack.append((owner_idx, card))
+        owner_name = self._game.players[owner_idx].name
+        self._log(f"    📌  {owner_name} puts {card.name} on the stack "
+                  f"(stack size: {len(self._instant_stack)}).")
+        self._reaction_passes = 0
+        self._reaction_priority_idx = 1 - owner_idx
+        self.agent_selection = f"agent_{self._reaction_priority_idx}"
+
+    def _resolve_top_of_reaction_stack(self) -> None:
+        """Pop and resolve the topmost card on the reaction stack (LIFO)."""
+        owner_idx, card = self._instant_stack.pop()
+        owner = self._game.players[owner_idx]
+        opp = self._game.players[1 - owner_idx]
+        self._resolve_reaction_from_stack(card, owner, opp)
+
+    def _resolve_reaction_from_stack(self, card: "Card", owner: "Player",
+                                     opponent: "Player") -> None:
+        """Resolve a card that was on the reaction stack."""
+        if card.card_type == CardType.INSTANT:
+            self._resolve_instant_from_stack(card, owner, opponent)
+            return
+
+        n = card.name
+        if card.card_type == CardType.ATTACK_REACTION:
+            if n == "Thrust":
+                self._pending_attack_power += 3
+                self._log(f"    ⚔  Thrust resolves — target sword attack gains +3 power "
+                          f"({self._pending_attack_power} total).")
+            elif n == "In the Swing":
+                attacker = self._game.players[self._reaction_attacker_idx]
+                if attacker.weapon_attack_count >= 2:
+                    self._pending_attack_power += 3
+                    self._log(f"    ⚔  In the Swing resolves — condition met, +3 power "
+                              f"({self._pending_attack_power} total).")
+                else:
+                    self._log(f"    ⚔  In the Swing resolves — condition not met "
+                              f"(fewer than 2 weapon attacks this turn).")
+            elif n == "Ironsong Response":
+                committed = self._committed_defend_action
+                if committed and committed.defend_hand_indices:
+                    self._pending_attack_power += 3
+                    self._log(f"    ⚔  Ironsong Response resolves — Reprise! +3 power "
+                              f"({self._pending_attack_power} total).")
+                else:
+                    self._log(f"    ⚔  Ironsong Response resolves — Reprise condition not met.")
+            elif n == "Out for Blood":
+                self._pending_attack_power += 2
+                self._log(f"    ⚔  Out for Blood resolves — target weapon attack gains +2 power "
+                          f"({self._pending_attack_power} total).")
+                committed = self._committed_defend_action
+                if committed and committed.defend_hand_indices:
+                    owner.next_attack_go_again = True
+                    self._log(f"    ⚔  Out for Blood Reprise — next attack this turn gains +1 power "
+                              f"(tracked via go_again flag).")
+            elif n in ("Run Through", "Blade Flash"):
+                if self._pending_attack is not None:
+                    self._pending_attack.go_again = True
+                self._log(f"    ⚔  {n} resolves — target sword attack gains go again.")
+                if n == "Run Through":
+                    owner.next_weapon_power_bonus += 2
+                    self._log(f"    ⚔  Run Through — next sword attack this turn gains +2 power.")
+            else:
+                self._log(f"    ⚔  {n} resolves.")
+
+        elif card.card_type == CardType.DEFENSE_REACTION:
+            bonus = card.defense
+            self._reaction_defense_bonus += bonus
+            self._log(f"    🛡  {n} resolves — +{bonus} defense "
+                      f"({self._reaction_defense_bonus} total reaction defense).")
+
+        owner.graveyard.append(card)
+
+    def _handle_reaction_action(self, action: Action, active: Player,
+                                opponent: Player) -> None:
+        """Priority-holder action inside the reaction window."""
+        active_idx = int(self.agent_selection[-1])
+        is_attacker = active_idx == self._reaction_attacker_idx
+
+        if action.action_type == ActionType.PASS_PRIORITY:
+            self._reaction_passes += 1
+            if self._reaction_passes >= 2:
+                if self._instant_stack:
+                    # Both passed with cards on the stack — resolve top.
+                    self._resolve_top_of_reaction_stack()
+                    self._reaction_passes = 0
+                    # After resolution, attacker gets priority back.
+                    self._reaction_priority_idx = self._reaction_attacker_idx
+                    self.agent_selection = f"agent_{self._reaction_priority_idx}"
+                else:
+                    # Both passed with empty stack — resolve combat.
+                    self._exit_reaction_phase()
+            else:
+                self._reaction_priority_idx = 1 - self._reaction_priority_idx
+                self.agent_selection = f"agent_{self._reaction_priority_idx}"
+            return
+
+        if action.action_type == ActionType.PLAY_CARD:
+            card = action.card
+            if card is None or card not in active.hand:
+                self._log(f"  ⚠  Invalid reaction card; passing priority.")
+                self._reaction_passes += 1
+                self._reaction_priority_idx = 1 - self._reaction_priority_idx
+                self.agent_selection = f"agent_{self._reaction_priority_idx}"
+                return
+
+            valid = False
+            if card.card_type == CardType.INSTANT:
+                valid = True
+            elif card.card_type == CardType.ATTACK_REACTION and is_attacker:
+                valid = True
+            elif card.card_type == CardType.DEFENSE_REACTION and not is_attacker:
+                valid = True
+
+            if not valid:
+                self._log(f"  ⚠  {card.name} cannot be played here; passing priority.")
+                self._reaction_passes += 1
+                self._reaction_priority_idx = 1 - self._reaction_priority_idx
+                self.agent_selection = f"agent_{self._reaction_priority_idx}"
+                return
+
+            active.hand.remove(card)
+            needed = max(0, card.cost - active.resource_points)
+            if needed > 0:
+                self._pending_play_card = card
+                self._pitched_this_play = []
+                self._pending_reaction_play = True
+                self._pending_reaction_player_idx = self._reaction_priority_idx
+                self._phase = Phase.PITCH
+                self._log(f"\n    ▶  {active.name} plays {card.name} "
+                          f"(needs {needed} more resource{'s' if needed != 1 else ''})")
+                return
+
+            active.resource_points -= card.cost
+            self._log(f"\n    ▶  {active.name} plays {card.name}")
+            self._push_reaction_to_stack(card, active_idx)
+            return
+
+        # Unknown action — treat as pass.
+        self._reaction_passes += 1
+        self._reaction_priority_idx = 1 - self._reaction_priority_idx
+        self.agent_selection = f"agent_{self._reaction_priority_idx}"
 
     # ──────────────────────────────────────────────────────────
     # Internal: turn management

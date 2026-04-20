@@ -216,6 +216,11 @@ class RhinarAgent:
         """INSTANT phase: Rhinar has no instants to play — always pass priority."""
         return legal[0]  # PASS_PRIORITY
 
+    def select_reaction(self, obs: dict, legal: List[Action], player: 'Player',
+                        attack_power: int = 0, is_attacker: bool = False) -> Action:
+        """REACTION phase: Rhinar has no attack/defense reactions — always pass priority."""
+        return legal[0]  # PASS_PRIORITY
+
     def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
         return legal[0]
 
@@ -395,6 +400,31 @@ class DorintheiAgent:
                     return a
         return legal[0]  # PASS_PRIORITY
 
+    def select_reaction(self, obs: dict, legal: List[Action], player: 'Player',
+                        attack_power: int = 0, is_attacker: bool = False) -> Action:
+        """REACTION phase: as attacker, play attack reactions to boost damage;
+        as defender, play defense reactions to reduce incoming damage."""
+        if is_attacker:
+            # Play attack reactions: Thrust, In the Swing, Ironsong Response, etc.
+            for a in legal:
+                if a.action_type == ActionType.PLAY_CARD and a.card is not None:
+                    if a.card.card_type == CardType.ATTACK_REACTION:
+                        return a
+        else:
+            # Play defense reactions when life is threatened
+            effective_power = attack_power
+            if player.life - effective_power <= 8:
+                for a in legal:
+                    if a.action_type == ActionType.PLAY_CARD and a.card is not None:
+                        if a.card.card_type == CardType.DEFENSE_REACTION:
+                            return a
+        # Play instants of opportunity
+        for a in legal:
+            if a.action_type == ActionType.PLAY_CARD and a.card is not None:
+                if a.card.name == "Sigil of Solace" and player.life <= 6:
+                    return a
+        return legal[0]  # PASS_PRIORITY
+
     def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
         return legal[0]
 
@@ -432,6 +462,10 @@ class RandomAgent:
 
     def select_instant(self, obs: dict, legal: List[Action], player: 'Player',
                        attack_power: int = 0) -> Action:
+        return self._rng.choice(legal)
+
+    def select_reaction(self, obs: dict, legal: List[Action], player: 'Player',
+                        attack_power: int = 0, is_attacker: bool = False) -> Action:
         return self._rng.choice(legal)
 
     def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
@@ -622,6 +656,20 @@ class HumanAgent:
         print(f"  Your life: {player.life} | resources: {player.resource_points}")
         self._show_hand(player)
         return self._choose(legal, player, "Play an instant or pass priority:")
+
+    def select_reaction(self, obs: dict, legal: List[Action], player: 'Player',
+                        attack_power: int = 0, is_attacker: bool = False) -> Action:
+        print(f"\n{'═' * 60}")
+        role = "ATTACKER" if is_attacker else "DEFENDER"
+        print(f"  REACTION PHASE — {player.name} ({role})")
+        print(f"  ⚔ Attack power: {attack_power}")
+        print(f"  Your life: {player.life} | resources: {player.resource_points}")
+        if is_attacker:
+            print(f"  You may play attack reactions or instants.")
+        else:
+            print(f"  You may play defense reactions or instants.")
+        self._show_hand(player)
+        return self._choose(legal, player, "Play a reaction card or pass priority:")
 
     def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
         print(f"\n{'═' * 60}")
