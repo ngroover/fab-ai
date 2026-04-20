@@ -898,6 +898,10 @@ class FaBEnv:
                         self._log(f"    ⚔  {n} resolves — target attack gains "
                                   f"+{effect.magnitude} power "
                                   f"({self._pending_attack_power} total).")
+                    elif effect.action == EffectAction.SWORD_ATTACK_GO_AGAIN:
+                        if self._pending_attack is not None:
+                            self._pending_attack.go_again = True
+                        self._log(f"    ⚔  {n} resolves — target sword attack gains go again.")
             if n == "In the Swing":
                 attacker = self._game.players[self._reaction_attacker_idx]
                 if attacker.weapon_attack_count >= 2:
@@ -924,13 +928,12 @@ class FaBEnv:
                     owner.next_attack_go_again = True
                     self._log(f"    ⚔  Out for Blood Reprise — next attack this turn gains +1 power "
                               f"(tracked via go_again flag).")
-            elif n in ("Run Through", "Blade Flash"):
+            elif n == "Run Through":
                 if self._pending_attack is not None:
                     self._pending_attack.go_again = True
-                self._log(f"    ⚔  {n} resolves — target sword attack gains go again.")
-                if n == "Run Through":
-                    owner.next_weapon_power_bonus += 2
-                    self._log(f"    ⚔  Run Through — next sword attack this turn gains +2 power.")
+                self._log(f"    ⚔  Run Through resolves — target sword attack gains go again.")
+                owner.next_weapon_power_bonus += 2
+                self._log(f"    ⚔  Run Through — next sword attack this turn gains +2 power.")
             else:
                 self._log(f"    ⚔  {n} resolves.")
 

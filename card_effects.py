@@ -40,6 +40,7 @@ class EffectAction(Enum):
     DRAW_DISCARD_POWER_BONUS = auto()   # draw a card, discard random; if 6+ power discarded → +2 power
     DRAW_DISCARD_INTIMIDATE  = auto()   # draw a card, discard random; if 6+ power discarded → intimidate
     ATTACK_POWER_BOOST       = auto()   # target attack gains +magnitude power (see CardEffect.magnitude)
+    SWORD_ATTACK_GO_AGAIN    = auto()   # target sword attack gains go again
 
 
 @dataclass

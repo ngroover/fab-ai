@@ -434,7 +434,9 @@ def build_dorinthea_deck() -> List[Card]:
         cards.append(Card("Blade Flash", CardType.ATTACK_REACTION, cost=1, pitch=3,
                            power=0, defense=2, color=Color.BLUE,
                            card_class=CardClass.WARRIOR,
-                           text="Target sword attack gains go again."))
+                           text="Target sword attack gains go again.",
+                           effects=[CardEffect(EffectTrigger.ON_ATTACK_REACTION,
+                                               EffectAction.SWORD_ATTACK_GO_AGAIN)]))
 
     # Hit and Run x2: cost 0, def 3, warrior action
     for _ in range(2):
