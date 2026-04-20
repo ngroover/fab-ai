@@ -1299,6 +1299,116 @@ class _GameCancelled(Exception):
     pass
 
 
+def _card_to_dict(card):
+    if card is None:
+        return None
+    return {
+        "name": card.name,
+        "type": card.card_type.value,
+        "cost": card.cost,
+        "pitch": card.pitch,
+        "power": card.power,
+        "defense": card.defense,
+        "color": card.color.name.lower() if card.color else None,
+        "go_again": card.go_again,
+        "no_block": card.no_block,
+        "text": card.text,
+    }
+
+
+def _build_gamestate_snapshot(env) -> dict:
+    """Build a per-player gamestate snapshot for the viewer UI.
+
+    Each view exposes the observable zones from that player's perspective:
+    own hand/arsenal/pitch/graveyard/equipment/weapon, opponent's public
+    pitch/graveyard/equipment/weapon plus counts for hidden zones, and the
+    shared combat chain (pending attack + accumulated defenders). Decks are
+    never exposed.
+    """
+    if env is None or env._game is None:
+        return {}
+
+    players = env._game.players
+    active_idx = env._game.active_player_idx
+    defender_idx = 1 - active_idx
+    defender = players[defender_idx]
+
+    pending_defend_cards = []
+    for idx in env._pending_defend_indices:
+        if 0 <= idx < len(defender.hand):
+            pending_defend_cards.append(_card_to_dict(defender.hand[idx]))
+    pending_defend_equip = []
+    for slot in env._pending_defend_equip_slots:
+        eq = defender.equipment.get(slot)
+        if eq is not None:
+            pending_defend_equip.append(_card_to_dict(eq.card))
+
+    def _self_view(p):
+        return {
+            "name": p.name,
+            "hero": p.hero_name,
+            "life": p.life,
+            "intellect": p.intellect,
+            "action_points": p.action_points,
+            "resource_points": p.resource_points,
+            "hand": [_card_to_dict(c) for c in p.hand],
+            "arsenal": _card_to_dict(p.arsenal),
+            "pitch_zone": [_card_to_dict(c) for c in p.pitch_zone],
+            "graveyard": [_card_to_dict(c) for c in p.graveyard],
+            "weapon": _card_to_dict(p.weapon),
+            "equipment": [
+                {"slot": slot, "card": _card_to_dict(eq.card),
+                 "destroyed": eq.destroyed}
+                for slot, eq in p.equipment.items()
+            ],
+            "deck_count": len(p.deck),
+        }
+
+    def _opponent_view(p):
+        return {
+            "name": p.name,
+            "hero": p.hero_name,
+            "life": p.life,
+            "intellect": p.intellect,
+            "action_points": p.action_points,
+            "resource_points": p.resource_points,
+            "hand_count": len(p.hand),
+            "arsenal_present": p.arsenal is not None,
+            "pitch_zone": [_card_to_dict(c) for c in p.pitch_zone],
+            "graveyard": [_card_to_dict(c) for c in p.graveyard],
+            "weapon": _card_to_dict(p.weapon),
+            "equipment": [
+                {"slot": slot, "card": _card_to_dict(eq.card),
+                 "destroyed": eq.destroyed}
+                for slot, eq in p.equipment.items()
+            ],
+            "deck_count": len(p.deck),
+        }
+
+    combat_chain = {
+        "attacker_idx": active_idx,
+        "attacker_name": players[active_idx].name,
+        "defender_name": defender.name,
+        "attack_card": _card_to_dict(env._pending_attack),
+        "attack_power": env._pending_attack_power,
+        "defend_cards": pending_defend_cards,
+        "defend_equipment": pending_defend_equip,
+    }
+
+    return {
+        "p0_view": {
+            "self": _self_view(players[0]),
+            "opponent": _opponent_view(players[1]),
+            "combat_chain": combat_chain,
+        },
+        "p1_view": {
+            "self": _self_view(players[1]),
+            "opponent": _opponent_view(players[0]),
+            "combat_chain": combat_chain,
+        },
+    }
+
+
 class _WebHumanAgent:
     """Drives a human player through the web UI instead of stdin."""
 
@@ -1424,6 +1534,7 @@ class _GameSession:
         self.attack_power = 0
         self.winner = None
         self.player_stats: dict = {}
+        self.gamestate: dict = {}
         self.log_lines: list = []
         self.log_total = 0
         self.p0_is_human = False
@@ -1481,6 +1592,7 @@ class _GameSession:
                 "log_total": self.log_total,
                 "winner": self.winner,
                 "player_stats": dict(self.player_stats),
+                "gamestate": dict(self.gamestate),
                 "p0_is_human": self.p0_is_human,
                 "p1_is_human": self.p1_is_human,
             }
@@ -1524,8 +1636,10 @@ class _GameSession:
                 "life": p.life,
                 "hand_size": len(p.hand),
             }
+        gamestate = _build_gamestate_snapshot(env)
         with self._lock:
             self.player_stats = stats
+            self.gamestate = gamestate
 
     def _run(self, p0_is_human: bool, p1_is_human: bool, seed,
              deck0_id=None, deck1_id=None):
@@ -1700,6 +1814,25 @@ PLAY_TEMPLATE = """
     .turn-label { font-size: 0.65rem; color: #718096; text-transform: uppercase; }
     .phase-label { font-size: 0.78rem; font-weight: 700; color: #f6e05e; }
 
+    /* ── View tabs ───────────────────────────────────── */
+    #view-tabs {
+      display: flex; gap: 6px; padding: 6px 12px 0;
+      background: #0a0e18; border-bottom: 1px solid #2d3748;
+      flex-wrap: wrap;
+    }
+    .view-tab {
+      background: #1a202c; border: 1px solid #2d3748;
+      border-bottom: none; border-radius: 6px 6px 0 0;
+      color: #a0aec0; font-size: 0.78rem;
+      font-family: inherit; padding: 5px 10px;
+      cursor: pointer;
+    }
+    .view-tab:hover { background: #2d3748; color: #e2e8f0; }
+    .view-tab.active {
+      background: #1e3a5f; color: #f6e05e;
+      border-color: #2b6cb0;
+    }
+
     /* ── Log area ────────────────────────────────────── */
     #log-area {
       font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
@@ -1708,6 +1841,73 @@ PLAY_TEMPLATE = """
       background: #0a0e18; border-bottom: 1px solid #2d3748;
       white-space: pre-wrap; word-break: break-word;
     }
+
+    /* ── Gamestate area ──────────────────────────────── */
+    #gamestate-area {
+      padding: 10px 12px; overflow-y: auto; height: 38vh;
+      background: #0a0e18; border-bottom: 1px solid #2d3748;
+      font-size: 0.78rem;
+    }
+    .gs-side {
+      background: #111826; border: 1px solid #2d3748;
+      border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
+    }
+    .gs-side.self { border-color: #3a6a9a; }
+    .gs-side.opp  { border-color: #6a3a3a; }
+    .gs-side h3 {
+      font-size: 0.82rem; font-weight: 700; margin-bottom: 6px;
+      display: flex; align-items: center; gap: 8px;
+      color: #e2e8f0;
+    }
+    .gs-side h3 .tag {
+      font-size: 0.65rem; padding: 1px 6px; border-radius: 4px;
+      background: #2d3748; color: #a0aec0; font-weight: 600;
+    }
+    .gs-side h3 .life { color: #fc8181; font-weight: 800; }
+    .gs-zone {
+      margin-top: 6px;
+    }
+    .gs-zone .label {
+      font-size: 0.68rem; text-transform: uppercase;
+      color: #718096; margin-bottom: 3px; letter-spacing: 0.04em;
+    }
+    .gs-cards {
+      display: flex; flex-wrap: wrap; gap: 4px;
+    }
+    .gs-card {
+      background: #1a202c; border: 1px solid #2d3748;
+      border-radius: 4px; padding: 3px 6px;
+      font-size: 0.72rem; color: #e2e8f0;
+      display: inline-flex; align-items: center; gap: 4px;
+      max-width: 100%;
+    }
+    .gs-card.hidden {
+      background: #2d3748; color: #718096; font-style: italic;
+      border-style: dashed;
+    }
+    .gs-card .pip {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      border: 1px solid #1a202c;
+    }
+    .gs-card .pip.red    { background: #e53e3e; }
+    .gs-card .pip.yellow { background: #f6e05e; }
+    .gs-card .pip.blue   { background: #63b3ed; }
+    .gs-card .stats {
+      color: #a0aec0; font-size: 0.65rem;
+    }
+    .gs-empty { color: #4a5568; font-style: italic; font-size: 0.7rem; }
+    .gs-chain {
+      background: #1a1a2e; border: 1px solid #4a4a7a;
+      border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
+    }
+    .gs-chain h3 {
+      font-size: 0.82rem; font-weight: 700; color: #f6e05e;
+      margin-bottom: 6px;
+    }
+    .gs-chain .subline {
+      font-size: 0.72rem; color: #a0aec0; margin-bottom: 4px;
+    }
+    .gs-chain .incoming { color: #fc8181; font-weight: 700; }
 
     /* ── Action panel ────────────────────────────────── */
     #action-panel { padding: 12px 14px; overflow-y: auto; max-height: calc(100vh - 38vh - 120px); }
@@ -1862,7 +2062,10 @@ PLAY_TEMPLATE = """
       <button class="quit-btn" onclick="quitGame()">✕ Quit &amp; New Game</button>
     </div>
 
+    <div id="view-tabs"></div>
+
     <div id="log-area"></div>
+    <div id="gamestate-area" style="display:none"></div>
 
     <div id="action-panel">
       <div id="status-msg"></div>
@@ -1874,6 +2077,9 @@ PLAY_TEMPLATE = """
     let lastLogTotal = -1;
     let lastActionKey = null;
     let polling = false;
+    let activeView = 'log';     // 'log' | 'p0' | 'p1'
+    let lastViewKey = null;
+    let lastTabKey = null;
 
     // ── Polling ────────────────────────────────────────────────
     async function poll() {
@@ -1895,8 +2101,47 @@ PLAY_TEMPLATE = """
       if (idle) return;
 
       updateStats(s);
+      updateViewTabs(s);
       updateLog(s);
+      updateGamestate(s);
       updatePanel(s);
+    }
+
+    // ── View tabs ──────────────────────────────────────────────
+    function updateViewTabs(s) {
+      const tabs = [{key: 'log', label: '📜 Logs'}];
+      if (s.p0_is_human) {
+        const name = (s.player_stats.agent_0 && s.player_stats.agent_0.name) || 'Player 1';
+        tabs.push({key: 'p0', label: '👁 ' + name + ' view'});
+      }
+      if (s.p1_is_human) {
+        const name = (s.player_stats.agent_1 && s.player_stats.agent_1.name) || 'Player 2';
+        tabs.push({key: 'p1', label: '👁 ' + name + ' view'});
+      }
+
+      const validKeys = tabs.map(t => t.key);
+      if (!validKeys.includes(activeView)) activeView = 'log';
+
+      const tabKey = tabs.map(t => t.key + ':' + t.label).join('|') + '#' + activeView;
+      if (tabKey !== lastTabKey) {
+        lastTabKey = tabKey;
+        const container = document.getElementById('view-tabs');
+        container.innerHTML = tabs.map(t => {
+          const cls = 'view-tab' + (t.key === activeView ? ' active' : '');
+          return `<button class="${cls}" onclick="setView('${t.key}')">${escHtml(t.label)}</button>`;
+        }).join('');
+      }
+
+      const showLog = (activeView === 'log');
+      document.getElementById('log-area').style.display = showLog ? '' : 'none';
+      document.getElementById('gamestate-area').style.display = showLog ? 'none' : '';
+    }
+
+    function setView(k) {
+      activeView = k;
+      lastTabKey = null;     // force tab highlight re-render
+      lastViewKey = null;    // force gamestate re-render
+      poll();
     }
 
     // ── Stats bar ──────────────────────────────────────────────
@@ -1936,6 +2181,121 @@ PLAY_TEMPLATE = """
       }).join('\\n');
 
       if (atBottom) area.scrollTop = area.scrollHeight;
+    }
+
+    // ── Gamestate area ─────────────────────────────────────────
+    function updateGamestate(s) {
+      if (activeView === 'log') return;
+      const viewKey = activeView + ':' + JSON.stringify(s.gamestate || {});
+      if (viewKey === lastViewKey) return;
+      lastViewKey = viewKey;
+
+      const area = document.getElementById('gamestate-area');
+      const gs = s.gamestate || {};
+      const view = (activeView === 'p0') ? gs.p0_view : gs.p1_view;
+      if (!view) {
+        area.innerHTML = '<div class="gs-empty">Gamestate not available yet…</div>';
+        return;
+      }
+      const viewerIdx = (activeView === 'p0') ? 0 : 1;
+      area.innerHTML =
+        renderChain(view.combat_chain, viewerIdx) +
+        renderSelfSide(view.self) +
+        renderOppSide(view.opponent);
+    }
+
+    function renderCard(c) {
+      if (!c) return '';
+      const pip = c.color ? `<span class="pip ${c.color}"></span>` : '';
+      const stats = [];
+      if (c.pitch)   stats.push('pitch ' + c.pitch);
+      if (c.cost)    stats.push('cost ' + c.cost);
+      if (c.power)   stats.push(c.power + 'p');
+      if (c.defense) stats.push(c.defense + 'd');
+      const sub = stats.length ? `<span class="stats">${stats.join(' · ')}</span>` : '';
+      return `<span class="gs-card">${pip}<span>${escHtml(c.name)}</span>${sub}</span>`;
+    }
+
+    function renderCards(arr) {
+      if (!arr || arr.length === 0) return '<span class="gs-empty">— empty —</span>';
+      return `<div class="gs-cards">${arr.map(renderCard).join('')}</div>`;
+    }
+
+    function renderHiddenCards(n) {
+      if (!n) return '<span class="gs-empty">— empty —</span>';
+      const hidden = [];
+      for (let i = 0; i < n; i++) {
+        hidden.push('<span class="gs-card hidden">🂠 hidden</span>');
+      }
+      return `<div class="gs-cards">${hidden.join('')}</div>`;
+    }
+
+    function renderZone(label, inner) {
+      return `<div class="gs-zone"><div class="label">${label}</div>${inner}</div>`;
+    }
+
+    function renderSelfSide(me) {
+      const arsenal = me.arsenal
+        ? renderCard(me.arsenal)
+        : '<span class="gs-empty">— empty —</span>';
+      return `
+        <div class="gs-side self">
+          <h3>
+            <span>${escHtml(me.name)}</span>
+            <span class="tag">YOU</span>
+            <span class="life">❤️ ${me.life}</span>
+          </h3>
+          ${renderZone('Hand (' + me.hand.length + ')', renderCards(me.hand))}
+          ${renderZone('Arsenal', '<div class="gs-cards">' + arsenal + '</div>')}
+          ${renderZone('Pitch zone (' + me.pitch_zone.length + ')', renderCards(me.pitch_zone))}
+          ${renderZone('Graveyard (' + me.graveyard.length + ')', renderCards(me.graveyard))}
+        </div>`;
+    }
+
+    function renderOppSide(op) {
+      const arsenalHtml = op.arsenal_present
+        ? '<div class="gs-cards"><span class="gs-card hidden">🂠 face-down</span></div>'
+        : '<span class="gs-empty">— empty —</span>';
+      return `
+        <div class="gs-side opp">
+          <h3>
+            <span>${escHtml(op.name)}</span>
+            <span class="tag">OPPONENT</span>
+            <span class="life">❤️ ${op.life}</span>
+          </h3>
+          ${renderZone('Hand (' + op.hand_count + ')', renderHiddenCards(op.hand_count))}
+          ${renderZone('Arsenal', arsenalHtml)}
+          ${renderZone('Pitch zone (' + op.pitch_zone.length + ')', renderCards(op.pitch_zone))}
+          ${renderZone('Graveyard (' + op.graveyard.length + ')', renderCards(op.graveyard))}
+        </div>`;
+    }
+
+    function renderChain(ch, viewerIdx) {
+      if (!ch || !ch.attack_card) {
+        return `
+          <div class="gs-chain">
+            <h3>⚔ Combat chain</h3>
+            <div class="subline">No attack currently resolving.</div>
+          </div>`;
+      }
+      const incoming = (ch.attacker_idx !== viewerIdx);
+      const who = incoming
+        ? `<span class="incoming">${escHtml(ch.attacker_name)} attacks you</span>`
+        : `You attack ${escHtml(ch.defender_name)}`;
+      const defenders = (ch.defend_cards && ch.defend_cards.length)
+        ? renderCards(ch.defend_cards)
+        : '<span class="gs-empty">— no blockers committed —</span>';
+      const equip = (ch.defend_equipment && ch.defend_equipment.length)
+        ? renderCards(ch.defend_equipment) : '';
+      return `
+        <div class="gs-chain">
+          <h3>⚔ Combat chain</h3>
+          <div class="subline">${who}</div>
+          ${renderZone('Attack', '<div class="gs-cards">' + renderCard(ch.attack_card) + '</div>')}
+          <div class="subline">Power: <b>${ch.attack_power}</b></div>
+          ${renderZone('Defenders', defenders)}
+          ${equip ? renderZone('Defending equipment', equip) : ''}
+        </div>`;
     }
 
     function classifyLine(line) {
