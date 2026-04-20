@@ -2234,6 +2234,23 @@ PLAY_TEMPLATE = """
       return `<div class="gs-zone"><div class="label">${label}</div>${inner}</div>`;
     }
 
+    function renderEquipment(weapon, equipment) {
+      const items = [];
+      if (weapon) {
+        items.push(`<span class="gs-card">🗡 ${escHtml(weapon.name)}<span class="stats">${weapon.power || 0}p</span></span>`);
+      }
+      (equipment || []).forEach(eq => {
+        if (!eq || !eq.card) return;
+        const destroyedTag = eq.destroyed ? ' <span class="stats">(destroyed)</span>' : '';
+        const cls = 'gs-card' + (eq.destroyed ? ' hidden' : '');
+        const slot = eq.slot ? `<span class="stats">${escHtml(eq.slot)}</span>` : '';
+        const def = eq.card.defense ? `<span class="stats">${eq.card.defense}d</span>` : '';
+        items.push(`<span class="${cls}">🛡 ${escHtml(eq.card.name)}${slot}${def}${destroyedTag}</span>`);
+      });
+      if (items.length === 0) return '<span class="gs-empty">— none —</span>';
+      return `<div class="gs-cards">${items.join('')}</div>`;
+    }
+
     function renderSelfSide(me) {
       const arsenal = me.arsenal
         ? renderCard(me.arsenal)
@@ -2245,6 +2262,7 @@ PLAY_TEMPLATE = """
             <span class="tag">YOU</span>
             <span class="life">❤️ ${me.life}</span>
           </h3>
+          ${renderZone('Equipment', renderEquipment(me.weapon, me.equipment))}
           ${renderZone('Hand (' + me.hand.length + ')', renderCards(me.hand))}
           ${renderZone('Arsenal', '<div class="gs-cards">' + arsenal + '</div>')}
           ${renderZone('Pitch zone (' + me.pitch_zone.length + ')', renderCards(me.pitch_zone))}
@@ -2263,6 +2281,7 @@ PLAY_TEMPLATE = """
             <span class="tag">OPPONENT</span>
             <span class="life">❤️ ${op.life}</span>
           </h3>
+          ${renderZone('Equipment', renderEquipment(op.weapon, op.equipment))}
           ${renderZone('Hand (' + op.hand_count + ')', renderHiddenCards(op.hand_count))}
           ${renderZone('Arsenal', arsenalHtml)}
           ${renderZone('Pitch zone (' + op.pitch_zone.length + ')', renderCards(op.pitch_zone))}
