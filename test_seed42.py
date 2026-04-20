@@ -149,12 +149,6 @@ class TestTurn2(unittest.TestCase):
         dorinthea = self.env._game.players[1]
         self.assertLessEqual(dorinthea.life, 0)
 
-    def test_dawnblade_counters_after_game(self):
-        """Dawnblade counter total at game end."""
-        dorinthea = self.env._game.players[1]
-        self.assertEqual(dorinthea.dawnblade_counters, 0)
-
-
 class TestTurn3(unittest.TestCase):
     """
     Turn 3 — Rhinar plays Wrecking Ball (discards Dodge, power 0, no special effect).
@@ -186,12 +180,6 @@ class TestTurn4(unittest.TestCase):
         # Rhinar wins — Dorinthea ends at ≤0 life
         dorinthea = self.env._game.players[1]
         self.assertLessEqual(dorinthea.life, 0)
-
-    def test_dawnblade_counters_after_game(self):
-        # Dawnblade counter total at game end.
-        dorinthea = self.env._game.players[1]
-        self.assertEqual(dorinthea.dawnblade_counters, 0)
-
 
 class TestFinalState(unittest.TestCase):
     """

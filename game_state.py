@@ -68,8 +68,6 @@ class Player:
 
         self.weapon: Optional[Card] = weapon
         self.weapon_used_this_turn = False
-        # Track +1 power counters on Dawnblade from hits
-        self.dawnblade_counters = 0
 
         # Turn resources
         self.action_points = 0
@@ -152,8 +150,8 @@ class Player:
 
     def get_effective_weapon_power(self) -> int:
         base = self.weapon.power if self.weapon else 0
-        if self.weapon and "Dawnblade" in self.weapon.name:
-            base += self.dawnblade_counters
+        if self.weapon and "Dawnblade" in self.weapon.name and self.weapon_attack_count >= 1:
+            base += 1  # second attack gains +1 power until end of turn
         return base + self.next_weapon_power_bonus
 
 

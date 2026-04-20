@@ -50,7 +50,6 @@ PLAYER_OBS_SIZE = (
     + CARD_FEATURES            # arsenal card (or PAD)
     + 4                        # equipment defense values [head, chest, arms, legs]
     + 1                        # weapon power (effective)
-    + 1                        # dawnblade counters
     + 8                        # turn state flags/values:
                                #   life, action_points, resource_points,
                                #   next_weapon_go_again, next_weapon_power_bonus,
@@ -108,9 +107,6 @@ def encode_player(player: 'Player') -> List[float]:
     # Weapon effective power
     obs.append(player.get_effective_weapon_power() / 10.0)
 
-    # Dawnblade counters
-    obs.append(player.dawnblade_counters / 5.0)
-
     # Turn state
     obs += [
         player.life / 20.0,
@@ -150,9 +146,6 @@ def encode_opponent_public(player: 'Player') -> List[float]:
 
     # Weapon power
     obs.append(player.get_effective_weapon_power() / 10.0)
-
-    # Dawnblade counters
-    obs.append(player.dawnblade_counters / 5.0)
 
     # Turn state (public info only — life, attacks, weapon used)
     obs += [
