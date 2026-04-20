@@ -582,6 +582,7 @@ class FaBEnv:
             if "Battleworn" in eq.card.text and not eq.destroyed:
                 eq.destroyed = True
                 self._log(f"    🔨 {eq.card.name} destroyed (Battleworn).")
+                self._move_equipment_to_graveyard(defender, eq)
 
         # Defending cards to graveyard
         for c in def_cards:
@@ -1148,6 +1149,14 @@ class FaBEnv:
                                 self._log(f"    👁  {card.name} — discarded 6+ power card, intimidate! "
                                           f"{opponent.name} banishes {banished.name}.")
 
+    def _move_equipment_to_graveyard(self, player: Player, eq) -> None:
+        """Remove a destroyed equipment from the equipment zone and put its card in the graveyard."""
+        for s, e in list(player.equipment.items()):
+            if e is eq:
+                del player.equipment[s]
+                break
+        player.graveyard.append(eq.card)
+
     def _resolve_equipment_activation(self, slot: str, active: Player):
         """Resolve an equipment activate ability (no action point cost, then destroy)."""
         eq = active.equipment.get(slot)
@@ -1159,6 +1168,7 @@ class FaBEnv:
             eq.destroyed = True
             self._log(f"\n  ▶  {active.name} activates {name}.")
             self._log(f"    🌸 Blossom of Spring — gain 1 resource. Blossom of Spring is destroyed.")
+            self._move_equipment_to_graveyard(active, eq)
 
     def _resolve_weapon_attack(self, attacker: Player, opponent: Player,
                                pre_pitched: Optional[List[Card]] = None):
