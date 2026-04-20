@@ -1110,6 +1110,9 @@ class FaBEnv:
                     opponent.hand.remove(banished)
                     opponent.banished.append(banished)
                     self._log(f"    👁  Intimidate! {opponent.name} banishes {banished.name}.")
+            elif effect.action == EffectAction.WEAPON_ATTACK_POWER_BONUS:
+                active.next_weapon_power_bonus += effect.magnitude
+                self._log(f"    ⚡ {card.name} — weapon has already swung, next attack gains +{effect.magnitude} power.")
             elif effect.action in (EffectAction.DRAW_DISCARD_GO_AGAIN,
                                    EffectAction.DRAW_DISCARD_POWER_BONUS,
                                    EffectAction.DRAW_DISCARD_INTIMIDATE):
@@ -1230,13 +1233,6 @@ class FaBEnv:
             active.next_weapon_go_again = True
             self._log(f"    ✨ Glistening Steelblade — next Dawnblade has go again + counter on hit.")
 
-        elif n == "Second Swing":
-            if active.weapon_attack_count >= 1:
-                active.next_weapon_power_bonus += 4
-                self._log(f"    ⚡ Second Swing — weapon has already swung, next attack gains +4 power.")
-            else:
-                self._log(f"    ⚡ Second Swing — no prior weapon attack this turn, +4 bonus does not apply.")
-
         elif n == "Slice and Dice":
             active.next_weapon_power_bonus += 1
             self._log(f"    ⚡ Slice and Dice — weapon attacks get +1/+2 power this turn.")
@@ -1254,7 +1250,9 @@ class FaBEnv:
             self._log(f"    💰 Titanium Bauble — gain 1 resource ({active.resource_points} total).")
 
         # Fire ON_PLAY card effects (e.g. intimidate keyword on non-attack actions)
-        self._apply_card_effects(card, EffectTrigger.ON_PLAY, {}, active, opponent)
+        self._apply_card_effects(card, EffectTrigger.ON_PLAY,
+                                 {"weapon_attack_count": active.weapon_attack_count},
+                                 active, opponent)
 
         if card.go_again:
             active.action_points += 1
