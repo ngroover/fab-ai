@@ -356,7 +356,15 @@ def build_dorinthea_deck() -> List[Card]:
         cards.append(Card("Second Swing", CardType.ACTION, cost=1, pitch=1,
                            power=0, defense=3, color=Color.RED, go_again=True,
                            card_class=CardClass.WARRIOR,
-                           text="If you have attacked with a weapon this turn, your next attack this turn gains +4 power. Go again."))
+                           text="If you have attacked with a weapon this turn, your next attack this turn gains +4 power. Go again.",
+                           effects=[
+                               CardEffect(
+                                   trigger=EffectTrigger.ON_PLAY,
+                                   action=EffectAction.WEAPON_ATTACK_POWER_BONUS,
+                                   magnitude=4,
+                                   condition=lambda ctx: ctx.get("weapon_attack_count", 0) >= 1,
+                               )
+                           ]))
 
     # Sharpen Steel x2: cost 0, def 3, action
     for _ in range(2):
