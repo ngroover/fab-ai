@@ -1275,9 +1275,6 @@ class FaBEnv:
 
     def _on_hit(self, card: Card, attacker: Player, defender: Player, is_weapon: bool):
         if is_weapon and "Dawnblade" in card.name:
-            if attacker.weapon_attack_count >= 1:
-                attacker.dawnblade_counters += 1
-                self._log(f"    ✨ Dawnblade hits twice this turn! +1 power counter ({attacker.dawnblade_counters} total).")
             if attacker.mentor_face_up:
                 attacker.action_points += 1
                 self._log(f"    🎓 Hala Goldenhelm! Sword hit — go again + lesson counter.")
