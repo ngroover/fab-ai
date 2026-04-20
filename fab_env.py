@@ -893,11 +893,14 @@ class FaBEnv:
 
         n = card.name
         if card.card_type == CardType.ATTACK_REACTION:
-            if n == "Thrust":
-                self._pending_attack_power += 3
-                self._log(f"    ⚔  Thrust resolves — target sword attack gains +3 power "
-                          f"({self._pending_attack_power} total).")
-            elif n == "In the Swing":
+            for effect in card.effects:
+                if effect.matches(EffectTrigger.ON_ATTACK_REACTION, {}):
+                    if effect.action == EffectAction.ATTACK_POWER_BOOST:
+                        self._pending_attack_power += effect.magnitude
+                        self._log(f"    ⚔  {n} resolves — target attack gains "
+                                  f"+{effect.magnitude} power "
+                                  f"({self._pending_attack_power} total).")
+            if n == "In the Swing":
                 attacker = self._game.players[self._reaction_attacker_idx]
                 if attacker.weapon_attack_count >= 2:
                     self._pending_attack_power += 3

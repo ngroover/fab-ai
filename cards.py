@@ -370,7 +370,12 @@ def build_dorinthea_deck() -> List[Card]:
         cards.append(Card("Thrust", CardType.ATTACK_REACTION, cost=1, pitch=1,
                            power=0, defense=2, color=Color.RED,
                            card_class=CardClass.WARRIOR,
-                           text="Target sword attack gains +3 power."))
+                           text="Target sword attack gains +3 power.",
+                           effects=[CardEffect(
+                               trigger=EffectTrigger.ON_ATTACK_REACTION,
+                               action=EffectAction.ATTACK_POWER_BOOST,
+                               magnitude=3,
+                           )]))
 
     # Warrior's Valor x2: cost 1, def 3, warrior action
     for _ in range(2):
