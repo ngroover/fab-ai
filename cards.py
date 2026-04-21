@@ -369,7 +369,7 @@ def build_dorinthea_deck() -> List[Card]:
     # Sharpen Steel x2: cost 0, def 3, action
     for _ in range(2):
         cards.append(Card("Sharpen Steel", CardType.ACTION, cost=0, pitch=1,
-                           power=0, defense=3, color=Color.RED,
+                           power=0, defense=3, color=Color.RED, go_again=True,
                            card_class=CardClass.WARRIOR,
                            text="Your next weapon attack this turn gains +3 power. Go again."))
 
