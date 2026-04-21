@@ -1355,6 +1355,7 @@ def _build_gamestate_snapshot(env) -> dict:
             "arsenal": _card_to_dict(p.arsenal),
             "pitch_zone": [_card_to_dict(c) for c in p.pitch_zone],
             "graveyard": [_card_to_dict(c) for c in p.graveyard],
+            "banished": [_card_to_dict(c) for c in p.banished],
             "weapon": _card_to_dict(p.weapon),
             "equipment": [
                 {"slot": slot, "card": _card_to_dict(eq.card),
@@ -1376,6 +1377,7 @@ def _build_gamestate_snapshot(env) -> dict:
             "arsenal_present": p.arsenal is not None,
             "pitch_zone": [_card_to_dict(c) for c in p.pitch_zone],
             "graveyard": [_card_to_dict(c) for c in p.graveyard],
+            "banished_count": len(p.banished),
             "weapon": _card_to_dict(p.weapon),
             "equipment": [
                 {"slot": slot, "card": _card_to_dict(eq.card),
@@ -1635,6 +1637,8 @@ class _GameSession:
                 "hero": p.hero_name,
                 "life": p.life,
                 "hand_size": len(p.hand),
+                "action_points": p.action_points,
+                "resource_points": p.resource_points,
             }
         gamestate = _build_gamestate_snapshot(env)
         with self._lock:
@@ -1803,7 +1807,9 @@ PLAY_TEMPLATE = """
     .player-box:last-child { border-right: none; }
     .player-box.active { background: #1e3a5f; }
     .player-name { font-weight: 700; font-size: 0.82rem; color: #e2e8f0; }
+    .player-life-row { display: flex; align-items: baseline; gap: 8px; }
     .player-life { font-size: 1.25rem; font-weight: 800; color: #fc8181; line-height: 1.2; }
+    .player-resources { font-size: 0.72rem; color: #90cdf4; white-space: nowrap; }
     .player-meta { font-size: 0.68rem; color: #718096; margin-top: 2px; }
     .turn-box {
       display: flex; flex-direction: column;
@@ -1864,6 +1870,8 @@ PLAY_TEMPLATE = """
       background: #2d3748; color: #a0aec0; font-weight: 600;
     }
     .gs-side h3 .life { color: #fc8181; font-weight: 800; }
+    .gs-side h3 .gs-ap { color: #f6e05e; font-size: 0.72rem; font-weight: 600; }
+    .gs-side h3 .gs-rp { color: #90cdf4; font-size: 0.72rem; font-weight: 600; }
     .gs-zone {
       margin-top: 6px;
     }
@@ -2044,7 +2052,10 @@ PLAY_TEMPLATE = """
     <div id="stats-bar">
       <div class="player-box" id="box-a0">
         <div class="player-name" id="name-a0">Rhinar</div>
-        <div class="player-life" id="life-a0">❤️ 20</div>
+        <div class="player-life-row">
+          <div class="player-life" id="life-a0">❤️ 20</div>
+          <div class="player-resources" id="res-a0"></div>
+        </div>
         <div class="player-meta" id="meta-a0"></div>
       </div>
       <div class="turn-box">
@@ -2053,7 +2064,10 @@ PLAY_TEMPLATE = """
       </div>
       <div class="player-box" id="box-a1">
         <div class="player-name" id="name-a1">Dorinthea</div>
-        <div class="player-life" id="life-a1">❤️ 20</div>
+        <div class="player-life-row">
+          <div class="player-life" id="life-a1">❤️ 20</div>
+          <div class="player-resources" id="res-a1"></div>
+        </div>
         <div class="player-meta" id="meta-a1"></div>
       </div>
     </div>
@@ -2156,6 +2170,10 @@ PLAY_TEMPLATE = """
         if (info) {
           document.getElementById('name-' + sfx).textContent = info.name;
           document.getElementById('life-' + sfx).textContent = '❤️ ' + info.life;
+          const resParts = [];
+          if (info.action_points > 0) resParts.push('⚡' + info.action_points + ' AP');
+          if (info.resource_points > 0) resParts.push('💰' + info.resource_points);
+          document.getElementById('res-' + sfx).textContent = resParts.join('  ');
           document.getElementById('meta-' + sfx).textContent =
             (humanFlags[i] ? '👤 You' : '🤖 AI') + '  ·  🃏 ' + info.hand_size;
         }
@@ -2251,9 +2269,20 @@ PLAY_TEMPLATE = """
       return `<div class="gs-cards">${items.join('')}</div>`;
     }
 
+    function renderResources(ap, rp) {
+      const parts = [];
+      if (ap > 0) parts.push(`<span class="gs-ap">⚡${ap} AP</span>`);
+      if (rp > 0) parts.push(`<span class="gs-rp">💰${rp}</span>`);
+      return parts.join(' ');
+    }
+
     function renderSelfSide(me) {
       const arsenal = me.arsenal
         ? renderCard(me.arsenal)
+        : '<span class="gs-empty">— empty —</span>';
+      const resHtml = renderResources(me.action_points, me.resource_points);
+      const banishHtml = (me.banished && me.banished.length)
+        ? renderCards(me.banished)
         : '<span class="gs-empty">— empty —</span>';
       return `
         <div class="gs-side self">
@@ -2261,12 +2290,14 @@ PLAY_TEMPLATE = """
             <span>${escHtml(me.name)}</span>
             <span class="tag">YOU</span>
             <span class="life">❤️ ${me.life}</span>
+            ${resHtml}
           </h3>
           ${renderZone('Equipment', renderEquipment(me.weapon, me.equipment))}
           ${renderZone('Hand (' + me.hand.length + ')', renderCards(me.hand))}
           ${renderZone('Arsenal', '<div class="gs-cards">' + arsenal + '</div>')}
           ${renderZone('Pitch zone (' + me.pitch_zone.length + ')', renderCards(me.pitch_zone))}
           ${renderZone('Graveyard (' + me.graveyard.length + ')', renderCards(me.graveyard))}
+          ${renderZone('Banished (' + (me.banished ? me.banished.length : 0) + ')', banishHtml)}
         </div>`;
     }
 
@@ -2274,18 +2305,24 @@ PLAY_TEMPLATE = """
       const arsenalHtml = op.arsenal_present
         ? '<div class="gs-cards"><span class="gs-card hidden">🂠 face-down</span></div>'
         : '<span class="gs-empty">— empty —</span>';
+      const resHtml = renderResources(op.action_points, op.resource_points);
+      const oppBanishHtml = (op.banished_count > 0)
+        ? renderHiddenCards(op.banished_count)
+        : '<span class="gs-empty">— empty —</span>';
       return `
         <div class="gs-side opp">
           <h3>
             <span>${escHtml(op.name)}</span>
             <span class="tag">OPPONENT</span>
             <span class="life">❤️ ${op.life}</span>
+            ${resHtml}
           </h3>
           ${renderZone('Equipment', renderEquipment(op.weapon, op.equipment))}
           ${renderZone('Hand (' + op.hand_count + ')', renderHiddenCards(op.hand_count))}
           ${renderZone('Arsenal', arsenalHtml)}
           ${renderZone('Pitch zone (' + op.pitch_zone.length + ')', renderCards(op.pitch_zone))}
           ${renderZone('Graveyard (' + op.graveyard.length + ')', renderCards(op.graveyard))}
+          ${renderZone('Banished (' + (op.banished_count || 0) + ')', oppBanishHtml)}
         </div>`;
     }
 
