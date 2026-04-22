@@ -160,6 +160,11 @@ class FaBEnv:
         # Action space upper bound; actual legal count varies. Agents MUST use legal_actions().
         self.action_spaces = {a: Discrete(256) for a in self.agents}
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_log_callback"] = None
+        return state
+
     # ──────────────────────────────────────────────────────────
     # reset
     # ──────────────────────────────────────────────────────────
