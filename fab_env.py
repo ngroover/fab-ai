@@ -757,9 +757,6 @@ class FaBEnv:
         elif n == "Titanium Bauble":
             owner.resource_points += 1
             self._log(f"    💰 Titanium Bauble resolves — {owner.name} gains 1 resource.")
-        elif n == "Sharpen Steel":
-            owner.next_weapon_power_bonus += 1
-            self._log(f"    ⚡ Sharpen Steel resolves — next weapon attack gains +1 power.")
         elif n == "Flock of the Feather Walkers":
             self._log(f"    🦅 Flock of the Feather Walkers resolves.")
         else:
@@ -1133,7 +1130,7 @@ class FaBEnv:
                     self._log(f"    👁  Intimidate! {opponent.name} banishes {banished.name}.")
             elif effect.action == EffectAction.WEAPON_ATTACK_POWER_BONUS:
                 active.next_weapon_power_bonus += effect.magnitude
-                self._log(f"    ⚡ {card.name} — weapon has already swung, next attack gains +{effect.magnitude} power.")
+                self._log(f"    ⚡ {card.name} — next weapon attack gains +{effect.magnitude} power.")
             elif effect.action == EffectAction.WEAPON_ATTACK_BONUS_PER_SWING:
                 active.slice_and_dice_active = True
                 self._log(f"    ⚡ {card.name} — first weapon attack +1, second weapon attack +2 power this turn.")
@@ -1300,9 +1297,6 @@ class FaBEnv:
             self._log(f"    💰 Titanium Bauble — gain 1 resource.")
         elif n == "Flock of the Feather Walkers":
             self._log(f"    🦅 Flock of the Feather Walkers — +2 defense to a defending attack card.")
-        elif n == "Sharpen Steel":
-            active.next_weapon_power_bonus += 1
-            self._log(f"    ⚡ Sharpen Steel — next weapon attack gains +1 power.")
         active.graveyard.append(card)
         active.action_points += 1  # instants don't consume action points
 

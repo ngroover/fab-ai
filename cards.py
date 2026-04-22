@@ -371,7 +371,12 @@ def build_dorinthea_deck() -> List[Card]:
         cards.append(Card("Sharpen Steel", CardType.ACTION, cost=0, pitch=1,
                            power=0, defense=3, color=Color.RED, go_again=True,
                            card_class=CardClass.WARRIOR,
-                           text="Your next weapon attack this turn gains +3 power. Go again."))
+                           text="Your next weapon attack this turn gains +3 power. Go again.",
+                           effects=[CardEffect(
+                               trigger=EffectTrigger.ON_PLAY,
+                               action=EffectAction.WEAPON_ATTACK_POWER_BONUS,
+                               magnitude=3,
+                           )]))
 
     # Thrust x2: cost 0, def 2, attack reaction
     for _ in range(2):
