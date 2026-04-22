@@ -111,6 +111,7 @@ class FaBEnv:
         self._phase = Phase.START
         self._pending_attack: Optional[Card] = None  # card currently resolving
         self._pending_attack_power: int = 0
+        self._pending_attack_go_again: bool = False  # granted by reaction (not on the card)
         self._pending_is_weapon: bool = False
         self._rewards: Dict[str, float] = {"agent_0": 0.0, "agent_1": 0.0}
         self._terminations: Dict[str, bool] = {"agent_0": False, "agent_1": False}
@@ -601,7 +602,8 @@ class FaBEnv:
             attacker.weapon_attack_count += 1
 
         # Go again
-        go = card.go_again
+        go = card.go_again or self._pending_attack_go_again
+        self._pending_attack_go_again = False
         if is_weapon and attacker.next_weapon_go_again:
             go = True
             attacker.next_weapon_go_again = False
@@ -902,7 +904,7 @@ class FaBEnv:
                                   f"({self._pending_attack_power} total).")
                     elif effect.action == EffectAction.SWORD_ATTACK_GO_AGAIN:
                         if self._pending_attack is not None:
-                            self._pending_attack.go_again = True
+                            self._pending_attack_go_again = True
                         self._log(f"    ⚔  {n} resolves — target sword attack gains go again.")
             if n == "In the Swing":
                 attacker = self._game.players[self._reaction_attacker_idx]
@@ -932,7 +934,7 @@ class FaBEnv:
                               f"(tracked via go_again flag).")
             elif n == "Run Through":
                 if self._pending_attack is not None:
-                    self._pending_attack.go_again = True
+                    self._pending_attack_go_again = True
                 self._log(f"    ⚔  Run Through resolves — target sword attack gains go again.")
                 owner.next_weapon_power_bonus += 2
                 self._log(f"    ⚔  Run Through — next sword attack this turn gains +2 power.")
@@ -1066,6 +1068,7 @@ class FaBEnv:
         # Baseline power; ON_ATTACK effects fired at window close may further
         # modify _pending_attack_power (e.g., DRAW_DISCARD_POWER_BONUS adds +2).
         self._pending_attack_power = power
+        self._pending_attack_go_again = False
         self._pending_defend_indices = []
         self._pending_defend_equip_slots = []
 
