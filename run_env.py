@@ -101,6 +101,11 @@ def run_game(
     rhinar_agent = agent0
     dorinthea_agent = agent1
 
+    # Give any MCTS-style agents a reference to the live env
+    for _agent in (rhinar_agent, dorinthea_agent):
+        if hasattr(_agent, "set_env"):
+            _agent.set_env(env)
+
     # agent_0 = Rhinar (player 0), agent_1 = Dorinthea (player 1)
     def get_agent(agent_id: str):
         return rhinar_agent if agent_id == "agent_0" else dorinthea_agent
