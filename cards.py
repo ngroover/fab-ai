@@ -334,7 +334,7 @@ def build_dorinthea_deck() -> List[Card]:
     for _ in range(2):
         cards.append(Card("Flock of the Feather Walkers", CardType.ACTION_ATTACK, cost=1, pitch=1,
                            power=5, defense=2, color=Color.RED,
-                           card_class=CardClass.WARRIOR,
+                           card_class=CardClass.GENERIC,
                            text="As an additional cost to play Flock of the Feather Walkers, reveal a card in your hand with cost 1 or less.  When you attack with Flock of the Feather Walkers, create a Quicken token."))
 
     # In the Swing x2: cost 0, def 3, attack reaction
