@@ -1395,6 +1395,9 @@ def _build_gamestate_snapshot(env) -> dict:
         "attack_power": env._pending_attack_power,
         "defend_cards": pending_defend_cards,
         "defend_equipment": pending_defend_equip,
+        # Already-resolved links still on the chain (cleared when chain closes)
+        "chained_attacks": [_card_to_dict(c) for c in players[active_idx].combat_chain],
+        "chained_defenders": [_card_to_dict(c) for c in defender.combat_chain],
     }
 
     return {
@@ -2327,30 +2330,59 @@ PLAY_TEMPLATE = """
     }
 
     function renderChain(ch, viewerIdx) {
-      if (!ch || !ch.attack_card) {
+      const hasResolved = (ch.chained_attacks && ch.chained_attacks.length > 0)
+                       || (ch.chained_defenders && ch.chained_defenders.length > 0);
+      const hasPending  = ch && ch.attack_card;
+
+      if (!hasResolved && !hasPending) {
         return `
           <div class="gs-chain">
             <h3>⚔ Combat chain</h3>
-            <div class="subline">No attack currently resolving.</div>
+            <div class="subline">No active combat chain.</div>
           </div>`;
       }
+
       const incoming = (ch.attacker_idx !== viewerIdx);
-      const who = incoming
+      const attackerLabel = incoming
         ? `<span class="incoming">${escHtml(ch.attacker_name)} attacks you</span>`
         : `You attack ${escHtml(ch.defender_name)}`;
-      const defenders = (ch.defend_cards && ch.defend_cards.length)
-        ? renderCards(ch.defend_cards)
-        : '<span class="gs-empty">— no blockers committed —</span>';
-      const equip = (ch.defend_equipment && ch.defend_equipment.length)
-        ? renderCards(ch.defend_equipment) : '';
-      return `
-        <div class="gs-chain">
-          <h3>⚔ Combat chain</h3>
-          <div class="subline">${who}</div>
+
+      let resolvedHtml = '';
+      if (hasResolved) {
+        const atkCards = (ch.chained_attacks && ch.chained_attacks.length)
+          ? renderCards(ch.chained_attacks)
+          : '<span class="gs-empty">— none —</span>';
+        const defCards = (ch.chained_defenders && ch.chained_defenders.length)
+          ? renderCards(ch.chained_defenders)
+          : '<span class="gs-empty">— none —</span>';
+        resolvedHtml = `
+          <div class="subline">Resolved links on chain</div>
+          ${renderZone('Attacks', atkCards)}
+          ${renderZone('Defenders', defCards)}`;
+      }
+
+      let pendingHtml = '';
+      if (hasPending) {
+        const defenders = (ch.defend_cards && ch.defend_cards.length)
+          ? renderCards(ch.defend_cards)
+          : '<span class="gs-empty">— no blockers committed —</span>';
+        const equip = (ch.defend_equipment && ch.defend_equipment.length)
+          ? renderZone('Defending equipment', renderCards(ch.defend_equipment)) : '';
+        pendingHtml = `
+          <div class="subline">Current link — ${attackerLabel}</div>
           ${renderZone('Attack', '<div class="gs-cards">' + renderCard(ch.attack_card) + '</div>')}
           <div class="subline">Power: <b>${ch.attack_power}</b></div>
           ${renderZone('Defenders', defenders)}
-          ${equip ? renderZone('Defending equipment', equip) : ''}
+          ${equip}`;
+      } else {
+        pendingHtml = `<div class="subline">${attackerLabel} — awaiting next action</div>`;
+      }
+
+      return `
+        <div class="gs-chain">
+          <h3>⚔ Combat chain</h3>
+          ${resolvedHtml}
+          ${pendingHtml}
         </div>`;
     }
 
