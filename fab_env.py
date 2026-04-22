@@ -138,6 +138,7 @@ class FaBEnv:
         self._reaction_attacker_idx: int = 0
         self._reaction_defense_bonus: int = 0             # defense from resolved defense reactions
         self._committed_defend_action: Optional[Action] = None
+        self._committed_defend_cards: List[Card] = []  # cards already moved to combat chain when block committed
         self._pending_reaction_play: bool = False         # True when PITCH phase is paying for a reaction card
         self._pending_reaction_player_idx: int = 0
         # Isolated RNG — seeded in reset() so game randomness is never shared with external code.
@@ -209,6 +210,7 @@ class FaBEnv:
         self._reaction_attacker_idx = 0
         self._reaction_defense_bonus = 0
         self._committed_defend_action = None
+        self._committed_defend_cards = []
         self._pending_reaction_play = False
         self._pending_reaction_player_idx = 0
 
@@ -517,14 +519,23 @@ class FaBEnv:
             return  # defender picks again next step
 
         # Done — commit blocks and open the reaction window before resolving combat
+        attacker_idx = self._game.active_player_idx
+        defender_idx = 1 - attacker_idx
+        defender = self._game.players[defender_idx]
         full_action = Action(ActionType.DEFEND,
                              defend_hand_indices=list(self._pending_defend_indices),
                              defend_equip_slots=list(self._pending_defend_equip_slots))
+        # Move blocking cards from hand to combat chain immediately so the game
+        # state is correct during the reaction phase.
+        def_cards = self._snapshot_by_indices(defender.hand, self._pending_defend_indices)
+        for c in def_cards:
+            if c in defender.hand:
+                defender.hand.remove(c)
+            defender.combat_chain.append(c)
+        self._committed_defend_cards = def_cards
         self._pending_defend_indices = []
         self._pending_defend_equip_slots = []
         self._committed_defend_action = full_action
-        attacker_idx = self._game.active_player_idx
-        defender_idx = 1 - attacker_idx
         self._enter_reaction_phase(attacker_idx, defender_idx)
 
     def _resolve_defend(self, action: Action, defender: Player, attacker: Player,
@@ -533,18 +544,15 @@ class FaBEnv:
         card = self._pending_attack
         is_weapon = self._pending_is_weapon
 
-        # Collect defending cards
-        def_cards = self._snapshot_by_indices(defender.hand, action.defend_hand_indices)
+        # Cards were already moved from hand to combat chain when the block was committed
+        # (in _handle_defend_action). Retrieve that list and clear the reference.
+        def_cards = self._committed_defend_cards
+        self._committed_defend_cards = []
         def_equip = []
         for slot in action.defend_equip_slots:
             eq = defender.equipment.get(slot)
             if eq and eq.active:
                 def_equip.append(eq)
-
-        # Remove defending hand cards
-        for c in def_cards:
-            if c in defender.hand:
-                defender.hand.remove(c)
 
         # Use the power stored when the attack was declared. It already includes
         # weapon bonuses (set by _trigger_defend_phase) and any modifications from
@@ -585,9 +593,7 @@ class FaBEnv:
                 self._log(f"    🔨 {eq.card.name} destroyed (Battleworn).")
                 self._move_equipment_to_graveyard(defender, eq)
 
-        # Defending cards stay on the combat chain until it closes.
-        for c in def_cards:
-            defender.combat_chain.append(c)
+        # def_cards are already on the combat chain (placed there at block commit time).
 
         # On-hit effects
         if hit:
