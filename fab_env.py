@@ -892,8 +892,10 @@ class FaBEnv:
 
         n = card.name
         if card.card_type == CardType.ATTACK_REACTION:
+            attacker = self._game.players[self._reaction_attacker_idx]
+            reaction_ctx = {"weapon_attack_count": attacker.weapon_attack_count}
             for effect in card.effects:
-                if effect.matches(EffectTrigger.ON_ATTACK_REACTION, {}):
+                if effect.matches(EffectTrigger.ON_ATTACK_REACTION, reaction_ctx):
                     if effect.action == EffectAction.ATTACK_POWER_BOOST:
                         self._pending_attack_power += effect.magnitude
                         self._log(f"    ⚔  {n} resolves — target attack gains "
@@ -903,16 +905,7 @@ class FaBEnv:
                         if self._pending_attack is not None:
                             self._pending_attack_go_again = True
                         self._log(f"    ⚔  {n} resolves — target sword attack gains go again.")
-            if n == "In the Swing":
-                attacker = self._game.players[self._reaction_attacker_idx]
-                if attacker.weapon_attack_count >= 2:
-                    self._pending_attack_power += 3
-                    self._log(f"    ⚔  In the Swing resolves — condition met, +3 power "
-                              f"({self._pending_attack_power} total).")
-                else:
-                    self._log(f"    ⚔  In the Swing resolves — condition not met "
-                              f"(fewer than 2 weapon attacks this turn).")
-            elif n == "Ironsong Response":
+            if n == "Ironsong Response":
                 committed = self._committed_defend_action
                 if committed and committed.defend_hand_indices:
                     self._pending_attack_power += 3
