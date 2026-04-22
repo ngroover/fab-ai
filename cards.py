@@ -342,7 +342,13 @@ def build_dorinthea_deck() -> List[Card]:
         cards.append(Card("In the Swing", CardType.ATTACK_REACTION, cost=0, pitch=1,
                            power=0, defense=3, color=Color.RED,
                            card_class=CardClass.WARRIOR,
-                           text="Play only if you have attacked 2 or more times with weapons this turn. Target weapon attack gains +3 power."))
+                           text="Play only if you have attacked 2 or more times with weapons this turn. Target weapon attack gains +3 power.",
+                           effects=[CardEffect(
+                               trigger=EffectTrigger.ON_ATTACK_REACTION,
+                               action=EffectAction.ATTACK_POWER_BOOST,
+                               magnitude=3,
+                               condition=lambda ctx: ctx.get("weapon_attack_count", 0) >= 1,
+                           )]))
 
     # Ironsong Response x2: cost 0, def 3, attack reaction
     for _ in range(2):
