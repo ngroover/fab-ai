@@ -1542,8 +1542,8 @@ class _GameSession:
         self.gamestate: dict = {}
         self.log_lines: list = []
         self.log_total = 0
-        self.p0_is_human = False
-        self.p1_is_human = False
+        self.p0_agent = "ai"
+        self.p1_agent = "ai"
         self._cancelled = False
         self._choice_idx = None
 
@@ -1555,18 +1555,18 @@ class _GameSession:
             self._reset_state()
         self._choice_event.set()   # unblock any waiting game thread
 
-    def start(self, p0_is_human: bool, p1_is_human: bool, seed,
+    def start(self, p0_agent: str, p1_agent: str, seed,
               deck0_id: int = None, deck1_id: int = None):
         self.reset()
         with self._lock:
             self._cancelled = False
             self.status = "running"
-            self.p0_is_human = p0_is_human
-            self.p1_is_human = p1_is_human
+            self.p0_agent = p0_agent
+            self.p1_agent = p1_agent
         self._choice_event.clear()
         t = threading.Thread(
             target=self._run,
-            args=(p0_is_human, p1_is_human, seed, deck0_id, deck1_id),
+            args=(p0_agent, p1_agent, seed, deck0_id, deck1_id),
             daemon=True,
         )
         t.start()
@@ -1598,8 +1598,8 @@ class _GameSession:
                 "winner": self.winner,
                 "player_stats": dict(self.player_stats),
                 "gamestate": dict(self.gamestate),
-                "p0_is_human": self.p0_is_human,
-                "p1_is_human": self.p1_is_human,
+                "p0_agent": self.p0_agent,
+                "p1_agent": self.p1_agent,
             }
 
     # ── called from game thread ───────────────────────────────
@@ -1648,10 +1648,10 @@ class _GameSession:
             self.player_stats = stats
             self.gamestate = gamestate
 
-    def _run(self, p0_is_human: bool, p1_is_human: bool, seed,
+    def _run(self, p0_agent: str, p1_agent: str, seed,
              deck0_id=None, deck1_id=None):
         try:
-            self._run_inner(p0_is_human, p1_is_human, seed, deck0_id, deck1_id)
+            self._run_inner(p0_agent, p1_agent, seed, deck0_id, deck1_id)
         except _GameCancelled:
             pass
         except Exception as exc:
@@ -1660,15 +1660,23 @@ class _GameSession:
                 self.status = "game_over"
                 self.winner = None
 
-    def _run_inner(self, p0_is_human, p1_is_human, seed,
+    def _run_inner(self, p0_agent: str, p1_agent: str, seed,
                    deck0_id=None, deck1_id=None):
         from fab_env import FaBEnv, Phase
         from agents import RhinarAgent, DorintheiAgent
+        from mcts_agent import MCTSAgent
 
         env = FaBEnv(verbose=False, log_callback=self.append_log)
 
-        agent_0 = (_WebHumanAgent(self, "agent_0") if p0_is_human else RhinarAgent())
-        agent_1 = (_WebHumanAgent(self, "agent_1") if p1_is_human else DorintheiAgent())
+        def _make_agent(agent_type: str, player_idx: int):
+            if agent_type == "human":
+                return _WebHumanAgent(self, f"agent_{player_idx}")
+            if agent_type == "mcts":
+                return MCTSAgent(player_idx=player_idx)
+            return RhinarAgent() if player_idx == 0 else DorintheiAgent()
+
+        agent_0 = _make_agent(p0_agent, 0)
+        agent_1 = _make_agent(p1_agent, 1)
 
         # Build players from selected decks
         p0 = None
@@ -1683,6 +1691,10 @@ class _GameSession:
                 p1 = _player_from_deck(rec)
 
         obs, _ = env.reset(seed=seed, player0=p0, player1=p1)
+
+        for _agent in (agent_0, agent_1):
+            if hasattr(_agent, "set_env"):
+                _agent.set_env(env)
 
         while not env.done:
             agent_id = env.agent_selection
@@ -1767,12 +1779,16 @@ PLAY_TEMPLATE = """
     .hero-row { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
     .hero-col { flex: 1; }
     .hero-col h3 { font-size: 0.88rem; font-weight: 700; margin-bottom: 8px; color: #e2e8f0; }
-    .radio-group { display: flex; flex-direction: column; gap: 6px; }
-    .radio-label {
-      display: flex; align-items: center; gap: 8px;
-      font-size: 0.83rem; cursor: pointer; color: #a0aec0;
+    .agent-select {
+      width: 100%;
+      background: #0f1117;
+      border: 1px solid #4a5568;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 0.83rem;
+      padding: 5px 8px;
     }
-    .radio-label input { accent-color: #63b3ed; }
+    .agent-select:focus { outline: none; border-color: #63b3ed; }
     .vs-col { color: #4a5568; font-weight: 800; font-size: 1.1rem; }
     .deck-select {
       width: 100%;
@@ -2012,14 +2028,12 @@ PLAY_TEMPLATE = """
                 <option value="{{ d.id }}">{{ d.name }} ({{ d.hero }})</option>
               {% endfor %}
             </select>
-            <div class="radio-group">
-              <label class="radio-label">
-                <input type="radio" name="player0" value="human"> 👤 Human
-              </label>
-              <label class="radio-label">
-                <input type="radio" name="player0" value="ai" checked> 🤖 AI
-              </label>
-            </div>
+            <div class="slot-label">Agent</div>
+            <select name="player0" class="agent-select">
+              <option value="ai">🤖 AI</option>
+              <option value="mcts">🌲 MCTS</option>
+              <option value="human">👤 Human</option>
+            </select>
           </div>
           <div class="vs-col">VS</div>
           <div class="hero-col">
@@ -2031,14 +2045,12 @@ PLAY_TEMPLATE = """
                 <option value="{{ d.id }}">{{ d.name }} ({{ d.hero }})</option>
               {% endfor %}
             </select>
-            <div class="radio-group">
-              <label class="radio-label">
-                <input type="radio" name="player1" value="human"> 👤 Human
-              </label>
-              <label class="radio-label">
-                <input type="radio" name="player1" value="ai" checked> 🤖 AI
-              </label>
-            </div>
+            <div class="slot-label">Agent</div>
+            <select name="player1" class="agent-select">
+              <option value="ai">🤖 AI</option>
+              <option value="mcts">🌲 MCTS</option>
+              <option value="human">👤 Human</option>
+            </select>
           </div>
         </div>
         <div class="seed-row">
@@ -2127,11 +2139,11 @@ PLAY_TEMPLATE = """
     // ── View tabs ──────────────────────────────────────────────
     function updateViewTabs(s) {
       const tabs = [{key: 'log', label: '📜 Logs'}];
-      if (s.p0_is_human) {
+      if (s.p0_agent === 'human') {
         const name = (s.player_stats.agent_0 && s.player_stats.agent_0.name) || 'Player 1';
         tabs.push({key: 'p0', label: '👁 ' + name + ' view'});
       }
-      if (s.p1_is_human) {
+      if (s.p1_agent === 'human') {
         const name = (s.player_stats.agent_1 && s.player_stats.agent_1.name) || 'Player 2';
         tabs.push({key: 'p1', label: '👁 ' + name + ' view'});
       }
@@ -2165,7 +2177,8 @@ PLAY_TEMPLATE = """
     function updateStats(s) {
       const agents = ['agent_0', 'agent_1'];
       const suffixes = ['a0', 'a1'];
-      const humanFlags = [s.p0_is_human, s.p1_is_human];
+      const agentTypes = [s.p0_agent, s.p1_agent];
+      const agentLabels = {'human': '👤 You', 'mcts': '🌲 MCTS', 'ai': '🤖 AI'};
 
       agents.forEach((aid, i) => {
         const info = s.player_stats[aid];
@@ -2177,8 +2190,9 @@ PLAY_TEMPLATE = """
           if (info.action_points > 0) resParts.push('⚡' + info.action_points + ' AP');
           if (info.resource_points > 0) resParts.push('💰' + info.resource_points);
           document.getElementById('res-' + sfx).textContent = resParts.join('  ');
+          const lbl = agentLabels[agentTypes[i]] || '🤖 AI';
           document.getElementById('meta-' + sfx).textContent =
-            (humanFlags[i] ? '👤 You' : '🤖 AI') + '  ·  🃏 ' + info.hand_size;
+            lbl + '  ·  🃏 ' + info.hand_size;
         }
         document.getElementById('box-' + sfx).classList
           .toggle('active', aid === s.current_agent && s.status === 'waiting_human');
@@ -2516,15 +2530,20 @@ def play_page():
 
 @app.route("/play/start", methods=["POST"])
 def play_start():
-    p0_human = request.form.get("player0") == "human"
-    p1_human = request.form.get("player1") == "human"
+    valid_agents = {"human", "ai", "mcts"}
+    p0_agent = request.form.get("player0", "ai")
+    p1_agent = request.form.get("player1", "ai")
+    if p0_agent not in valid_agents:
+        p0_agent = "ai"
+    if p1_agent not in valid_agents:
+        p1_agent = "ai"
     seed_str = request.form.get("seed", "").strip()
     seed = int(seed_str) if seed_str.isdigit() else None
     deck0_str = request.form.get("deck0", "").strip()
     deck1_str = request.form.get("deck1", "").strip()
     deck0_id = int(deck0_str) if deck0_str.isdigit() else None
     deck1_id = int(deck1_str) if deck1_str.isdigit() else None
-    _session.start(p0_human, p1_human, seed, deck0_id, deck1_id)
+    _session.start(p0_agent, p1_agent, seed, deck0_id, deck1_id)
     return jsonify({"ok": True})
 
 
