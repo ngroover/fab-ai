@@ -585,17 +585,17 @@ class FaBEnv:
                 self._log(f"    🔨 {eq.card.name} destroyed (Battleworn).")
                 self._move_equipment_to_graveyard(defender, eq)
 
-        # Defending cards to graveyard
+        # Defending cards stay on the combat chain until it closes.
         for c in def_cards:
-            defender.graveyard.append(c)
+            defender.combat_chain.append(c)
 
         # On-hit effects
         if hit:
             self._on_hit(card, attacker, defender, is_weapon)
 
-        # Attack card to graveyard
+        # Attack card stays on the combat chain until it closes (weapons stay equipped).
         if not is_weapon:
-            attacker.graveyard.append(card)
+            attacker.combat_chain.append(card)
 
         attacker.attacks_this_turn += 1
         if is_weapon:
@@ -1042,8 +1042,20 @@ class FaBEnv:
         self._phase = Phase.ATTACK
         self.agent_selection = f"agent_{self._game.active_player_idx}"
 
+    def _break_combat_chain(self, attacker: Player, defender: Player) -> None:
+        """Close the combat chain — move all chained cards to their owners' graveyards."""
+        if not attacker.combat_chain and not defender.combat_chain:
+            return
+        all_names = [c.name for c in attacker.combat_chain] + [c.name for c in defender.combat_chain]
+        self._log(f"  ⛓  Combat chain closes ({', '.join(all_names)} → graveyard).")
+        attacker.graveyard.extend(attacker.combat_chain)
+        attacker.combat_chain.clear()
+        defender.graveyard.extend(defender.combat_chain)
+        defender.combat_chain.clear()
+
     def _end_attack_phase(self, active: Player, opponent: Player):
-        """Active player has passed — open an end-of-turn instant window, then arsenal."""
+        """Active player has passed — break combat chain, then open end-of-turn instant window, then arsenal."""
+        self._break_combat_chain(active, opponent)
         self._enter_instant_phase(
             return_phase=Phase.ARSENAL,
             return_agent_idx=self._game.active_player_idx,
@@ -1223,6 +1235,8 @@ class FaBEnv:
     # ──────────────────────────────────────────────────────────
 
     def _resolve_action(self, card: Card, active: Player, opponent: Player):
+        # Non-attack actions close the combat chain before resolving.
+        self._break_combat_chain(active, opponent)
         n = card.name
 
         if n == "Barraging Beatdown":

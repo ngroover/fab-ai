@@ -56,6 +56,7 @@ class Player:
 
         self.hand: List[Card] = []
         self.graveyard: List[Card] = []
+        self.combat_chain: List[Card] = []  # cards staying on chain until it closes
         self.banished: List[Card] = []
         self.pitch_zone: List[Card] = []
         self.arsenal: Optional[Card] = None
