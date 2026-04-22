@@ -437,7 +437,11 @@ def build_dorinthea_deck() -> List[Card]:
         cards.append(Card("Run Through", CardType.ATTACK_REACTION, cost=1, pitch=2,
                            power=0, defense=3, color=Color.YELLOW,
                            card_class=CardClass.WARRIOR,
-                           text="Target sword attack gains go again.  Your next sword attack this turn gains +2 power."))
+                           text="Target sword attack gains go again.  Your next sword attack this turn gains +2 power.",
+                           effects=[
+                               CardEffect(trigger=EffectTrigger.ON_ATTACK_REACTION, action=EffectAction.SWORD_ATTACK_GO_AGAIN),
+                               CardEffect(trigger=EffectTrigger.ON_ATTACK_REACTION, action=EffectAction.NEXT_SWORD_ATTACK_POWER_BONUS, magnitude=2),
+                           ]))
 
     # Slice and Dice x2: cost 0, def 3, warrior action
     for _ in range(2):

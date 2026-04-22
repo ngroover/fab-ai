@@ -905,6 +905,10 @@ class FaBEnv:
                         if self._pending_attack is not None:
                             self._pending_attack_go_again = True
                         self._log(f"    ⚔  {n} resolves — target sword attack gains go again.")
+                    elif effect.action == EffectAction.NEXT_SWORD_ATTACK_POWER_BONUS:
+                        owner.next_sword_attack_power_bonus += effect.magnitude
+                        self._log(f"    ⚔  {n} resolves — next sword attack this turn gains "
+                                  f"+{effect.magnitude} power.")
             if n == "Ironsong Response":
                 committed = self._committed_defend_action
                 if committed and committed.defend_hand_indices:
@@ -922,12 +926,6 @@ class FaBEnv:
                     owner.next_attack_go_again = True
                     self._log(f"    ⚔  Out for Blood Reprise — next attack this turn gains +1 power "
                               f"(tracked via go_again flag).")
-            elif n == "Run Through":
-                if self._pending_attack is not None:
-                    self._pending_attack_go_again = True
-                self._log(f"    ⚔  Run Through resolves — target sword attack gains go again.")
-                owner.next_weapon_power_bonus += 2
-                self._log(f"    ⚔  Run Through — next sword attack this turn gains +2 power.")
             else:
                 self._log(f"    ⚔  {n} resolves.")
 
@@ -1064,6 +1062,7 @@ class FaBEnv:
         """
         if self._pending_is_weapon:
             power = attacker.get_effective_weapon_power()
+            attacker.next_sword_attack_power_bonus = 0  # consumed by this attack declaration
         else:
             power = self._pending_attack.power + attacker.next_brute_attack_bonus
 
