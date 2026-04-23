@@ -73,7 +73,8 @@ class TestSigilOfSolaceCard(unittest.TestCase):
         self.assertEqual(sigil.card_type, CardType.INSTANT)
         self.assertEqual(sigil.cost, 0)
         self.assertEqual(sigil.color, Color.BLUE)
-        self.assertTrue(sigil.no_block)
+        from cards import Keyword
+        self.assertIn(Keyword.NO_BLOCK, sigil.keywords)
         self.assertEqual(sigil.text, "Gain 1 life.")
 
 

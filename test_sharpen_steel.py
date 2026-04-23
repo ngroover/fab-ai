@@ -71,7 +71,8 @@ class TestSharpenSteelCardDefinition(unittest.TestCase):
         self.assertEqual(card.cost, 0)
         self.assertEqual(card.pitch, 1)
         self.assertEqual(card.defense, 3)
-        self.assertTrue(card.go_again)
+        from cards import Keyword
+        self.assertIn(Keyword.GO_AGAIN, card.keywords)
         self.assertEqual(card.color, Color.RED)
         self.assertEqual(card.card_class, CardClass.WARRIOR)
 

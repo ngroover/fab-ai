@@ -29,7 +29,7 @@ import copy
 from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple, Any
 
-from cards import (Card, CardType, Color,
+from cards import (Card, CardType, Color, Keyword,
                    build_rhinar_deck, build_rhinar_equipment,
                    build_dorinthea_deck, build_dorinthea_equipment)
 from card_effects import EffectTrigger, EffectAction
@@ -613,7 +613,7 @@ class FaBEnv:
             attacker.weapon_attack_count += 1
 
         # Go again
-        go = card.go_again or self._pending_attack_go_again
+        go = Keyword.GO_AGAIN in card.keywords or self._pending_attack_go_again
         self._pending_attack_go_again = False
         if is_weapon and attacker.next_weapon_go_again:
             go = True
@@ -1153,7 +1153,8 @@ class FaBEnv:
                     self._fire_effects(EffectTrigger.ON_DISCARD, {"card": discarded}, active, opponent)
                     if discarded.power >= 6:
                         if effect.action == EffectAction.DRAW_DISCARD_GO_AGAIN:
-                            card.go_again = True
+                            if Keyword.GO_AGAIN not in card.keywords:
+                                card.keywords.append(Keyword.GO_AGAIN)
                             self._log(f"    ↩  {card.name} — discarded 6+ power card, gains go again!")
                         elif effect.action == EffectAction.DRAW_DISCARD_POWER_BONUS:
                             self._pending_attack_power += 2
@@ -1285,7 +1286,7 @@ class FaBEnv:
                                  {"weapon_attack_count": active.weapon_attack_count},
                                  active, opponent)
 
-        if card.go_again:
+        if Keyword.GO_AGAIN in card.keywords:
             active.action_points += 1
 
         active.graveyard.append(card)

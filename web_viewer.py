@@ -29,6 +29,7 @@ import deck_db
 from cards import (
     build_rhinar_deck, build_rhinar_equipment,
     build_dorinthea_deck, build_dorinthea_equipment,
+    Keyword,
 )
 from card_effects import EffectAction
 
@@ -463,10 +464,10 @@ def _build_card_catalog() -> list:
                     "power": c.power,
                     "defense": c.defense,
                     "color": c.color.name.capitalize() if c.color else None,
-                    "go_again": c.go_again,
+                    "go_again": Keyword.GO_AGAIN in c.keywords,
                     "text": c.text,
                     "intimidate": any(e.action == EffectAction.INTIMIDATE for e in c.effects),
-                    "no_block": c.no_block,
+                    "no_block": Keyword.NO_BLOCK in c.keywords,
                     "equip_slot": c.equip_slot.value if c.equip_slot else None,
                     "hero": hero,
                     "card_class": c.card_class.value,
@@ -503,7 +504,7 @@ def _build_card_catalog() -> list:
 
 def _catalog_row_to_card(row: dict):
     """Convert a card_catalog DB row into a Card dataclass instance."""
-    from cards import Card, CardType, Color, EquipSlot, CardClass
+    from cards import Card, CardType, Color, EquipSlot, CardClass, Keyword
 
     type_map   = {v.value: v for v in CardType}
     color_map  = {"Red": Color.RED, "Yellow": Color.YELLOW, "Blue": Color.BLUE}
@@ -514,6 +515,12 @@ def _catalog_row_to_card(row: dict):
     }
     class_map  = {v.value: v for v in CardClass}
 
+    kws = []
+    if bool(row["go_again"]):
+        kws.append(Keyword.GO_AGAIN)
+    if bool(row["no_block"]):
+        kws.append(Keyword.NO_BLOCK)
+
     return Card(
         name      = row["name"],
         card_type = type_map.get(row["card_type"], CardType.ACTION),
@@ -522,9 +529,8 @@ def _catalog_row_to_card(row: dict):
         power     = row["power"],
         defense   = row["defense"],
         color     = color_map.get(row["color"]),
-        go_again  = bool(row["go_again"]),
         text      = row["text"] or "",
-        no_block  = bool(row["no_block"]),
+        keywords  = kws,
         equip_slot= equip_map.get(row["equip_slot"]),
         # Unknown classes (e.g. Ranger) fall back to Generic for game purposes
         card_class= class_map.get(row["card_class"], CardClass.GENERIC),
@@ -1310,8 +1316,8 @@ def _card_to_dict(card):
         "power": card.power,
         "defense": card.defense,
         "color": card.color.name.lower() if card.color else None,
-        "go_again": card.go_again,
-        "no_block": card.no_block,
+        "go_again": Keyword.GO_AGAIN in card.keywords,
+        "no_block": Keyword.NO_BLOCK in card.keywords,
         "text": card.text,
     }
 
@@ -1427,7 +1433,7 @@ class _WebHumanAgent:
         if card.pitch:     details.append(f"pitch:{card.pitch}")
         if card.power:     details.append(f"pow:{card.power}")
         if card.defense:   details.append(f"def:{card.defense}")
-        if card.go_again:  details.append("go-again")
+        if Keyword.GO_AGAIN in card.keywords:  details.append("go-again")
         if any(e.action == EffectAction.INTIMIDATE for e in card.effects): details.append("intimidate")
         suffix = f" ({', '.join(details)})" if details else ""
         return card.name + suffix

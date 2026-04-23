@@ -11,6 +11,8 @@ Each card slot is encoded as a one-hot over the vocabulary + [cost, pitch, power
 from __future__ import annotations
 from typing import List, Dict, TYPE_CHECKING
 
+from cards import Keyword
+
 if TYPE_CHECKING:
     from game_state import Player, GameState
 
@@ -72,7 +74,7 @@ def _encode_card(card) -> List[float]:
         card.pitch / 3.0,
         card.power / 10.0,
         card.defense / 5.0,
-        float(card.go_again),
+        float(Keyword.GO_AGAIN in card.keywords),
         color_val,
     ]
     return one_hot + numeric

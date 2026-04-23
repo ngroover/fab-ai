@@ -47,6 +47,15 @@ class CardClass(Enum):
     WARRIOR = "Warrior"
 
 
+class Keyword(Enum):
+    GO_AGAIN = "Go Again"
+    INTIMIDATE = "Intimidate"
+    NO_BLOCK = "No Block"
+    BLADE_BREAK = "Blade Break"
+    BATTLEWORN = "Battleworn"
+    REPRISE = "Reprise"
+
+
 @dataclass
 class Card:
     name: str
@@ -56,11 +65,10 @@ class Card:
     power: int = 0
     defense: int = 0
     color: Optional[Color] = None
-    go_again: bool = False
     text: str = ""
-    no_block: bool = False
     equip_slot: Optional[EquipSlot] = None
     card_class: CardClass = CardClass.GENERIC
+    keywords: List["Keyword"] = field(default_factory=list)
     effects: List[CardEffect] = field(default_factory=list)
 
     @property
@@ -89,10 +97,8 @@ class Card:
             stats.append(f"Def:{self.defense}")
         if stats:
             lines.append("    " + " | ".join(stats))
-        if self.go_again:
-            lines.append("    Go again")
-        if self.no_block:
-            lines.append("    No Block")
+        for kw in self.keywords:
+            lines.append(f"    {kw.value}")
         if self.text:
             lines.append(f"    {self.text}")
         return "\n".join(lines)
@@ -131,7 +137,7 @@ def build_rhinar_deck() -> List[Card]:
     # Awakening Bellow x2: cost 2, power 6, def 3, go again, intimidate
     for _ in range(2):
         cards.append(Card("Awakening Bellow", CardType.ACTION, cost=1, pitch=1,
-                           power=0, defense=3, color=Color.RED, go_again=True,
+                           power=0, defense=3, color=Color.RED, keywords=[Keyword.GO_AGAIN],
                            card_class=CardClass.BRUTE,
                            text="Go again. Intimidate.",
                            effects=[CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.INTIMIDATE)]))
@@ -141,7 +147,7 @@ def build_rhinar_deck() -> List[Card]:
     # If discarded card has 6+ power, this gets +2 power.
     for _ in range(2):
         cards.append(Card("Bare Fangs", CardType.ACTION_ATTACK, cost=2, pitch=1,
-                           power=6, defense=0, color=Color.RED, no_block=True,
+                           power=6, defense=0, color=Color.RED, keywords=[Keyword.NO_BLOCK],
                            card_class=CardClass.BRUTE,
                            text="When you attack with Bare Fangs, draw a card then discard a random card. If a card wth 6 or more power is discarded this way, Bare Fangs gets +2 power.",
                            effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.DRAW_DISCARD_POWER_BONUS)]))
@@ -166,7 +172,7 @@ def build_rhinar_deck() -> List[Card]:
     # Draw a card then discard a random card. If discarded card 6+ power, go again
     for _ in range(2):
         cards.append(Card("Wild Ride", CardType.ACTION_ATTACK, cost=2, pitch=1,
-                           power=6, defense=0, color=Color.RED, no_block=True,
+                           power=6, defense=0, color=Color.RED, keywords=[Keyword.NO_BLOCK],
                            card_class=CardClass.BRUTE,
                            text="When you attack with Wild Ride, draw a card then discard a random card.  If a card with 6 or more power is discarded this way, Wild Ride gains go again.",
                            effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.DRAW_DISCARD_GO_AGAIN)]))
@@ -174,7 +180,7 @@ def build_rhinar_deck() -> List[Card]:
     # Wrecking Ball x2: cost 3, power 6, def 0, intimidate on hit condition, no_block
     for _ in range(2):
         cards.append(Card("Wrecking Ball", CardType.ACTION_ATTACK, cost=3, pitch=1,
-                           power=6, defense=0, color=Color.RED, no_block=True,
+                           power=6, defense=0, color=Color.RED, keywords=[Keyword.NO_BLOCK],
                            card_class=CardClass.BRUTE,
                            text="When you attack with Wrecking Ball, draw a card then discard a random card. If a card with 6 or more power is discarded this way, intimidate.",
                            effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.DRAW_DISCARD_INTIMIDATE)]))
@@ -185,7 +191,7 @@ def build_rhinar_deck() -> List[Card]:
     # Non-attack action: next Brute attack gains conditional +3 power
     for _ in range(2):
         cards.append(Card("Barraging Beatdown", CardType.ACTION, cost=0, pitch=2,
-                           power=0, defense=3, color=Color.YELLOW, go_again=True,
+                           power=0, defense=3, color=Color.YELLOW, keywords=[Keyword.GO_AGAIN],
                            card_class=CardClass.BRUTE,
                            text="Intimidate, then your next Brute attack this turn gains 'While this attack is defended by less than 2 non-equipment cards it has +3 power'. Go again.",
                            effects=[CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.INTIMIDATE)]))
@@ -223,7 +229,7 @@ def build_rhinar_deck() -> List[Card]:
     # Smash with Big Tree x2: cost 2, power 6, no_block
     for _ in range(2):
         cards.append(Card("Smash with Big Tree", CardType.ACTION_ATTACK, cost=2, pitch=2,
-                           power=6, defense=0, color=Color.YELLOW, no_block=True,
+                           power=6, defense=0, color=Color.YELLOW, keywords=[Keyword.NO_BLOCK],
                            card_class=CardClass.BRUTE,
                            text=""))
 
@@ -239,7 +245,7 @@ def build_rhinar_deck() -> List[Card]:
     # Clearing Bellow x2: cost 0, power 0, def 3, go again, intimidate
     for _ in range(2):
         cards.append(Card("Clearing Bellow", CardType.ACTION, cost=0, pitch=3,
-                           power=0, defense=3, color=Color.BLUE, go_again=True,
+                           power=0, defense=3, color=Color.BLUE, keywords=[Keyword.GO_AGAIN],
                            card_class=CardClass.BRUTE,
                            text="Intimidate.Go again.",
                            effects=[CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.INTIMIDATE)]))
@@ -326,7 +332,7 @@ def build_dorinthea_deck() -> List[Card]:
     # En Garde x2: cost 1, def 3, warrior action (non-attack)
     for _ in range(2):
         cards.append(Card("En Garde", CardType.ACTION, cost=1, pitch=1,
-                           power=0, defense=3, color=Color.RED, go_again=True,
+                           power=0, defense=3, color=Color.RED, keywords=[Keyword.GO_AGAIN],
                            card_class=CardClass.WARRIOR,
                            text="Your next weapon attack this turn gains +3 power. Go again."))
 
@@ -360,7 +366,7 @@ def build_dorinthea_deck() -> List[Card]:
     # Second Swing x2: cost 1, def 3, warrior action
     for _ in range(2):
         cards.append(Card("Second Swing", CardType.ACTION, cost=1, pitch=1,
-                           power=0, defense=3, color=Color.RED, go_again=True,
+                           power=0, defense=3, color=Color.RED, keywords=[Keyword.GO_AGAIN],
                            card_class=CardClass.WARRIOR,
                            text="If you have attacked with a weapon this turn, your next attack this turn gains +4 power. Go again.",
                            effects=[
@@ -375,7 +381,7 @@ def build_dorinthea_deck() -> List[Card]:
     # Sharpen Steel x2: cost 0, def 3, action
     for _ in range(2):
         cards.append(Card("Sharpen Steel", CardType.ACTION, cost=0, pitch=1,
-                           power=0, defense=3, color=Color.RED, go_again=True,
+                           power=0, defense=3, color=Color.RED, keywords=[Keyword.GO_AGAIN],
                            card_class=CardClass.WARRIOR,
                            text="Your next weapon attack this turn gains +3 power. Go again.",
                            effects=[CardEffect(
@@ -399,7 +405,7 @@ def build_dorinthea_deck() -> List[Card]:
     # Warrior's Valor x2: cost 1, def 3, warrior action
     for _ in range(2):
         cards.append(Card("Warrior's Valor", CardType.ACTION, cost=1, pitch=1,
-                           power=0, defense=3, color=Color.RED, go_again=True,
+                           power=0, defense=3, color=Color.RED, keywords=[Keyword.GO_AGAIN],
                            card_class=CardClass.WARRIOR,
                            text="Your next weapon attack this turn gains +3 power and 'When this attack hits, it gains go again.' Go again."))
 
@@ -414,14 +420,14 @@ def build_dorinthea_deck() -> List[Card]:
 
     # Glistening Steelblade x1: cost 1, def 3, Dorinthea spec
     cards.append(Card("Glistening Steelblade", CardType.ACTION, cost=1, pitch=2,
-                       power=0, defense=3, color=Color.YELLOW, go_again=True,
+                       power=0, defense=3, color=Color.YELLOW, keywords=[Keyword.GO_AGAIN],
                        card_class=CardClass.WARRIOR,
                        text="Dorinthea Specialization. Your next Dawnblade attack this turn has go again.  Whenever Dawnblade hits a hero this turn, put a +1 counter on it. Go again."))
 
     # On a Knife Edge x2: cost 0, def 2, warrior action
     for _ in range(2):
         cards.append(Card("On a Knife Edge", CardType.ACTION, cost=0, pitch=2,
-                           power=0, defense=2, color=Color.YELLOW, go_again=True,
+                           power=0, defense=2, color=Color.YELLOW, keywords=[Keyword.GO_AGAIN],
                            card_class=CardClass.WARRIOR,
                            text="Your next sword attack this turn gains go again. Go again."))
 
@@ -446,7 +452,7 @@ def build_dorinthea_deck() -> List[Card]:
     # Slice and Dice x2: cost 0, def 3, warrior action
     for _ in range(2):
         cards.append(Card("Slice and Dice", CardType.ACTION, cost=0, pitch=2,
-                           power=0, defense=3, color=Color.YELLOW, go_again=True,
+                           power=0, defense=3, color=Color.YELLOW, keywords=[Keyword.GO_AGAIN],
                            card_class=CardClass.WARRIOR,
                            text="The first time you attack with a weapon this turn, if it's a sword or dagger it gains +1 power.  The second time you attack with a weapon this turn if it's a sword or dagger it gains +2 power.  Go again.",
                            effects=[CardEffect(trigger=EffectTrigger.ON_PLAY,
@@ -466,14 +472,14 @@ def build_dorinthea_deck() -> List[Card]:
     # Hit and Run x2: cost 0, def 3, warrior action
     for _ in range(2):
         cards.append(Card("Hit and Run", CardType.ACTION, cost=0, pitch=3,
-                           power=0, defense=3, color=Color.BLUE, go_again=True,
+                           power=0, defense=3, color=Color.BLUE, keywords=[Keyword.GO_AGAIN],
                            card_class=CardClass.WARRIOR,
                            text="Your next weapon attack this turn gains go again.  If you have attacked with a weapon this turn your next attack this turn gains +1 power.  Go again."))
 
     # Sigil of Solace x2: cost 0, instant — Generic
     for _ in range(2):
         cards.append(Card("Sigil of Solace", CardType.INSTANT, cost=0, pitch=3,
-                           power=0, defense=0, color=Color.BLUE, no_block=True,
+                           power=0, defense=0, color=Color.BLUE, keywords=[Keyword.NO_BLOCK],
                            text="Gain 1 life."))
 
     # Titanium Bauble x2: cost 0 — Generic resource
@@ -491,7 +497,7 @@ def build_dorinthea_deck() -> List[Card]:
     # Visit the Blacksmith x2: cost 0, def 2, warrior action
     for _ in range(2):
         cards.append(Card("Visit the Blacksmith", CardType.ACTION, cost=0, pitch=3,
-                           power=0, defense=2, color=Color.BLUE, go_again=True,
+                           power=0, defense=2, color=Color.BLUE, keywords=[Keyword.GO_AGAIN],
                            card_class=CardClass.WARRIOR,
                            text="Your next sword attack this turn gains +1 power."))
 

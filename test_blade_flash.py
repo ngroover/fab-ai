@@ -130,8 +130,9 @@ class TestBladeFlashGoAgain(unittest.TestCase):
 
     def test_dawnblade_card_go_again_not_mutated_before_resolution(self):
         # Before the reaction resolves, the weapon Card object must be clean
-        self.assertFalse(self.dorinthea.weapon.go_again,
-                         "Dawnblade.go_again must not be True before Blade Flash resolves")
+        from cards import Keyword
+        self.assertNotIn(Keyword.GO_AGAIN, self.dorinthea.weapon.keywords,
+                         "Dawnblade must not have GO_AGAIN keyword before Blade Flash resolves")
 
     def test_pending_attack_go_again_flag_set(self):
         # After pitching for Blade Flash (stack pending), the flag is not yet set
@@ -175,8 +176,9 @@ class TestBladeFlashGoAgain(unittest.TestCase):
             )
             self.env.step(pass_action)
 
-        self.assertFalse(self.dorinthea.weapon.go_again,
-                         "Dawnblade.go_again must be False after Blade Flash resolves — "
+        from cards import Keyword
+        self.assertNotIn(Keyword.GO_AGAIN, self.dorinthea.weapon.keywords,
+                         "Dawnblade must not have GO_AGAIN keyword after Blade Flash resolves — "
                          "the flag must not be permanently set on the Card object")
 
     def test_pending_attack_go_again_cleared_after_combat(self):

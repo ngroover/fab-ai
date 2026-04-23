@@ -65,7 +65,8 @@ class TestSliceAndDiceCardDefinition(unittest.TestCase):
         self.assertEqual(card.cost, 0)
         self.assertEqual(card.defense, 3)
         self.assertEqual(card.color, Color.YELLOW)
-        self.assertTrue(card.go_again)
+        from cards import Keyword
+        self.assertIn(Keyword.GO_AGAIN, card.keywords)
 
     def test_has_weapon_attack_bonus_per_swing_effect(self):
         card = next(c for c in self.dorinthea.hand if c.name == "Slice and Dice")
