@@ -211,6 +211,9 @@ class RhinarAgent:
                      pending_card=None) -> Action:
         return legal[0]
 
+    def select_pitch_order(self, obs: dict, legal: List[Action], player: 'Player') -> Action:
+        return legal[0]
+
     def select_instant(self, obs: dict, legal: List[Action], player: 'Player',
                         attack_power: int = 0) -> Action:
         """INSTANT phase: Rhinar has no instants to play — always pass priority."""
@@ -390,6 +393,9 @@ class DorintheiAgent:
                      pending_card=None) -> Action:
         return legal[0]
 
+    def select_pitch_order(self, obs: dict, legal: List[Action], player: 'Player') -> Action:
+        return legal[0]
+
     def select_instant(self, obs: dict, legal: List[Action], player: 'Player',
                         attack_power: int = 0) -> Action:
         """INSTANT phase: play 0-cost Sigil of Solace when life is tight,
@@ -458,6 +464,9 @@ class RandomAgent:
 
     def select_pitch(self, obs: dict, legal: List[Action], player: 'Player',
                      pending_card=None) -> Action:
+        return self._rng.choice(legal)
+
+    def select_pitch_order(self, obs: dict, legal: List[Action], player: 'Player') -> Action:
         return self._rng.choice(legal)
 
     def select_instant(self, obs: dict, legal: List[Action], player: 'Player',
@@ -589,6 +598,10 @@ class HumanAgent:
                 return "DON'T store (no arsenal this turn)"
             card = player.hand[action.arsenal_hand_index]
             return f"STORE in arsenal — {self._fmt_card(card)}"
+        if action.action_type == ActionType.PITCH_ORDER:
+            if 0 <= action.pitch_order_index < len(player.pitch_zone):
+                card = player.pitch_zone[action.pitch_order_index]
+                return f"PLACE at deck bottom — {self._fmt_card(card)}"
         return str(action)
 
     def _choose(self, legal: List[Action], player: 'Player', prompt: str) -> Action:
@@ -646,6 +659,15 @@ class HumanAgent:
         print(f"  Current resources: {player.resource_points}")
         self._show_hand(player)
         return self._choose(legal, player, "Choose cards to pitch:")
+
+    def select_pitch_order(self, obs: dict, legal: List[Action], player: 'Player') -> Action:
+        print(f"\n{'═' * 60}")
+        print(f"  PITCH ORDER — choose the order to place pitched cards at deck bottom")
+        print(f"  The first card you choose will be deepest in the deck.")
+        print(f"  Pitch zone ({len(player.pitch_zone)} card(s)):")
+        for i, c in enumerate(player.pitch_zone):
+            print(f"    [{i}] {self._fmt_card(c)}")
+        return self._choose(legal, player, "Which card goes to deck bottom next?")
 
     def select_instant(self, obs: dict, legal: List[Action], player: 'Player',
                         attack_power: int = 0) -> Action:

@@ -41,6 +41,7 @@ class ActionType(Enum):
     GO_FIRST           = auto()   # CHOOSE_FIRST phase: choosing player elects to go first
     GO_SECOND          = auto()   # CHOOSE_FIRST phase: choosing player elects to go second
     PASS_PRIORITY      = auto()   # INSTANT phase: player passes priority without playing
+    PITCH_ORDER        = auto()   # end-of-turn: place one card from pitch zone to deck bottom
 
 
 @dataclass
@@ -64,6 +65,9 @@ class Action:
     # ACTIVATE_EQUIPMENT field
     equip_slot: str = ""  # e.g. "head"
 
+    # PITCH_ORDER field
+    pitch_order_index: int = -1  # index into player.pitch_zone
+
     def __repr__(self):
         if self.action_type == ActionType.PLAY_CARD:
             src = f"hand[{self.card.name}]"
@@ -86,6 +90,8 @@ class Action:
             return "Action(GO_SECOND)"
         if self.action_type == ActionType.PASS_PRIORITY:
             return "Action(PASS_PRIORITY)"
+        if self.action_type == ActionType.PITCH_ORDER:
+            return f"Action(PITCH_ORDER index={self.pitch_order_index})"
         return f"Action({self.action_type})"
 
 
@@ -368,3 +374,13 @@ def legal_instant_actions(player: 'Player') -> List[Action]:
         if pitchable_total >= needed:
             actions.append(Action(ActionType.PLAY_CARD, card=card))
     return actions
+
+
+def legal_pitch_order_actions(player: 'Player') -> List[Action]:
+    """One PITCH_ORDER action per card remaining in the pitch zone.
+    The player selects cards one at a time; each chosen card is placed at the
+    bottom of the deck, so the last card selected ends up closest to the top."""
+    return [
+        Action(ActionType.PITCH_ORDER, pitch_order_index=i)
+        for i in range(len(player.pitch_zone))
+    ]

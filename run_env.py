@@ -141,6 +141,8 @@ def run_game(
         elif env._phase == Phase.PITCH:
             action = agent.select_pitch(obs[agent_id], legal, player,
                                         env._pending_play_card)
+        elif env._phase == Phase.PITCH_ORDER:
+            action = agent.select_pitch_order(obs[agent_id], legal, player)
         else:
             action = legal[0]
 

@@ -39,6 +39,7 @@ from actions import (
     legal_attack_actions, legal_pitch_actions,
     legal_defend_actions, legal_arsenal_actions, legal_choose_first_actions,
     legal_instant_actions, legal_reaction_actions,
+    legal_pitch_order_actions,
 )
 from observations import build_observation, PLAYER_OBS_SIZE, CARD_FEATURES
 from spaces import Discrete, Box, Dict as DictSpace
@@ -57,6 +58,7 @@ class Phase(Enum):
     REACTION     = auto()   # after defender commits blocks: attacker plays attack reactions, then defender plays defense reactions
     INSTANT      = auto()   # either player may play instants onto a stack; LIFO resolution
     ARSENAL      = auto()
+    PITCH_ORDER  = auto()   # end-of-turn: player orders pitch zone cards to deck bottom one at a time
     END          = auto()
 
 
@@ -267,6 +269,8 @@ class FaBEnv:
             self._handle_instant_action(action, active, opponent)
         elif self._phase == Phase.ARSENAL:
             self._handle_arsenal_action(action, active, opponent)
+        elif self._phase == Phase.PITCH_ORDER:
+            self._handle_pitch_order_action(action, active)
 
         # ── Check game over ──
         if self._game.is_over() or self._game.turn_number > self.MAX_TURNS:
@@ -297,6 +301,8 @@ class FaBEnv:
                 self._handle_instant_action(auto_action, auto_active, auto_opponent)
             elif self._phase == Phase.ARSENAL:
                 self._handle_arsenal_action(auto_action, auto_active, auto_opponent)
+            elif self._phase == Phase.PITCH_ORDER:
+                self._handle_pitch_order_action(auto_action, auto_active)
 
             if self._game.is_over() or self._game.turn_number > self.MAX_TURNS:
                 self._finalize()
@@ -334,6 +340,8 @@ class FaBEnv:
             return legal_instant_actions(active)
         elif self._phase == Phase.ARSENAL:
             return legal_arsenal_actions(active)
+        elif self._phase == Phase.PITCH_ORDER:
+            return legal_pitch_order_actions(active)
         return []
 
     # ──────────────────────────────────────────────────────────
@@ -658,13 +666,32 @@ class FaBEnv:
             opponent.banished.clear()
             self._log(f"    ↩  Banished cards returned to {opponent.name}'s hand: {names}.")
 
-        # Pitch zone to deck bottom
-        self._rng.shuffle(active.pitch_zone)
-        active.deck.extend(active.pitch_zone)
-        active.pitch_zone.clear()
         active.resource_points = 0
         active.action_points = 0
 
+        # If there are pitched cards, let the player choose the order they go to deck bottom.
+        if active.pitch_zone:
+            self._phase = Phase.PITCH_ORDER
+            self._log(f"\n  📋  {active.name} orders pitch zone ({len(active.pitch_zone)} card(s)) to deck bottom.")
+            return
+
+        self._complete_end_phase(active, opponent)
+
+    def _handle_pitch_order_action(self, action: Action, active: Player):
+        """Player selects one card from pitch_zone to place at the bottom of the deck."""
+        opponent = self._game.players[1 - self._game.active_player_idx]
+        if 0 <= action.pitch_order_index < len(active.pitch_zone):
+            card = active.pitch_zone.pop(action.pitch_order_index)
+            active.deck.append(card)
+            self._log(f"    ↓  {active.name} places {card.name} at deck bottom.")
+
+        if active.pitch_zone:
+            return  # more cards to order; stay in PITCH_ORDER
+
+        self._complete_end_phase(active, opponent)
+
+    def _complete_end_phase(self, active: Player, opponent: Player):
+        """Draw up, switch turns — called after pitch ordering is done."""
         # Draw up
         hand_size_before = len(active.hand)
         active.draw_to_intellect()
