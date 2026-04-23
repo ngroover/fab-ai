@@ -1031,6 +1031,10 @@ class FaBEnv:
         active = self._game.active
         active.reset_turn_resources()
 
+        if self._both_players_stuck():
+            self._finalize_stuck_draw()
+            return
+
         self._log(f"\n{'═'*60}")
         self._log(f"  TURN {self._game.turn_number} — {active.name} ({active.hero_name})")
         self._log(f"{'═'*60}")
@@ -1344,6 +1348,28 @@ class FaBEnv:
     # Internal: utilities
     # ──────────────────────────────────────────────────────────
 
+    def _player_has_no_cards(self, player: Player) -> bool:
+        return not player.deck and not player.hand and not player.arsenal
+
+    def _player_weapon_usable_with_no_cards(self, player: Player) -> bool:
+        """True if the player can activate their weapon with zero cards in hand."""
+        if not player.weapon:
+            return False
+        if player.weapon.cost > 0:
+            return False
+        if player.weapon_used_this_turn and not (player.next_weapon_go_again or player.weapon_additional_attack):
+            return False
+        return True
+
+    def _both_players_stuck(self) -> bool:
+        """Both players have no cards left and neither can activate a weapon."""
+        for p in self._game.players:
+            if not self._player_has_no_cards(p):
+                return False
+            if self._player_weapon_usable_with_no_cards(p):
+                return False
+        return True
+
     def _snapshot_by_indices(self, hand: List[Card], indices: List[int]) -> List[Card]:
         """Return cards at given indices (safely, ignoring out-of-range)."""
         cards = []
@@ -1390,6 +1416,16 @@ class FaBEnv:
         if self._game.turn_number > self.MAX_TURNS:
             self._truncations = {"agent_0": True, "agent_1": True}
             self._terminations = {"agent_0": False, "agent_1": False}
+
+    def _finalize_stuck_draw(self):
+        """Both players have exhausted all cards and neither can take a meaningful action."""
+        self.done = True
+        self._log(f"\n{'★'*60}")
+        self._log(f"  🤝 DRAW — both players have no cards remaining and cannot act.")
+        self._rewards = {"agent_0": 0.0, "agent_1": 0.0}
+        self._log(f"{'★'*60}")
+        self._terminations = {"agent_0": True, "agent_1": True}
+        self._truncations = {"agent_0": False, "agent_1": False}
 
     def _log(self, msg: str):
         if self.verbose:
