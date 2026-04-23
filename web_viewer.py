@@ -467,7 +467,7 @@ def _build_card_catalog() -> list:
                     "go_again": Keyword.GO_AGAIN in c.keywords,
                     "text": c.text,
                     "intimidate": any(e.action == EffectAction.INTIMIDATE for e in c.effects),
-                    "no_block": Keyword.NO_BLOCK in c.keywords,
+                    "no_block": c.no_block,
                     "equip_slot": c.equip_slot.value if c.equip_slot else None,
                     "hero": hero,
                     "card_class": c.card_class.value,
@@ -518,8 +518,6 @@ def _catalog_row_to_card(row: dict):
     kws = []
     if bool(row["go_again"]):
         kws.append(Keyword.GO_AGAIN)
-    if bool(row["no_block"]):
-        kws.append(Keyword.NO_BLOCK)
 
     return Card(
         name      = row["name"],
@@ -530,6 +528,7 @@ def _catalog_row_to_card(row: dict):
         defense   = row["defense"],
         color     = color_map.get(row["color"]),
         text      = row["text"] or "",
+        no_block  = bool(row["no_block"]),
         keywords  = kws,
         equip_slot= equip_map.get(row["equip_slot"]),
         # Unknown classes (e.g. Ranger) fall back to Generic for game purposes
@@ -1317,7 +1316,7 @@ def _card_to_dict(card):
         "defense": card.defense,
         "color": card.color.name.lower() if card.color else None,
         "go_again": Keyword.GO_AGAIN in card.keywords,
-        "no_block": Keyword.NO_BLOCK in card.keywords,
+        "no_block": card.no_block,
         "text": card.text,
     }
 

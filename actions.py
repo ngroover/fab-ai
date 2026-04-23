@@ -249,11 +249,10 @@ def legal_defend_actions(player: 'Player', attack_power: int,
     # NOTE: instants and defense reactions are NOT offered here. Instants are
     # played during the pre-DEFEND instant window; defense reactions can only be
     # played in the REACTION phase after blocks are committed.
-    from cards import Keyword
     defenders = [(i, c) for i, c in enumerate(player.hand)
                  if c.defense > 0
                  and c.card_type not in (CardType.INSTANT, CardType.DEFENSE_REACTION)
-                 and Keyword.NO_BLOCK not in c.keywords
+                 and not c.no_block
                  and i not in already_indices]
     equip_slots = [slot for slot, eq in player.equipment.items()
                    if eq.active and eq.defense > 0 and slot not in already_equip]

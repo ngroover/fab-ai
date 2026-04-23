@@ -50,7 +50,6 @@ class CardClass(Enum):
 class Keyword(Enum):
     GO_AGAIN = "Go Again"
     INTIMIDATE = "Intimidate"
-    NO_BLOCK = "No Block"
     BLADE_BREAK = "Blade Break"
     BATTLEWORN = "Battleworn"
     REPRISE = "Reprise"
@@ -66,6 +65,7 @@ class Card:
     defense: int = 0
     color: Optional[Color] = None
     text: str = ""
+    no_block: bool = False
     equip_slot: Optional[EquipSlot] = None
     card_class: CardClass = CardClass.GENERIC
     keywords: List["Keyword"] = field(default_factory=list)
@@ -147,7 +147,7 @@ def build_rhinar_deck() -> List[Card]:
     # If discarded card has 6+ power, this gets +2 power.
     for _ in range(2):
         cards.append(Card("Bare Fangs", CardType.ACTION_ATTACK, cost=2, pitch=1,
-                           power=6, defense=0, color=Color.RED, keywords=[Keyword.NO_BLOCK],
+                           power=6, defense=0, color=Color.RED, no_block=True,
                            card_class=CardClass.BRUTE,
                            text="When you attack with Bare Fangs, draw a card then discard a random card. If a card wth 6 or more power is discarded this way, Bare Fangs gets +2 power.",
                            effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.DRAW_DISCARD_POWER_BONUS)]))
@@ -172,7 +172,7 @@ def build_rhinar_deck() -> List[Card]:
     # Draw a card then discard a random card. If discarded card 6+ power, go again
     for _ in range(2):
         cards.append(Card("Wild Ride", CardType.ACTION_ATTACK, cost=2, pitch=1,
-                           power=6, defense=0, color=Color.RED, keywords=[Keyword.NO_BLOCK],
+                           power=6, defense=0, color=Color.RED, no_block=True,
                            card_class=CardClass.BRUTE,
                            text="When you attack with Wild Ride, draw a card then discard a random card.  If a card with 6 or more power is discarded this way, Wild Ride gains go again.",
                            effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.DRAW_DISCARD_GO_AGAIN)]))
@@ -180,7 +180,7 @@ def build_rhinar_deck() -> List[Card]:
     # Wrecking Ball x2: cost 3, power 6, def 0, intimidate on hit condition, no_block
     for _ in range(2):
         cards.append(Card("Wrecking Ball", CardType.ACTION_ATTACK, cost=3, pitch=1,
-                           power=6, defense=0, color=Color.RED, keywords=[Keyword.NO_BLOCK],
+                           power=6, defense=0, color=Color.RED, no_block=True,
                            card_class=CardClass.BRUTE,
                            text="When you attack with Wrecking Ball, draw a card then discard a random card. If a card with 6 or more power is discarded this way, intimidate.",
                            effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.DRAW_DISCARD_INTIMIDATE)]))
@@ -229,7 +229,7 @@ def build_rhinar_deck() -> List[Card]:
     # Smash with Big Tree x2: cost 2, power 6, no_block
     for _ in range(2):
         cards.append(Card("Smash with Big Tree", CardType.ACTION_ATTACK, cost=2, pitch=2,
-                           power=6, defense=0, color=Color.YELLOW, keywords=[Keyword.NO_BLOCK],
+                           power=6, defense=0, color=Color.YELLOW, no_block=True,
                            card_class=CardClass.BRUTE,
                            text=""))
 
@@ -479,7 +479,7 @@ def build_dorinthea_deck() -> List[Card]:
     # Sigil of Solace x2: cost 0, instant — Generic
     for _ in range(2):
         cards.append(Card("Sigil of Solace", CardType.INSTANT, cost=0, pitch=3,
-                           power=0, defense=0, color=Color.BLUE, keywords=[Keyword.NO_BLOCK],
+                           power=0, defense=0, color=Color.BLUE, no_block=True,
                            text="Gain 1 life."))
 
     # Titanium Bauble x2: cost 0 — Generic resource
