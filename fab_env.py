@@ -598,6 +598,11 @@ class FaBEnv:
                 self._log(f"    🔨 {eq.card.name} destroyed (Battleworn).")
                 self._move_equipment_to_graveyard(defender, eq)
 
+        # Blade Break — mark as used so it cannot block again this combat chain
+        for eq in def_equip:
+            if Keyword.BLADE_BREAK in eq.card.keywords and not eq.destroyed:
+                eq.used_this_turn = True
+
         # def_cards are already on the combat chain (placed there at block commit time).
 
         # On-hit effects
@@ -1051,6 +1056,14 @@ class FaBEnv:
         attacker.combat_chain.clear()
         defender.graveyard.extend(defender.combat_chain)
         defender.combat_chain.clear()
+
+        # Blade Break — destroy any equipment used to block this chain
+        for player in (attacker, defender):
+            for eq in list(player.equipment.values()):
+                if Keyword.BLADE_BREAK in eq.card.keywords and eq.used_this_turn and not eq.destroyed:
+                    eq.destroyed = True
+                    self._log(f"    💀 {eq.card.name} destroyed (Blade Break).")
+                    self._move_equipment_to_graveyard(player, eq)
 
     def _end_attack_phase(self, active: Player, opponent: Player):
         """Active player has passed — break combat chain, then open end-of-turn instant window, then arsenal."""

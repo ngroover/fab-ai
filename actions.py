@@ -234,7 +234,7 @@ def legal_defend_actions(player: 'Player', attack_power: int,
 
     already_indices / already_equip track cards already accumulated this step.
     """
-    from cards import CardType
+    from cards import CardType, Keyword
 
     if already_indices is None:
         already_indices = []
@@ -255,7 +255,8 @@ def legal_defend_actions(player: 'Player', attack_power: int,
                  and not c.no_block
                  and i not in already_indices]
     equip_slots = [slot for slot, eq in player.equipment.items()
-                   if eq.active and eq.defense > 0 and slot not in already_equip]
+                   if eq.active and eq.defense > 0 and slot not in already_equip
+                   and not (Keyword.BLADE_BREAK in eq.card.keywords and eq.used_this_turn)]
 
     # One card at a time — deduplicate identical cards (same choice regardless of copy)
     seen_defend_names: set = set()

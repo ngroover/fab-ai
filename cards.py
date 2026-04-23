@@ -522,9 +522,9 @@ def build_dorinthea_equipment():
         Card("Blossom of Spring", CardType.EQUIPMENT, defense=0, equip_slot=EquipSlot.CHEST,
              text="Action: Destroy Blossom of Spring: Gain 1 resource. Go again"),
         Card("Ironrot Helm", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.ARMS,
-             text="Blade Break."),
+             text="Blade Break.", keywords=[Keyword.BLADE_BREAK]),
         Card("Ironrot Legs", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.LEGS,
-             text="Blade Break."),
+             text="Blade Break.", keywords=[Keyword.BLADE_BREAK]),
     ]
 
 
