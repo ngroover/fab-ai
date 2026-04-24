@@ -329,6 +329,9 @@ class MCTSAgent:
     def select_arsenal(self, obs, legal, player) -> Action:
         return self._mcts_select(legal)
 
+    def select_pitch_order(self, obs, legal, player) -> Action:
+        return self._mcts_select(legal)
+
     def select_instant(self, obs, legal, player, attack_power=0) -> Action:
         return self._mcts_select(legal)
 
