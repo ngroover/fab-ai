@@ -81,7 +81,8 @@ class Player:
         self.next_sword_attack_power_bonus = 0  # from Run Through (set during reaction window, consumed on next attack)
         self.slice_and_dice_active = False # from Slice and Dice: +1 1st weapon, +2 2nd weapon
         self.next_attack_go_again = False  # from Come to Fight
-        self.next_brute_attack_bonus = 0   # from Beast Mode / Barraging Beatdown setup
+        self.next_brute_attack_bonus = 0             # from Beast Mode (unconditional)
+        self.next_brute_attack_conditional_bonus = 0  # from Barraging Beatdown (conditional on < 2 non-equip blockers)
         self.attacks_this_turn = 0
         self.weapon_additional_attack = False  # Dawnblade: one extra attack when go again fires
         # Mentor state
@@ -138,6 +139,7 @@ class Player:
         self.slice_and_dice_active = False
         self.next_attack_go_again = False
         self.next_brute_attack_bonus = 0
+        self.next_brute_attack_conditional_bonus = 0
         self.attacks_this_turn = 0
         self.weapon_additional_attack = False
         for eq in self.equipment.values():

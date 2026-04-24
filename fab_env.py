@@ -567,6 +567,15 @@ class FaBEnv:
             attacker.next_weapon_power_bonus = 0
         else:
             attacker.next_brute_attack_bonus = 0
+            if attacker.next_brute_attack_conditional_bonus > 0:
+                if len(def_cards) < 2:
+                    power += attacker.next_brute_attack_conditional_bonus
+                    self._log(f"    ⚡ Barraging Beatdown +{attacker.next_brute_attack_conditional_bonus} power "
+                              f"({len(def_cards)} non-equipment blocker(s)).")
+                else:
+                    self._log(f"    ❌ Barraging Beatdown bonus nullified "
+                              f"({len(def_cards)} non-equipment blockers).")
+                attacker.next_brute_attack_conditional_bonus = 0
 
         total_def = (sum(c.defense for c in def_cards) + sum(e.defense for e in def_equip)
                      + reaction_defense_bonus)
@@ -1254,8 +1263,8 @@ class FaBEnv:
         n = card.name
 
         if n == "Barraging Beatdown":
-            active.next_brute_attack_bonus = 3
-            self._log(f"    ⚡ Next Brute attack gains conditional +3 power.")
+            active.next_brute_attack_conditional_bonus = 3
+            self._log(f"    ⚡ Next Brute attack gains +3 power if defended by < 2 non-equipment cards.")
 
         elif n == "Beast Mode":
             active.next_brute_attack_bonus = max(active.next_brute_attack_bonus, 3)
