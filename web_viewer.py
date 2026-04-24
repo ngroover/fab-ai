@@ -1491,6 +1491,11 @@ class _WebHumanAgent:
             return "GO FIRST — you take the first turn"
         if action.action_type == ActionType.GO_SECOND:
             return "GO SECOND — opponent takes the first turn"
+        if action.action_type == ActionType.PITCH_ORDER:
+            if 0 <= action.pitch_order_index < len(player.pitch_zone):
+                card = player.pitch_zone[action.pitch_order_index]
+                remaining = len(player.pitch_zone)
+                return f"PUT NEXT TO BOTTOM — {self._fmt_card(card)} ({remaining} card{'s' if remaining != 1 else ''} remaining)"
         return str(action)
 
     def _pend(self, legal, player, phase, attack_power=0):
@@ -1516,6 +1521,9 @@ class _WebHumanAgent:
 
     def select_reaction(self, obs, legal, player, attack_power=0):
         return self._pend(legal, player, "REACTION", attack_power)
+
+    def select_pitch_order(self, obs, legal, player):
+        return self._pend(legal, player, "PITCH_ORDER")
 
     def select_choose_first(self, legal, player):
         return self._pend(legal, player, "CHOOSE_FIRST")
@@ -1739,6 +1747,8 @@ class _GameSession:
             elif env._phase == Phase.PITCH:
                 action = agent.select_pitch(obs[agent_id], legal, player,
                                             env._pending_play_card)
+            elif env._phase == Phase.PITCH_ORDER:
+                action = agent.select_pitch_order(obs[agent_id], legal, player)
             else:
                 action = legal[0]
 
