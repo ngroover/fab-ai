@@ -209,7 +209,8 @@ def build_rhinar_deck() -> List[Card]:
         cards.append(Card("Pack Call", CardType.ACTION_ATTACK, cost=3, pitch=2,
                            power=6, defense=3, color=Color.YELLOW,
                            card_class=CardClass.BRUTE,
-                           text="When you defend with Pack Call, reveal the top card of your deck. If it has 6 or more power, put it on top of your deck. Otherwise, put it on he bottom."))
+                           text="When you defend with Pack Call, reveal the top card of your deck. If it has 6 or more power, put it on top of your deck. Otherwise, put it on the bottom.",
+                           effects=[CardEffect(trigger=EffectTrigger.ON_DEFEND, action=EffectAction.REVEAL_TOP_DECK_POWER_CHECK)]))
 
     # Raging Onslaught x2: cost 3, power 6, def 3
     for _ in range(2):

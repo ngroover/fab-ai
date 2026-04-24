@@ -579,6 +579,10 @@ class FaBEnv:
         else:
             self._log(f"    🛡  {defender.name} does not defend.")
 
+        # Fire ON_DEFEND effects for each card used to block
+        for def_card in def_cards:
+            self._apply_card_effects(def_card, EffectTrigger.ON_DEFEND, {}, defender, attacker)
+
         # Damage
         damage = max(0, power - total_def)
         hit = damage > 0
@@ -1167,6 +1171,18 @@ class FaBEnv:
                                 opponent.banished.append(banished)
                                 self._log(f"    👁  {card.name} — discarded 6+ power card, intimidate! "
                                           f"{opponent.name} banishes {banished.name}.")
+            elif effect.action == EffectAction.REVEAL_TOP_DECK_POWER_CHECK:
+                if active.deck:
+                    top = active.deck[0]
+                    self._log(f"    🃏 {card.name} — reveals top card: {top.name} (power: {top.power}).")
+                    if top.power >= 6:
+                        self._log(f"    ✅ {top.name} has 6 or more power — stays on top of deck.")
+                    else:
+                        active.deck.pop(0)
+                        active.deck.append(top)
+                        self._log(f"    ⬇  {top.name} has less than 6 power — moved to bottom of deck.")
+                else:
+                    self._log(f"    🃏 {card.name} — deck is empty, no card to reveal.")
 
     def _move_equipment_to_graveyard(self, player: Player, eq) -> None:
         """Remove a destroyed equipment from the equipment zone and put its card in the graveyard."""
