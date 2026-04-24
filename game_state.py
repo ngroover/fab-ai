@@ -92,14 +92,7 @@ class Player:
     def draw(self, n=1):
         for _ in range(n):
             if not self.deck:
-                if self.graveyard:
-                    self.deck = self.graveyard[:]
-                    self.graveyard = []
-                    self._rng.shuffle(self.deck)
-                    print(f"  [{self.name}] Deck empty — shuffled graveyard back in.")
-                else:
-                    print(f"  [{self.name}] No cards left to draw!")
-                    return
+                return
             self.hand.append(self.deck.pop(0))
 
     def draw_to_intellect(self):
