@@ -1212,6 +1212,9 @@ class FaBEnv:
                                 opponent.banished.append(banished)
                                 self._log(f"    👁  {card.name} — discarded 6+ power card, intimidate! "
                                           f"{opponent.name} banishes {banished.name}.")
+            elif effect.action == EffectAction.NEXT_BRUTE_ATTACK_BONUS:
+                active.next_brute_attack_bonus = max(active.next_brute_attack_bonus, effect.magnitude)
+                self._log(f"    ⚡ {card.name} — next Brute attack gains +{effect.magnitude} power.")
             elif effect.action == EffectAction.REVEAL_TOP_DECK_POWER_CHECK:
                 if active.deck:
                     top = active.deck[0]

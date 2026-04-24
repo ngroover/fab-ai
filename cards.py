@@ -134,13 +134,17 @@ def build_rhinar_deck() -> List[Card]:
                        text="Rhinar Specialization. As an additional cost to play Alpha Rampage, discard a random card. When you attack with Alpha Rampage, intimidate.",
                        effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.INTIMIDATE)]))
 
-    # Awakening Bellow x2: cost 2, power 6, def 3, go again, intimidate
+    # Awakening Bellow x2: cost 1, power 0, def 3, go again, intimidate, +3 next brute attack
     for _ in range(2):
         cards.append(Card("Awakening Bellow", CardType.ACTION, cost=1, pitch=1,
-                           power=0, defense=3, color=Color.RED, keywords=[Keyword.GO_AGAIN],
+                           power=0, defense=3, color=Color.RED,
+                           keywords=[Keyword.GO_AGAIN, Keyword.INTIMIDATE],
                            card_class=CardClass.BRUTE,
-                           text="Go again. Intimidate.",
-                           effects=[CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.INTIMIDATE)]))
+                           text="Go again. Intimidate. Your next Brute attack action card this turn has +3 power.",
+                           effects=[
+                               CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.INTIMIDATE),
+                               CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_BRUTE_ATTACK_BONUS, magnitude=3),
+                           ]))
 
     # Bare Fangs x2: cost 2, power 6, def 0, no block
     # When attacking: draw a card then discard a random card.
