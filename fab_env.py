@@ -478,6 +478,15 @@ class FaBEnv:
         elif card.card_type == CardType.ACTION:
             self._resolve_action(card, active, opponent)
         elif card.card_type == CardType.ACTION_ATTACK:
+            # Pay any additional play costs before declaring the attack
+            from card_effects import EffectAction, EffectTrigger
+            for effect in card.effects:
+                if effect.action == EffectAction.DISCARD_CARD_COST and active.hand:
+                    discarded = self._rng.choice(active.hand)
+                    active.hand.remove(discarded)
+                    active.graveyard.append(discarded)
+                    self._log(f"    🎲 Additional cost — {active.name} discards {discarded.name}.")
+                    self._fire_effects(EffectTrigger.ON_DISCARD, {"card": discarded}, active, opponent)
             self._pending_attack = card
             self._pending_is_weapon = False
             self._trigger_defend_phase(active, opponent)

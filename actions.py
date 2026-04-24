@@ -99,6 +99,30 @@ class Action:
 # Legal action generation
 # ──────────────────────────────────────────────────────────────
 
+def _card_has_discard_cost(card: 'Card') -> bool:
+    """Return True if *card* requires discarding a card as an additional play cost."""
+    from card_effects import EffectAction
+    return any(e.action == EffectAction.DISCARD_CARD_COST for e in card.effects)
+
+
+def _has_discard_available(available_cards: List['Card'], needed: int) -> bool:
+    """Return True if *available_cards* can cover *needed* pitch resources AND
+    still leave at least one card in hand for the discard additional cost.
+
+    Uses a greedy (highest-pitch-first) strategy to minimise the number of
+    cards pitched, which maximises the cards remaining for the discard.
+    """
+    if needed == 0:
+        return len(available_cards) >= 1
+    pitchable = sorted([c for c in available_cards if c.pitch > 0], key=lambda c: -c.pitch)
+    accumulated = 0
+    for i, c in enumerate(pitchable):
+        accumulated += c.pitch
+        if accumulated >= needed:
+            return (len(available_cards) - (i + 1)) >= 1
+    return False
+
+
 def _pitch_combinations(hand: List['Card'], exclude_idx: int, needed: int):
     """
     Yield lists of hand indices that sum pitch value to >= needed,
@@ -151,9 +175,14 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
     ):
         card = player.arsenal
         needed = max(0, card.cost - player.resource_points)
-        total_pitch = sum(c.pitch for c in player.hand if c.pitch > 0)
-        if needed == 0 or total_pitch >= needed:
-            actions.append(Action(ActionType.PLAY_CARD, card=player.arsenal, from_arsenal=True))
+        if _card_has_discard_cost(card):
+            # Arsenal card not in hand, so all hand cards are available for pitch/discard
+            if _has_discard_available(player.hand, needed):
+                actions.append(Action(ActionType.PLAY_CARD, card=player.arsenal, from_arsenal=True))
+        else:
+            total_pitch = sum(c.pitch for c in player.hand if c.pitch > 0)
+            if needed == 0 or total_pitch >= needed:
+                actions.append(Action(ActionType.PLAY_CARD, card=player.arsenal, from_arsenal=True))
 
     # ── Hand cards ──
     seen_play_names: set = set()
@@ -164,7 +193,12 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
             continue  # duplicate card — same choice regardless of which copy is picked
         seen_play_names.add(card.name)
         needed = max(0, card.cost - player.resource_points)
-        if needed == 0:
+        if _card_has_discard_cost(card):
+            # Must be able to cover pitch cost AND keep >= 1 card in hand for discard
+            other = [c for j, c in enumerate(player.hand) if j != i]
+            if _has_discard_available(other, needed):
+                actions.append(Action(ActionType.PLAY_CARD, card=card))
+        elif needed == 0:
             actions.append(Action(ActionType.PLAY_CARD, card=card))
         else:
             # Card costs more than current resources — playable only if hand can cover with pitch
@@ -207,10 +241,19 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
     Returns one action per pitchable card in hand so the player selects cards
     one at a time.  The phase repeats until resource_points >= pending_card.cost.
     If cost is already covered, returns a single no-pitch action (safety net).
+
+    For cards with a discard additional cost, pitching is forbidden when only
+    one card remains in hand — that card must be kept for the discard.
     """
     needed = max(0, pending_card.cost - player.resource_points)
 
     if needed == 0:
+        return [Action(ActionType.PITCH, pitch_indices=[])]
+
+    has_discard_cost = _card_has_discard_cost(pending_card)
+
+    # For discard-cost cards: can't pitch if only 1 card left (needed for discard)
+    if has_discard_cost and len(player.hand) <= 1:
         return [Action(ActionType.PITCH, pitch_indices=[])]
 
     # Sort by descending pitch value so agents pitching greedily (legal[0]) pick

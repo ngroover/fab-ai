@@ -275,11 +275,13 @@ def build_rhinar_deck() -> List[Card]:
                            power=0, defense=3, color=Color.BLUE,
                            text=""))
 
-    # Wrecker Romp x2: cost 2, power 6, def 3
+    # Wrecker Romp x2: cost 2, power 6, def 3 — additional cost: discard a card
     for _ in range(2):
         cards.append(Card("Wrecker Romp", CardType.ACTION_ATTACK, cost=2, pitch=3,
                            power=6, defense=3, color=Color.BLUE,
-                           card_class=CardClass.BRUTE))
+                           card_class=CardClass.BRUTE,
+                           text="As an additional cost to play Wrecker Romp, discard a card.",
+                           effects=[CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.DISCARD_CARD_COST)]))
 
     # Chief Ruk'utan x1: Mentor
     # When face-up: whenever you play a card with 6+ power, intimidate + lesson counter.

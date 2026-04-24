@@ -46,6 +46,7 @@ class EffectAction(Enum):
     WEAPON_ATTACK_POWER_BONUS          = auto()   # if weapon was attacked this turn, next attack gains +magnitude power
     WEAPON_ATTACK_BONUS_PER_SWING      = auto()   # 1st weapon attack this turn +1, 2nd weapon attack this turn +2
     REVEAL_TOP_DECK_POWER_CHECK        = auto()   # reveal top card of deck; if 6+ power keep on top, else move to bottom
+    DISCARD_CARD_COST                  = auto()   # as an additional cost to play this card, discard a card from hand
 
 
 @dataclass
