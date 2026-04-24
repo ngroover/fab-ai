@@ -478,6 +478,7 @@ class FaBEnv:
         elif card.card_type == CardType.ACTION:
             self._resolve_action(card, active, opponent)
         elif card.card_type == CardType.ACTION_ATTACK:
+<<<<<<< HEAD
             # Pay any additional play costs before declaring the attack
             from card_effects import EffectAction, EffectTrigger
             for effect in card.effects:
@@ -487,6 +488,9 @@ class FaBEnv:
                     active.graveyard.append(discarded)
                     self._log(f"    🎲 Additional cost — {active.name} discards {discarded.name}.")
                     self._fire_effects(EffectTrigger.ON_DISCARD, {"card": discarded}, active, opponent)
+=======
+            self._apply_card_effects(card, EffectTrigger.ON_ATTACK_PLAY, {}, active, opponent)
+>>>>>>> origin/claude/add-intimidate-alpha-rampage-EvuKG
             self._pending_attack = card
             self._pending_is_weapon = False
             self._trigger_defend_phase(active, opponent)
@@ -1221,6 +1225,15 @@ class FaBEnv:
                                 opponent.banished.append(banished)
                                 self._log(f"    👁  {card.name} — discarded 6+ power card, intimidate! "
                                           f"{opponent.name} banishes {banished.name}.")
+            elif effect.action == EffectAction.DISCARD_CARD_COST:
+                if active.hand:
+                    discarded = self._rng.choice(active.hand)
+                    active.hand.remove(discarded)
+                    active.graveyard.append(discarded)
+                    self._log(f"    💸 {card.name} — additional cost: discarded {discarded.name}.")
+                    self._fire_effects(EffectTrigger.ON_DISCARD, {"card": discarded}, active, opponent)
+                else:
+                    self._log(f"    💸 {card.name} — additional cost: no card to discard.")
             elif effect.action == EffectAction.REVEAL_TOP_DECK_POWER_CHECK:
                 if active.deck:
                     top = active.deck[0]

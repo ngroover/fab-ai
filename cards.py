@@ -131,8 +131,12 @@ def build_rhinar_deck() -> List[Card]:
     cards.append(Card("Alpha Rampage", CardType.ACTION_ATTACK, cost=3, pitch=1,
                        power=9, defense=3, color=Color.RED,
                        card_class=CardClass.BRUTE,
-                       text="Rhinar Specialization. As an additional cost to play Alpha Rampage, discard a random card. When you attack with Alpha Rampage, intimidate.",
-                       effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.INTIMIDATE)]))
+                       keywords=[Keyword.INTIMIDATE],
+                       text="Rhinar Specialization. As an additional cost to play Alpha Rampage, discard a random card. Intimidate.",
+                       effects=[
+                           CardEffect(trigger=EffectTrigger.ON_ATTACK_PLAY, action=EffectAction.DISCARD_CARD_COST),
+                           CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.INTIMIDATE),
+                       ]))
 
     # Awakening Bellow x2: cost 2, power 6, def 3, go again, intimidate
     for _ in range(2):

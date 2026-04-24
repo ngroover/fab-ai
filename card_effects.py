@@ -29,6 +29,7 @@ class EffectTrigger(Enum):
     """Events that can activate a card effect."""
     ON_DISCARD         = auto()   # a card is discarded from hand during the action phase
     ON_ATTACK          = auto()   # fired when an attack card is declared (before defend step)
+    ON_ATTACK_PLAY     = auto()   # fired when an ACTION_ATTACK card is played (before defend, for additional costs)
     ON_PLAY            = auto()   # fired when a non-attack action card is played
     ON_ATTACK_REACTION = auto()   # fired when this card resolves as an attack reaction
     ON_DEFEND          = auto()   # fired when this card is used to defend
