@@ -31,6 +31,7 @@ class EffectTrigger(Enum):
     ON_ATTACK          = auto()   # fired when an attack card is declared (before defend step)
     ON_PLAY            = auto()   # fired when a non-attack action card is played
     ON_ATTACK_REACTION = auto()   # fired when this card resolves as an attack reaction
+    ON_DEFEND          = auto()   # fired when this card is used to defend
 
 
 class EffectAction(Enum):
@@ -42,8 +43,9 @@ class EffectAction(Enum):
     ATTACK_POWER_BOOST             = auto()   # target attack gains +magnitude power (see CardEffect.magnitude)
     SWORD_ATTACK_GO_AGAIN          = auto()   # target sword attack gains go again
     NEXT_SWORD_ATTACK_POWER_BONUS  = auto()   # next sword attack this turn gains +magnitude power
-    WEAPON_ATTACK_POWER_BONUS      = auto()   # if weapon was attacked this turn, next attack gains +magnitude power
-    WEAPON_ATTACK_BONUS_PER_SWING  = auto()   # 1st weapon attack this turn +1, 2nd weapon attack this turn +2
+    WEAPON_ATTACK_POWER_BONUS          = auto()   # if weapon was attacked this turn, next attack gains +magnitude power
+    WEAPON_ATTACK_BONUS_PER_SWING      = auto()   # 1st weapon attack this turn +1, 2nd weapon attack this turn +2
+    REVEAL_TOP_DECK_POWER_CHECK        = auto()   # reveal top card of deck; if 6+ power keep on top, else move to bottom
 
 
 @dataclass
