@@ -255,22 +255,7 @@ class FaBEnv:
         self._rewards = {"agent_0": 0.0, "agent_1": 0.0}  # zero out each step
 
         # ── Dispatch by phase ──
-        if self._phase == Phase.CHOOSE_FIRST:
-            self._handle_choose_first_action(action)
-        elif self._phase == Phase.ATTACK:
-            self._handle_attack_action(action, active, opponent)
-        elif self._phase == Phase.PITCH:
-            self._handle_pitch_action(action, active, opponent)
-        elif self._phase == Phase.DEFEND:
-            self._handle_defend_action(action, active, opponent)
-        elif self._phase == Phase.REACTION:
-            self._handle_reaction_action(action, active, opponent)
-        elif self._phase == Phase.INSTANT:
-            self._handle_instant_action(action, active, opponent)
-        elif self._phase == Phase.ARSENAL:
-            self._handle_arsenal_action(action, active, opponent)
-        elif self._phase == Phase.PITCH_ORDER:
-            self._handle_pitch_order_action(action, active)
+        self._dispatch_action(action, active, opponent)
 
         # ── Check game over ──
         if self._game.is_over() or self._game.turn_number > self.MAX_TURNS:
@@ -287,22 +272,7 @@ class FaBEnv:
             auto_active = self._game.players[auto_active_idx]
             auto_opponent = self._game.players[1 - auto_active_idx]
 
-            if self._phase == Phase.CHOOSE_FIRST:
-                self._handle_choose_first_action(auto_action)
-            elif self._phase == Phase.ATTACK:
-                self._handle_attack_action(auto_action, auto_active, auto_opponent)
-            elif self._phase == Phase.PITCH:
-                self._handle_pitch_action(auto_action, auto_active, auto_opponent)
-            elif self._phase == Phase.DEFEND:
-                self._handle_defend_action(auto_action, auto_active, auto_opponent)
-            elif self._phase == Phase.REACTION:
-                self._handle_reaction_action(auto_action, auto_active, auto_opponent)
-            elif self._phase == Phase.INSTANT:
-                self._handle_instant_action(auto_action, auto_active, auto_opponent)
-            elif self._phase == Phase.ARSENAL:
-                self._handle_arsenal_action(auto_action, auto_active, auto_opponent)
-            elif self._phase == Phase.PITCH_ORDER:
-                self._handle_pitch_order_action(auto_action, auto_active)
+            self._dispatch_action(auto_action, auto_active, auto_opponent)
 
             if self._game.is_over() or self._game.turn_number > self.MAX_TURNS:
                 self._finalize()
@@ -347,6 +317,24 @@ class FaBEnv:
     # ──────────────────────────────────────────────────────────
     # Internal: action handlers
     # ──────────────────────────────────────────────────────────
+
+    def _dispatch_action(self, action: Action, active: Player, opponent: Player):
+        if self._phase == Phase.CHOOSE_FIRST:
+            self._handle_choose_first_action(action)
+        elif self._phase == Phase.ATTACK:
+            self._handle_attack_action(action, active, opponent)
+        elif self._phase == Phase.PITCH:
+            self._handle_pitch_action(action, active, opponent)
+        elif self._phase == Phase.DEFEND:
+            self._handle_defend_action(action, active, opponent)
+        elif self._phase == Phase.REACTION:
+            self._handle_reaction_action(action, active, opponent)
+        elif self._phase == Phase.INSTANT:
+            self._handle_instant_action(action, active, opponent)
+        elif self._phase == Phase.ARSENAL:
+            self._handle_arsenal_action(action, active, opponent)
+        elif self._phase == Phase.PITCH_ORDER:
+            self._handle_pitch_order_action(action, active)
 
     def _handle_choose_first_action(self, action: Action):
         """Pre-game: the coin-flip winner chooses who goes first."""
