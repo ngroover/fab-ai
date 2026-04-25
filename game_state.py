@@ -77,6 +77,7 @@ class Player:
         # Per-turn trackers
         self.weapon_attack_count = 0      # for In the Swing / Slice and Dice
         self.next_weapon_go_again = False  # from On a Knife Edge, Blade Flash, etc.
+        self.next_weapon_go_again_if_hits = False  # from Warrior's Valor: go again only if weapon attack hits
         self.next_weapon_power_bonus = 0   # from En Garde, Sharpen Steel, etc.
         self.next_sword_attack_power_bonus = 0  # from Run Through (set during reaction window, consumed on next attack)
         self.slice_and_dice_active = False # from Slice and Dice: +1 1st weapon, +2 2nd weapon
@@ -127,6 +128,7 @@ class Player:
         self.weapon_used_this_turn = False
         self.weapon_attack_count = 0
         self.next_weapon_go_again = False
+        self.next_weapon_go_again_if_hits = False
         self.next_weapon_power_bonus = 0
         self.next_sword_attack_power_bonus = 0
         self.slice_and_dice_active = False

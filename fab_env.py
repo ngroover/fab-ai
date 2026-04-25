@@ -642,6 +642,10 @@ class FaBEnv:
         if is_weapon and attacker.next_weapon_go_again:
             go = True
             attacker.next_weapon_go_again = False
+        if is_weapon and attacker.next_weapon_go_again_if_hits:
+            if hit:
+                go = True
+            attacker.next_weapon_go_again_if_hits = False
         if go:
             attacker.action_points += 1
             self._log(f"    ↩  Go again! {attacker.name} gains 1 action point.")
@@ -1346,7 +1350,7 @@ class FaBEnv:
 
         elif n == "Warrior's Valor":
             active.next_weapon_power_bonus += 3
-            active.next_weapon_go_again = True
+            active.next_weapon_go_again_if_hits = True
             self._log(f"    ⚡ Warrior's Valor — weapon gets +3 power and 'if hits, go again'.")
 
         elif n in ("On a Knife Edge", "Blade Flash", "Hit and Run"):
