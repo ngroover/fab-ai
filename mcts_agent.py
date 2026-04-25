@@ -341,3 +341,6 @@ class MCTSAgent:
 
     def select_choose_first(self, legal, player) -> Action:
         return self._mcts_select(legal)
+
+    def select_pitch_order(self, obs, legal, player) -> Action:
+        return self._mcts_select(legal)
