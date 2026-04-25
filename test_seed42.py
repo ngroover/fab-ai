@@ -312,13 +312,27 @@ class TestHeroAbility(unittest.TestCase):
 
 
 class TestInstantWindowTurn1(unittest.TestCase):
-    """Seed 42, Rhinar's turn 1: an INSTANT window opens after Wild Ride is
-    declared.  Dorinthea holds no instants so her only legal choice is
-    PASS_PRIORITY, which is correct behaviour.  This test pins that the window
-    opens, that priority belongs to the defender first, and that no illegal
-    PLAY_CARD actions leak in when the defender has nothing to play."""
+    """Seed 42, Rhinar's turn 1: an instant window opens after Wild Ride is
+    declared.  Neither player holds instants at seed 42, so both auto-pass and
+    the window closes immediately, depositing the game directly in Phase.DEFEND
+    with the defender (Dorinthea / agent_1) holding priority.
 
-    def _advance_to_instant_window(self):
+    Tests verify:
+    - The game reaches DEFEND (not INSTANT) because the window auto-executes
+      when neither player has anything to play.
+    - The defender still has priority once DEFEND opens.
+    - No illegal PLAY_CARD actions (reaction cards, etc.) leak into the DEFEND
+      block-selection step.
+    - Attack reaction cards are NOT offered as block options; they must be
+      played in the REACTION phase after blocks are committed.
+    """
+
+    def _advance_to_defend_phase(self):
+        """Advance to the DEFEND phase of Wild Ride on turn 1, seed 42.
+
+        The pre-DEFEND instant window is auto-executed (both players have no
+        instants) so this helper returns with Phase.DEFEND already active.
+        """
         env = FaBEnv(verbose=False)
         env.reset(seed=SEED)
 
@@ -335,50 +349,69 @@ class TestInstantWindowTurn1(unittest.TestCase):
         )
         env.step(wild_ride)
 
-        # Pay Wild Ride's cost
+        # Pay Wild Ride's cost; after the last pitch step Wild Ride resolves,
+        # the instant window opens and is immediately auto-executed (no instants
+        # in either hand), leaving the env at Phase.DEFEND.
         while env._phase == Phase.PITCH:
             env.step(env.legal_actions()[0])
 
         return env
 
-    def test_instant_window_opens_after_wild_ride(self):
-        env = self._advance_to_instant_window()
-        self.assertEqual(env._phase, Phase.INSTANT)
+    def test_defend_phase_reached_after_wild_ride(self):
+        """When neither player has instants the pre-DEFEND instant window is
+        auto-executed and the game lands directly in Phase.DEFEND."""
+        env = self._advance_to_defend_phase()
+        self.assertEqual(env._phase, Phase.DEFEND)
 
     def test_defender_has_priority_first(self):
-        env = self._advance_to_instant_window()
+        env = self._advance_to_defend_phase()
         self.assertEqual(env.agent_selection, "agent_1")
 
     def test_pending_attack_is_wild_ride(self):
-        env = self._advance_to_instant_window()
+        env = self._advance_to_defend_phase()
         self.assertIsNotNone(env._pending_attack)
         self.assertEqual(env._pending_attack.name, "Wild Ride")
 
     def test_stack_empty_at_window_start(self):
-        env = self._advance_to_instant_window()
+        env = self._advance_to_defend_phase()
         self.assertEqual(len(env._instant_stack), 0)
 
-    def test_dorinthea_has_no_instants_so_only_pass_priority(self):
-        """Dorinthea's seed-42 hand has no instants; PASS_PRIORITY is the sole
-        legal action and no spurious PLAY_CARD actions are offered."""
-        env = self._advance_to_instant_window()
-        dorinthea = env._game.players[1]
+    def test_no_play_card_actions_in_defend_phase(self):
+        """In the DEFEND phase no PLAY_CARD actions should be offered — only
+        DEFEND (block) actions.  Reaction cards must not leak into the block
+        step."""
+        env = self._advance_to_defend_phase()
         from cards import CardType
+        dorinthea = env._game.players[1]
+        # Confirm Dorinthea has no instants (so the instant window was a no-op)
         instant_names = [c.name for c in dorinthea.hand if c.card_type == CardType.INSTANT]
         self.assertEqual(instant_names, [], "Dorinthea has no instants in hand at seed 42")
 
         legal = env.legal_actions()
         play_card_actions = [a for a in legal if a.action_type == ActionType.PLAY_CARD]
         self.assertEqual(play_card_actions, [],
-                         f"No PLAY_CARD should be offered with no instants; got {legal}")
-        self.assertTrue(any(a.action_type == ActionType.PASS_PRIORITY for a in legal))
+                         f"No PLAY_CARD should be offered in DEFEND phase; got {legal}")
 
-    def test_window_closes_and_defend_phase_starts(self):
-        """Both players pass with an empty stack → window closes → DEFEND."""
-        from actions import Action
-        env = self._advance_to_instant_window()
-        env.step(Action(ActionType.PASS_PRIORITY))  # Dorinthea passes
-        env.step(Action(ActionType.PASS_PRIORITY))  # Rhinar passes → window closes
+    def test_attack_reactions_not_offered_as_blocks(self):
+        """Attack reaction cards must NOT appear as block options in the DEFEND
+        phase.  They are only playable as reactions after blocks are committed."""
+        env = self._advance_to_defend_phase()
+        from cards import CardType
+        legal = env.legal_actions()
+        for a in legal:
+            if a.action_type == ActionType.DEFEND and a.defend_hand_indices:
+                dorinthea = env._game.players[1]
+                for i in a.defend_hand_indices:
+                    card = dorinthea.hand[i]
+                    self.assertNotEqual(
+                        card.card_type, CardType.ATTACK_REACTION,
+                        f"Attack reaction {card.name} should not be offered as a block",
+                    )
+
+    def test_defend_phase_is_active_after_instant_window(self):
+        """After the instant window closes, the game is in DEFEND with the
+        defender controlling — no need to manually step through the window."""
+        env = self._advance_to_defend_phase()
         self.assertEqual(env._phase, Phase.DEFEND)
         self.assertEqual(env.agent_selection, "agent_1")
 

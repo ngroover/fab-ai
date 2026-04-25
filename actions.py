@@ -295,12 +295,15 @@ def legal_defend_actions(player: 'Player', attack_power: int,
     # Done — commit all accumulated block cards (or take full damage if none chosen)
     actions.append(Action(ActionType.DEFEND))
 
-    # NOTE: instants and defense reactions are NOT offered here. Instants are
-    # played during the pre-DEFEND instant window; defense reactions can only be
-    # played in the REACTION phase after blocks are committed.
+    # NOTE: instants and reaction cards are NOT offered here. Instants are
+    # played during the pre-DEFEND instant window; attack reactions and defense
+    # reactions can only be played in the REACTION phase after blocks are
+    # committed.  Block cards must be chosen before any reactions are played.
     defenders = [(i, c) for i, c in enumerate(player.hand)
                  if c.defense > 0
-                 and c.card_type not in (CardType.INSTANT, CardType.DEFENSE_REACTION)
+                 and c.card_type not in (CardType.INSTANT,
+                                         CardType.DEFENSE_REACTION,
+                                         CardType.ATTACK_REACTION)
                  and not c.no_block
                  and i not in already_indices]
     equip_slots = [slot for slot, eq in player.equipment.items()
