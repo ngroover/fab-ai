@@ -104,10 +104,12 @@ class FaBEnv:
     MAX_TURNS = 80
 
     def __init__(self, verbose: bool = False, log_file: Optional[str] = None,
-                 log_callback=None):
+                 log_callback=None, log_callback_p0=None, log_callback_p1=None):
         self.verbose = verbose
         self._log_file = log_file
         self._log_callback = log_callback
+        self._log_callback_p0 = log_callback_p0
+        self._log_callback_p1 = log_callback_p1
         self.agents = ["agent_0", "agent_1"]
         self._game: Optional[GameState] = None
         self._phase = Phase.START
@@ -165,6 +167,8 @@ class FaBEnv:
     def __getstate__(self):
         state = self.__dict__.copy()
         state["_log_callback"] = None
+        state["_log_callback_p0"] = None
+        state["_log_callback_p1"] = None
         return state
 
     # ──────────────────────────────────────────────────────────
@@ -673,7 +677,10 @@ class FaBEnv:
                 card = active.hand[action.arsenal_hand_index]
                 active.hand.remove(card)
                 active.arsenal = card
-                self._log(f"\n  📦  {active.name} stores {card.name} in arsenal.")
+                active_idx = self._game.active_player_idx
+                self._log_private(active_idx,
+                    f"\n  📦  {active.name} stores {card.name} in arsenal.",
+                    f"\n  📦  {active.name} stores a card face-down in arsenal.")
                 # Mentors go face-up immediately when placed in arsenal
                 if card.card_type == CardType.MENTOR:
                     active.mentor_face_up = True
@@ -682,9 +689,13 @@ class FaBEnv:
         # Return banished cards (intimidate cleanup)
         if opponent.banished:
             names = ", ".join(c.name for c in opponent.banished)
+            n_returned = len(opponent.banished)
             opponent.hand.extend(opponent.banished)
             opponent.banished.clear()
-            self._log(f"    ↩  Banished cards returned to {opponent.name}'s hand: {names}.")
+            opp_idx = 1 - self._game.active_player_idx
+            self._log_private(opp_idx,
+                f"    ↩  Banished cards returned to your hand: {names}.",
+                f"    ↩  {n_returned} banished card(s) returned to {opponent.name}'s hand.")
 
         active.resource_points = 0
         active.action_points = 0
@@ -721,13 +732,17 @@ class FaBEnv:
                 self._log(f"    ↓  {opponent.name} places {card.name} at deck bottom.")
             opponent.pitch_zone.clear()
 
+        active_idx = self._game.active_player_idx
         # Draw up
         hand_size_before = len(active.hand)
         active.draw_to_intellect()
         drawn = active.hand[hand_size_before:]
         drawn_str = f": {', '.join(c.name for c in drawn)}" if drawn else " (none)"
-        self._log(f"\n  🔄  {active.name} draws to {active.intellect}{drawn_str}. "
-                  f"Hand: {len(active.hand)}, Deck: {len(active.deck)}")
+        self._log_private(active_idx,
+            f"\n  🔄  {active.name} draws to {active.intellect}{drawn_str}. "
+            f"Hand: {len(active.hand)}, Deck: {len(active.deck)}",
+            f"\n  🔄  {active.name} draws {len(drawn)} card(s) to hand. "
+            f"Hand: {len(active.hand)}, Deck: {len(active.deck)}")
 
         # First turn: defender draws too
         if self._game.is_first_turn:
@@ -735,7 +750,10 @@ class FaBEnv:
             opponent.draw_to_intellect()
             opp_drawn = opponent.hand[opp_hand_size_before:]
             opp_drawn_str = f": {', '.join(c.name for c in opp_drawn)}" if opp_drawn else " (none)"
-            self._log(f"  🔄  (First turn) {opponent.name} also draws to {opponent.intellect}{opp_drawn_str}.")
+            opp_idx = 1 - active_idx
+            self._log_private(opp_idx,
+                f"  🔄  (First turn) {opponent.name} also draws to {opponent.intellect}{opp_drawn_str}.",
+                f"  🔄  (First turn) {opponent.name} also draws {len(opp_drawn)} card(s) to hand.")
 
         # Switch turns
         self._game.is_first_turn = False
@@ -1096,7 +1114,7 @@ class FaBEnv:
         self._log(f"{'═'*60}")
         self._log(f"  ♥  Life: {self._game.players[0].name}={self._game.players[0].life} "
                   f"| {self._game.players[1].name}={self._game.players[1].life}")
-        self._log(f"  🃏  Hand: {', '.join(str(c) for c in active.hand)}")
+        self._log(f"  🃏  Hand: {', '.join(str(c) for c in active.hand)}", player_idx=self._game.active_player_idx)
 
         self._phase = Phase.ATTACK
         self.agent_selection = f"agent_{self._game.active_player_idx}"
@@ -1207,7 +1225,10 @@ class FaBEnv:
                     banished = self._rng.choice(opponent.hand)
                     opponent.hand.remove(banished)
                     opponent.banished.append(banished)
-                    self._log(f"    👁  Intimidate! {opponent.name} banishes {banished.name}.")
+                    opp_idx = 1 - self._game.active_player_idx
+                    self._log_private(opp_idx,
+                        f"    👁  Intimidate! {opponent.name} banishes {banished.name} face-down.",
+                        f"    👁  Intimidate! {opponent.name} banishes a card face-down.")
             elif effect.action == EffectAction.WEAPON_ATTACK_POWER_BONUS:
                 active.next_weapon_power_bonus += effect.magnitude
                 self._log(f"    ⚡ {card.name} — next weapon attack gains +{effect.magnitude} power.")
@@ -1220,7 +1241,10 @@ class FaBEnv:
                 active.draw(1)
                 drawn = active.hand[-1] if active.hand else None
                 if drawn:
-                    self._log(f"    🎴 {card.name} — drew {drawn.name}.")
+                    active_idx = self._game.active_player_idx
+                    self._log_private(active_idx,
+                        f"    🎴 {card.name} — drew {drawn.name}.",
+                        f"    🎴 {card.name} — {active.name} drew a card.")
                 if active.hand:
                     discarded = self._rng.choice(active.hand)
                     active.hand.remove(discarded)
@@ -1413,8 +1437,16 @@ class FaBEnv:
                 self._mentor_lesson(attacker)
 
         if card.name == "Raging Onslaught":
+            hand_before = len(attacker.hand)
             attacker.draw(1)
-            self._log(f"    🎴 Raging Onslaught hit — {attacker.name} draws a card.")
+            drawn_ro = attacker.hand[-1] if len(attacker.hand) > hand_before else None
+            attacker_idx = self._game.active_player_idx
+            if drawn_ro:
+                self._log_private(attacker_idx,
+                    f"    🎴 Raging Onslaught hit — {attacker.name} draws {drawn_ro.name}.",
+                    f"    🎴 Raging Onslaught hit — {attacker.name} draws a card.")
+            else:
+                self._log(f"    🎴 Raging Onslaught hit — {attacker.name} draws a card (deck empty).")
 
         if card.name == "Driving Blade":
             attacker.next_weapon_go_again = True
@@ -1524,7 +1556,9 @@ class FaBEnv:
         self._terminations = {"agent_0": True, "agent_1": True}
         self._truncations = {"agent_0": False, "agent_1": False}
 
-    def _log(self, msg: str):
+    def _log(self, msg: str, player_idx: int = -1):
+        """Log a message. player_idx=-1 sends to both players (public info).
+        player_idx=0 or 1 sends only to that player's private log."""
         if self.verbose:
             print(msg)
         if self._log_file:
@@ -1532,6 +1566,23 @@ class FaBEnv:
                 f.write(msg + "\n")
         if self._log_callback:
             self._log_callback(msg)
+        if player_idx == -1:
+            if self._log_callback_p0:
+                self._log_callback_p0(msg)
+            if self._log_callback_p1:
+                self._log_callback_p1(msg)
+        elif player_idx == 0:
+            if self._log_callback_p0:
+                self._log_callback_p0(msg)
+        elif player_idx == 1:
+            if self._log_callback_p1:
+                self._log_callback_p1(msg)
+
+    def _log_private(self, player_idx: int, private_msg: str, public_msg: str = ""):
+        """Log private info to the owning player, and a public version to the opponent."""
+        self._log(private_msg, player_idx=player_idx)
+        if public_msg:
+            self._log(public_msg, player_idx=1 - player_idx)
 
     # ──────────────────────────────────────────────────────────
     # Convenience: render
