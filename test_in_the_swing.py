@@ -179,59 +179,36 @@ class TestInTheSwingDuringSecondWeaponAttack(unittest.TestCase):
 
 
 class TestInTheSwingNotLegalOnFirstAttack(unittest.TestCase):
-    """Verify weapon_attack_count is 0 during first attack reaction window
-    (play condition check — card should have no effect if played then)."""
+    """Verify 'In the Swing' has a play restriction enforced during the first weapon attack."""
 
     def setUp(self):
         self.env = FaBEnv(verbose=False)
         self.env.reset(seed=SEED)
         self.dorinthea = self.env._game.players[1]
 
-    def _advance_to_first_attack_reaction(self):
-        env = self.env
-        dorinthea = self.dorinthea
+    def test_play_condition_fails_with_zero_weapon_attacks(self):
+        """play_condition returns False when weapon_attack_count==0 (first attack)."""
+        card = next(c for c in self.dorinthea.hand if c.name == "In the Swing")
+        self.assertIsNotNone(card.play_condition,
+                             "In the Swing must have a play_condition")
+        self.assertFalse(card.play_condition({"weapon_attack_count": 0}),
+                         "play_condition must block play on the first weapon attack")
 
-        legal = env.legal_actions()
-        env.step(next(a for a in legal if a.action_type == ActionType.GO_FIRST))
+    def test_in_the_swing_not_in_legal_reaction_actions_first_attack(self):
+        """legal_reaction_actions excludes 'In the Swing' when weapon_attack_count==0."""
+        from actions import legal_reaction_actions
+        self.dorinthea.weapon_attack_count = 0
+        legal = legal_reaction_actions(self.dorinthea, attacker_idx=1, priority_idx=1)
+        names = [a.card.name for a in legal if a.card]
+        self.assertNotIn("In the Swing", names,
+                         "In the Swing must not be legal on the first weapon attack")
 
-        legal = env.legal_actions()
-        env.step(next(
-            a for a in legal
-            if a.action_type == ActionType.PLAY_CARD and a.card.name == "On a Knife Edge"
-        ))
-
-        legal = env.legal_actions()
-        env.step(next(a for a in legal if a.action_type == ActionType.WEAPON))
-
-        bf_idx = next(i for i, c in enumerate(dorinthea.hand) if c.name == "Blade Flash")
-        legal = env.legal_actions()
-        env.step(next(
-            a for a in legal
-            if a.action_type == ActionType.PITCH and a.pitch_indices == [bf_idx]
-        ))
-
-        legal = env.legal_actions()
-        env.step(next(
-            a for a in legal
-            if a.action_type == ActionType.DEFEND
-            and a.defend_hand_indices == []
-            and not a.defend_equip_slots
-        ))
-
-    def test_weapon_attack_count_zero_during_first_attack_reaction(self):
-        self._advance_to_first_attack_reaction()
-        self.assertEqual(self.env._phase, Phase.REACTION)
-        self.assertEqual(self.dorinthea.weapon_attack_count, 0)
-
-    def test_in_the_swing_effect_does_not_fire_when_count_is_zero(self):
-        self._advance_to_first_attack_reaction()
-        power_before = self.env._pending_attack_power
-
-        # Force-resolve as if "In the Swing" effect fires with weapon_attack_count=0
+    def test_effect_condition_fails_on_first_attack(self):
+        """The effect's condition also blocks the +3 power boost when count==0."""
         card = next(c for c in self.dorinthea.hand if c.name == "In the Swing")
         effect = card.effects[0]
-        ctx = {"weapon_attack_count": self.dorinthea.weapon_attack_count}
-        self.assertFalse(effect.matches(EffectTrigger.ON_ATTACK_REACTION, ctx),
+        self.assertFalse(effect.matches(EffectTrigger.ON_ATTACK_REACTION,
+                                        {"weapon_attack_count": 0}),
                          "Effect must NOT fire during first weapon attack")
 
 

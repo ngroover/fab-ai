@@ -8,7 +8,7 @@ Dorinthea deck: 40-card Blitz, young hero Dorinthea, Quicksilver Prodigy (20 lif
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, Optional, List
+from typing import Any, Callable, Dict, Optional, List
 from enum import Enum
 
 from card_effects import CardEffect, EffectTrigger, EffectAction
@@ -70,6 +70,7 @@ class Card:
     card_class: CardClass = CardClass.GENERIC
     keywords: List["Keyword"] = field(default_factory=list)
     effects: List[CardEffect] = field(default_factory=list)
+    play_condition: Optional[Callable[[Dict[str, Any]], bool]] = field(default=None, compare=False)
 
     @property
     def card_id(self) -> str:
@@ -360,6 +361,7 @@ def build_dorinthea_deck() -> List[Card]:
                            power=0, defense=3, color=Color.RED,
                            card_class=CardClass.WARRIOR,
                            text="Play only if you have attacked 2 or more times with weapons this turn. Target weapon attack gains +3 power.",
+                           play_condition=lambda ctx: ctx.get("weapon_attack_count", 0) >= 1,
                            effects=[CardEffect(
                                trigger=EffectTrigger.ON_ATTACK_REACTION,
                                action=EffectAction.ATTACK_POWER_BOOST,
