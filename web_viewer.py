@@ -1555,6 +1555,10 @@ class _GameSession:
         self.gamestate: dict = {}
         self.log_lines: list = []
         self.log_total = 0
+        self.log_lines_p0: list = []
+        self.log_total_p0 = 0
+        self.log_lines_p1: list = []
+        self.log_total_p1 = 0
         self.p0_agent = "ai"
         self.p1_agent = "ai"
         self._cancelled = False
@@ -1608,6 +1612,10 @@ class _GameSession:
                 "attack_power": self.attack_power,
                 "log": list(self.log_lines[-150:]),
                 "log_total": self.log_total,
+                "log_p0": list(self.log_lines_p0[-150:]),
+                "log_total_p0": self.log_total_p0,
+                "log_p1": list(self.log_lines_p1[-150:]),
+                "log_total_p1": self.log_total_p1,
                 "winner": self.winner,
                 "player_stats": dict(self.player_stats),
                 "gamestate": dict(self.gamestate),
@@ -1625,6 +1633,24 @@ class _GameSession:
                     self.log_total += 1
             if len(self.log_lines) > 500:
                 self.log_lines = self.log_lines[-500:]
+
+    def append_log_p0(self, msg: str):
+        with self._lock:
+            for line in msg.split("\n"):
+                if line.strip():
+                    self.log_lines_p0.append(line)
+                    self.log_total_p0 += 1
+            if len(self.log_lines_p0) > 500:
+                self.log_lines_p0 = self.log_lines_p0[-500:]
+
+    def append_log_p1(self, msg: str):
+        with self._lock:
+            for line in msg.split("\n"):
+                if line.strip():
+                    self.log_lines_p1.append(line)
+                    self.log_total_p1 += 1
+            if len(self.log_lines_p1) > 500:
+                self.log_lines_p1 = self.log_lines_p1[-500:]
 
     def set_pending(self, legal, labels, phase, agent_id, attack_power=0):
         with self._lock:
@@ -1679,7 +1705,9 @@ class _GameSession:
         from agents import RhinarAgent, DorintheiAgent
         from mcts_agent import MCTSAgent
 
-        env = FaBEnv(verbose=False, log_callback=self.append_log)
+        env = FaBEnv(verbose=False, log_callback=self.append_log,
+                     log_callback_p0=self.append_log_p0,
+                     log_callback_p1=self.append_log_p1)
 
         def _make_agent(agent_type: str, player_idx: int):
             if agent_type == "human":
@@ -1881,10 +1909,11 @@ PLAY_TEMPLATE = """
       background: #0a0e18; border-bottom: 1px solid #2d3748;
       white-space: pre-wrap; word-break: break-word;
     }
+    #log-area.compact { height: 20vh; }
 
     /* ── Gamestate area ──────────────────────────────── */
     #gamestate-area {
-      padding: 10px 12px; overflow-y: auto; height: 38vh;
+      padding: 10px 12px; overflow-y: auto; height: 20vh;
       background: #0a0e18; border-bottom: 1px solid #2d3748;
       font-size: 0.78rem;
     }
@@ -2108,6 +2137,7 @@ PLAY_TEMPLATE = """
 
     <div id="view-tabs"></div>
 
+    <div id="log-label" style="padding:2px 14px;font-size:0.65rem;color:#718096;background:#0a0e18;border-bottom:1px solid #1a2030;display:none"></div>
     <div id="log-area"></div>
     <div id="gamestate-area" style="display:none"></div>
 
@@ -2118,7 +2148,7 @@ PLAY_TEMPLATE = """
   </div>
 
   <script>
-    let lastLogTotal = -1;
+    let lastLogKey = null;
     let lastActionKey = null;
     let polling = false;
     let activeView = 'log';     // 'log' | 'p0' | 'p1'
@@ -2176,13 +2206,28 @@ PLAY_TEMPLATE = """
         }).join('');
       }
 
-      const showLog = (activeView === 'log');
-      document.getElementById('log-area').style.display = showLog ? '' : 'none';
-      document.getElementById('gamestate-area').style.display = showLog ? 'none' : '';
+      const inPlayerView = (activeView === 'p0' || activeView === 'p1');
+      document.getElementById('log-area').style.display = '';
+      document.getElementById('log-area').classList.toggle('compact', inPlayerView);
+      document.getElementById('gamestate-area').style.display = inPlayerView ? '' : 'none';
+      const lbl = document.getElementById('log-label');
+      if (activeView === 'p0') {
+        const n0 = (s.player_stats.agent_0 && s.player_stats.agent_0.name) || 'Player 1';
+        lbl.textContent = '📜 ' + n0 + "'s private log";
+        lbl.style.display = '';
+      } else if (activeView === 'p1') {
+        const n1 = (s.player_stats.agent_1 && s.player_stats.agent_1.name) || 'Player 2';
+        lbl.textContent = '📜 ' + n1 + "'s private log";
+        lbl.style.display = '';
+      } else {
+        lbl.textContent = '';
+        lbl.style.display = 'none';
+      }
     }
 
     function setView(k) {
       activeView = k;
+      lastLogKey = null;    // force log re-render when view changes
       lastTabKey = null;     // force tab highlight re-render
       lastViewKey = null;    // force gamestate re-render
       poll();
@@ -2218,13 +2263,26 @@ PLAY_TEMPLATE = """
 
     // ── Log area ───────────────────────────────────────────────
     function updateLog(s) {
-      if (s.log_total === lastLogTotal) return;
-      lastLogTotal = s.log_total;
+      let logData, logTotal;
+      if (activeView === 'p0') {
+        logData = s.log_p0 || [];
+        logTotal = s.log_total_p0 || 0;
+      } else if (activeView === 'p1') {
+        logData = s.log_p1 || [];
+        logTotal = s.log_total_p1 || 0;
+      } else {
+        logData = s.log || [];
+        logTotal = s.log_total || 0;
+      }
+
+      const key = activeView + ':' + logTotal;
+      if (key === lastLogKey) return;
+      lastLogKey = key;
 
       const area = document.getElementById('log-area');
       const atBottom = area.scrollHeight - area.clientHeight <= area.scrollTop + 40;
 
-      area.innerHTML = s.log.map(line => {
+      area.innerHTML = logData.map(line => {
         const cls = classifyLine(line);
         const esc = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
         return cls ? `<span class="${cls}">${esc}</span>` : esc;
