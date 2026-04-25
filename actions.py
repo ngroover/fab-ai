@@ -187,8 +187,8 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
     # ── Hand cards ──
     seen_play_names: set = set()
     for i, card in enumerate(player.hand):
-        if card.card_type in (CardType.DEFENSE_REACTION, CardType.ATTACK_REACTION, CardType.MENTOR):
-            continue  # reactions are played in the reaction step, not freely; mentors are not playable
+        if card.card_type in (CardType.DEFENSE_REACTION, CardType.ATTACK_REACTION, CardType.MENTOR, CardType.RESOURCE):
+            continue  # reactions are played in the reaction step, not freely; mentors/resources are not playable
         if card.name in seen_play_names:
             continue  # duplicate card — same choice regardless of which copy is picked
         seen_play_names.add(card.name)
