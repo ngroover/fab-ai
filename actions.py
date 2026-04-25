@@ -421,10 +421,13 @@ def legal_instant_actions(player: 'Player') -> List[Action]:
 
 
 def legal_pitch_order_actions(player: 'Player') -> List[Action]:
-    """One PITCH_ORDER action per card remaining in the pitch zone.
+    """One PITCH_ORDER action per distinct card name remaining in the pitch zone.
     The player selects cards one at a time; each chosen card is placed at the
     bottom of the deck, so the last card selected ends up closest to the top."""
-    return [
-        Action(ActionType.PITCH_ORDER, pitch_order_index=i)
-        for i in range(len(player.pitch_zone))
-    ]
+    seen: set = set()
+    actions = []
+    for i, c in enumerate(player.pitch_zone):
+        if c.name not in seen:
+            seen.add(c.name)
+            actions.append(Action(ActionType.PITCH_ORDER, pitch_order_index=i))
+    return actions
