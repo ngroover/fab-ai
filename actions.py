@@ -367,7 +367,9 @@ def legal_reaction_actions(player: 'Player', attacker_idx: int,
         if card.card_type == CardType.INSTANT:
             pass  # either player may play instants
         elif card.card_type == CardType.ATTACK_REACTION and is_attacker:
-            pass
+            ctx = {"weapon_attack_count": player.weapon_attack_count}
+            if card.play_condition is not None and not card.play_condition(ctx):
+                continue
         elif card.card_type == CardType.DEFENSE_REACTION and not is_attacker:
             pass
         else:
