@@ -33,6 +33,7 @@ class EffectTrigger(Enum):
     ON_PLAY            = auto()   # fired when a non-attack action card is played
     ON_ATTACK_REACTION = auto()   # fired when this card resolves as an attack reaction
     ON_DEFEND          = auto()   # fired when this card is used to defend
+    ON_DESTROYED       = auto()   # fired when this equipment card is destroyed
 
 
 class EffectAction(Enum):

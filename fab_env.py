@@ -1090,21 +1090,30 @@ class FaBEnv:
 
     def _break_combat_chain(self, attacker: Player, defender: Player) -> None:
         """Close the combat chain — move all chained cards to their owners' graveyards."""
-        if not attacker.combat_chain and not defender.combat_chain:
+        has_chain_cards = bool(attacker.combat_chain or defender.combat_chain)
+        has_blade_break = any(
+            Keyword.BLADE_BREAK in eq.card.keywords and eq.used_this_turn and not eq.destroyed
+            for player in (attacker, defender)
+            for eq in player.equipment.values()
+        )
+        if not has_chain_cards and not has_blade_break:
             return
-        all_names = [c.name for c in attacker.combat_chain] + [c.name for c in defender.combat_chain]
-        self._log(f"  ⛓  Combat chain closes ({', '.join(all_names)} → graveyard).")
-        attacker.graveyard.extend(attacker.combat_chain)
-        attacker.combat_chain.clear()
-        defender.graveyard.extend(defender.combat_chain)
-        defender.combat_chain.clear()
+        if has_chain_cards:
+            all_names = [c.name for c in attacker.combat_chain] + [c.name for c in defender.combat_chain]
+            self._log(f"  ⛓  Combat chain closes ({', '.join(all_names)} → graveyard).")
+            attacker.graveyard.extend(attacker.combat_chain)
+            attacker.combat_chain.clear()
+            defender.graveyard.extend(defender.combat_chain)
+            defender.combat_chain.clear()
 
         # Blade Break — destroy any equipment used to block this chain
         for player in (attacker, defender):
+            opponent = defender if player is attacker else attacker
             for eq in list(player.equipment.values()):
                 if Keyword.BLADE_BREAK in eq.card.keywords and eq.used_this_turn and not eq.destroyed:
                     eq.destroyed = True
                     self._log(f"    💀 {eq.card.name} destroyed (Blade Break).")
+                    self._apply_card_effects(eq.card, EffectTrigger.ON_DESTROYED, {}, player, opponent)
                     self._move_equipment_to_graveyard(player, eq)
 
     def _end_attack_phase(self, active: Player, opponent: Player):
