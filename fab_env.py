@@ -712,6 +712,15 @@ class FaBEnv:
 
     def _complete_end_phase(self, active: Player, opponent: Player):
         """Draw up, switch turns — called after pitch ordering is done."""
+        # If the opponent pitched cards this turn (e.g. to pay for instants),
+        # put them at the bottom of their deck now.
+        if opponent.pitch_zone:
+            self._log(f"\n  📋  {opponent.name} places {len(opponent.pitch_zone)} pitched card(s) at deck bottom.")
+            for card in opponent.pitch_zone:
+                opponent.deck.append(card)
+                self._log(f"    ↓  {opponent.name} places {card.name} at deck bottom.")
+            opponent.pitch_zone.clear()
+
         # Draw up
         hand_size_before = len(active.hand)
         active.draw_to_intellect()
