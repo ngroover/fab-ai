@@ -1676,7 +1676,7 @@ class _GameSession:
     def _run_inner(self, p0_agent: str, p1_agent: str, seed,
                    deck0_id=None, deck1_id=None):
         from fab_env import FaBEnv, Phase
-        from agents import RhinarAgent, DorintheiAgent
+        from agents import RhinarAgent, DorintheiAgent, RandomAgent
         from mcts_agent import MCTSAgent
 
         env = FaBEnv(verbose=False, log_callback=self.append_log)
@@ -1686,6 +1686,8 @@ class _GameSession:
                 return _WebHumanAgent(self, f"agent_{player_idx}")
             if agent_type == "mcts":
                 return MCTSAgent(player_idx=player_idx)
+            if agent_type == "random":
+                return RandomAgent()
             return RhinarAgent() if player_idx == 0 else DorintheiAgent()
 
         agent_0 = _make_agent(p0_agent, 0)
@@ -2047,6 +2049,7 @@ PLAY_TEMPLATE = """
             <select name="player0" class="agent-select">
               <option value="ai">🤖 AI</option>
               <option value="mcts">🌲 MCTS</option>
+              <option value="random">🎲 Random</option>
               <option value="human">👤 Human</option>
             </select>
           </div>
@@ -2064,6 +2067,7 @@ PLAY_TEMPLATE = """
             <select name="player1" class="agent-select">
               <option value="ai">🤖 AI</option>
               <option value="mcts">🌲 MCTS</option>
+              <option value="random">🎲 Random</option>
               <option value="human">👤 Human</option>
             </select>
           </div>
@@ -2545,7 +2549,7 @@ def play_page():
 
 @app.route("/play/start", methods=["POST"])
 def play_start():
-    valid_agents = {"human", "ai", "mcts"}
+    valid_agents = {"human", "ai", "mcts", "random"}
     p0_agent = request.form.get("player0", "ai")
     p1_agent = request.form.get("player1", "ai")
     if p0_agent not in valid_agents:
