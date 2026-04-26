@@ -18,7 +18,6 @@ import unittest
 from fab_env import FaBEnv, Phase
 from actions import Action, ActionType
 from cards import CardType, Color, CardClass, Keyword
-from card_effects import EffectTrigger, EffectAction
 
 SEED = 3
 
@@ -119,15 +118,10 @@ class TestBarragingBeatdownCardDefinition(unittest.TestCase):
         self.assertEqual(card.card_class, CardClass.BRUTE)
         self.assertIn(Keyword.GO_AGAIN, card.keywords)
 
-    def test_has_intimidate_on_play_effect(self):
+    def test_has_intimidate_keyword(self):
         card = next(c for c in self.rhinar.hand if c.name == "Barraging Beatdown")
-        matching = [
-            e for e in card.effects
-            if e.trigger == EffectTrigger.ON_PLAY
-            and e.action == EffectAction.INTIMIDATE
-        ]
-        self.assertEqual(len(matching), 1,
-                         "Barraging Beatdown must have exactly one ON_PLAY INTIMIDATE effect")
+        self.assertIn(Keyword.INTIMIDATE, card.keywords,
+                      "Barraging Beatdown must have the Intimidate keyword")
 
 
 class TestBarragingBeatdownOnPlay(unittest.TestCase):

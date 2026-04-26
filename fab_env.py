@@ -811,6 +811,15 @@ class FaBEnv:
                     self._pending_attack, EffectTrigger.ON_ATTACK, {},
                     attacker, defender,
                 )
+                if Keyword.INTIMIDATE in self._pending_attack.keywords:
+                    if defender.hand:
+                        banished = self._rng.choice(defender.hand)
+                        defender.hand.remove(banished)
+                        defender.banished.append(banished)
+                        opp_idx = 1 - self._game.active_player_idx
+                        self._log_private(opp_idx,
+                            f"    👁  Intimidate! {defender.name} banishes {banished.name} face-down.",
+                            f"    👁  Intimidate! {defender.name} banishes a card face-down.")
             self._phase = Phase.DEFEND
             self.agent_selection = f"agent_{return_agent_idx}"
             return
@@ -1220,16 +1229,7 @@ class FaBEnv:
         for effect in card.effects:
             if not effect.matches(trigger, context):
                 continue
-            if effect.action == EffectAction.INTIMIDATE:
-                if opponent.hand:
-                    banished = self._rng.choice(opponent.hand)
-                    opponent.hand.remove(banished)
-                    opponent.banished.append(banished)
-                    opp_idx = 1 - self._game.active_player_idx
-                    self._log_private(opp_idx,
-                        f"    👁  Intimidate! {opponent.name} banishes {banished.name} face-down.",
-                        f"    👁  Intimidate! {opponent.name} banishes a card face-down.")
-            elif effect.action == EffectAction.WEAPON_ATTACK_POWER_BONUS:
+            if effect.action == EffectAction.WEAPON_ATTACK_POWER_BONUS:
                 active.next_weapon_power_bonus += effect.magnitude
                 self._log(f"    ⚡ {card.name} — next weapon attack gains +{effect.magnitude} power.")
             elif effect.action == EffectAction.WEAPON_ATTACK_BONUS_PER_SWING:
@@ -1406,7 +1406,17 @@ class FaBEnv:
             active.resource_points += 1
             self._log(f"    💰 Titanium Bauble — gain 1 resource ({active.resource_points} total).")
 
-        # Fire ON_PLAY card effects (e.g. intimidate keyword on non-attack actions)
+        if Keyword.INTIMIDATE in card.keywords:
+            if opponent.hand:
+                banished = self._rng.choice(opponent.hand)
+                opponent.hand.remove(banished)
+                opponent.banished.append(banished)
+                opp_idx = 1 - self._game.active_player_idx
+                self._log_private(opp_idx,
+                    f"    👁  Intimidate! {opponent.name} banishes {banished.name} face-down.",
+                    f"    👁  Intimidate! {opponent.name} banishes a card face-down.")
+
+        # Fire ON_PLAY card effects
         self._apply_card_effects(card, EffectTrigger.ON_PLAY,
                                  {"weapon_attack_count": active.weapon_attack_count},
                                  active, opponent)

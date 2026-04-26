@@ -136,7 +136,6 @@ def build_rhinar_deck() -> List[Card]:
                        text="Rhinar Specialization. As an additional cost to play Alpha Rampage, discard a random card. Intimidate.",
                        effects=[
                            CardEffect(trigger=EffectTrigger.ON_ATTACK_PLAY, action=EffectAction.DISCARD_CARD_COST),
-                           CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.INTIMIDATE),
                        ]))
 
     # Awakening Bellow x2: cost 1, power 0, def 3, go again, intimidate, +3 next brute attack
@@ -147,7 +146,6 @@ def build_rhinar_deck() -> List[Card]:
                            card_class=CardClass.BRUTE,
                            text="Go again. Intimidate. Your next Brute attack action card this turn has +3 power.",
                            effects=[
-                               CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.INTIMIDATE),
                                CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_BRUTE_ATTACK_BONUS, magnitude=3),
                            ]))
 
@@ -169,13 +167,13 @@ def build_rhinar_deck() -> List[Card]:
                            card_class=CardClass.BRUTE,
                            text="If you have intimidated this turn, Beast Mode gains +2 power."))
 
-    # Pack Hunt x2: cost 2, power 6, def 3
+    # Pack Hunt x2: cost 2, power 6, def 3, intimidate
     for _ in range(2):
         cards.append(Card("Pack Hunt", CardType.ACTION_ATTACK, cost=2, pitch=1,
                            power=6, defense=3, color=Color.RED,
                            card_class=CardClass.BRUTE,
-                           text="When you attack with Pack Hunt, intimidate",
-                           effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.INTIMIDATE)]))
+                           keywords=[Keyword.INTIMIDATE],
+                           text="Intimidate."))
 
     # Wild Ride x2: cost 2, power 6, def 0, may have go again, no block
     # Draw a card then discard a random card. If discarded card 6+ power, go again
@@ -200,10 +198,10 @@ def build_rhinar_deck() -> List[Card]:
     # Non-attack action: next Brute attack gains conditional +3 power
     for _ in range(2):
         cards.append(Card("Barraging Beatdown", CardType.ACTION, cost=0, pitch=2,
-                           power=0, defense=3, color=Color.YELLOW, keywords=[Keyword.GO_AGAIN],
+                           power=0, defense=3, color=Color.YELLOW,
+                           keywords=[Keyword.GO_AGAIN, Keyword.INTIMIDATE],
                            card_class=CardClass.BRUTE,
-                           text="Intimidate, then your next Brute attack this turn gains 'While this attack is defended by less than 2 non-equipment cards it has +3 power'. Go again.",
-                           effects=[CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.INTIMIDATE)]))
+                           text="Intimidate, then your next Brute attack this turn gains 'While this attack is defended by less than 2 non-equipment cards it has +3 power'. Go again."))
 
     # Muscle Mutt x2: cost 3, power 6, def 2
     for _ in range(2):
@@ -233,8 +231,8 @@ def build_rhinar_deck() -> List[Card]:
         cards.append(Card("Smash Instinct", CardType.ACTION_ATTACK, cost=3, pitch=2,
                            power=6, defense=3, color=Color.YELLOW,
                            card_class=CardClass.BRUTE,
-                           text="When you attack with Smash Instinct, intimidate.",
-                           effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.INTIMIDATE)]))
+                           keywords=[Keyword.INTIMIDATE],
+                           text="Intimidate."))
 
     # Smash with Big Tree x2: cost 2, power 6, no_block
     for _ in range(2):
@@ -255,10 +253,10 @@ def build_rhinar_deck() -> List[Card]:
     # Clearing Bellow x2: cost 0, power 0, def 3, go again, intimidate
     for _ in range(2):
         cards.append(Card("Clearing Bellow", CardType.ACTION, cost=0, pitch=3,
-                           power=0, defense=3, color=Color.BLUE, keywords=[Keyword.GO_AGAIN],
+                           power=0, defense=3, color=Color.BLUE,
+                           keywords=[Keyword.GO_AGAIN, Keyword.INTIMIDATE],
                            card_class=CardClass.BRUTE,
-                           text="Intimidate.Go again.",
-                           effects=[CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.INTIMIDATE)]))
+                           text="Intimidate. Go again."))
 
     # Come to Fight x2: cost 0, power 0, def 3 — Generic
     for _ in range(2):
