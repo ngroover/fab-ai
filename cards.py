@@ -91,14 +91,10 @@ class Card:
     def display(self):
         lines = [f"  [{self.card_type.value}] {self}"]
         stats = []
-        if self.cost > 0:
-            stats.append(f"Cost:{self.cost}")
-        if self.pitch > 0:
-            stats.append(f"Pitch:{self.pitch}")
-        if self.power > 0:
-            stats.append(f"Power:{self.power}")
-        if self.defense > 0:
-            stats.append(f"Def:{self.defense}")
+        stats.append(f"Cost:{self.cost}")
+        stats.append(f"Pitch:{self.pitch}")
+        stats.append(f"Power:{self.power}")
+        stats.append(f"Def:{self.defense}")
         if stats:
             lines.append("    " + " | ".join(stats))
         for kw in self.keywords:
