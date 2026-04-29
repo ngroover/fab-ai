@@ -71,6 +71,9 @@ class Card:
     keywords: List["Keyword"] = field(default_factory=list)
     effects: List[CardEffect] = field(default_factory=list)
     play_condition: Optional[Callable[[Dict[str, Any]], bool]] = field(default=None, compare=False)
+    intellect: Optional[int] = None  # Only relevant for hero cards
+    hp: Optional[int] = None  # Only relevant for hero cards
+    young: Optional[bool] = None  # Only relevant for hero cards
 
     @property
     def card_id(self) -> str:
@@ -115,8 +118,9 @@ def build_rhinar_deck() -> List[Card]:
     cards = []
 
     # ── Hero card (extracted before shuffling) ──
-    cards.append(Card("Rhinar (Young Brute)", CardType.HERO, card_class=CardClass.BRUTE,
-                       text="Young Hero. Life 20, Intellect 4. Whenever you discard a card with 6 or more power during your action phase, intimidate.",
+    cards.append(Card("Rhinar", CardType.HERO, card_class=CardClass.BRUTE,
+                       text="Whenever you discard a card with 6 or more power during your action phase, intimidate.",
+                       intellect=4, hp=20, young=True,
                        effects=[
                            CardEffect(
                                trigger=EffectTrigger.ON_DISCARD,
@@ -337,7 +341,8 @@ def build_dorinthea_deck() -> List[Card]:
 
     # ── Hero card (extracted before shuffling) ──
     cards.append(Card("Dorinthea, Quicksilver Prodigy", CardType.HERO, card_class=CardClass.WARRIOR,
-                       text="Young Hero. Life 20, Intellect 4. The first time Dawnblade, Resplendent gains go again each turn, you may attack and additional time with it this turn."))
+                       text="The first time Dawnblade, Resplendent gains go again each turn, you may attack and additional time with it this turn.",
+                       intellect=4, hp=20, young=True))
 
     # ── RED (Pitch 1) — 16 cards ──
 
