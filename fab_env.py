@@ -1516,9 +1516,9 @@ class FaBEnv:
         if player.mentor_lesson_counters >= 2:
             player.mentor_lesson_counters = 0
             player.mentor_face_up = False
-            # Banish the mentor card
+            # Banish the mentor card permanently (does not return to hand)
             if player.arsenal and player.arsenal.card_type == CardType.MENTOR:
-                player.banished.append(player.arsenal)
+                player.permanently_banished.append(player.arsenal)
                 self._log(f"    🎓 {player.arsenal.name} banished.")
                 player.arsenal = None
             if "Rhinar" in player.hero_name:
