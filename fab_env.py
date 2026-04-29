@@ -1053,6 +1053,8 @@ class FaBEnv:
             self._reaction_defense_bonus += bonus
             self._log(f"    🛡  {n} resolves — +{bonus} defense "
                       f"({self._reaction_defense_bonus} total reaction defense).")
+            owner.combat_chain.append(card)
+            return
 
         owner.graveyard.append(card)
 
