@@ -1954,6 +1954,19 @@ PLAY_TEMPLATE = """
       color: #a0aec0; font-size: 0.65rem;
     }
     .gs-empty { color: #4a5568; font-style: italic; font-size: 0.7rem; }
+    .gs-card[data-has-text] { cursor: pointer; }
+    .gs-card[data-has-text]:hover { border-color: #63b3ed; }
+    #card-popup {
+      display: none; position: fixed; z-index: 9999;
+      background: #1a202c; border: 1px solid #63b3ed;
+      border-radius: 6px; padding: 10px 12px; max-width: 260px;
+      font-size: 0.75rem; color: #e2e8f0; box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+      pointer-events: none;
+    }
+    #card-popup .cp-name { font-weight: 700; font-size: 0.82rem; color: #90cdf4; margin-bottom: 4px; }
+    #card-popup .cp-type { color: #a0aec0; font-size: 0.68rem; margin-bottom: 4px; }
+    #card-popup .cp-stats { color: #a0aec0; font-size: 0.68rem; margin-bottom: 6px; }
+    #card-popup .cp-text { color: #e2e8f0; line-height: 1.4; white-space: pre-wrap; }
     .gs-chain {
       background: #1a1a2e; border: 1px solid #4a4a7a;
       border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
@@ -2037,6 +2050,12 @@ PLAY_TEMPLATE = """
   </style>
 </head>
 <body>
+  <div id="card-popup">
+    <div class="cp-name" id="cp-name"></div>
+    <div class="cp-type" id="cp-type"></div>
+    <div class="cp-stats" id="cp-stats"></div>
+    <div class="cp-text" id="cp-text"></div>
+  </div>
   <header>
     <a class="back-link" href="/">← Logs</a>
     <div style="flex:1">
@@ -2310,6 +2329,10 @@ PLAY_TEMPLATE = """
       if (c.power)   stats.push(c.power + 'p');
       if (c.defense) stats.push(c.defense + 'd');
       const sub = stats.length ? `<span class="stats">${stats.join(' · ')}</span>` : '';
+      if (c.text) {
+        const data = encodeURIComponent(JSON.stringify({name: c.name, type: c.type, stats: stats.join(' · '), text: c.text}));
+        return `<span class="gs-card" data-has-text="1" data-card="${data}" onclick="showCardPopup(event,this)">${pip}<span>${escHtml(c.name)}</span>${sub}</span>`;
+      }
       return `<span class="gs-card">${pip}<span>${escHtml(c.name)}</span>${sub}</span>`;
     }
 
@@ -2571,6 +2594,27 @@ PLAY_TEMPLATE = """
     function escHtml(s) {
       return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
+
+    (function() {
+      const popup = document.getElementById('card-popup');
+      function hidePopup() { popup.style.display = 'none'; }
+      document.addEventListener('click', hidePopup);
+      window.showCardPopup = function(e, el) {
+        e.stopPropagation();
+        const d = JSON.parse(decodeURIComponent(el.dataset.card));
+        document.getElementById('cp-name').textContent = d.name;
+        document.getElementById('cp-type').textContent = d.type || '';
+        document.getElementById('cp-stats').textContent = d.stats || '';
+        document.getElementById('cp-text').textContent = d.text || '';
+        popup.style.display = 'block';
+        const r = el.getBoundingClientRect();
+        const pw = popup.offsetWidth || 260;
+        let left = r.left;
+        if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+        popup.style.left = Math.max(4, left) + 'px';
+        popup.style.top = (r.bottom + 6) + 'px';
+      };
+    })();
 
     setInterval(poll, 500);
     poll();
