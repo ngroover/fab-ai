@@ -564,8 +564,18 @@ class FaBEnv:
             defender.combat_chain.append(c)
         self._committed_defend_cards = def_cards
         self._pending_defend_indices = []
+        equip_slots_snapshot = list(full_action.defend_equip_slots)
         self._pending_defend_equip_slots = []
         self._committed_defend_action = full_action
+        block_names = [c.name for c in def_cards] + [
+            defender.equipment[s].card.name
+            for s in equip_slots_snapshot
+            if s in defender.equipment and defender.equipment[s].active
+        ]
+        if block_names:
+            self._log(f"    🛡  {defender.name} commits blocks: {', '.join(block_names)}")
+        else:
+            self._log(f"    🛡  {defender.name} commits no blocks")
         self._enter_reaction_phase(attacker_idx, defender_idx)
 
     def _resolve_defend(self, action: Action, defender: Player, attacker: Player,
