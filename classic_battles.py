@@ -126,6 +126,7 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "dodge_blue": Card("Dodge", CardType.DEFENSE_REACTION, cost=0, pitch=3,
                        power=0, defense=2, color=Color.BLUE,
+                       no_block=True,
                        text=""),
 
     "rally_the_rearguard_blue": Card("Rally the Rearguard", CardType.ACTION_ATTACK, cost=2, pitch=3,
@@ -298,6 +299,7 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "toughen_up_blue": Card("Toughen Up", CardType.DEFENSE_REACTION, cost=2, pitch=3,
                             power=0, defense=4, color=Color.BLUE,
+                            no_block=True, # this card cannot block normally it can block as defense reaction in the defense reaction step
                             text=""),
 
     "visit_the_blacksmith_blue": Card("Visit the Blacksmith", CardType.ACTION, cost=0, pitch=3,
