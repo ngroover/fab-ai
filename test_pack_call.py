@@ -19,6 +19,7 @@ import unittest
 from fab_env import FaBEnv, Phase
 from actions import Action, ActionType
 from cards import CardType, Color, CardClass
+from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
 from card_effects import EffectTrigger, EffectAction
 
 SEED = 3  # Rhinar has Pack Call; Dorinthea wins coin flip and goes first
@@ -38,7 +39,7 @@ def _advance_to_defend(env):
 
     Returns (rhinar, dorinthea).
     """
-    env.reset(seed=SEED)
+    env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
     rhinar = env._game.players[0]
     dorinthea = env._game.players[1]
 
@@ -69,7 +70,7 @@ def _defend_with_pack_call(env, rhinar):
 class TestPackCallCardDefinition(unittest.TestCase):
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(seed=SEED)
+        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
         self.rhinar = self.env._game.players[0]
 
     def test_in_rhinar_opening_hand(self):

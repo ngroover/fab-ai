@@ -1,7 +1,7 @@
 """
 Tests for Titanium Bauble resource card.
 
-Seed 7 (via env.reset(seed=7)) gives:
+Seed 7 (via env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=7)) gives:
   Rhinar (agent_0):  Beast Mode, Titanium Bauble, Wrecking Ball, Raging Onslaught
   Rhinar wins the coin flip and goes first.
 
@@ -15,6 +15,7 @@ import unittest
 from fab_env import FaBEnv, Phase
 from actions import ActionType
 from cards import CardType, Color
+from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
 
 SEED = 7  # Rhinar has Titanium Bauble; Rhinar wins coin flip and goes first
 
@@ -22,7 +23,7 @@ SEED = 7  # Rhinar has Titanium Bauble; Rhinar wins coin flip and goes first
 class TestTitaniumBaubleCardDefinition(unittest.TestCase):
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(seed=SEED)
+        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal if a.action_type == ActionType.GO_FIRST))
         self.rhinar = self.env._game.players[0]
@@ -45,7 +46,7 @@ class TestTitaniumBaubleCardDefinition(unittest.TestCase):
 class TestTitaniumBaubleNotPlayableFromHand(unittest.TestCase):
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(seed=SEED)
+        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal if a.action_type == ActionType.GO_FIRST))
         self.rhinar = self.env._game.players[0]

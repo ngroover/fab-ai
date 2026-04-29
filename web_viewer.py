@@ -579,13 +579,12 @@ def _validate_deck_cards(hero: str, cards: dict) -> list[str]:
     return bad
 
 
-def _player_from_deck(deck_record: dict):
+def _decklist_from_deck(deck_record: dict) -> list:
     """
-    Build a Player from a saved deck record.
-    Hero stats and equipment are chosen based on deck_record["hero"].
+    Build a full decklist from a saved deck record.
+    Returns a list of Card objects (hero + equipment + action cards) suitable
+    for passing directly to FaBEnv.reset().
     """
-    from game_state import Player
-
     lookup = _build_card_lookup()
     deck_cards = []
     for card_id, qty in deck_record["cards"].items():
@@ -594,25 +593,14 @@ def _player_from_deck(deck_record: dict):
             deck_cards.extend([card] * qty)
 
     if deck_record.get("hero") == "Dorinthea":
+        hero_deck = build_dorinthea_deck()
         equip = build_dorinthea_equipment()
-        return Player(
-            name=deck_record["name"],
-            hero_name="Dorinthea, Quicksilver Prodigy",
-            life=20, intellect=4,
-            deck=deck_cards,
-            equipment_list=equip[1:],
-            weapon=equip[0],
-        )
     else:  # Rhinar or Custom
+        hero_deck = build_rhinar_deck()
         equip = build_rhinar_equipment()
-        return Player(
-            name=deck_record["name"],
-            hero_name="Rhinar (Young Brute)",
-            life=20, intellect=4,
-            deck=deck_cards,
-            equipment_list=equip[1:],
-            weapon=equip[0],
-        )
+
+    hero_card = next(c for c in hero_deck if c.card_type.value == "Hero")
+    return [hero_card] + equip + deck_cards
 
 
 # ──────────────────────────────────────────────────────────────
@@ -1721,19 +1709,19 @@ class _GameSession:
         agent_0 = _make_agent(p0_agent, 0)
         agent_1 = _make_agent(p1_agent, 1)
 
-        # Build players from selected decks
-        p0 = None
-        p1 = None
+        # Build decklists for each player
+        decklist0 = build_rhinar_deck() + build_rhinar_equipment()
+        decklist1 = build_dorinthea_deck() + build_dorinthea_equipment()
         if deck0_id is not None:
             rec = deck_db.get_deck(deck0_id)
             if rec:
-                p0 = _player_from_deck(rec)
+                decklist0 = _decklist_from_deck(rec)
         if deck1_id is not None:
             rec = deck_db.get_deck(deck1_id)
             if rec:
-                p1 = _player_from_deck(rec)
+                decklist1 = _decklist_from_deck(rec)
 
-        obs, _ = env.reset(seed=seed, player0=p0, player1=p1)
+        obs, _ = env.reset(decklist0, decklist1, seed=seed)
 
         for _agent in (agent_0, agent_1):
             if hasattr(_agent, "set_env"):

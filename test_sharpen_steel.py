@@ -17,6 +17,7 @@ import unittest
 from fab_env import FaBEnv, Phase
 from actions import Action, ActionType
 from cards import CardType, Color, CardClass
+from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
 from card_effects import EffectTrigger, EffectAction
 
 SEED = 1  # Dorinthea has Sharpen Steel; Dorinthea wins coin flip
@@ -34,7 +35,7 @@ def _setup(env):
 
     Returns (dorinthea, rhinar).
     """
-    env.reset(seed=SEED)
+    env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
     dorinthea = env._game.players[1]
     rhinar = env._game.players[0]
 
@@ -58,7 +59,7 @@ def _setup(env):
 class TestSharpenSteelCardDefinition(unittest.TestCase):
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(seed=SEED)
+        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
         self.dorinthea = self.env._game.players[1]
 
     def test_in_dorinthea_opening_hand(self):
