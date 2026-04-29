@@ -2034,6 +2034,47 @@ PLAY_TEMPLATE = """
     .pitch-line    { color: #b794f4; }
     .hand-line     { color: #90cdf4; }
     .store-line    { color: #e9d8fd; }
+
+    /* ── Tablet horizontal layout (wide screens) ── */
+    @media (min-width: 900px) {
+      #game-area {
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      #main-content {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        overflow: hidden;
+      }
+      #left-panel {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border-right: 1px solid #2d3748;
+      }
+      #log-area,
+      #log-area.compact {
+        flex: 1;
+        min-height: 0;
+        height: auto !important;
+      }
+      #gamestate-area {
+        flex: 1;
+        min-height: 0;
+        height: auto !important;
+      }
+      #action-panel {
+        width: 360px;
+        flex-shrink: 0;
+        overflow-y: auto;
+        max-height: none !important;
+      }
+    }
   </style>
 </head>
 <body>
@@ -2124,15 +2165,17 @@ PLAY_TEMPLATE = """
       <button class="quit-btn" onclick="quitGame()">✕ Quit &amp; New Game</button>
     </div>
 
-    <div id="view-tabs"></div>
-
-    <div id="log-label" style="padding:2px 14px;font-size:0.65rem;color:#718096;background:#0a0e18;border-bottom:1px solid #1a2030;display:none"></div>
-    <div id="log-area"></div>
-    <div id="gamestate-area" style="display:none"></div>
-
-    <div id="action-panel">
-      <div id="status-msg"></div>
-      <div id="action-btns"></div>
+    <div id="main-content">
+      <div id="left-panel">
+        <div id="view-tabs"></div>
+        <div id="log-label" style="padding:2px 14px;font-size:0.65rem;color:#718096;background:#0a0e18;border-bottom:1px solid #1a2030;display:none"></div>
+        <div id="log-area"></div>
+        <div id="gamestate-area" style="display:none"></div>
+      </div>
+      <div id="action-panel">
+        <div id="status-msg"></div>
+        <div id="action-btns"></div>
+      </div>
     </div>
   </div>
 
