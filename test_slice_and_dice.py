@@ -20,14 +20,14 @@ import unittest
 from fab_env import FaBEnv, Phase
 from actions import Action, ActionType
 from card_effects import EffectTrigger, EffectAction
-from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
+from cards import build_rhinar_deck, build_dorinthea_deck
 
 SEED = 24  # Dorinthea has Slice and Dice; she wins coin flip
 
 
 def _advance_to_dorinthea_attack_phase(env):
     """Reset at SEED and step to Dorinthea's ATTACK phase."""
-    env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+    env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
     # Dorinthea (agent_1) won the coin flip — GO_FIRST puts her active
     legal = env.legal_actions()
     go_first = next(a for a in legal if a.action_type == ActionType.GO_FIRST)
@@ -52,7 +52,7 @@ class TestSliceAndDiceCardDefinition(unittest.TestCase):
 
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+        self.env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
         self.dorinthea = self.env._game.players[1]
 
     def test_in_dorinthea_opening_hand(self):

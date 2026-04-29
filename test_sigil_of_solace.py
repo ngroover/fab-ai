@@ -19,7 +19,7 @@ import unittest
 
 from fab_env import FaBEnv, Phase
 from actions import Action, ActionType
-from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
+from cards import build_rhinar_deck, build_dorinthea_deck
 
 
 SEED = 27  # Dorinthea has Sigil of Solace; Rhinar has Wild Ride
@@ -31,7 +31,7 @@ def _advance_to_attack_reaction_after_wild_ride(env):
 
     Returns once env._phase == Phase.INSTANT with Dorinthea (agent_1) holding
     priority so she can respond to Wild Ride by playing Sigil of Solace."""
-    env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+    env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
 
     # CHOOSE_FIRST: Rhinar elects to go first
     legal = env.legal_actions()
@@ -61,7 +61,7 @@ class TestSigilOfSolaceCard(unittest.TestCase):
 
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+        self.env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
         self.dorinthea = self.env._game.players[1]
 
     def test_sigil_in_dorinthea_opening_hand(self):

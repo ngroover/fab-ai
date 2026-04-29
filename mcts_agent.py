@@ -84,7 +84,7 @@ def _get_hero_full_deck(hero_name: str) -> List:
         full = build_rhinar_deck()
     else:
         full = build_dorinthea_deck()
-    return [c for c in full if c.card_type != CardType.HERO]
+    return [c for c in full if c.card_type not in (CardType.HERO, CardType.EQUIPMENT, CardType.WEAPON)]
 
 
 def _determinize(sim_env: FaBEnv, my_player_idx: int, rng: random.Random) -> None:

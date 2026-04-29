@@ -118,6 +118,11 @@ def build_rhinar_deck() -> List[Card]:
     c = CARD_CATALOG
     return [
         c["rhinar"],
+        c["bone_basher"],
+        c["blossom_of_spring"],
+        c["bone_vizier"],
+        c["ironhide_gauntlet"],
+        c["ironhide_legs"],
         c["alpha_rampage_red"],
         *[c["awakening_bellow_red"]] * 2,
         *[c["bare_fangs_red"]] * 2,
@@ -142,17 +147,6 @@ def build_rhinar_deck() -> List[Card]:
     ]
 
 
-def build_rhinar_equipment():
-    c = CARD_CATALOG
-    return [
-        c["bone_basher"],
-        c["blossom_of_spring"],
-        c["bone_vizier"],
-        c["ironhide_gauntlet"],
-        c["ironhide_legs"],
-    ]
-
-
 # ──────────────────────── DORINTHEA DECK ────────────────────────
 # Hero: Dorinthea, Quicksilver Prodigy (young) — Life: 20, Intellect: 4
 # Hero ability: Once per Turn — At the start of your action phase,
@@ -167,6 +161,11 @@ def build_dorinthea_deck() -> List[Card]:
     c = CARD_CATALOG
     return [
         c["dorinthea_quicksilver_prodigy"],
+        c["dawnblade_resplendent"],
+        c["gallantry_gold"],
+        c["blossom_of_spring"],
+        c["ironrot_helm"],
+        c["ironrot_legs"],
         *[c["en_garde_red"]] * 2,
         *[c["flock_of_the_feather_walkers_red"]] * 2,
         *[c["in_the_swing_red"]] * 2,
@@ -188,17 +187,6 @@ def build_dorinthea_deck() -> List[Card]:
         *[c["toughen_up_blue"]] * 2,
         *[c["visit_the_blacksmith_blue"]] * 2,
         c["hala_goldenhelm"],
-    ]
-
-
-def build_dorinthea_equipment():
-    c = CARD_CATALOG
-    return [
-        c["dawnblade_resplendent"],
-        c["gallantry_gold"],
-        c["blossom_of_spring"],
-        c["ironrot_helm"],
-        c["ironrot_legs"],
     ]
 
 

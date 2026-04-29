@@ -27,8 +27,8 @@ from flask import Flask, abort, jsonify, redirect, render_template_string, reque
 
 import deck_db
 from cards import (
-    build_rhinar_deck, build_rhinar_equipment,
-    build_dorinthea_deck, build_dorinthea_equipment,
+    build_rhinar_deck,
+    build_dorinthea_deck,
     Keyword,
 )
 from card_effects import EffectAction
@@ -448,9 +448,7 @@ def _build_card_catalog() -> list:
     seen: dict = {}
     sources = [
         ("Rhinar", build_rhinar_deck()),
-        ("Rhinar", build_rhinar_equipment()),
         ("Dorinthea", build_dorinthea_deck()),
-        ("Dorinthea", build_dorinthea_equipment()),
     ]
     for hero, card_list in sources:
         for c in card_list:
@@ -540,8 +538,8 @@ def _build_card_lookup() -> dict:
     """Return {card_id: Card} for every card known to the game."""
     lookup: dict = {}
     for card_list in [
-        build_rhinar_deck(), build_rhinar_equipment(),
-        build_dorinthea_deck(), build_dorinthea_equipment(),
+        build_rhinar_deck(),
+        build_dorinthea_deck(),
     ]:
         for c in card_list:
             lookup[c.card_id] = c
@@ -593,13 +591,12 @@ def _decklist_from_deck(deck_record: dict) -> list:
             deck_cards.extend([card] * qty)
 
     if deck_record.get("hero") == "Dorinthea":
-        hero_deck = build_dorinthea_deck()
-        equip = build_dorinthea_equipment()
+        full_deck = build_dorinthea_deck()
     else:  # Rhinar or Custom
-        hero_deck = build_rhinar_deck()
-        equip = build_rhinar_equipment()
+        full_deck = build_rhinar_deck()
 
-    hero_card = next(c for c in hero_deck if c.card_type.value == "Hero")
+    hero_card = next(c for c in full_deck if c.card_type.value == "Hero")
+    equip = [c for c in full_deck if c.card_type.value in ("Equipment", "Weapon")]
     return [hero_card] + equip + deck_cards
 
 
@@ -1710,8 +1707,8 @@ class _GameSession:
         agent_1 = _make_agent(p1_agent, 1)
 
         # Build decklists for each player
-        decklist0 = build_rhinar_deck() + build_rhinar_equipment()
-        decklist1 = build_dorinthea_deck() + build_dorinthea_equipment()
+        decklist0 = build_rhinar_deck()
+        decklist1 = build_dorinthea_deck()
         if deck0_id is not None:
             rec = deck_db.get_deck(deck0_id)
             if rec:

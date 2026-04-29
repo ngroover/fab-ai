@@ -24,7 +24,7 @@ from typing import Optional
 from fab_env import FaBEnv, Phase
 from agents import RhinarAgent, DorintheiAgent, HumanAgent, RandomAgent
 from actions import ActionType
-from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
+from cards import build_rhinar_deck, build_dorinthea_deck
 
 _AGENT_CHOICES = ("rhinar", "dorinthea", "random", "human")
 
@@ -92,8 +92,8 @@ def run_game(
     """
     log_file = _new_log_path(seed) if save_log else None
     env = FaBEnv(verbose=verbose, log_file=log_file)
-    obs, infos = env.reset(build_rhinar_deck() + build_rhinar_equipment(),
-                           build_dorinthea_deck() + build_dorinthea_equipment(),
+    obs, infos = env.reset(build_rhinar_deck(),
+                           build_dorinthea_deck(),
                            seed=seed)
 
     if agent0 is None:

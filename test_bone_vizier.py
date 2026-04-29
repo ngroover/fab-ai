@@ -20,7 +20,7 @@ import unittest
 from fab_env import FaBEnv, Phase
 from actions import Action, ActionType
 from cards import Keyword
-from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
+from cards import build_rhinar_deck, build_dorinthea_deck
 from card_effects import EffectTrigger, EffectAction
 
 SEED = 3
@@ -40,7 +40,7 @@ def _advance_to_defend(env):
 
     Returns (rhinar, dorinthea).
     """
-    env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+    env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
     rhinar = env._game.players[0]
     dorinthea = env._game.players[1]
 
@@ -71,7 +71,7 @@ def _defend_with_bone_vizier(env):
 class TestBoneVizierCardDefinition(unittest.TestCase):
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+        self.env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
         self.rhinar = self.env._game.players[0]
 
     def test_bone_vizier_in_head_slot(self):

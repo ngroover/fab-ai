@@ -14,11 +14,14 @@ from collections import Counter
 
 import deck_db
 import cards as card_module
+from cards import CardType
+
+_DECK_ONLY = {CardType.HERO, CardType.EQUIPMENT, CardType.WEAPON}
 
 
 def _build_card_counts(card_list):
-    """Return a dict of card_id -> quantity from a list of Card instances."""
-    return dict(Counter(card.card_id for card in card_list))
+    """Return a dict of card_id -> quantity for the 40-card deck body only."""
+    return dict(Counter(card.card_id for card in card_list if card.card_type not in _DECK_ONLY))
 
 
 def main():

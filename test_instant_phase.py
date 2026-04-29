@@ -13,7 +13,7 @@ import unittest
 from fab_env import FaBEnv, Phase
 from actions import Action, ActionType
 from cards import CARD_CATALOG, CardType
-from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
+from cards import build_rhinar_deck, build_dorinthea_deck
 from game_state import Player
 
 
@@ -26,7 +26,7 @@ def _make_test_env(p0_hand=None, p1_hand=None, p0_life=20, p1_life=20,
     """Spin up a FaBEnv and force both players into a known state by
     overwriting ``_game`` after reset."""
     env = FaBEnv(verbose=False)
-    env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=0)
+    env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=0)
     g = env._game
 
     # Skip the CHOOSE_FIRST phase effects; just put us in ATTACK with clean hands

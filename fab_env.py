@@ -7,10 +7,10 @@ one agent acts at a time, alternating, with the environment handling all resolut
 
 Key API
 -------
-from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
+from cards import build_rhinar_deck, build_dorinthea_deck
 env = FaBEnv()
-obs, infos = env.reset(build_rhinar_deck() + build_rhinar_equipment(),
-                       build_dorinthea_deck() + build_dorinthea_equipment())
+obs, infos = env.reset(build_rhinar_deck(),
+                       build_dorinthea_deck())
 
 while not env.done:
     agent = env.agent_selection          # whose turn to act

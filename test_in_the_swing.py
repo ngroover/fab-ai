@@ -24,7 +24,7 @@ import unittest
 from fab_env import FaBEnv, Phase
 from actions import ActionType
 from card_effects import EffectTrigger, EffectAction
-from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
+from cards import build_rhinar_deck, build_dorinthea_deck
 
 SEED = 63  # Dorinthea: In the Swing x2, Blade Flash, On a Knife Edge; she wins flip
 
@@ -96,7 +96,7 @@ def _setup_to_second_weapon_reaction(env):
 class TestInTheSwingCardDefinition(unittest.TestCase):
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+        self.env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
         self.dorinthea = self.env._game.players[1]
 
     def test_in_dorinthea_opening_hand(self):
@@ -141,7 +141,7 @@ class TestInTheSwingDuringSecondWeaponAttack(unittest.TestCase):
 
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+        self.env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
         self.dorinthea = self.env._game.players[1]
         self.rhinar = self.env._game.players[0]
         _setup_to_second_weapon_reaction(self.env)
@@ -184,7 +184,7 @@ class TestInTheSwingNotLegalOnFirstAttack(unittest.TestCase):
 
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+        self.env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
         self.dorinthea = self.env._game.players[1]
 
     def test_play_condition_fails_with_zero_weapon_attacks(self):

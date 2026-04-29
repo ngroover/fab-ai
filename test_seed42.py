@@ -17,7 +17,7 @@ import random
 from fab_env import FaBEnv, Phase
 from agents import RhinarAgent, DorintheiAgent
 from actions import ActionType
-from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
+from cards import build_rhinar_deck, build_dorinthea_deck
 
 
 SEED = 42
@@ -26,7 +26,7 @@ SEED = 42
 def run_full_game(seed=SEED):
     """Run a complete game with the given seed, recording state snapshots."""
     env = FaBEnv(verbose=False)
-    obs, infos = env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=seed)
+    obs, infos = env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=seed)
 
     rhinar_agent = RhinarAgent()
     dorinthea_agent = DorintheiAgent()
@@ -68,7 +68,7 @@ class TestOpeningHand(unittest.TestCase):
     def setUp(self):
         from fab_env import FaBEnv
         self.env = FaBEnv(verbose=False)
-        self.game = self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)[0]
+        self.game = self.env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)[0]
         self.rhinar_hand = self.env._game.players[0].hand
         self.dorinthea_hand = self.env._game.players[1].hand
 
@@ -225,7 +225,7 @@ class TestResourceAccounting(unittest.TestCase):
     def test_resource_points_reset_each_turn(self):
         """After a turn ends, resource_points should be 0."""
         env = FaBEnv(verbose=False)
-        obs, _ = env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+        obs, _ = env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
         rhinar_agent = RhinarAgent()
         dorinthea_agent = DorintheiAgent()
 
@@ -277,7 +277,7 @@ class TestHeroAbility(unittest.TestCase):
         letting Rhinar attack twice in turn 1. We verify by tracking Dorinthea's
         minimum life during turn 1 — she must have been hit at least twice."""
         env = FaBEnv(verbose=False)
-        obs, _ = env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+        obs, _ = env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
         rhinar_agent = RhinarAgent()
         dorinthea_agent = DorintheiAgent()
 
@@ -335,7 +335,7 @@ class TestInstantWindowTurn1(unittest.TestCase):
         instants) so this helper returns with Phase.DEFEND already active.
         """
         env = FaBEnv(verbose=False)
-        env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+        env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
 
         # Rhinar goes first
         legal = env.legal_actions()

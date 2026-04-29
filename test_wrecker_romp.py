@@ -19,7 +19,7 @@ import unittest
 from fab_env import FaBEnv, Phase
 from actions import Action, ActionType
 from cards import CardType, Color, CardClass
-from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
+from cards import build_rhinar_deck, build_dorinthea_deck
 from card_effects import EffectAction
 
 
@@ -28,7 +28,7 @@ SEED = 14  # Rhinar: Wrecker Romp, Wounded Bull, Smash Instinct, Chief Ruk'utan
 
 def _setup_rhinar_turn(env):
     """Reset at SEED and advance past CHOOSE_FIRST so Rhinar is in ATTACK phase."""
-    env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+    env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
     legal = env.legal_actions()
     go_first = next(a for a in legal if a.action_type == ActionType.GO_FIRST)
     env.step(go_first)
@@ -39,7 +39,7 @@ class TestWreckerRompCardDefinition(unittest.TestCase):
 
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+        self.env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
         self.rhinar = self.env._game.players[0]
         self.card = next(c for c in self.rhinar.hand if c.name == "Wrecker Romp")
 

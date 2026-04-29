@@ -18,7 +18,7 @@ import unittest
 from fab_env import FaBEnv, Phase
 from actions import Action, ActionType
 from cards import CardType, Color
-from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
+from cards import build_rhinar_deck, build_dorinthea_deck
 
 SEED = 12  # Rhinar has Dodge; Rhinar wins coin flip
 
@@ -36,7 +36,7 @@ def _advance_to_defend(env):
        [Auto-step collapses pre-DEFEND instant window.]
     -> Returns with phase=DEFEND, agent=agent_0 (Rhinar defending).
     """
-    env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+    env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
     env.step(next(a for a in env.legal_actions() if a.action_type == ActionType.GO_SECOND))
     env.step(next(a for a in env.legal_actions() if a.action_type == ActionType.WEAPON))
     env.step(env.legal_actions()[0])  # pitch Titanium Bauble to cover Dawnblade cost
@@ -64,7 +64,7 @@ def _advance_to_reaction(env):
 class TestDodgeCardDefinition(unittest.TestCase):
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
+        self.env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
         self.rhinar = self.env._game.players[0]
 
     def test_in_rhinar_opening_hand(self):
