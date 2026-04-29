@@ -7,8 +7,10 @@ one agent acts at a time, alternating, with the environment handling all resolut
 
 Key API
 -------
+from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
 env = FaBEnv()
-obs, infos = env.reset()
+obs, infos = env.reset(build_rhinar_deck() + build_rhinar_equipment(),
+                       build_dorinthea_deck() + build_dorinthea_equipment())
 
 while not env.done:
     agent = env.agent_selection          # whose turn to act
@@ -29,9 +31,7 @@ import copy
 from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple, Any
 
-from cards import (Card, CardType, Color, Keyword,
-                   build_rhinar_deck, build_rhinar_equipment,
-                   build_dorinthea_deck, build_dorinthea_equipment)
+from cards import Card, CardType, Color, Keyword
 from card_effects import EffectTrigger, EffectAction
 from game_state import Player, GameState, Equipment
 from actions import (
@@ -64,28 +64,41 @@ class Phase(Enum):
 
 # ──────────────────────────────────────────────────────────────
 # FaBEnv
-def _make_rhinar(rng: Optional[random.Random] = None) -> Player:
-    equip = build_rhinar_equipment()
-    return Player(
-        name="Rhinar",
-        life=20,
-        intellect=4,
-        deck=build_rhinar_deck(),
-        equipment_list=equip[1:],
-        weapon=equip[0],
-        rng=rng,
-    )
 
+def _player_from_decklist(decklist: List[Card],
+                           rng: Optional[random.Random] = None) -> Player:
+    """Build a Player from a full decklist (hero + equipment + action cards).
 
-def _make_dorinthea(rng: Optional[random.Random] = None) -> Player:
-    equip = build_dorinthea_equipment()
+    The hero card (CardType.HERO) must be present and must have hero_life and
+    hero_intellect set. The weapon card (CardType.WEAPON) is separated from the
+    other equipment (CardType.EQUIPMENT) before constructing the Player.
+    """
+    hero = next((c for c in decklist if c.card_type == CardType.HERO), None)
+    if hero is None:
+        raise ValueError("Decklist must contain exactly one hero card.")
+    if hero.hero_life is None or hero.hero_intellect is None:
+        raise ValueError(f"Hero card '{hero.name}' must have hero_life and hero_intellect set.")
+
+    weapon = next((c for c in decklist if c.card_type == CardType.WEAPON), None)
+    equipment = [c for c in decklist if c.card_type == CardType.EQUIPMENT]
+    # Pass hero + action/attack/reaction cards to Player; it extracts the hero internally.
+    deck_cards = [c for c in decklist if c.card_type not in (CardType.WEAPON, CardType.EQUIPMENT)]
+
+    # Derive short display name: everything before first comma or parenthesis.
+    name = hero.name
+    for sep in (',', '('):
+        idx = name.find(sep)
+        if 0 < idx < len(name):
+            name = name[:idx]
+    name = name.strip()
+
     return Player(
-        name="Dorinthea",
-        life=20,
-        intellect=4,
-        deck=build_dorinthea_deck(),
-        equipment_list=equip[1:],
-        weapon=equip[0],
+        name=name,
+        life=hero.hero_life,
+        intellect=hero.hero_intellect,
+        deck=deck_cards,
+        equipment_list=equipment,
+        weapon=weapon,
         rng=rng,
     )
 
@@ -175,17 +188,19 @@ class FaBEnv:
     # reset
     # ──────────────────────────────────────────────────────────
 
-    def reset(self, seed: Optional[int] = None,
-              player0: Optional[Player] = None,
-              player1: Optional[Player] = None) -> Tuple[Dict, Dict]:
+    def reset(self, decklist0: List[Card], decklist1: List[Card],
+              seed: Optional[int] = None) -> Tuple[Dict, Dict]:
         """
         Reset the environment and return initial observations.
 
         Parameters
         ----------
-        player0, player1 : optional Player overrides.  When provided, these
-            replace the default Rhinar / Dorinthea players so custom decks
-            can be used without subclassing FaBEnv.
+        decklist0, decklist1 : full decklists for player 0 and player 1.
+            Each list must contain one hero card (CardType.HERO) with
+            hero_life and hero_intellect set, one weapon card (CardType.WEAPON),
+            any equipment cards (CardType.EQUIPMENT), and the action/attack/
+            reaction cards.  Life and intellect are read from the hero card.
+        seed : optional RNG seed for reproducibility.
 
         Returns:
             obs   — {agent_id: observation_dict}
@@ -193,8 +208,8 @@ class FaBEnv:
         """
         self._rng = random.Random(seed)
 
-        p0 = _make_rhinar(self._rng)
-        p1 = _make_dorinthea(self._rng)
+        p0 = _player_from_decklist(decklist0, self._rng)
+        p1 = _player_from_decklist(decklist1, self._rng)
 
         self._game = GameState(p0, p1, rng=self._rng)
 

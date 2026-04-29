@@ -8,12 +8,13 @@ turn, it gains +1 power (total 3) until end of turn.
 import unittest
 
 from fab_env import FaBEnv
+from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
 
 
 class TestDawnbladeBasePower(unittest.TestCase):
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(seed=42)
+        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=42)
         self.dorinthea = self.env._game.players[1]
 
     def test_base_power_is_2(self):
@@ -44,7 +45,7 @@ class TestDawnbladeNoHitCounter(unittest.TestCase):
 
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(seed=42)
+        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=42)
         self.dorinthea = self.env._game.players[1]
 
     def test_no_dawnblade_counters_attribute(self):

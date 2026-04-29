@@ -18,6 +18,7 @@ import unittest
 from fab_env import FaBEnv, Phase
 from actions import Action, ActionType
 from cards import CardType, Color, CardClass, Keyword
+from cards import build_rhinar_deck, build_rhinar_equipment, build_dorinthea_deck, build_dorinthea_equipment
 
 SEED = 3
 
@@ -38,7 +39,7 @@ def _setup_after_bb_and_bare_fangs(env):
 
     Returns (rhinar, dorinthea).
     """
-    env.reset(seed=SEED)
+    env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
     rhinar = env._game.players[0]
     dorinthea = env._game.players[1]
 
@@ -100,7 +101,7 @@ def _pass_reactions(env):
 class TestBarragingBeatdownCardDefinition(unittest.TestCase):
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(seed=SEED)
+        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
         self.rhinar = self.env._game.players[0]
 
     def test_in_rhinar_opening_hand(self):
@@ -127,7 +128,7 @@ class TestBarragingBeatdownCardDefinition(unittest.TestCase):
 class TestBarragingBeatdownOnPlay(unittest.TestCase):
     def setUp(self):
         self.env = FaBEnv(verbose=False)
-        self.env.reset(seed=SEED)
+        self.env.reset(build_rhinar_deck() + build_rhinar_equipment(), build_dorinthea_deck() + build_dorinthea_equipment(), seed=SEED)
         self.rhinar = self.env._game.players[0]
         self.dorinthea = self.env._game.players[1]
 
