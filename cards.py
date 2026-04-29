@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, Optional, List
 from enum import Enum
 
 from card_effects import CardEffect, EffectTrigger, EffectAction
+import classic_battles
 
 
 class CardType(Enum):
@@ -157,11 +158,7 @@ def build_rhinar_deck() -> List[Card]:
     # When attacking: draw a card then discard a random card.
     # If discarded card has 6+ power, this gets +2 power.
     for _ in range(2):
-        cards.append(Card("Bare Fangs", CardType.ACTION_ATTACK, cost=2, pitch=1,
-                           power=6, defense=0, color=Color.RED, no_block=True,
-                           card_class=CardClass.BRUTE,
-                           text="When you attack with Bare Fangs, draw a card then discard a random card. If a card wth 6 or more power is discarded this way, Bare Fangs gets +2 power.",
-                           effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.DRAW_DISCARD_POWER_BONUS)]))
+        cards.append(CARD_CATALOG["bare_fangs_red"])
 
     # Beast Mode x2: cost 3, power 6, def 3, (attack action)
     # Note: Beast Mode has no defense value and cannot block
