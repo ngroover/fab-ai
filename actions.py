@@ -42,6 +42,7 @@ class ActionType(Enum):
     GO_SECOND          = auto()   # CHOOSE_FIRST phase: choosing player elects to go second
     PASS_PRIORITY      = auto()   # INSTANT phase: player passes priority without playing
     PITCH_ORDER        = auto()   # end-of-turn: place one card from pitch zone to deck bottom
+    MENTOR_FLIP        = auto()   # start of turn: choose to flip face-down mentor face-up
 
 
 @dataclass
@@ -68,6 +69,9 @@ class Action:
     # PITCH_ORDER field
     pitch_order_index: int = -1  # index into player.pitch_zone
 
+    # MENTOR_FLIP field
+    flip: bool = False  # True = flip mentor face-up, False = keep face-down
+
     def __repr__(self):
         if self.action_type == ActionType.PLAY_CARD:
             src = f"hand[{self.card.name}]"
@@ -92,6 +96,8 @@ class Action:
             return "Action(PASS_PRIORITY)"
         if self.action_type == ActionType.PITCH_ORDER:
             return f"Action(PITCH_ORDER index={self.pitch_order_index})"
+        if self.action_type == ActionType.MENTOR_FLIP:
+            return f"Action(MENTOR_FLIP flip={self.flip})"
         return f"Action({self.action_type})"
 
 
@@ -334,6 +340,12 @@ def legal_arsenal_actions(player: 'Player') -> List[Action]:
 def legal_choose_first_actions() -> List[Action]:
     """CHOOSE_FIRST phase: the randomly selected player picks whether to go first or second."""
     return [Action(ActionType.GO_FIRST), Action(ActionType.GO_SECOND)]
+
+
+def legal_mentor_flip_actions() -> List[Action]:
+    """MENTOR_FLIP phase: active player may flip their face-down mentor face-up or keep it down."""
+    return [Action(ActionType.MENTOR_FLIP, flip=True),
+            Action(ActionType.MENTOR_FLIP, flip=False)]
 
 
 def legal_reaction_actions(player: 'Player', attacker_idx: int,

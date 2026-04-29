@@ -1481,6 +1481,9 @@ class _WebHumanAgent:
                 card = player.pitch_zone[action.pitch_order_index]
                 remaining = len(player.pitch_zone)
                 return f"PUT NEXT TO BOTTOM — {self._fmt_card(card)} ({remaining} card{'s' if remaining != 1 else ''} remaining)"
+        if action.action_type == ActionType.MENTOR_FLIP:
+            mentor_name = player.arsenal.name if player.arsenal else "mentor"
+            return f"FLIP {mentor_name} FACE-UP" if action.flip else f"KEEP {mentor_name} FACE-DOWN"
         return str(action)
 
     def _pend(self, legal, player, phase, attack_power=0):
@@ -1509,6 +1512,9 @@ class _WebHumanAgent:
 
     def select_pitch_order(self, obs, legal, player):
         return self._pend(legal, player, "PITCH_ORDER")
+
+    def select_mentor_flip(self, obs, legal, player):
+        return self._pend(legal, player, "MENTOR_FLIP")
 
     def select_choose_first(self, legal, player):
         return self._pend(legal, player, "CHOOSE_FIRST")
@@ -1689,6 +1695,7 @@ class _GameSession:
         from fab_env import FaBEnv, Phase
         from agents import RhinarAgent, DorintheiAgent, RandomAgent
         from mcts_agent import MCTSAgent
+        from actions import ActionType
 
         env = FaBEnv(verbose=False, log_callback=self.append_log,
                      log_callback_p0=self.append_log_p0,
@@ -1764,6 +1771,11 @@ class _GameSession:
                                             env._pending_play_card)
             elif env._phase == Phase.PITCH_ORDER:
                 action = agent.select_pitch_order(obs[agent_id], legal, player)
+            elif env._phase == Phase.MENTOR_FLIP:
+                if hasattr(agent, 'select_mentor_flip'):
+                    action = agent.select_mentor_flip(obs[agent_id], legal, player)
+                else:
+                    action = next(a for a in legal if a.action_type == ActionType.MENTOR_FLIP and a.flip)
             else:
                 action = legal[0]
 

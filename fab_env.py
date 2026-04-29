@@ -39,7 +39,7 @@ from actions import (
     legal_attack_actions, legal_pitch_actions,
     legal_defend_actions, legal_arsenal_actions, legal_choose_first_actions,
     legal_instant_actions, legal_reaction_actions,
-    legal_pitch_order_actions,
+    legal_pitch_order_actions, legal_mentor_flip_actions,
 )
 from observations import build_observation, PLAYER_OBS_SIZE, CARD_FEATURES
 from spaces import Discrete, Box, Dict as DictSpace
@@ -59,6 +59,7 @@ class Phase(Enum):
     INSTANT      = auto()   # either player may play instants onto a stack; LIFO resolution
     ARSENAL      = auto()
     PITCH_ORDER  = auto()   # end-of-turn: player orders pitch zone cards to deck bottom one at a time
+    MENTOR_FLIP  = auto()   # start of turn: player may flip face-down mentor face-up
     END          = auto()
 
 
@@ -331,6 +332,8 @@ class FaBEnv:
             return legal_arsenal_actions(active)
         elif self._phase == Phase.PITCH_ORDER:
             return legal_pitch_order_actions(active)
+        elif self._phase == Phase.MENTOR_FLIP:
+            return legal_mentor_flip_actions()
         return []
 
     # ──────────────────────────────────────────────────────────
@@ -354,6 +357,8 @@ class FaBEnv:
             self._handle_arsenal_action(action, active, opponent)
         elif self._phase == Phase.PITCH_ORDER:
             self._handle_pitch_order_action(action, active)
+        elif self._phase == Phase.MENTOR_FLIP:
+            self._handle_mentor_flip_action(action, active)
 
     def _handle_choose_first_action(self, action: Action):
         """Pre-game: the coin-flip winner chooses who goes first."""
@@ -695,6 +700,15 @@ class FaBEnv:
             return_agent_idx=self._game.active_player_idx,
         )
 
+    def _handle_mentor_flip_action(self, action: Action, active: Player):
+        """Start of turn: player chooses whether to flip their face-down mentor face-up."""
+        if action.flip:
+            active.mentor_face_up = True
+            self._log(f"    🎓 {active.name} flips {active.arsenal.name} face-up in arsenal.")
+        else:
+            self._log(f"    🎓 {active.name} keeps {active.arsenal.name} face-down.")
+        self._phase = Phase.ATTACK
+
     def _handle_arsenal_action(self, action: Action, active: Player, opponent: Player):
         """Store a card (or nothing) in arsenal, then complete end phase."""
         if action.arsenal_hand_index >= 0 and not active.arsenal:
@@ -706,10 +720,6 @@ class FaBEnv:
                 self._log_private(active_idx,
                     f"\n  📦  {active.name} stores {card.name} in arsenal.",
                     f"\n  📦  {active.name} stores a card face-down in arsenal.")
-                # Mentors go face-up immediately when placed in arsenal
-                if card.card_type == CardType.MENTOR:
-                    active.mentor_face_up = True
-                    self._log(f"    🎓 {card.name} is now face-up in arsenal.")
 
         # Return banished cards (intimidate cleanup)
         if opponent.banished:
@@ -1152,7 +1162,14 @@ class FaBEnv:
                   f"| {self._game.players[1].name}={self._game.players[1].life}")
         self._log(f"  🃏  Hand: {', '.join(str(c) for c in active.hand)}", player_idx=self._game.active_player_idx)
 
-        self._phase = Phase.ATTACK
+        # If the active player has a face-down mentor in arsenal, give them the flip option
+        if (active.arsenal is not None
+                and active.arsenal.card_type == CardType.MENTOR
+                and not active.mentor_face_up):
+            self._phase = Phase.MENTOR_FLIP
+            self._log(f"  🎓  {active.name} has {active.arsenal.name} face-down in arsenal — flip face-up?")
+        else:
+            self._phase = Phase.ATTACK
         self.agent_selection = f"agent_{self._game.active_player_idx}"
 
     def _break_combat_chain(self, attacker: Player, defender: Player) -> None:
@@ -1466,12 +1483,16 @@ class FaBEnv:
         active.graveyard.append(card)
         active.action_points += 1  # instants don't consume action points
 
+    @staticmethod
+    def _is_sword_attack(card: Card, is_weapon: bool) -> bool:
+        """Return True when the attack qualifies as a 'sword attack' for Hala Goldenhelm."""
+        return is_weapon and card.card_class.value == "Warrior" and card.card_type.value == "Weapon"
+
     def _on_hit(self, card: Card, attacker: Player, defender: Player, is_weapon: bool):
-        if is_weapon and "Dawnblade" in card.name:
-            if attacker.mentor_face_up:
-                attacker.action_points += 1
-                self._log(f"    🎓 Hala Goldenhelm! Sword hit — go again + lesson counter.")
-                self._mentor_lesson(attacker)
+        if self._is_sword_attack(card, is_weapon) and attacker.mentor_face_up:
+            self._pending_attack_go_again = True  # processed by _resolve_combat go-again path
+            self._log(f"    🎓 Hala Goldenhelm! Sword hit — go again + lesson counter.")
+            self._mentor_lesson(attacker)
 
         if card.name == "Raging Onslaught":
             hand_before = len(attacker.hand)

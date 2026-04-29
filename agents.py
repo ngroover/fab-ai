@@ -91,6 +91,11 @@ class RhinarAgent:
 
     def select_action(self, obs: dict, legal: List[Action], player: 'Player',
                       opponent: 'Player') -> Action:
+        # Always flip mentor face-up at start of turn
+        for a in legal:
+            if a.action_type == ActionType.MENTOR_FLIP:
+                return next(x for x in legal if x.action_type == ActionType.MENTOR_FLIP and x.flip)
+
         hand = player.hand
 
         # 1. Barraging Beatdown
@@ -248,6 +253,11 @@ class DorintheiAgent:
 
     def select_action(self, obs: dict, legal: List[Action], player: 'Player',
                       opponent: 'Player') -> Action:
+        # Always flip mentor face-up at start of turn
+        for a in legal:
+            if a.action_type == ActionType.MENTOR_FLIP:
+                return next(x for x in legal if x.action_type == ActionType.MENTOR_FLIP and x.flip)
+
         # Activate Blossom of Spring before first weapon swing
         if not player.weapon_used_this_turn:
             for a in legal:
@@ -691,6 +701,12 @@ class HumanAgent:
             print(f"  You may play defense reactions or instants.")
         self._show_hand(player)
         return self._choose(legal, player, "Play a reaction card or pass priority:")
+
+    def select_mentor_flip(self, obs: dict, legal: List[Action], player: 'Player') -> Action:
+        print(f"\n{'═' * 60}")
+        arsenal_name = player.arsenal.name if player.arsenal else "mentor"
+        print(f"  START OF TURN — {arsenal_name} is face-down in your arsenal.")
+        return self._choose(legal, player, "Flip mentor face-up?")
 
     def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
         print(f"\n{'═' * 60}")
