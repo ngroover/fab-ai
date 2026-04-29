@@ -2604,7 +2604,10 @@ PLAY_TEMPLATE = """
 
     // ── User actions ───────────────────────────────────────────
     async function submitAction(idx) {
-      document.querySelectorAll('.action-btn').forEach(b => b.disabled = true);
+      const btns = document.getElementById('action-btns');
+      const msg  = document.getElementById('status-msg');
+      btns.innerHTML = '';
+      msg.innerHTML = '<div class="ai-thinking">⟳ Processing…</div>';
       try {
         await fetch('/play/action', {
           method: 'POST',
