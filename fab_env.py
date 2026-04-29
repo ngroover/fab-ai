@@ -1436,6 +1436,7 @@ class FaBEnv:
 
         elif n == "Glistening Steelblade":
             active.next_weapon_go_again = True
+            active.glistening_steelblade_active = True
             self._log(f"    ✨ Glistening Steelblade — next Dawnblade has go again + counter on hit.")
 
         elif n == "Visit the Blacksmith":
@@ -1509,6 +1510,11 @@ class FaBEnv:
         if card.name == "Driving Blade":
             attacker.next_weapon_go_again = True
             self._log(f"    ⚡ Driving Blade hit — next weapon attack gains go again.")
+
+        if is_weapon and "Dawnblade" in card.name and attacker.glistening_steelblade_active:
+            attacker.dawnblade_counters += 1
+            self._log(f"    ✨ Glistening Steelblade! Dawnblade hit — +1 power counter "
+                      f"({attacker.dawnblade_counters} total, permanent).")
 
     def _mentor_lesson(self, player: Player):
         player.mentor_lesson_counters += 1

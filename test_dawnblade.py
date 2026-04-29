@@ -40,16 +40,25 @@ class TestDawnbladeBasePower(unittest.TestCase):
         self.assertEqual(self.dorinthea.get_effective_weapon_power(), 2)
 
 
-class TestDawnbladeNoHitCounter(unittest.TestCase):
-    """Dawnblade no longer accumulates persistent +1 counters on hit."""
+class TestDawnbladeCounters(unittest.TestCase):
+    """dawnblade_counters is a persistent +1 power counter placed by Glistening Steelblade."""
 
     def setUp(self):
         self.env = FaBEnv(verbose=False)
         self.env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=42)
         self.dorinthea = self.env._game.players[1]
 
-    def test_no_dawnblade_counters_attribute(self):
-        self.assertFalse(hasattr(self.dorinthea, "dawnblade_counters"))
+    def test_dawnblade_counters_starts_at_zero(self):
+        self.assertEqual(self.dorinthea.dawnblade_counters, 0)
+
+    def test_counters_increase_effective_power(self):
+        self.dorinthea.dawnblade_counters = 2
+        self.assertEqual(self.dorinthea.get_effective_weapon_power(), 4)
+
+    def test_counters_not_reset_between_turns(self):
+        self.dorinthea.dawnblade_counters = 3
+        self.dorinthea.reset_turn_resources()
+        self.assertEqual(self.dorinthea.dawnblade_counters, 3)
 
 
 if __name__ == "__main__":

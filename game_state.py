@@ -86,6 +86,10 @@ class Player:
         self.next_brute_attack_conditional_bonus = 0  # from Barraging Beatdown (conditional on < 2 non-equip blockers)
         self.attacks_this_turn = 0
         self.weapon_additional_attack = False  # Dawnblade: one extra attack when go again fires
+        # Persistent Dawnblade counters (from Glistening Steelblade on-hit effect; never reset)
+        self.dawnblade_counters = 0
+        # Per-turn flag: True when Glistening Steelblade was played this turn
+        self.glistening_steelblade_active = False
         # Mentor state
         self.mentor_face_up = False
         self.mentor_lesson_counters = 0
@@ -137,6 +141,7 @@ class Player:
         self.next_brute_attack_conditional_bonus = 0
         self.attacks_this_turn = 0
         self.weapon_additional_attack = False
+        self.glistening_steelblade_active = False
         for eq in self.equipment.values():
             eq.reset_turn()
 
@@ -150,8 +155,10 @@ class Player:
 
     def get_effective_weapon_power(self) -> int:
         base = self.weapon.power if self.weapon else 0
-        if self.weapon and "Dawnblade" in self.weapon.name and self.weapon_attack_count >= 1:
-            base += 1  # second attack gains +1 power until end of turn
+        if self.weapon and "Dawnblade" in self.weapon.name:
+            base += self.dawnblade_counters  # permanent +1 counters from Glistening Steelblade
+            if self.weapon_attack_count >= 1:
+                base += 1  # second attack gains +1 power until end of turn
         bonus = self.next_weapon_power_bonus + self.next_sword_attack_power_bonus
         if self.slice_and_dice_active:
             if self.weapon_attack_count == 0:
