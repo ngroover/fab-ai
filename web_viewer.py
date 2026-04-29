@@ -2036,7 +2036,7 @@ PLAY_TEMPLATE = """
     .store-line    { color: #e9d8fd; }
 
     /* ── Tablet horizontal layout (wide screens) ── */
-    @media (min-width: 900px) {
+    @media (min-width: 768px) {
       #game-area {
         height: 100vh;
         overflow: hidden;
@@ -2047,6 +2047,7 @@ PLAY_TEMPLATE = """
         flex: 1;
         min-height: 0;
         display: flex;
+        flex-direction: row;
         overflow: hidden;
       }
       #left-panel {
