@@ -146,6 +146,11 @@ def run_game(
                                         env._pending_play_card)
         elif env._phase == Phase.PITCH_ORDER:
             action = agent.select_pitch_order(obs[agent_id], legal, player)
+        elif env._phase == Phase.MENTOR_FLIP:
+            if hasattr(agent, 'select_mentor_flip'):
+                action = agent.select_mentor_flip(obs[agent_id], legal, player)
+            else:
+                action = next(a for a in legal if a.action_type == ActionType.MENTOR_FLIP and a.flip)
         else:
             action = legal[0]
 
