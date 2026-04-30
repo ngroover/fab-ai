@@ -78,7 +78,10 @@ CARD_CATALOG: Dict[str, Card] = {
                                       power=0, defense=3, color=Color.YELLOW,
                                       keywords=[Keyword.GO_AGAIN, Keyword.INTIMIDATE],
                                       card_class=CardClass.BRUTE,
-                                      text="Intimidate, then your next Brute attack this turn gains 'While this attack is defended by less than 2 non-equipment cards it has +3 power'. Go again."),
+                                      text="Intimidate, then your next Brute attack this turn gains 'While this attack is defended by less than 2 non-equipment cards it has +3 power'. Go again.",
+                                      effects=[
+                                          CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_BRUTE_ATTACK_CONDITIONAL_BONUS, magnitude=3),
+                                      ]),
 
     "muscle_mutt_yellow": Card("Muscle Mutt", CardType.ACTION_ATTACK, cost=3, pitch=2,
                                power=6, defense=2, color=Color.YELLOW,
@@ -94,7 +97,10 @@ CARD_CATALOG: Dict[str, Card] = {
     "raging_onslaught_yellow": Card("Raging Onslaught", CardType.ACTION_ATTACK, cost=3, pitch=2,
                                     power=6, defense=3, color=Color.YELLOW,
                                     card_class=CardClass.BRUTE,
-                                    text=""),
+                                    text="When Raging Onslaught hits, draw a card.",
+                                    effects=[
+                                        CardEffect(trigger=EffectTrigger.ON_HIT, action=EffectAction.DRAW_CARD, magnitude=1),
+                                    ]),
 
     "smash_instinct_yellow": Card("Smash Instinct", CardType.ACTION_ATTACK, cost=3, pitch=2,
                                   power=6, defense=3, color=Color.YELLOW,
@@ -122,7 +128,10 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "come_to_fight_blue": Card("Come to Fight", CardType.ACTION, cost=1, pitch=3,
                                power=0, defense=3, color=Color.BLUE,
-                               text="Your next attack action card you play this turn gains +1 power. Go again."),
+                               text="Your next attack action card you play this turn gains +1 power. Go again.",
+                               effects=[
+                                   CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_ATTACK_GO_AGAIN),
+                               ]),
 
     "dodge_blue": Card("Dodge", CardType.DEFENSE_REACTION, cost=0, pitch=3,
                        power=0, defense=2, color=Color.BLUE,
@@ -157,7 +166,10 @@ CARD_CATALOG: Dict[str, Card] = {
                         text="Once per Turn Action — 2: Attack."),
 
     "blossom_of_spring": Card("Blossom of Spring", CardType.EQUIPMENT, defense=0, equip_slot=EquipSlot.CHEST,
-                              text="Action: Destroy Blossom of Spring: Gain 1 resource. Go again"),
+                              text="Action: Destroy Blossom of Spring: Gain 1 resource. Go again",
+                              effects=[
+                                  CardEffect(trigger=EffectTrigger.ON_ACTIVATE, action=EffectAction.GAIN_RESOURCE, magnitude=1),
+                              ]),
 
     "bone_vizier": Card("Bone Vizier", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.HEAD,
                         card_class=CardClass.BRUTE,
@@ -178,7 +190,10 @@ CARD_CATALOG: Dict[str, Card] = {
     "en_garde_red": Card("En Garde", CardType.ACTION, cost=1, pitch=1,
                          power=0, defense=3, color=Color.RED, keywords=[Keyword.GO_AGAIN],
                          card_class=CardClass.WARRIOR,
-                         text="Your next weapon attack this turn gains +3 power. Go again."),
+                         text="Your next weapon attack this turn gains +3 power. Go again.",
+                         effects=[
+                             CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.WEAPON_ATTACK_POWER_BONUS, magnitude=3),
+                         ]),
 
     "flock_of_the_feather_walkers_red": Card(
         "Flock of the Feather Walkers", CardType.ACTION_ATTACK, cost=1, pitch=1,
@@ -201,7 +216,11 @@ CARD_CATALOG: Dict[str, Card] = {
     "ironsong_response_red": Card("Ironsong Response", CardType.ATTACK_REACTION, cost=0, pitch=1,
                                   power=0, defense=3, color=Color.RED,
                                   card_class=CardClass.WARRIOR,
-                                  text="Reprise - If the defending hero has defended with a card from their hand this chain link, your weapon attack gains +3 power."),
+                                  text="Reprise - If the defending hero has defended with a card from their hand this chain link, your weapon attack gains +3 power.",
+                                  effects=[
+                                      CardEffect(trigger=EffectTrigger.ON_ATTACK_REACTION, action=EffectAction.ATTACK_POWER_BOOST, magnitude=3,
+                                                 condition=lambda ctx: ctx.get("reprise_condition_met", False)),
+                                  ]),
 
     "second_swing_red": Card("Second Swing", CardType.ACTION, cost=1, pitch=1,
                              power=0, defense=3, color=Color.RED, keywords=[Keyword.GO_AGAIN],
@@ -239,29 +258,49 @@ CARD_CATALOG: Dict[str, Card] = {
     "warrior_s_valor_red": Card("Warrior's Valor", CardType.ACTION, cost=1, pitch=1,
                                 power=0, defense=3, color=Color.RED, keywords=[Keyword.GO_AGAIN],
                                 card_class=CardClass.WARRIOR,
-                                text="Your next weapon attack this turn gains +3 power and 'When this attack hits, it gains go again.' Go again."),
+                                text="Your next weapon attack this turn gains +3 power and 'When this attack hits, it gains go again.' Go again.",
+                                effects=[
+                                    CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.WEAPON_ATTACK_POWER_BONUS, magnitude=3),
+                                    CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_WEAPON_GO_AGAIN_IF_HITS),
+                                ]),
 
     # ── DORINTHEA — YELLOW ──────────────────────────────────────────────────
 
     "driving_blade_yellow": Card("Driving Blade", CardType.ACTION, cost=2, pitch=2,
                                  power=0, defense=3, color=Color.YELLOW,
                                  card_class=CardClass.WARRIOR,
-                                 text="Your next weapon attack this turn gains +2 power and go again. Go again."),
+                                 text="Your next weapon attack this turn gains +2 power and go again. Go again.",
+                                 effects=[
+                                     CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.WEAPON_ATTACK_POWER_BONUS, magnitude=2),
+                                     CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_WEAPON_GO_AGAIN),
+                                 ]),
 
     "glistening_steelblade_yellow": Card("Glistening Steelblade", CardType.ACTION, cost=1, pitch=2,
                                          power=0, defense=3, color=Color.YELLOW, keywords=[Keyword.GO_AGAIN],
                                          card_class=CardClass.WARRIOR,
-                                         text="Dorinthea Specialization. Your next Dawnblade attack this turn has go again.  Whenever Dawnblade hits a hero this turn, put a +1 counter on it. Go again."),
+                                         text="Dorinthea Specialization. Your next Dawnblade attack this turn has go again.  Whenever Dawnblade hits a hero this turn, put a +1 counter on it. Go again.",
+                                         effects=[
+                                             CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_WEAPON_GO_AGAIN),
+                                             CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.GLISTENING_STEELBLADE_ACTIVATE),
+                                         ]),
 
     "on_a_knife_edge_yellow": Card("On a Knife Edge", CardType.ACTION, cost=0, pitch=2,
                                    power=0, defense=2, color=Color.YELLOW, keywords=[Keyword.GO_AGAIN],
                                    card_class=CardClass.WARRIOR,
-                                   text="Your next sword attack this turn gains go again. Go again."),
+                                   text="Your next sword attack this turn gains go again. Go again.",
+                                   effects=[
+                                       CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_WEAPON_GO_AGAIN),
+                                   ]),
 
     "out_for_blood_yellow": Card("Out for Blood", CardType.ATTACK_REACTION, cost=1, pitch=2,
                                  power=0, defense=3, color=Color.YELLOW,
                                  card_class=CardClass.WARRIOR,
-                                 text="Target weaopn attack gains +2 power.  Reprise - If the defending hero has defended with a card from their hand this chain link, your next attack this turn gains +1 power."),
+                                 text="Target weapon attack gains +2 power.  Reprise - If the defending hero has defended with a card from their hand this chain link, your next attack this turn gains +1 power.",
+                                 effects=[
+                                     CardEffect(trigger=EffectTrigger.ON_ATTACK_REACTION, action=EffectAction.ATTACK_POWER_BOOST, magnitude=2),
+                                     CardEffect(trigger=EffectTrigger.ON_ATTACK_REACTION, action=EffectAction.NEXT_ATTACK_GO_AGAIN,
+                                                condition=lambda ctx: ctx.get("reprise_condition_met", False)),
+                                 ]),
 
     "run_through_yellow": Card("Run Through", CardType.ATTACK_REACTION, cost=1, pitch=2,
                                power=0, defense=3, color=Color.YELLOW,
@@ -291,11 +330,19 @@ CARD_CATALOG: Dict[str, Card] = {
     "hit_and_run_blue": Card("Hit and Run", CardType.ACTION, cost=0, pitch=3,
                              power=0, defense=3, color=Color.BLUE, keywords=[Keyword.GO_AGAIN],
                              card_class=CardClass.WARRIOR,
-                             text="Your next weapon attack this turn gains go again.  If you have attacked with a weapon this turn your next attack this turn gains +1 power.  Go again."),
+                             text="Your next weapon attack this turn gains go again.  If you have attacked with a weapon this turn your next attack this turn gains +1 power.  Go again.",
+                             effects=[
+                                 CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_WEAPON_GO_AGAIN),
+                                 CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.WEAPON_ATTACK_POWER_BONUS, magnitude=1,
+                                            condition=lambda ctx: ctx.get("weapon_attack_count", 0) >= 1),
+                             ]),
 
     "sigil_of_solace_blue": Card("Sigil of Solace", CardType.INSTANT, cost=0, pitch=3,
                                  power=0, defense=0, color=Color.BLUE, no_block=True,
-                                 text="Gain 1 life."),
+                                 text="Gain 1 life.",
+                                 effects=[
+                                     CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.GAIN_LIFE, magnitude=1),
+                                 ]),
 
     "toughen_up_blue": Card("Toughen Up", CardType.DEFENSE_REACTION, cost=2, pitch=3,
                             power=0, defense=4, color=Color.BLUE,
@@ -305,7 +352,10 @@ CARD_CATALOG: Dict[str, Card] = {
     "visit_the_blacksmith_blue": Card("Visit the Blacksmith", CardType.ACTION, cost=0, pitch=3,
                                       power=0, defense=2, color=Color.BLUE, keywords=[Keyword.GO_AGAIN],
                                       card_class=CardClass.WARRIOR,
-                                      text="Your next sword attack this turn gains +1 power."),
+                                      text="Your next sword attack this turn gains +1 power.",
+                                      effects=[
+                                          CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.WEAPON_ATTACK_POWER_BONUS, magnitude=1),
+                                      ]),
 
     # ── DORINTHEA — MENTOR ──────────────────────────────────────────────────
 
@@ -319,6 +369,7 @@ CARD_CATALOG: Dict[str, Card] = {
     "dawnblade_resplendent": Card("Dawnblade, Resplendent", CardType.WEAPON, cost=1, power=2,
                                   equip_slot=EquipSlot.WEAPON,
                                   card_class=CardClass.WARRIOR,
+                                  keywords=[Keyword.DAWNBLADE],
                                   text="Once per Turn Action — 1: Attack. The second time you attack with Dawnblade each turn, it gains +1 power until the end of turn."),
 
     "gallantry_gold": Card("Gallantry Gold", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.ARMS,

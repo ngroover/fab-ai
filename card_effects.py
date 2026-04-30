@@ -31,9 +31,11 @@ class EffectTrigger(Enum):
     ON_ATTACK          = auto()   # fired when an attack card is declared (before defend step)
     ON_ATTACK_PLAY     = auto()   # fired when an ACTION_ATTACK card is played (before defend, for additional costs)
     ON_PLAY            = auto()   # fired when a non-attack action card is played
+    ON_HIT             = auto()   # fired when this attack card deals damage
     ON_ATTACK_REACTION = auto()   # fired when this card resolves as an attack reaction
     ON_DEFEND          = auto()   # fired when this card is used to defend
     ON_DESTROYED       = auto()   # fired when this equipment card is destroyed
+    ON_ACTIVATE        = auto()   # fired when this equipment's activated ability resolves
 
 
 class EffectAction(Enum):
@@ -45,11 +47,19 @@ class EffectAction(Enum):
     ATTACK_POWER_BOOST             = auto()   # target attack gains +magnitude power (see CardEffect.magnitude)
     SWORD_ATTACK_GO_AGAIN          = auto()   # target sword attack gains go again
     NEXT_SWORD_ATTACK_POWER_BONUS  = auto()   # next sword attack this turn gains +magnitude power
-    WEAPON_ATTACK_POWER_BONUS          = auto()   # if weapon was attacked this turn, next attack gains +magnitude power
+    WEAPON_ATTACK_POWER_BONUS          = auto()   # next weapon attack this turn gains +magnitude power
     WEAPON_ATTACK_BONUS_PER_SWING      = auto()   # 1st weapon attack this turn +1, 2nd weapon attack this turn +2
     REVEAL_TOP_DECK_POWER_CHECK        = auto()   # reveal top card of deck; if 6+ power keep on top, else move to bottom
     DISCARD_CARD_COST                  = auto()   # as an additional cost to play this card, discard a card from hand
     NEXT_BRUTE_ATTACK_BONUS            = auto()   # next Brute attack action card this turn gains +magnitude power
+    NEXT_BRUTE_ATTACK_CONDITIONAL_BONUS = auto()  # next Brute attack gains +magnitude power if defended by <2 non-equipment cards
+    NEXT_ATTACK_GO_AGAIN               = auto()   # next attack action card this turn gains go again
+    NEXT_WEAPON_GO_AGAIN               = auto()   # next weapon attack this turn gains go again
+    NEXT_WEAPON_GO_AGAIN_IF_HITS       = auto()   # next weapon attack this turn gains go again if it hits
+    GLISTENING_STEELBLADE_ACTIVATE     = auto()   # whenever Dawnblade hits this turn, put a +1 counter on it
+    GAIN_LIFE                          = auto()   # active player gains magnitude life
+    GAIN_RESOURCE                      = auto()   # active player gains magnitude resource
+    DRAW_CARD                          = auto()   # active player draws magnitude cards
 
 
 @dataclass

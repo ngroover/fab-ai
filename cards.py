@@ -53,6 +53,7 @@ class Keyword(Enum):
     BLADE_BREAK = "Blade Break"
     BATTLEWORN = "Battleworn"
     REPRISE = "Reprise"
+    DAWNBLADE = "Dawnblade"
 
 
 @dataclass

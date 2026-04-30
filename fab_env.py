@@ -610,10 +610,10 @@ class FaBEnv:
             if attacker.next_brute_attack_conditional_bonus > 0:
                 if len(def_cards) < 2:
                     power += attacker.next_brute_attack_conditional_bonus
-                    self._log(f"    ⚡ Barraging Beatdown +{attacker.next_brute_attack_conditional_bonus} power "
+                    self._log(f"    ⚡ Conditional bonus +{attacker.next_brute_attack_conditional_bonus} power "
                               f"({len(def_cards)} non-equipment blocker(s)).")
                 else:
-                    self._log(f"    ❌ Barraging Beatdown bonus nullified "
+                    self._log(f"    ❌ Conditional bonus nullified "
                               f"({len(def_cards)} non-equipment blockers).")
                 attacker.next_brute_attack_conditional_bonus = 0
 
@@ -878,18 +878,9 @@ class FaBEnv:
         """Resolve an instant that was previously placed on the stack.
         Unlike ``_resolve_instant``, this does not grant the owner an action
         point — the card is resolving outside their action phase."""
-        n = card.name
-        if n == "Sigil of Solace":
-            owner.gain_life(1)
-            self._log(f"    💚 Sigil of Solace resolves — {owner.name} gains 1 life "
-                      f"({owner.life}).")
-        elif n == "Titanium Bauble":
-            owner.resource_points += 1
-            self._log(f"    💰 Titanium Bauble resolves — {owner.name} gains 1 resource.")
-        elif n == "Flock of the Feather Walkers":
-            self._log(f"    🦅 Flock of the Feather Walkers resolves.")
-        else:
-            self._log(f"    ✨ {n} resolves.")
+        self._apply_card_effects(card, EffectTrigger.ON_PLAY, {}, owner, opponent)
+        if not card.effects:
+            self._log(f"    ✨ {card.name} resolves.")
         owner.graveyard.append(card)
 
     def _resolve_top_of_stack(self) -> None:
@@ -1022,7 +1013,12 @@ class FaBEnv:
         n = card.name
         if card.card_type == CardType.ATTACK_REACTION:
             attacker = self._game.players[self._reaction_attacker_idx]
-            reaction_ctx = {"weapon_attack_count": attacker.weapon_attack_count}
+            committed = self._committed_defend_action
+            reprise_met = bool(committed and committed.defend_hand_indices)
+            reaction_ctx = {
+                "weapon_attack_count": attacker.weapon_attack_count,
+                "reprise_condition_met": reprise_met,
+            }
             for effect in card.effects:
                 if effect.matches(EffectTrigger.ON_ATTACK_REACTION, reaction_ctx):
                     if effect.action == EffectAction.ATTACK_POWER_BOOST:
@@ -1038,25 +1034,10 @@ class FaBEnv:
                         owner.next_sword_attack_power_bonus += effect.magnitude
                         self._log(f"    ⚔  {n} resolves — next sword attack this turn gains "
                                   f"+{effect.magnitude} power.")
-            if n == "Ironsong Response":
-                committed = self._committed_defend_action
-                if committed and committed.defend_hand_indices:
-                    self._pending_attack_power += 3
-                    self._log(f"    ⚔  Ironsong Response resolves — Reprise! +3 power "
-                              f"({self._pending_attack_power} total).")
-                else:
-                    self._log(f"    ⚔  Ironsong Response resolves — Reprise condition not met.")
-            elif n == "Out for Blood":
-                self._pending_attack_power += 2
-                self._log(f"    ⚔  Out for Blood resolves — target weapon attack gains +2 power "
-                          f"({self._pending_attack_power} total).")
-                committed = self._committed_defend_action
-                if committed and committed.defend_hand_indices:
-                    owner.next_attack_go_again = True
-                    self._log(f"    ⚔  Out for Blood Reprise — next attack this turn gains +1 power "
-                              f"(tracked via go_again flag).")
-            else:
-                self._log(f"    ⚔  {n} resolves.")
+                    elif effect.action == EffectAction.NEXT_ATTACK_GO_AGAIN:
+                        owner.next_attack_go_again = True
+                        self._log(f"    ⚔  {n} resolves — Reprise! next attack this turn gains go again.")
+            self._log(f"    ⚔  {n} resolves.")
 
         elif card.card_type == CardType.DEFENSE_REACTION:
             bonus = card.defense
@@ -1324,6 +1305,38 @@ class FaBEnv:
             elif effect.action == EffectAction.NEXT_BRUTE_ATTACK_BONUS:
                 active.next_brute_attack_bonus = max(active.next_brute_attack_bonus, effect.magnitude)
                 self._log(f"    ⚡ {card.name} — next Brute attack gains +{effect.magnitude} power.")
+            elif effect.action == EffectAction.NEXT_BRUTE_ATTACK_CONDITIONAL_BONUS:
+                active.next_brute_attack_conditional_bonus = effect.magnitude
+                self._log(f"    ⚡ {card.name} — next Brute attack gains +{effect.magnitude} power if defended by <2 non-equipment cards.")
+            elif effect.action == EffectAction.NEXT_ATTACK_GO_AGAIN:
+                active.next_attack_go_again = True
+                self._log(f"    ⚡ {card.name} — next attack gains go again.")
+            elif effect.action == EffectAction.NEXT_WEAPON_GO_AGAIN:
+                active.next_weapon_go_again = True
+                self._log(f"    ⚡ {card.name} — next weapon attack gains go again.")
+            elif effect.action == EffectAction.NEXT_WEAPON_GO_AGAIN_IF_HITS:
+                active.next_weapon_go_again_if_hits = True
+                self._log(f"    ⚡ {card.name} — next weapon attack gains go again if it hits.")
+            elif effect.action == EffectAction.GLISTENING_STEELBLADE_ACTIVATE:
+                active.glistening_steelblade_active = True
+                self._log(f"    ✨ {card.name} — whenever Dawnblade hits this turn, it gains a +1 counter.")
+            elif effect.action == EffectAction.GAIN_LIFE:
+                active.gain_life(effect.magnitude)
+                self._log(f"    💚 {card.name} — {active.name} gains {effect.magnitude} life ({active.life}).")
+            elif effect.action == EffectAction.GAIN_RESOURCE:
+                active.resource_points += effect.magnitude
+                self._log(f"    💰 {card.name} — {active.name} gains {effect.magnitude} resource ({active.resource_points} total).")
+            elif effect.action == EffectAction.DRAW_CARD:
+                hand_before = len(active.hand)
+                active.draw(effect.magnitude)
+                drawn = active.hand[-1] if len(active.hand) > hand_before else None
+                active_idx = self._game.active_player_idx
+                if drawn:
+                    self._log_private(active_idx,
+                        f"    🎴 {card.name} — {active.name} draws {drawn.name}.",
+                        f"    🎴 {card.name} — {active.name} draws a card.")
+                else:
+                    self._log(f"    🎴 {card.name} — {active.name} draws a card (deck empty).")
             elif effect.action == EffectAction.REVEAL_TOP_DECK_POWER_CHECK:
                 if active.deck:
                     top = active.deck[0]
@@ -1350,13 +1363,14 @@ class FaBEnv:
         eq = active.equipment.get(slot)
         if not eq or not eq.active or eq.destroyed:
             return
-        name = eq.card.name
-        if name == "Blossom of Spring":
-            active.resource_points += 1
-            eq.destroyed = True
-            self._log(f"\n  ▶  {active.name} activates {name}.")
-            self._log(f"    🌸 Blossom of Spring — gain 1 resource. Blossom of Spring is destroyed.")
-            self._move_equipment_to_graveyard(active, eq)
+        if not eq.card.effects:
+            return
+        active_idx = self._game.players.index(active)
+        opponent = self._game.players[1 - active_idx]
+        self._log(f"\n  ▶  {active.name} activates {eq.card.name}.")
+        self._apply_card_effects(eq.card, EffectTrigger.ON_ACTIVATE, {}, active, opponent)
+        eq.destroyed = True
+        self._move_equipment_to_graveyard(active, eq)
 
     def _resolve_weapon_attack(self, attacker: Player, opponent: Player,
                                pre_pitched: Optional[List[Card]] = None):
@@ -1407,49 +1421,6 @@ class FaBEnv:
     def _resolve_action(self, card: Card, active: Player, opponent: Player):
         # Non-attack actions close the combat chain before resolving.
         self._break_combat_chain(active, opponent)
-        n = card.name
-
-        if n == "Barraging Beatdown":
-            active.next_brute_attack_conditional_bonus = 3
-            self._log(f"    ⚡ Next Brute attack gains +3 power if defended by < 2 non-equipment cards.")
-
-        elif n == "Beast Mode":
-            active.next_brute_attack_bonus = max(active.next_brute_attack_bonus, 3)
-            self._log(f"    ⚡ Beast Mode — next Brute attack gains +3 power.")
-
-        elif n == "Come to Fight":
-            active.next_attack_go_again = True
-            self._log(f"    ⚡ Come to Fight — next attack gains go again.")
-
-        elif n == "En Garde":
-            active.next_weapon_power_bonus += 3
-            self._log(f"    ⚡ En Garde — weapon gets +3 power.")
-
-        elif n == "Warrior's Valor":
-            active.next_weapon_power_bonus += 3
-            active.next_weapon_go_again_if_hits = True
-            self._log(f"    ⚡ Warrior's Valor — weapon gets +3 power and 'if hits, go again'.")
-
-        elif n in ("On a Knife Edge", "Blade Flash", "Hit and Run"):
-            active.next_weapon_go_again = True
-            self._log(f"    ⚡ {n} — next weapon attack gains go again.")
-
-        elif n == "Glistening Steelblade":
-            active.next_weapon_go_again = True
-            active.glistening_steelblade_active = True
-            self._log(f"    ✨ Glistening Steelblade — next Dawnblade has go again + counter on hit.")
-
-        elif n == "Visit the Blacksmith":
-            active.next_weapon_power_bonus += 1
-            self._log(f"    ⚡ Visit the Blacksmith — next sword attack gains +1 power.")
-
-        elif n == "Sigil of Solace":
-            active.gain_life(3)
-            self._log(f"    💚 Sigil of Solace — {active.name} gains 3 life ({active.life}).")
-
-        elif n == "Titanium Bauble":
-            active.resource_points += 1
-            self._log(f"    💰 Titanium Bauble — gain 1 resource ({active.resource_points} total).")
 
         if Keyword.INTIMIDATE in card.keywords:
             if opponent.hand:
@@ -1472,15 +1443,7 @@ class FaBEnv:
         active.graveyard.append(card)
 
     def _resolve_instant(self, card: Card, active: Player, opponent: Player):
-        n = card.name
-        if n == "Sigil of Solace":
-            active.gain_life(1)
-            self._log(f"    💚 Sigil of Solace — {active.name} gains 1 life ({active.life}).")
-        elif n == "Titanium Bauble":
-            active.resource_points += 1
-            self._log(f"    💰 Titanium Bauble — gain 1 resource.")
-        elif n == "Flock of the Feather Walkers":
-            self._log(f"    🦅 Flock of the Feather Walkers — +2 defense to a defending attack card.")
+        self._apply_card_effects(card, EffectTrigger.ON_PLAY, {}, active, opponent)
         active.graveyard.append(card)
         active.action_points += 1  # instants don't consume action points
 
@@ -1495,23 +1458,9 @@ class FaBEnv:
             self._log(f"    🎓 Hala Goldenhelm! Sword hit — go again + lesson counter.")
             self._mentor_lesson(attacker)
 
-        if card.name == "Raging Onslaught":
-            hand_before = len(attacker.hand)
-            attacker.draw(1)
-            drawn_ro = attacker.hand[-1] if len(attacker.hand) > hand_before else None
-            attacker_idx = self._game.active_player_idx
-            if drawn_ro:
-                self._log_private(attacker_idx,
-                    f"    🎴 Raging Onslaught hit — {attacker.name} draws {drawn_ro.name}.",
-                    f"    🎴 Raging Onslaught hit — {attacker.name} draws a card.")
-            else:
-                self._log(f"    🎴 Raging Onslaught hit — {attacker.name} draws a card (deck empty).")
+        self._apply_card_effects(card, EffectTrigger.ON_HIT, {}, attacker, defender)
 
-        if card.name == "Driving Blade":
-            attacker.next_weapon_go_again = True
-            self._log(f"    ⚡ Driving Blade hit — next weapon attack gains go again.")
-
-        if is_weapon and "Dawnblade" in card.name and attacker.glistening_steelblade_active:
+        if is_weapon and Keyword.DAWNBLADE in card.keywords and attacker.glistening_steelblade_active:
             attacker.dawnblade_counters += 1
             self._log(f"    ✨ Glistening Steelblade! Dawnblade hit — +1 power counter "
                       f"({attacker.dawnblade_counters} total, permanent).")
