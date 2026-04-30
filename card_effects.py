@@ -50,6 +50,8 @@ class EffectAction(Enum):
     REVEAL_TOP_DECK_POWER_CHECK        = auto()   # reveal top card of deck; if 6+ power keep on top, else move to bottom
     DISCARD_CARD_COST                  = auto()   # as an additional cost to play this card, discard a card from hand
     NEXT_BRUTE_ATTACK_BONUS            = auto()   # next Brute attack action card this turn gains +magnitude power
+    REVEAL_CARD_COST                   = auto()   # as an additional cost, reveal a card with cost ≤ 1 from hand (card stays)
+    QUICKEN_TOKEN                      = auto()   # when this attacks, create a Quicken token (grants Go Again)
 
 
 @dataclass

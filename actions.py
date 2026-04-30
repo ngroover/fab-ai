@@ -111,6 +111,30 @@ def _card_has_discard_cost(card: 'Card') -> bool:
     return any(e.action == EffectAction.DISCARD_CARD_COST for e in card.effects)
 
 
+def _card_has_reveal_cost(card: 'Card') -> bool:
+    """Return True if *card* requires revealing a cost ≤ 1 card as an additional play cost."""
+    from card_effects import EffectAction
+    return any(e.action == EffectAction.REVEAL_CARD_COST for e in card.effects)
+
+
+def _has_reveal_available(available_cards: List['Card'], needed: int) -> bool:
+    """Return True if *available_cards* can cover *needed* pitch AND still leave a cost ≤ 1 card.
+
+    Reserves the cost ≤ 1 card with the lowest pitch value (maximising remaining pitch pool)
+    then checks whether the rest covers *needed*.
+    """
+    low_cost = [c for c in available_cards if c.cost <= 1]
+    if not low_cost:
+        return False
+    if needed == 0:
+        return True
+    # Reserve the low-cost card that wastes the least pitch potential.
+    reserved = min(low_cost, key=lambda c: c.pitch)
+    remaining = list(available_cards)
+    remaining.remove(reserved)
+    return sum(c.pitch for c in remaining if c.pitch > 0) >= needed
+
+
 def _has_discard_available(available_cards: List['Card'], needed: int) -> bool:
     """Return True if *available_cards* can cover *needed* pitch resources AND
     still leave at least one card in hand for the discard additional cost.
@@ -185,6 +209,10 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
             # Arsenal card not in hand, so all hand cards are available for pitch/discard
             if _has_discard_available(player.hand, needed):
                 actions.append(Action(ActionType.PLAY_CARD, card=player.arsenal, from_arsenal=True))
+        elif _card_has_reveal_cost(card):
+            # Arsenal card not in hand; all hand cards available for pitch, must keep one cost ≤ 1
+            if _has_reveal_available(player.hand, needed):
+                actions.append(Action(ActionType.PLAY_CARD, card=player.arsenal, from_arsenal=True))
         else:
             total_pitch = sum(c.pitch for c in player.hand if c.pitch > 0)
             if needed == 0 or total_pitch >= needed:
@@ -199,17 +227,20 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
             continue  # duplicate card — same choice regardless of which copy is picked
         seen_play_names.add(card.name)
         needed = max(0, card.cost - player.resource_points)
+        other = [c for j, c in enumerate(player.hand) if j != i]
         if _card_has_discard_cost(card):
             # Must be able to cover pitch cost AND keep >= 1 card in hand for discard
-            other = [c for j, c in enumerate(player.hand) if j != i]
             if _has_discard_available(other, needed):
+                actions.append(Action(ActionType.PLAY_CARD, card=card))
+        elif _card_has_reveal_cost(card):
+            # Must be able to cover pitch cost AND keep >= 1 cost ≤ 1 card in hand to reveal
+            if _has_reveal_available(other, needed):
                 actions.append(Action(ActionType.PLAY_CARD, card=card))
         elif needed == 0:
             actions.append(Action(ActionType.PLAY_CARD, card=card))
         else:
             # Card costs more than current resources — playable only if hand can cover with pitch
-            pitchable_total = sum(c.pitch for j, c in enumerate(player.hand)
-                                  if j != i and c.pitch > 0)
+            pitchable_total = sum(c.pitch for c in other if c.pitch > 0)
             if pitchable_total >= needed:
                 actions.append(Action(ActionType.PLAY_CARD, card=card))
 
@@ -257,6 +288,7 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
         return [Action(ActionType.PITCH, pitch_indices=[])]
 
     has_discard_cost = _card_has_discard_cost(pending_card)
+    has_reveal_cost = _card_has_reveal_cost(pending_card)
 
     # For discard-cost cards: can't pitch if only 1 card left (needed for discard)
     if has_discard_cost and len(player.hand) <= 1:
@@ -274,6 +306,11 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
         if c.name in seen_pitch_names:
             continue  # duplicate card — same pitch value regardless of which copy is picked
         seen_pitch_names.add(c.name)
+        if has_reveal_cost:
+            # Don't pitch this card if it would leave no cost ≤ 1 card in hand to reveal
+            hand_after = [card for j, card in enumerate(player.hand) if j != i]
+            if not any(card.cost <= 1 for card in hand_after):
+                continue
         actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
     return actions if actions else [Action(ActionType.PITCH, pitch_indices=[])]
 

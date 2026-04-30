@@ -511,6 +511,12 @@ class FaBEnv:
                     active.graveyard.append(discarded)
                     self._log(f"    🎲 Additional cost — {active.name} discards {discarded.name}.")
                     self._fire_effects(EffectTrigger.ON_DISCARD, {"card": discarded}, active, opponent)
+                elif effect.action == EffectAction.REVEAL_CARD_COST:
+                    revealed = next((c for c in active.hand if c.cost <= 1), None)
+                    if revealed:
+                        self._log(f"    👁  Additional cost — {active.name} reveals {revealed.name} (cost {revealed.cost}).")
+                    else:
+                        self._log(f"    👁  Additional cost — {active.name} has no cost ≤ 1 card to reveal.")
             self._apply_card_effects(card, EffectTrigger.ON_ATTACK_PLAY, {}, active, opponent)
             self._pending_attack = card
             self._pending_is_weapon = False
@@ -1324,6 +1330,9 @@ class FaBEnv:
             elif effect.action == EffectAction.NEXT_BRUTE_ATTACK_BONUS:
                 active.next_brute_attack_bonus = max(active.next_brute_attack_bonus, effect.magnitude)
                 self._log(f"    ⚡ {card.name} — next Brute attack gains +{effect.magnitude} power.")
+            elif effect.action == EffectAction.QUICKEN_TOKEN:
+                self._pending_attack_go_again = True
+                self._log(f"    ⚡ {card.name} — Quicken token created, attack gains Go Again!")
             elif effect.action == EffectAction.REVEAL_TOP_DECK_POWER_CHECK:
                 if active.deck:
                     top = active.deck[0]

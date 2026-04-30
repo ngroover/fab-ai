@@ -184,7 +184,11 @@ CARD_CATALOG: Dict[str, Card] = {
         "Flock of the Feather Walkers", CardType.ACTION_ATTACK, cost=1, pitch=1,
         power=5, defense=2, color=Color.RED,
         card_class=CardClass.GENERIC,
-        text="As an additional cost to play Flock of the Feather Walkers, reveal a card in your hand with cost 1 or less.  When you attack with Flock of the Feather Walkers, create a Quicken token."),
+        text="As an additional cost to play Flock of the Feather Walkers, reveal a card in your hand with cost 1 or less.  When you attack with Flock of the Feather Walkers, create a Quicken token.",
+        effects=[
+            CardEffect(trigger=EffectTrigger.ON_ATTACK_PLAY, action=EffectAction.REVEAL_CARD_COST),
+            CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.QUICKEN_TOKEN),
+        ]),
 
     "in_the_swing_red": Card("In the Swing", CardType.ATTACK_REACTION, cost=0, pitch=1,
                              power=0, defense=3, color=Color.RED,
