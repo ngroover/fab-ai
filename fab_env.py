@@ -1439,6 +1439,11 @@ class FaBEnv:
             active.glistening_steelblade_active = True
             self._log(f"    ✨ Glistening Steelblade — next Dawnblade has go again + counter on hit.")
 
+        elif n == "Driving Blade":
+            active.next_weapon_power_bonus += 2
+            active.next_weapon_go_again = True
+            self._log(f"    ⚡ Driving Blade — next weapon attack gains +2 power and go again.")
+
         elif n == "Visit the Blacksmith":
             active.next_weapon_power_bonus += 1
             self._log(f"    ⚡ Visit the Blacksmith — next sword attack gains +1 power.")
