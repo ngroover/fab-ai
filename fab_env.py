@@ -865,8 +865,12 @@ class FaBEnv:
     def _push_instant_to_stack(self, card: "Card", owner_idx: int) -> None:
         """Place *card* onto the instant stack owned by *owner_idx*, then pass
         priority to the opponent so they may respond."""
+        owner = self._game.players[owner_idx]
+        if card.name == "Sigil of Solace":
+            owner.gain_life(1)
+            self._log(f"    💚 Sigil of Solace played — {owner.name} gains 1 life ({owner.life}).")
         self._instant_stack.append((owner_idx, card))
-        owner_name = self._game.players[owner_idx].name
+        owner_name = owner.name
         self._log(f"    📌  {owner_name} puts {card.name} on the stack "
                   f"(stack size: {len(self._instant_stack)}).")
         self._instant_passes = 0
@@ -879,14 +883,7 @@ class FaBEnv:
         Unlike ``_resolve_instant``, this does not grant the owner an action
         point — the card is resolving outside their action phase."""
         n = card.name
-        if n == "Sigil of Solace":
-            owner.gain_life(1)
-            self._log(f"    💚 Sigil of Solace resolves — {owner.name} gains 1 life "
-                      f"({owner.life}).")
-        elif n == "Titanium Bauble":
-            owner.resource_points += 1
-            self._log(f"    💰 Titanium Bauble resolves — {owner.name} gains 1 resource.")
-        elif n == "Flock of the Feather Walkers":
+        if n == "Flock of the Feather Walkers":
             self._log(f"    🦅 Flock of the Feather Walkers resolves.")
         else:
             self._log(f"    ✨ {n} resolves.")
