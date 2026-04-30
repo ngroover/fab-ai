@@ -1345,7 +1345,7 @@ def _build_gamestate_snapshot(env) -> dict:
             "arsenal": _card_to_dict(p.arsenal),
             "pitch_zone": [_card_to_dict(c) for c in p.pitch_zone],
             "graveyard": [_card_to_dict(c) for c in p.graveyard],
-            "banished": [_card_to_dict(c) for c in p.banished],
+            "banished": [_card_to_dict(c) for c in p.banished + p.permanently_banished],
             "weapon": _card_to_dict(p.weapon),
             "equipment": [
                 {"slot": slot, "card": _card_to_dict(eq.card),
@@ -1367,7 +1367,7 @@ def _build_gamestate_snapshot(env) -> dict:
             "arsenal_present": p.arsenal is not None,
             "pitch_zone": [_card_to_dict(c) for c in p.pitch_zone],
             "graveyard": [_card_to_dict(c) for c in p.graveyard],
-            "banished_count": len(p.banished),
+            "banished_count": len(p.banished) + len(p.permanently_banished),
             "weapon": _card_to_dict(p.weapon),
             "equipment": [
                 {"slot": slot, "card": _card_to_dict(eq.card),

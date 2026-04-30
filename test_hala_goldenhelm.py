@@ -275,7 +275,7 @@ class TestHalaTwoLessonCounters(unittest.TestCase):
         _flip_and_hit_twice(self.env, self.dorinthea)
 
     def test_hala_banished(self):
-        self.assertIn('Hala Goldenhelm', [c.name for c in self.dorinthea.banished])
+        self.assertIn('Hala Goldenhelm', [c.name for c in self.dorinthea.permanently_banished])
 
     def test_hala_no_longer_in_arsenal(self):
         if self.dorinthea.arsenal:

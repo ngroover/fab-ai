@@ -106,6 +106,7 @@ def _determinize(sim_env: FaBEnv, my_player_idx: int, rng: random.Random) -> Non
             + opp.pitch_zone
             + opp.combat_chain
             + opp.banished
+            + opp.permanently_banished
             + ([opp.arsenal] if opp.arsenal else []))
 
     seen_remaining = Counter(c.name for c in seen)

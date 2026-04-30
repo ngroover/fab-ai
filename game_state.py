@@ -57,7 +57,8 @@ class Player:
         self.hand: List[Card] = []
         self.graveyard: List[Card] = []
         self.combat_chain: List[Card] = []  # cards staying on chain until it closes
-        self.banished: List[Card] = []
+        self.banished: List[Card] = []          # intimidate — returns to hand at end of turn
+        self.permanently_banished: List[Card] = []  # mentor fire, etc. — stays banished
         self.pitch_zone: List[Card] = []
         self.arsenal: Optional[Card] = None
 
