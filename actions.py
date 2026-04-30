@@ -248,8 +248,10 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
     one at a time.  The phase repeats until resource_points >= pending_card.cost.
     If cost is already covered, returns a single no-pitch action (safety net).
 
-    For cards with a discard additional cost, pitching is forbidden when only
-    one card remains in hand — that card must be kept for the discard.
+    For cards with a discard additional cost, a card may only be pitched if the
+    remaining hand can still cover the outstanding cost (after this pitch) while
+    preserving at least one card for the discard.  This prevents a suboptimal
+    pitch sequence from stranding resources and bypassing the full cost.
     """
     needed = max(0, pending_card.cost - player.resource_points)
 
@@ -257,10 +259,6 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
         return [Action(ActionType.PITCH, pitch_indices=[])]
 
     has_discard_cost = _card_has_discard_cost(pending_card)
-
-    # For discard-cost cards: can't pitch if only 1 card left (needed for discard)
-    if has_discard_cost and len(player.hand) <= 1:
-        return [Action(ActionType.PITCH, pitch_indices=[])]
 
     # Sort by descending pitch value so agents pitching greedily (legal[0]) pick
     # the highest-value card first, minimising the number of pitch steps needed.
@@ -274,7 +272,19 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
         if c.name in seen_pitch_names:
             continue  # duplicate card — same pitch value regardless of which copy is picked
         seen_pitch_names.add(c.name)
-        actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
+        if has_discard_cost:
+            remaining = [h for j, h in enumerate(player.hand) if j != i]
+            remaining_needed = needed - c.pitch
+            if remaining_needed <= 0:
+                # This card alone covers the cost; need >= 1 left for discard
+                if len(remaining) >= 1:
+                    actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
+            else:
+                # Still need more after this pitch — remaining cards must be able to cover
+                if _has_discard_available(remaining, remaining_needed):
+                    actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
+        else:
+            actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
     return actions if actions else [Action(ActionType.PITCH, pitch_indices=[])]
 
 
