@@ -139,7 +139,7 @@ class FaBEnv:
         self._pending_play_card: Optional[Card] = None  # card chosen in PLAY_CARD step, awaiting pitch
         self._pitched_this_play: List[Card] = []         # cards pitched so far for the current pending card
         self._pending_weapon_attack: bool = False        # True when PITCH phase is for a weapon attack
-        self._pending_action_response_card: Optional[Card] = None  # ACTION card with INTIMIDATE waiting to resolve after instant window
+        self._pending_action_response_card: Optional[Card] = None  # ACTION card waiting to resolve after the instant response window
         self._pending_instant_play: bool = False         # True when PITCH phase is for an instant played during the INSTANT window
         self._pending_instant_player_idx: int = 0        # which player is paying for / owns the pending instant
         self._pending_defend_indices: List[int] = []     # hand indices accumulated during defend step
@@ -502,17 +502,15 @@ class FaBEnv:
         if card.card_type == CardType.INSTANT:
             self._resolve_instant(card, active, opponent)
         elif card.card_type == CardType.ACTION:
-            if Keyword.INTIMIDATE in card.keywords:
-                # Open an instant window so the opponent can respond before INTIMIDATE fires
-                self._pending_action_response_card = card
-                active_idx = self._game.active_player_idx
-                self._enter_instant_phase(
-                    return_phase=Phase.ATTACK,
-                    return_agent_idx=active_idx,
-                    priority_idx=1 - active_idx,
-                )
-                return
-            self._resolve_action(card, active, opponent)
+            # Open an instant window so both players may respond before the card resolves
+            self._pending_action_response_card = card
+            active_idx = self._game.active_player_idx
+            self._enter_instant_phase(
+                return_phase=Phase.ATTACK,
+                return_agent_idx=active_idx,
+                priority_idx=1 - active_idx,
+            )
+            return
         elif card.card_type == CardType.ACTION_ATTACK:
             # Pay any additional play costs before declaring the attack
             from card_effects import EffectAction, EffectTrigger
