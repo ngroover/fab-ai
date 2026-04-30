@@ -1324,6 +1324,12 @@ class FaBEnv:
             elif effect.action == EffectAction.NEXT_BRUTE_ATTACK_BONUS:
                 active.next_brute_attack_bonus = max(active.next_brute_attack_bonus, effect.magnitude)
                 self._log(f"    ⚡ {card.name} — next Brute attack gains +{effect.magnitude} power.")
+            elif effect.action == EffectAction.NEXT_WEAPON_POWER_BONUS:
+                active.next_weapon_power_bonus += effect.magnitude
+                self._log(f"    ⚡ {card.name} — next weapon attack gains +{effect.magnitude} power.")
+            elif effect.action == EffectAction.NEXT_WEAPON_GO_AGAIN:
+                active.next_weapon_go_again = True
+                self._log(f"    ⚡ {card.name} — next weapon attack gains go again.")
             elif effect.action == EffectAction.REVEAL_TOP_DECK_POWER_CHECK:
                 if active.deck:
                     top = active.deck[0]
@@ -1438,11 +1444,6 @@ class FaBEnv:
             active.next_weapon_go_again = True
             active.glistening_steelblade_active = True
             self._log(f"    ✨ Glistening Steelblade — next Dawnblade has go again + counter on hit.")
-
-        elif n == "Driving Blade":
-            active.next_weapon_power_bonus += 2
-            active.next_weapon_go_again = True
-            self._log(f"    ⚡ Driving Blade — next weapon attack gains +2 power and go again.")
 
         elif n == "Visit the Blacksmith":
             active.next_weapon_power_bonus += 1
