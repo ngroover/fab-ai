@@ -139,6 +139,7 @@ class FaBEnv:
         self._pending_play_card: Optional[Card] = None  # card chosen in PLAY_CARD step, awaiting pitch
         self._pitched_this_play: List[Card] = []         # cards pitched so far for the current pending card
         self._pending_weapon_attack: bool = False        # True when PITCH phase is for a weapon attack
+        self._pending_action_response_card: Optional[Card] = None  # ACTION card with INTIMIDATE waiting to resolve after instant window
         self._pending_instant_play: bool = False         # True when PITCH phase is for an instant played during the INSTANT window
         self._pending_instant_player_idx: int = 0        # which player is paying for / owns the pending instant
         self._pending_defend_indices: List[int] = []     # hand indices accumulated during defend step
@@ -229,6 +230,7 @@ class FaBEnv:
         self._instant_passes = 0
         self._instant_return_phase = None
         self._instant_return_agent_idx = 0
+        self._pending_action_response_card = None
         self._pending_instant_play = False
         self._pending_instant_player_idx = 0
         # Reset reaction-phase bookkeeping
@@ -500,6 +502,16 @@ class FaBEnv:
         if card.card_type == CardType.INSTANT:
             self._resolve_instant(card, active, opponent)
         elif card.card_type == CardType.ACTION:
+            if Keyword.INTIMIDATE in card.keywords:
+                # Open an instant window so the opponent can respond before INTIMIDATE fires
+                self._pending_action_response_card = card
+                active_idx = self._game.active_player_idx
+                self._enter_instant_phase(
+                    return_phase=Phase.ATTACK,
+                    return_agent_idx=active_idx,
+                    priority_idx=1 - active_idx,
+                )
+                return
             self._resolve_action(card, active, opponent)
         elif card.card_type == CardType.ACTION_ATTACK:
             # Pay any additional play costs before declaring the attack
@@ -857,6 +869,19 @@ class FaBEnv:
                             f"    👁  Intimidate! {defender.name} banishes a card face-down.")
             self._phase = Phase.DEFEND
             self.agent_selection = f"agent_{return_agent_idx}"
+            return
+
+        if self._pending_action_response_card is not None:
+            card = self._pending_action_response_card
+            self._pending_action_response_card = None
+            attacker = self._game.players[return_agent_idx]
+            defender = self._game.players[1 - return_agent_idx]
+            self._resolve_action(card, attacker, defender)
+            if attacker.action_points <= 0:
+                self._end_attack_phase(attacker, defender)
+            else:
+                self._phase = return_phase if return_phase is not None else Phase.ATTACK
+                self.agent_selection = f"agent_{return_agent_idx}"
             return
 
         self._phase = return_phase if return_phase is not None else Phase.ATTACK
