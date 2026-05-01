@@ -249,8 +249,13 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "driving_blade_yellow": Card("Driving Blade", CardType.ACTION, cost=2, pitch=2,
                                  power=0, defense=3, color=Color.YELLOW,
+                                 keywords=[Keyword.GO_AGAIN],
                                  card_class=CardClass.WARRIOR,
-                                 text="Your next weapon attack this turn gains +2 power and go again. Go again."),
+                                 text="Your next weapon attack this turn gains +2 power and go again. Go again.",
+                                 effects=[
+                                     CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_WEAPON_POWER_BONUS, magnitude=2),
+                                     CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_WEAPON_GO_AGAIN),
+                                 ]),
 
     "glistening_steelblade_yellow": Card("Glistening Steelblade", CardType.ACTION, cost=1, pitch=2,
                                          power=0, defense=3, color=Color.YELLOW, keywords=[Keyword.GO_AGAIN],

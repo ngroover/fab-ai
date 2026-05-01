@@ -1356,6 +1356,12 @@ class FaBEnv:
             elif effect.action == EffectAction.QUICKEN_TOKEN:
                 self._pending_attack_go_again = True
                 self._log(f"    ⚡ {card.name} — Quicken token created, attack gains Go Again!")
+            elif effect.action == EffectAction.NEXT_WEAPON_POWER_BONUS:
+                active.next_weapon_power_bonus += effect.magnitude
+                self._log(f"    ⚡ {card.name} — next weapon attack gains +{effect.magnitude} power.")
+            elif effect.action == EffectAction.NEXT_WEAPON_GO_AGAIN:
+                active.next_weapon_go_again = True
+                self._log(f"    ⚡ {card.name} — next weapon attack gains go again.")
             elif effect.action == EffectAction.REVEAL_TOP_DECK_POWER_CHECK:
                 if active.deck:
                     top = active.deck[0]
