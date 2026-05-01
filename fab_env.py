@@ -764,6 +764,7 @@ class FaBEnv:
         if 0 <= action.pitch_order_index < len(active.pitch_zone):
             card = active.pitch_zone.pop(action.pitch_order_index)
             active.deck.append(card)
+            active.deck_bottom_known.append(card)
             self._log(f"    ↓  {active.name} places {card.name} at deck bottom.")
 
         if active.pitch_zone:
@@ -779,6 +780,7 @@ class FaBEnv:
             self._log(f"\n  📋  {opponent.name} places {len(opponent.pitch_zone)} pitched card(s) at deck bottom.")
             for card in opponent.pitch_zone:
                 opponent.deck.append(card)
+                opponent.deck_bottom_known.append(card)
                 self._log(f"    ↓  {opponent.name} places {card.name} at deck bottom.")
             opponent.pitch_zone.clear()
 

@@ -1353,6 +1353,7 @@ def _build_gamestate_snapshot(env) -> dict:
                 for slot, eq in p.equipment.items()
             ],
             "deck_count": len(p.deck),
+            "deck_bottom_known": [_card_to_dict(c) for c in p.deck_bottom_known],
         }
 
     def _opponent_view(p):
@@ -1375,6 +1376,7 @@ def _build_gamestate_snapshot(env) -> dict:
                 for slot, eq in p.equipment.items()
             ],
             "deck_count": len(p.deck),
+            "deck_bottom_known": [_card_to_dict(c) for c in p.deck_bottom_known],
         }
 
     combat_chain = {
@@ -2407,6 +2409,19 @@ PLAY_TEMPLATE = """
       return `<div class="gs-cards">${hidden.join('')}</div>`;
     }
 
+    function renderDeckWithKnown(count, knownBottom) {
+      if (!count) return '<span class="gs-empty">— empty —</span>';
+      const known = knownBottom || [];
+      const knownCount = Math.min(known.length, count);
+      const hiddenCount = count - knownCount;
+      const parts = [];
+      for (let i = 0; i < hiddenCount; i++) {
+        parts.push('<span class="gs-card hidden">🂠 hidden</span>');
+      }
+      known.slice(-knownCount).forEach(c => parts.push(renderCard(c)));
+      return `<div class="gs-cards">${parts.join('')}</div>`;
+    }
+
     function renderZone(label, inner) {
       return `<div class="gs-zone"><div class="label">${label}</div>${inner}</div>`;
     }
@@ -2452,7 +2467,7 @@ PLAY_TEMPLATE = """
             ${resHtml}
           </h3>
           ${renderZone('Equipment', renderEquipment(me.weapon, me.equipment))}
-          ${renderZone('Deck (' + me.deck_count + ')', renderHiddenCards(me.deck_count))}
+          ${renderZone('Deck (' + me.deck_count + ')', renderDeckWithKnown(me.deck_count, me.deck_bottom_known))}
           ${renderZone('Hand (' + me.hand.length + ')', renderCards(me.hand))}
           ${renderZone('Arsenal', '<div class="gs-cards">' + arsenal + '</div>')}
           ${renderZone('Pitch zone (' + me.pitch_zone.length + ')', renderCards(me.pitch_zone))}
@@ -2478,7 +2493,7 @@ PLAY_TEMPLATE = """
             ${resHtml}
           </h3>
           ${renderZone('Equipment', renderEquipment(op.weapon, op.equipment))}
-          ${renderZone('Deck (' + op.deck_count + ')', renderHiddenCards(op.deck_count))}
+          ${renderZone('Deck (' + op.deck_count + ')', renderDeckWithKnown(op.deck_count, op.deck_bottom_known))}
           ${renderZone('Hand (' + op.hand_count + ')', renderHiddenCards(op.hand_count))}
           ${renderZone('Arsenal', arsenalHtml)}
           ${renderZone('Pitch zone (' + op.pitch_zone.length + ')', renderCards(op.pitch_zone))}
