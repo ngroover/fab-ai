@@ -27,7 +27,6 @@ Decision phases within a single "turn":
 from __future__ import annotations
 
 import random
-import copy
 from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -1327,8 +1326,7 @@ class FaBEnv:
                     self._fire_effects(EffectTrigger.ON_DISCARD, {"card": discarded}, active, opponent)
                     if discarded.power >= 6:
                         if effect.action == EffectAction.DRAW_DISCARD_GO_AGAIN:
-                            if Keyword.GO_AGAIN not in card.keywords:
-                                card.keywords.append(Keyword.GO_AGAIN)
+                            self._pending_attack_go_again = True
                             self._log(f"    ↩  {card.name} — discarded 6+ power card, gains go again!")
                         elif effect.action == EffectAction.DRAW_DISCARD_POWER_BONUS:
                             self._pending_attack_power += 2
