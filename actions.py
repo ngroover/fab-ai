@@ -316,13 +316,12 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
                 if _has_discard_available(remaining, remaining_needed):
                     actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
         else:
+            if has_reveal_cost:
+                # Don't pitch this card if it would leave no cost ≤ 1 card in hand to reveal
+                hand_after = [card for j, card in enumerate(player.hand) if j != i]
+                if not any(card.cost <= 1 for card in hand_after):
+                    continue
             actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
-        if has_reveal_cost:
-            # Don't pitch this card if it would leave no cost ≤ 1 card in hand to reveal
-            hand_after = [card for j, card in enumerate(player.hand) if j != i]
-            if not any(card.cost <= 1 for card in hand_after):
-                continue
-        actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
     return actions if actions else [Action(ActionType.PITCH, pitch_indices=[])]
 
 
