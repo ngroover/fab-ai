@@ -23,7 +23,9 @@ from pathlib import Path
 
 import threading
 
-from flask import Flask, abort, jsonify, redirect, render_template_string, request
+import functools
+
+from flask import Flask, abort, jsonify, redirect, render_template_string, request, session, url_for
 
 import deck_db
 from cards import (
@@ -38,6 +40,10 @@ deck_db.init_db()
 LOGS_DIR = Path(__file__).parent / "logs"
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("FAB_SECRET_KEY") or os.urandom(24)
+
+# Password for the web UI — set FAB_PASSWORD env var to change from default.
+_LOGIN_PASSWORD = os.environ.get("FAB_PASSWORD", "admin")
 
 # ──────────────────────────────────────────────────────────────
 # HTML templates (inline — no template files needed)
@@ -77,6 +83,112 @@ header .subtitle { font-size: 0.75rem; color: #718096; }
     border-radius: 6px;
 }
 .back-link:hover { background: #2d3748; text-decoration: none; }
+"""
+
+LOGIN_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FaB Viewer — Login</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      background: #1a202c;
+      border: 1px solid #2d3748;
+      border-radius: 14px;
+      padding: 36px 32px;
+      width: 100%;
+      max-width: 360px;
+    }
+    .logo {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .logo h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #f6e05e;
+      letter-spacing: 0.02em;
+    }
+    .logo p {
+      font-size: 0.8rem;
+      color: #718096;
+      margin-top: 4px;
+    }
+    label {
+      display: block;
+      font-size: 0.8rem;
+      color: #a0aec0;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    input[type="password"] {
+      width: 100%;
+      background: #0f1117;
+      border: 1px solid #2d3748;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 1rem;
+      padding: 10px 12px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input[type="password"]:focus { border-color: #63b3ed; }
+    button[type="submit"] {
+      margin-top: 20px;
+      width: 100%;
+      background: #2b6cb0;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 11px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button[type="submit"]:hover { background: #2c5282; }
+    .error {
+      margin-top: 14px;
+      background: #742a2a;
+      border: 1px solid #9b2c2c;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 0.85rem;
+      color: #feb2b2;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <h1>⚔ FaB Viewer</h1>
+      <p>Flesh and Blood game log viewer</p>
+    </div>
+    <form method="post" action="/login">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" autofocus autocomplete="current-password">
+      <button type="submit">Sign in</button>
+      {% if error %}
+      <div class="error">{{ error }}</div>
+      {% endif %}
+    </form>
+  </div>
+</body>
+</html>
 """
 
 INDEX_TEMPLATE = """
@@ -1219,10 +1331,42 @@ DECK_BUILDER_TEMPLATE = """
 
 
 # ──────────────────────────────────────────────────────────────
+# Auth
+# ──────────────────────────────────────────────────────────────
+
+def login_required(f):
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login", next=request.path))
+        return f(*args, **kwargs)
+    return decorated
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    next_url = request.values.get("next") or "/"
+    if request.method == "POST":
+        if request.form.get("password") == _LOGIN_PASSWORD:
+            session["logged_in"] = True
+            return redirect(next_url if next_url.startswith("/") else "/")
+        error = "Incorrect password."
+    return render_template_string(LOGIN_TEMPLATE, next=next_url, error=error)
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+# ──────────────────────────────────────────────────────────────
 # Routes
 # ──────────────────────────────────────────────────────────────
 
 @app.route("/")
+@login_required
 def index():
     logs = _list_logs()
     return render_template_string(
@@ -1233,6 +1377,7 @@ def index():
 
 
 @app.route("/log/<path:filename>")
+@login_required
 def view_log(filename: str):
     # Safety: only serve .log files from the logs directory
     if not filename.endswith(".log") or "/" in filename or "\\" in filename:
@@ -1257,6 +1402,7 @@ def view_log(filename: str):
 
 
 @app.route("/run", methods=["POST"])
+@login_required
 def run_game_route():
     """Run a complete AI vs AI game, save the log, then open it."""
     from run_env import run_game
@@ -2756,12 +2902,14 @@ PLAY_TEMPLATE = """
 # ──────────────────────────────────────────────────────────────
 
 @app.route("/play")
+@login_required
 def play_page():
     saved_decks = deck_db.list_decks()
     return render_template_string(PLAY_TEMPLATE, css=BASE_CSS, saved_decks=saved_decks)
 
 
 @app.route("/play/start", methods=["POST"])
+@login_required
 def play_start():
     valid_agents = {"human", "ai", "mcts", "random"}
     p0_agent = request.form.get("player0", "ai")
@@ -2781,17 +2929,20 @@ def play_start():
 
 
 @app.route("/play/reset", methods=["POST"])
+@login_required
 def play_reset():
     _session.reset()
     return jsonify({"ok": True})
 
 
 @app.route("/play/state")
+@login_required
 def play_state():
     return jsonify(_session.get_state_json())
 
 
 @app.route("/play/action", methods=["POST"])
+@login_required
 def play_action():
     data = request.get_json(force=True) or {}
     idx = data.get("index", -1)
@@ -2804,6 +2955,7 @@ def play_action():
 # ──────────────────────────────────────────────────────────────
 
 @app.route("/decks")
+@login_required
 def decks_list():
     decks = deck_db.list_decks()
     return render_template_string(DECKS_TEMPLATE, css=BASE_CSS, decks=decks)
@@ -2811,6 +2963,7 @@ def decks_list():
 
 @app.route("/decks/builder")
 @app.route("/decks/builder/<int:deck_id>")
+@login_required
 def deck_builder(deck_id: int = None):
     import json
 
@@ -2842,16 +2995,19 @@ def deck_builder(deck_id: int = None):
 # ── Deck API ───────────────────────────────────────────────────
 
 @app.route("/api/cards")
+@login_required
 def api_cards():
     return jsonify(_build_card_catalog())
 
 
 @app.route("/api/decks", methods=["GET"])
+@login_required
 def api_list_decks():
     return jsonify(deck_db.list_decks())
 
 
 @app.route("/api/decks", methods=["POST"])
+@login_required
 def api_create_deck():
     data = request.get_json(force=True) or {}
     name = (data.get("name") or "").strip()
@@ -2867,6 +3023,7 @@ def api_create_deck():
 
 
 @app.route("/api/decks/<int:deck_id>", methods=["GET"])
+@login_required
 def api_get_deck(deck_id: int):
     d = deck_db.get_deck(deck_id)
     if d is None:
@@ -2875,6 +3032,7 @@ def api_get_deck(deck_id: int):
 
 
 @app.route("/api/decks/<int:deck_id>", methods=["PUT"])
+@login_required
 def api_update_deck(deck_id: int):
     data = request.get_json(force=True) or {}
     name = (data.get("name") or "").strip()
@@ -2892,6 +3050,7 @@ def api_update_deck(deck_id: int):
 
 
 @app.route("/api/decks/<int:deck_id>", methods=["DELETE"])
+@login_required
 def api_delete_deck(deck_id: int):
     ok = deck_db.delete_deck(deck_id)
     if not ok:
