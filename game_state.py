@@ -60,6 +60,8 @@ class Player:
         self.banished: List[Card] = []          # intimidate — returns to hand at end of turn
         self.permanently_banished: List[Card] = []  # mentor fire, etc. — stays banished
         self.pitch_zone: List[Card] = []
+        self.hand_revealed: List[Card] = []  # hand cards revealed to the opponent
+        self.deck_bottom_known: List[Card] = []  # pitched cards at deck bottom, in order (oldest first)
         self.arsenal: Optional[Card] = None
 
         # Equipment
@@ -100,6 +102,8 @@ class Player:
             if not self.deck:
                 return
             self.hand.append(self.deck.pop(0))
+            if len(self.deck_bottom_known) > len(self.deck):
+                self.deck_bottom_known.pop(0)
 
     def draw_to_intellect(self):
         need = self.intellect - len(self.hand)

@@ -1341,7 +1341,7 @@ def _build_gamestate_snapshot(env) -> dict:
             "intellect": p.intellect,
             "action_points": p.action_points,
             "resource_points": p.resource_points,
-            "hand": [_card_to_dict(c) for c in p.hand],
+            "hand": _player_view_hand(p),
             "arsenal": _card_to_dict(p.arsenal),
             "pitch_zone": [_card_to_dict(c) for c in p.pitch_zone],
             "graveyard": [_card_to_dict(c) for c in p.graveyard],
@@ -1353,9 +1353,37 @@ def _build_gamestate_snapshot(env) -> dict:
                 for slot, eq in p.equipment.items()
             ],
             "deck_count": len(p.deck),
+            "deck_bottom_known": [_card_to_dict(c) for c in p.deck_bottom_known],
         }
 
+    def _revealed_hand_cards(p):
+        """Cards currently in p.hand that have been revealed to the opponent."""
+        from collections import Counter
+        rev_counts = Counter(id(c) for c in p.hand_revealed)
+        result = []
+        for c in p.hand:
+            cid = id(c)
+            if rev_counts.get(cid, 0) > 0:
+                result.append(c)
+                rev_counts[cid] -= 1
+        return result
+
+    def _player_view_hand(p):
+        """Own hand with revealed_to_opp annotation on each card dict."""
+        from collections import Counter
+        rev_counts = Counter(id(c) for c in p.hand_revealed)
+        hand_dicts = []
+        for c in p.hand:
+            cid = id(c)
+            d = _card_to_dict(c)
+            if rev_counts.get(cid, 0) > 0:
+                d["revealed_to_opp"] = True
+                rev_counts[cid] -= 1
+            hand_dicts.append(d)
+        return hand_dicts
+
     def _opponent_view(p):
+        revealed = _revealed_hand_cards(p)
         return {
             "name": p.name,
             "hero": p.hero_name,
@@ -1364,6 +1392,7 @@ def _build_gamestate_snapshot(env) -> dict:
             "action_points": p.action_points,
             "resource_points": p.resource_points,
             "hand_count": len(p.hand),
+            "hand_revealed": [_card_to_dict(c) for c in revealed],
             "arsenal_present": p.arsenal is not None,
             "pitch_zone": [_card_to_dict(c) for c in p.pitch_zone],
             "graveyard": [_card_to_dict(c) for c in p.graveyard],
@@ -1375,6 +1404,7 @@ def _build_gamestate_snapshot(env) -> dict:
                 for slot, eq in p.equipment.items()
             ],
             "deck_count": len(p.deck),
+            "deck_bottom_known": [_card_to_dict(c) for c in p.deck_bottom_known],
         }
 
     combat_chain = {
@@ -1956,6 +1986,12 @@ PLAY_TEMPLATE = """
       background: #2d3748; color: #718096; font-style: italic;
       border-style: dashed;
     }
+    .gs-card.revealed-to-opp {
+      border-color: #d69e2e; box-shadow: 0 0 0 1px #d69e2e33;
+    }
+    .gs-card .revealed-badge {
+      font-size: 0.6rem; color: #d69e2e; margin-left: 2px;
+    }
     .gs-card .pip {
       display: inline-block; width: 8px; height: 8px; border-radius: 50%;
       border: 1px solid #1a202c;
@@ -2386,11 +2422,13 @@ PLAY_TEMPLATE = """
       if (c.power)   stats.push(c.power + 'p');
       if (c.defense) stats.push(c.defense + 'd');
       const sub = stats.length ? `<span class="stats">${stats.join(' · ')}</span>` : '';
+      const revBadge = c.revealed_to_opp ? '<span class="revealed-badge" title="Revealed to opponent">👁</span>' : '';
+      const revCls = c.revealed_to_opp ? ' revealed-to-opp' : '';
       if (c.text) {
         const data = encodeURIComponent(JSON.stringify({name: c.name, type: c.type, stats: stats.join(' · '), text: c.text}));
-        return `<span class="gs-card" data-has-text="1" data-card="${data}" onclick="showCardPopup(event,this)">${pip}<span>${escHtml(c.name)}</span>${sub}</span>`;
+        return `<span class="gs-card${revCls}" data-has-text="1" data-card="${data}" onclick="showCardPopup(event,this)">${pip}<span>${escHtml(c.name)}</span>${sub}${revBadge}</span>`;
       }
-      return `<span class="gs-card">${pip}<span>${escHtml(c.name)}</span>${sub}</span>`;
+      return `<span class="gs-card${revCls}">${pip}<span>${escHtml(c.name)}</span>${sub}${revBadge}</span>`;
     }
 
     function renderCards(arr) {
@@ -2405,6 +2443,33 @@ PLAY_TEMPLATE = """
         hidden.push('<span class="gs-card hidden">🂠 hidden</span>');
       }
       return `<div class="gs-cards">${hidden.join('')}</div>`;
+    }
+
+    function renderDeckWithKnown(count, knownBottom) {
+      if (!count) return '<span class="gs-empty">— empty —</span>';
+      const known = knownBottom || [];
+      const knownCount = Math.min(known.length, count);
+      const hiddenCount = count - knownCount;
+      const parts = [];
+      if (hiddenCount > 0) {
+        const label = hiddenCount === 1 ? '🂠 1 hidden' : `🂠 ${hiddenCount} hidden`;
+        parts.push(`<span class="gs-card hidden">${label}</span>`);
+      }
+      known.slice(-knownCount).forEach(c => parts.push(renderCard(c)));
+      return `<div class="gs-cards">${parts.join('')}</div>`;
+    }
+
+    function renderHandWithRevealed(count, revealed) {
+      if (!count) return '<span class="gs-empty">— empty —</span>';
+      const rev = revealed || [];
+      const hiddenCount = count - rev.length;
+      const parts = [];
+      if (hiddenCount > 0) {
+        const label = hiddenCount === 1 ? '🂠 1 hidden' : `🂠 ${hiddenCount} hidden`;
+        parts.push(`<span class="gs-card hidden">${label}</span>`);
+      }
+      rev.forEach(c => parts.push(renderCard(c)));
+      return `<div class="gs-cards">${parts.join('')}</div>`;
     }
 
     function renderZone(label, inner) {
@@ -2452,7 +2517,7 @@ PLAY_TEMPLATE = """
             ${resHtml}
           </h3>
           ${renderZone('Equipment', renderEquipment(me.weapon, me.equipment))}
-          ${renderZone('Deck (' + me.deck_count + ')', renderHiddenCards(me.deck_count))}
+          ${renderZone('Deck (' + me.deck_count + ')', renderDeckWithKnown(me.deck_count, me.deck_bottom_known))}
           ${renderZone('Hand (' + me.hand.length + ')', renderCards(me.hand))}
           ${renderZone('Arsenal', '<div class="gs-cards">' + arsenal + '</div>')}
           ${renderZone('Pitch zone (' + me.pitch_zone.length + ')', renderCards(me.pitch_zone))}
@@ -2478,8 +2543,8 @@ PLAY_TEMPLATE = """
             ${resHtml}
           </h3>
           ${renderZone('Equipment', renderEquipment(op.weapon, op.equipment))}
-          ${renderZone('Deck (' + op.deck_count + ')', renderHiddenCards(op.deck_count))}
-          ${renderZone('Hand (' + op.hand_count + ')', renderHiddenCards(op.hand_count))}
+          ${renderZone('Deck (' + op.deck_count + ')', renderDeckWithKnown(op.deck_count, op.deck_bottom_known))}
+          ${renderZone('Hand (' + op.hand_count + ')', renderHandWithRevealed(op.hand_count, op.hand_revealed))}
           ${renderZone('Arsenal', arsenalHtml)}
           ${renderZone('Pitch zone (' + op.pitch_zone.length + ')', renderCards(op.pitch_zone))}
           ${renderZone('Graveyard (' + op.graveyard.length + ')', renderCards(op.graveyard))}
