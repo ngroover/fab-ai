@@ -157,6 +157,21 @@ class TestPackCallDefendLowPowerCardMovesToBottom(unittest.TestCase):
         self.assertNotEqual(self.rhinar.deck[0].name, self.low_power_card.name,
                             "Low-power card must not remain on top after Pack Call defend")
 
+    def test_low_power_card_added_to_deck_bottom_known(self):
+        _defend_with_pack_call(self.env, self.rhinar)
+        self.assertIn(self.low_power_card, self.rhinar.deck_bottom_known,
+                      "Low-power card must appear in deck_bottom_known so the viewer can display it")
+
+    def test_high_power_top_card_not_added_to_deck_bottom_known(self):
+        # Put a 6+ power card on top instead
+        high_power = next(c for c in self.rhinar.deck if c.power >= 6)
+        self.rhinar.deck.remove(high_power)
+        self.rhinar.deck.insert(0, high_power)
+        before = list(self.rhinar.deck_bottom_known)
+        _defend_with_pack_call(self.env, self.rhinar)
+        self.assertEqual(self.rhinar.deck_bottom_known, before,
+                         "deck_bottom_known must not change when top card has 6+ power")
+
 
 class TestPackCallDefendEmptyDeck(unittest.TestCase):
     """Effect does nothing when the deck is empty."""
