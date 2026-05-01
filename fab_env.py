@@ -129,6 +129,7 @@ class FaBEnv:
         self._pending_attack: Optional[Card] = None  # card currently resolving
         self._pending_attack_power: int = 0
         self._pending_attack_go_again: bool = False  # granted by reaction (not on the card)
+        self._pending_attack_intimidate: bool = False  # from Chief Ruk'utan mentor effect
         self._pending_is_weapon: bool = False
         self._rewards: Dict[str, float] = {"agent_0": 0.0, "agent_1": 0.0}
         self._terminations: Dict[str, bool] = {"agent_0": False, "agent_1": False}
@@ -530,6 +531,7 @@ class FaBEnv:
             self._apply_card_effects(card, EffectTrigger.ON_ATTACK_PLAY, {}, active, opponent)
             self._pending_attack = card
             self._pending_is_weapon = False
+            self._pending_attack_intimidate = card.power >= 6 and active.mentor_face_up
             self._trigger_defend_phase(active, opponent)
             return  # defend phase takes over; returns to ATTACK after defend resolves
 
@@ -703,10 +705,6 @@ class FaBEnv:
                 # Only the first weapon attack's go-again grants an additional attack slot
                 attacker.weapon_additional_attack = True
 
-        # Mentor check for Rhinar
-        if not is_weapon and card.power >= 6 and attacker.mentor_face_up:
-            self._mentor_lesson(attacker)
-
         self._pending_attack = None
         self._pending_is_weapon = False
 
@@ -864,7 +862,12 @@ class FaBEnv:
                     self._pending_attack, EffectTrigger.ON_ATTACK, {},
                     attacker, defender,
                 )
-                if Keyword.INTIMIDATE in self._pending_attack.keywords:
+                mentor_intimidate = self._pending_attack_intimidate
+                self._pending_attack_intimidate = False
+                if mentor_intimidate:
+                    self._log(f"    🎓 Chief Ruk'utan — 6+ power attack triggers intimidate + lesson counter!")
+                    self._mentor_lesson(attacker)
+                if Keyword.INTIMIDATE in self._pending_attack.keywords or mentor_intimidate:
                     if defender.hand:
                         banished = self._rng.choice(defender.hand)
                         defender.hand.remove(banished)
