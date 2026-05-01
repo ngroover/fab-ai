@@ -523,6 +523,7 @@ class FaBEnv:
                 elif effect.action == EffectAction.REVEAL_CARD_COST:
                     revealed = next((c for c in active.hand if c.cost <= 1), None)
                     if revealed:
+                        active.hand_revealed.append(revealed)
                         self._log(f"    👁  Additional cost — {active.name} reveals {revealed.name} (cost {revealed.cost}).")
                     else:
                         self._log(f"    👁  Additional cost — {active.name} has no cost ≤ 1 card to reveal.")
