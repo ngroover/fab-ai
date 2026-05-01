@@ -2415,8 +2415,9 @@ PLAY_TEMPLATE = """
       const knownCount = Math.min(known.length, count);
       const hiddenCount = count - knownCount;
       const parts = [];
-      for (let i = 0; i < hiddenCount; i++) {
-        parts.push('<span class="gs-card hidden">🂠 hidden</span>');
+      if (hiddenCount > 0) {
+        const label = hiddenCount === 1 ? '🂠 1 hidden' : `🂠 ${hiddenCount} hidden`;
+        parts.push(`<span class="gs-card hidden">${label}</span>`);
       }
       known.slice(-knownCount).forEach(c => parts.push(renderCard(c)));
       return `<div class="gs-cards">${parts.join('')}</div>`;
