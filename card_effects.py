@@ -60,6 +60,9 @@ class EffectAction(Enum):
     GAIN_LIFE                          = auto()   # active player gains magnitude life
     GAIN_RESOURCE                      = auto()   # active player gains magnitude resource
     DRAW_CARD                          = auto()   # active player draws magnitude cards
+    REVEAL_CARD_COST                   = auto()   # as an additional cost, reveal a card with cost ≤ 1 from hand (card stays)
+    QUICKEN_TOKEN                      = auto()   # when this attacks, create a Quicken token (grants Go Again)
+    NEXT_WEAPON_POWER_BONUS            = auto()   # next weapon attack this turn gains +magnitude power
 
 
 @dataclass

@@ -1670,6 +1670,7 @@ class _GameSession:
                 "hero": p.hero_name,
                 "life": p.life,
                 "hand_size": len(p.hand),
+                "deck_size": len(p.deck),
                 "action_points": p.action_points,
                 "resource_points": p.resource_points,
             }
@@ -2316,7 +2317,7 @@ PLAY_TEMPLATE = """
           document.getElementById('res-' + sfx).textContent = resParts.join('  ');
           const lbl = agentLabels[agentTypes[i]] || '🤖 AI';
           document.getElementById('meta-' + sfx).textContent =
-            lbl + '  ·  🃏 ' + info.hand_size;
+            lbl + '  ·  🃏 ' + info.hand_size + '  ·  🂠 ' + info.deck_size;
         }
         document.getElementById('box-' + sfx).classList
           .toggle('active', aid === s.current_agent && s.status === 'waiting_human');
@@ -2451,6 +2452,7 @@ PLAY_TEMPLATE = """
             ${resHtml}
           </h3>
           ${renderZone('Equipment', renderEquipment(me.weapon, me.equipment))}
+          ${renderZone('Deck (' + me.deck_count + ')', renderHiddenCards(me.deck_count))}
           ${renderZone('Hand (' + me.hand.length + ')', renderCards(me.hand))}
           ${renderZone('Arsenal', '<div class="gs-cards">' + arsenal + '</div>')}
           ${renderZone('Pitch zone (' + me.pitch_zone.length + ')', renderCards(me.pitch_zone))}
@@ -2476,6 +2478,7 @@ PLAY_TEMPLATE = """
             ${resHtml}
           </h3>
           ${renderZone('Equipment', renderEquipment(op.weapon, op.equipment))}
+          ${renderZone('Deck (' + op.deck_count + ')', renderHiddenCards(op.deck_count))}
           ${renderZone('Hand (' + op.hand_count + ')', renderHiddenCards(op.hand_count))}
           ${renderZone('Arsenal', arsenalHtml)}
           ${renderZone('Pitch zone (' + op.pitch_zone.length + ')', renderCards(op.pitch_zone))}

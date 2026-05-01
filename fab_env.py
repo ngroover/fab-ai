@@ -27,7 +27,6 @@ Decision phases within a single "turn":
 from __future__ import annotations
 
 import random
-import copy
 from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -139,6 +138,7 @@ class FaBEnv:
         self._pending_play_card: Optional[Card] = None  # card chosen in PLAY_CARD step, awaiting pitch
         self._pitched_this_play: List[Card] = []         # cards pitched so far for the current pending card
         self._pending_weapon_attack: bool = False        # True when PITCH phase is for a weapon attack
+        self._pending_action_response_card: Optional[Card] = None  # ACTION card waiting to resolve after the instant response window
         self._pending_instant_play: bool = False         # True when PITCH phase is for an instant played during the INSTANT window
         self._pending_instant_player_idx: int = 0        # which player is paying for / owns the pending instant
         self._pending_defend_indices: List[int] = []     # hand indices accumulated during defend step
@@ -229,6 +229,7 @@ class FaBEnv:
         self._instant_passes = 0
         self._instant_return_phase = None
         self._instant_return_agent_idx = 0
+        self._pending_action_response_card = None
         self._pending_instant_play = False
         self._pending_instant_player_idx = 0
         # Reset reaction-phase bookkeeping
@@ -500,7 +501,15 @@ class FaBEnv:
         if card.card_type == CardType.INSTANT:
             self._resolve_instant(card, active, opponent)
         elif card.card_type == CardType.ACTION:
-            self._resolve_action(card, active, opponent)
+            # Open an instant window so both players may respond before the card resolves
+            self._pending_action_response_card = card
+            active_idx = self._game.active_player_idx
+            self._enter_instant_phase(
+                return_phase=Phase.ATTACK,
+                return_agent_idx=active_idx,
+                priority_idx=1 - active_idx,
+            )
+            return
         elif card.card_type == CardType.ACTION_ATTACK:
             # Pay any additional play costs before declaring the attack
             from card_effects import EffectAction, EffectTrigger
@@ -511,6 +520,12 @@ class FaBEnv:
                     active.graveyard.append(discarded)
                     self._log(f"    🎲 Additional cost — {active.name} discards {discarded.name}.")
                     self._fire_effects(EffectTrigger.ON_DISCARD, {"card": discarded}, active, opponent)
+                elif effect.action == EffectAction.REVEAL_CARD_COST:
+                    revealed = next((c for c in active.hand if c.cost <= 1), None)
+                    if revealed:
+                        self._log(f"    👁  Additional cost — {active.name} reveals {revealed.name} (cost {revealed.cost}).")
+                    else:
+                        self._log(f"    👁  Additional cost — {active.name} has no cost ≤ 1 card to reveal.")
             self._apply_card_effects(card, EffectTrigger.ON_ATTACK_PLAY, {}, active, opponent)
             self._pending_attack = card
             self._pending_is_weapon = False
@@ -859,14 +874,31 @@ class FaBEnv:
             self.agent_selection = f"agent_{return_agent_idx}"
             return
 
+        if self._pending_action_response_card is not None:
+            card = self._pending_action_response_card
+            self._pending_action_response_card = None
+            attacker = self._game.players[return_agent_idx]
+            defender = self._game.players[1 - return_agent_idx]
+            self._resolve_action(card, attacker, defender)
+            if attacker.action_points <= 0:
+                self._end_attack_phase(attacker, defender)
+            else:
+                self._phase = return_phase if return_phase is not None else Phase.ATTACK
+                self.agent_selection = f"agent_{return_agent_idx}"
+            return
+
         self._phase = return_phase if return_phase is not None else Phase.ATTACK
         self.agent_selection = f"agent_{return_agent_idx}"
 
     def _push_instant_to_stack(self, card: "Card", owner_idx: int) -> None:
         """Place *card* onto the instant stack owned by *owner_idx*, then pass
         priority to the opponent so they may respond."""
+        owner = self._game.players[owner_idx]
+        if card.name == "Sigil of Solace":
+            owner.gain_life(1)
+            self._log(f"    💚 Sigil of Solace played — {owner.name} gains 1 life ({owner.life}).")
         self._instant_stack.append((owner_idx, card))
-        owner_name = self._game.players[owner_idx].name
+        owner_name = owner.name
         self._log(f"    📌  {owner_name} puts {card.name} on the stack "
                   f"(stack size: {len(self._instant_stack)}).")
         self._instant_passes = 0
@@ -1279,8 +1311,7 @@ class FaBEnv:
                     self._fire_effects(EffectTrigger.ON_DISCARD, {"card": discarded}, active, opponent)
                     if discarded.power >= 6:
                         if effect.action == EffectAction.DRAW_DISCARD_GO_AGAIN:
-                            if Keyword.GO_AGAIN not in card.keywords:
-                                card.keywords.append(Keyword.GO_AGAIN)
+                            self._pending_attack_go_again = True
                             self._log(f"    ↩  {card.name} — discarded 6+ power card, gains go again!")
                         elif effect.action == EffectAction.DRAW_DISCARD_POWER_BONUS:
                             self._pending_attack_power += 2
@@ -1337,6 +1368,12 @@ class FaBEnv:
                         f"    🎴 {card.name} — {active.name} draws a card.")
                 else:
                     self._log(f"    🎴 {card.name} — {active.name} draws a card (deck empty).")
+            elif effect.action == EffectAction.QUICKEN_TOKEN:
+                self._pending_attack_go_again = True
+                self._log(f"    ⚡ {card.name} — Quicken token created, attack gains Go Again!")
+            elif effect.action == EffectAction.NEXT_WEAPON_POWER_BONUS:
+                active.next_weapon_power_bonus += effect.magnitude
+                self._log(f"    ⚡ {card.name} — next weapon attack gains +{effect.magnitude} power.")
             elif effect.action == EffectAction.REVEAL_TOP_DECK_POWER_CHECK:
                 if active.deck:
                     top = active.deck[0]
