@@ -1887,9 +1887,8 @@ PLAY_TEMPLATE = """
 
     /* ── Stats bar ───────────────────────────────────── */
     #stats-bar {
-      display: flex; align-items: stretch;
-      background: #1a202c; border-bottom: 1px solid #2d3748;
-      position: sticky; top: 48px; z-index: 5;
+      flex: 1; display: flex; align-items: stretch;
+      border-left: 1px solid #2d3748;
     }
     .player-box {
       flex: 1; padding: 8px 12px;
@@ -2149,8 +2148,27 @@ PLAY_TEMPLATE = """
   </div>
   <header>
     <a class="back-link" href="/">← Logs</a>
-    <div style="flex:1">
-      <h1>⚔️ Interactive Game</h1>
+    <div id="stats-bar" style="display:none">
+      <div class="player-box" id="box-a0">
+        <div class="player-name" id="name-a0">Rhinar</div>
+        <div class="player-life-row">
+          <div class="player-life" id="life-a0">❤️ 20</div>
+          <div class="player-resources" id="res-a0"></div>
+        </div>
+        <div class="player-meta" id="meta-a0"></div>
+      </div>
+      <div class="turn-box">
+        <div class="turn-label">Phase</div>
+        <div class="phase-label" id="phase-disp">—</div>
+      </div>
+      <div class="player-box" id="box-a1">
+        <div class="player-name" id="name-a1">Dorinthea</div>
+        <div class="player-life-row">
+          <div class="player-life" id="life-a1">❤️ 20</div>
+          <div class="player-resources" id="res-a1"></div>
+        </div>
+        <div class="player-meta" id="meta-a1"></div>
+      </div>
     </div>
   </header>
 
@@ -2207,29 +2225,6 @@ PLAY_TEMPLATE = """
 
   <!-- ── Game area ── -->
   <div id="game-area" style="display:none">
-    <div id="stats-bar">
-      <div class="player-box" id="box-a0">
-        <div class="player-name" id="name-a0">Rhinar</div>
-        <div class="player-life-row">
-          <div class="player-life" id="life-a0">❤️ 20</div>
-          <div class="player-resources" id="res-a0"></div>
-        </div>
-        <div class="player-meta" id="meta-a0"></div>
-      </div>
-      <div class="turn-box">
-        <div class="turn-label">Phase</div>
-        <div class="phase-label" id="phase-disp">—</div>
-      </div>
-      <div class="player-box" id="box-a1">
-        <div class="player-name" id="name-a1">Dorinthea</div>
-        <div class="player-life-row">
-          <div class="player-life" id="life-a1">❤️ 20</div>
-          <div class="player-resources" id="res-a1"></div>
-        </div>
-        <div class="player-meta" id="meta-a1"></div>
-      </div>
-    </div>
-
     <div id="quit-bar">
       <button class="quit-btn" onclick="quitGame()">✕ Quit &amp; New Game</button>
     </div>
@@ -2273,6 +2268,7 @@ PLAY_TEMPLATE = """
       const idle = (s.status === 'idle');
       document.getElementById('setup-area').style.display = idle ? '' : 'none';
       document.getElementById('game-area').style.display  = idle ? 'none' : '';
+      document.getElementById('stats-bar').style.display  = idle ? 'none' : 'flex';
       if (idle) return;
 
       updateStats(s);
