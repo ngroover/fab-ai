@@ -63,6 +63,7 @@ class EffectAction(Enum):
     REVEAL_CARD_COST                   = auto()   # as an additional cost, reveal a card with cost ≤ 1 from hand (card stays)
     QUICKEN_TOKEN                      = auto()   # when this attacks, create a Quicken token (grants Go Again)
     NEXT_WEAPON_POWER_BONUS            = auto()   # next weapon attack this turn gains +magnitude power
+    NEXT_ATTACK_POWER_BONUS            = auto()   # next attack (weapon or action) this turn gains +magnitude power
 
 
 @dataclass

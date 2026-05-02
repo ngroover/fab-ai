@@ -1072,6 +1072,9 @@ class FaBEnv:
                     elif effect.action == EffectAction.NEXT_ATTACK_GO_AGAIN:
                         owner.next_attack_go_again = True
                         self._log(f"    ⚔  {n} resolves — Reprise! next attack this turn gains go again.")
+                    elif effect.action == EffectAction.NEXT_ATTACK_POWER_BONUS:
+                        owner.next_attack_power_bonus += effect.magnitude
+                        self._log(f"    ⚔  {n} resolves — Reprise! next attack this turn gains +{effect.magnitude} power.")
             self._log(f"    ⚔  {n} resolves.")
 
         elif card.card_type == CardType.DEFENSE_REACTION:
@@ -1240,6 +1243,10 @@ class FaBEnv:
             attacker.next_sword_attack_power_bonus = 0  # consumed by this attack declaration
         else:
             power = self._pending_attack.power + attacker.next_brute_attack_bonus
+        if attacker.next_attack_power_bonus:
+            power += attacker.next_attack_power_bonus
+            self._log(f"    ⚡ next attack power bonus +{attacker.next_attack_power_bonus} applied.")
+            attacker.next_attack_power_bonus = 0
 
         # Baseline power; ON_ATTACK effects fired at window close may further
         # modify _pending_attack_power (e.g., DRAW_DISCARD_POWER_BONUS adds +2).
@@ -1345,6 +1352,9 @@ class FaBEnv:
             elif effect.action == EffectAction.NEXT_ATTACK_GO_AGAIN:
                 active.next_attack_go_again = True
                 self._log(f"    ⚡ {card.name} — next attack gains go again.")
+            elif effect.action == EffectAction.NEXT_ATTACK_POWER_BONUS:
+                active.next_attack_power_bonus += effect.magnitude
+                self._log(f"    ⚡ {card.name} — next attack gains +{effect.magnitude} power.")
             elif effect.action == EffectAction.NEXT_WEAPON_GO_AGAIN:
                 active.next_weapon_go_again = True
                 self._log(f"    ⚡ {card.name} — next weapon attack gains go again.")
