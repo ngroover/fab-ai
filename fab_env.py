@@ -1222,14 +1222,6 @@ class FaBEnv:
                     self._apply_card_effects(eq.card, EffectTrigger.ON_DESTROYED, {}, player, opponent)
                     self._move_equipment_to_graveyard(player, eq)
 
-        # Consume arena tokens — move TOKEN cards from attacker's arena to graveyard
-        if attacker.arena:
-            token_names = [c.name for c in attacker.arena if c.card_type == CardType.TOKEN]
-            tokens = [c for c in attacker.arena if c.card_type == CardType.TOKEN]
-            if tokens:
-                self._log(f"  🪙  Arena token(s) consumed: {', '.join(token_names)} → graveyard.")
-                attacker.graveyard.extend(tokens)
-                attacker.arena = [c for c in attacker.arena if c.card_type != CardType.TOKEN]
 
     def _end_attack_phase(self, active: Player, opponent: Player):
         """Active player has passed — break combat chain, then open end-of-turn instant window, then arsenal."""
@@ -1266,6 +1258,15 @@ class FaBEnv:
         self._pending_attack_go_again = False
         self._pending_defend_indices = []
         self._pending_defend_equip_slots = []
+
+        # Consume any Quicken token in the attacker's arena — it grants Go Again
+        # to the next attack declared after it was created (not the attack that made it).
+        # Tokens are removed from the game (not placed in graveyard).
+        quicken_tokens = [c for c in attacker.arena if c.name == "Quicken"]
+        if quicken_tokens:
+            attacker.arena = [c for c in attacker.arena if c.name != "Quicken"]
+            self._pending_attack_go_again = True
+            self._log(f"    🪙 Quicken token consumed — {self._pending_attack.name} gains Go Again!")
 
         self._log(f"\n    ⚔  {attacker.name} attacks with "
                   f"{self._pending_attack.name} — {power} power")
@@ -1394,10 +1395,8 @@ class FaBEnv:
                 else:
                     self._log(f"    🎴 {card.name} — {active.name} draws a card (deck empty).")
             elif effect.action == EffectAction.QUICKEN_TOKEN:
-                token = QUICKEN_TOKEN_CARD
-                active.arena.append(token)
-                self._pending_attack_go_again = True
-                self._log(f"    ⚡ {card.name} — Quicken token created and placed in arena, attack gains Go Again!")
+                active.arena.append(QUICKEN_TOKEN_CARD)
+                self._log(f"    🪙 {card.name} — Quicken token created and placed in arena.")
             elif effect.action == EffectAction.NEXT_WEAPON_POWER_BONUS:
                 active.next_weapon_power_bonus += effect.magnitude
                 self._log(f"    ⚡ {card.name} — next weapon attack gains +{effect.magnitude} power.")

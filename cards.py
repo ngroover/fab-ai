@@ -112,7 +112,7 @@ QUICKEN_TOKEN_CARD = Card(
     name="Quicken",
     card_type=CardType.TOKEN,
     keywords=[Keyword.GO_AGAIN],
-    text="Go Again. While Quicken is in the arena, the next attack action card played gains go again. Put Quicken into the graveyard.",
+    text="Go Again. The next attack you make while Quicken is in the arena gains go again. Quicken is then removed from the game.",
 )
 
 # ──────────────────────── RHINAR DECK ────────────────────────
