@@ -62,7 +62,8 @@ class TestInstantPhaseEntry(unittest.TestCase):
         self.assertEqual(env.agent_selection, "agent_0")
 
     def test_instant_window_closes_after_two_passes_with_empty_stack(self):
-        env = _make_test_env()
+        # Give agent_0 a card so the ARSENAL phase has >1 legal action (store or not).
+        env = _make_test_env(p0_hand=[CARD_CATALOG["bare_fangs_red"]])
         env._phase = Phase.ATTACK
         env.agent_selection = "agent_0"
         env._game.players[0].action_points = 1
@@ -88,7 +89,9 @@ class TestSigilOfSolaceOnStack(unittest.TestCase):
         self.assertEqual(sigil.card_type, CardType.INSTANT)
 
         # Give the opponent (agent_1) a Sigil of Solace; active is agent_0.
-        env = _make_test_env(p1_hand=[sigil], p1_life=12, active_idx=0)
+        # Also give agent_0 a card so ARSENAL has >1 legal action (store or not).
+        env = _make_test_env(p0_hand=[CARD_CATALOG["bare_fangs_red"]],
+                             p1_hand=[sigil], p1_life=12, active_idx=0)
         env._phase = Phase.ATTACK
         env.agent_selection = "agent_0"
         env._game.players[0].action_points = 1

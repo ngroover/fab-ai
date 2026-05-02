@@ -90,6 +90,8 @@ class TestWildRideGoAgain(unittest.TestCase):
         """After combat resolves with go again, Rhinar gets action_points=1."""
         # Dorinthea takes no block
         self.env.step(self.env.legal_actions()[0])
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
         self.assertEqual(self.env._phase, Phase.ATTACK)
         self.assertEqual(self.rhinar.action_points, 1)
 

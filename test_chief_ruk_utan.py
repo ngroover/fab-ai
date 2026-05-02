@@ -56,6 +56,8 @@ def _play_attack(env, rhinar, card_name, required_resources):
     action = next(a for a in legal
                   if a.action_type == ActionType.PLAY_CARD and a.card.name == card_name)
     env.step(action)
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
 
 
 class TestChiefRukutanCardDefinition(unittest.TestCase):

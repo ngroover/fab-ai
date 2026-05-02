@@ -55,6 +55,9 @@ def _setup_after_bb_and_bare_fangs(env):
               and a.card.name == "Barraging Beatdown")
     env.step(bb)
 
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
+
     # Step 3: Play Bare Fangs (cost 2, attack action)
     legal = env.legal_actions()
     bf = next(a for a in legal
@@ -144,6 +147,9 @@ class TestBarragingBeatdownOnPlay(unittest.TestCase):
                   and a.card is not None
                   and a.card.name == "Barraging Beatdown")
         self.env.step(bb)
+
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
 
     def test_sets_conditional_bonus_not_unconditional(self):
         self.assertEqual(self.rhinar.next_brute_attack_conditional_bonus, 3,

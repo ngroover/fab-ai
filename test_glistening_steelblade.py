@@ -64,6 +64,9 @@ def _play_glistening_steelblade(env):
     legal = env.legal_actions()
     env.step(next(a for a in legal if a.pitch_indices == [0]))
 
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
+
     assert env._phase == Phase.ATTACK
     return dorinthea, rhinar
 
@@ -297,6 +300,9 @@ class TestGlisteningSteebladeMultipleHits(unittest.TestCase):
         while self.env._phase == Phase.REACTION:
             legal = self.env.legal_actions()
             self.env.step(next(a for a in legal if a.action_type == ActionType.PASS_PRIORITY))
+
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
 
         self.assertEqual(self.dorinthea.dawnblade_counters, 1)
         self.assertEqual(self.dorinthea.action_points, 1)

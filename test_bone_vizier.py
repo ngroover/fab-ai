@@ -69,6 +69,8 @@ def _defend_with_bone_vizier(env):
                   if a.action_type == ActionType.DEFEND
                   and not a.defend_hand_indices
                   and not a.defend_equip_slots))
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
 
 
 class TestBoneVizierCardDefinition(unittest.TestCase):

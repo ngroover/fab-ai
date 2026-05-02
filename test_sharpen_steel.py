@@ -53,6 +53,9 @@ def _setup(env):
     )
     env.step(sharpen_action)
 
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
+
     return dorinthea, rhinar
 
 

@@ -59,6 +59,9 @@ def _setup(env):
     legal = env.legal_actions()
     env.step(next(a for a in legal if a.pitch_indices == [2]))
 
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
+
     # Step 4: Rhinar does not defend
     legal = env.legal_actions()
     no_defend = next(
@@ -86,6 +89,9 @@ def _setup(env):
     legal = env.legal_actions()
     env.step(next(a for a in legal if a.pitch_indices == [1]))
     # Run Through resolves; combat resolves; Dorinthea enters go-again ATTACK phase
+
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
 
     return dorinthea, rhinar
 

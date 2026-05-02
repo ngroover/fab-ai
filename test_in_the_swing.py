@@ -49,6 +49,9 @@ def _setup_to_second_weapon_reaction(env):
         if a.action_type == ActionType.PLAY_CARD and a.card.name == "On a Knife Edge"
     ))
 
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
+
     # First Dawnblade attack — needs 1 resource; pitch Blade Flash (pitch value 3)
     legal = env.legal_actions()
     env.step(next(a for a in legal if a.action_type == ActionType.WEAPON))
@@ -59,6 +62,9 @@ def _setup_to_second_weapon_reaction(env):
         a for a in legal
         if a.action_type == ActionType.PITCH and a.pitch_indices == [bf_idx]
     ))
+
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
 
     # Rhinar passes the defend step
     legal = env.legal_actions()
@@ -75,9 +81,15 @@ def _setup_to_second_weapon_reaction(env):
             legal = env.legal_actions()
             env.step(next(a for a in legal if a.action_type == ActionType.PASS_PRIORITY))
 
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
+
     # Second Dawnblade attack — 2 leftover resources cover the cost; no PITCH phase
     legal = env.legal_actions()
     env.step(next(a for a in legal if a.action_type == ActionType.WEAPON))
+
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
 
     # Rhinar passes the defend step for the second attack
     legal = env.legal_actions()
