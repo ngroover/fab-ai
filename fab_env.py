@@ -1399,6 +1399,7 @@ class FaBEnv:
                     else:
                         active.deck.pop(0)
                         active.deck.append(top)
+                        active.deck_bottom_known.append(top)
                         self._log(f"    ⬇  {top.name} has less than 6 power — moved to bottom of deck.")
                 else:
                     self._log(f"    🃏 {card.name} — deck is empty, no card to reveal.")
