@@ -25,6 +25,7 @@ class CardType(Enum):
     HERO = "Hero"
     MENTOR = "Mentor"
     RESOURCE = "Resource"
+    TOKEN = "Token"
 
 
 class Color(Enum):
@@ -104,6 +105,15 @@ class Card:
             lines.append(f"    {self.text}")
         return "\n".join(lines)
 
+
+# ──────────────────────── TOKEN CARDS ────────────────────────
+
+QUICKEN_TOKEN_CARD = Card(
+    name="Quicken",
+    card_type=CardType.TOKEN,
+    keywords=[Keyword.GO_AGAIN],
+    text="Go Again. While Quicken is in the arena, the next attack action card played gains go again. Put Quicken into the graveyard.",
+)
 
 # ──────────────────────── RHINAR DECK ────────────────────────
 # Hero: Rhinar (young) — Life: 20, Intellect: 4

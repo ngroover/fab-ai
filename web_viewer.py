@@ -1489,6 +1489,7 @@ def _build_gamestate_snapshot(env) -> dict:
             "resource_points": p.resource_points,
             "hand": _player_view_hand(p),
             "arsenal": _card_to_dict(p.arsenal),
+            "arena": [_card_to_dict(c) for c in p.arena],
             "pitch_zone": [_card_to_dict(c) for c in p.pitch_zone],
             "graveyard": [_card_to_dict(c) for c in p.graveyard],
             "banished": [_card_to_dict(c) for c in p.banished + p.permanently_banished],
@@ -1540,6 +1541,7 @@ def _build_gamestate_snapshot(env) -> dict:
             "hand_count": len(p.hand),
             "hand_revealed": [_card_to_dict(c) for c in revealed],
             "arsenal_present": p.arsenal is not None,
+            "arena": [_card_to_dict(c) for c in p.arena],
             "pitch_zone": [_card_to_dict(c) for c in p.pitch_zone],
             "graveyard": [_card_to_dict(c) for c in p.graveyard],
             "banished_count": len(p.banished) + len(p.permanently_banished),
@@ -2662,6 +2664,7 @@ PLAY_TEMPLATE = """
           ${renderZone('Deck (' + me.deck_count + ')', renderDeckWithKnown(me.deck_count, me.deck_bottom_known))}
           ${renderZone('Hand (' + me.hand.length + ')', renderCards(me.hand))}
           ${renderZone('Arsenal', '<div class="gs-cards">' + arsenal + '</div>')}
+          ${renderZone('Arena (' + (me.arena ? me.arena.length : 0) + ')', me.arena && me.arena.length ? renderCards(me.arena) : '<span class="gs-empty">— empty —</span>')}
           ${renderZone('Pitch zone (' + me.pitch_zone.length + ')', renderCards(me.pitch_zone))}
           ${renderZone('Graveyard (' + me.graveyard.length + ')', renderCards(me.graveyard))}
           ${renderZone('Banished (' + (me.banished ? me.banished.length : 0) + ')', banishHtml)}
@@ -2688,6 +2691,7 @@ PLAY_TEMPLATE = """
           ${renderZone('Deck (' + op.deck_count + ')', renderDeckWithKnown(op.deck_count, op.deck_bottom_known))}
           ${renderZone('Hand (' + op.hand_count + ')', renderHandWithRevealed(op.hand_count, op.hand_revealed))}
           ${renderZone('Arsenal', arsenalHtml)}
+          ${renderZone('Arena (' + (op.arena ? op.arena.length : 0) + ')', op.arena && op.arena.length ? renderCards(op.arena) : '<span class="gs-empty">— empty —</span>')}
           ${renderZone('Pitch zone (' + op.pitch_zone.length + ')', renderCards(op.pitch_zone))}
           ${renderZone('Graveyard (' + op.graveyard.length + ')', renderCards(op.graveyard))}
           ${renderZone('Banished (' + (op.banished_count || 0) + ')', oppBanishHtml)}

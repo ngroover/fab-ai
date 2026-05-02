@@ -63,6 +63,7 @@ class Player:
         self.hand_revealed: List[Card] = []  # hand cards revealed to the opponent
         self.deck_bottom_known: List[Card] = []  # pitched cards at deck bottom, in order (oldest first)
         self.arsenal: Optional[Card] = None
+        self.arena: List[Card] = []  # token cards and persistent cards in play
 
         # Equipment
         self.equipment: Dict[str, Equipment] = {}

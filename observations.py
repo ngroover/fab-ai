@@ -36,6 +36,8 @@ CARD_VOCAB: List[str] = [
     "Bone Basher", "Dawnblade, Resplendent",
     "Blossom of Spring", "Bone Vizier", "Ironhide Gauntlet", "Ironhide Legs",
     "Gallantry Gold", "Ironrot Helm", "Ironrot Legs",
+    # Tokens
+    "Quicken",
     # Unknown/padding
     "<PAD>",
 ]
@@ -52,10 +54,11 @@ PLAYER_OBS_SIZE = (
     + CARD_FEATURES            # arsenal card (or PAD)
     + 4                        # equipment defense values [head, chest, arms, legs]
     + 1                        # weapon power (effective)
-    + 8                        # turn state flags/values:
+    + 9                        # turn state flags/values:
                                #   life, action_points, resource_points,
                                #   next_weapon_go_again, next_weapon_power_bonus,
-                               #   next_brute_attack_bonus, weapon_used, attacks_this_turn
+                               #   next_brute_attack_bonus, weapon_used, attacks_this_turn,
+                               #   arena_card_count
 )
 
 
@@ -119,6 +122,7 @@ def encode_player(player: 'Player') -> List[float]:
         player.next_brute_attack_bonus / 5.0,
         float(player.weapon_used_this_turn),
         player.attacks_this_turn / 5.0,
+        len(player.arena) / 4.0,
     ]
 
     assert len(obs) == PLAYER_OBS_SIZE, (
@@ -159,6 +163,7 @@ def encode_opponent_public(player: 'Player') -> List[float]:
         0.0,  # next_brute_attack_bonus hidden
         float(player.weapon_used_this_turn),
         player.attacks_this_turn / 5.0,
+        len(player.arena) / 4.0,  # arena is public
     ]
 
     assert len(obs) == PLAYER_OBS_SIZE

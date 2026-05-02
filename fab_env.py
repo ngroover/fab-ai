@@ -30,7 +30,7 @@ import random
 from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple, Any
 
-from cards import Card, CardType, Color, Keyword
+from cards import Card, CardType, Color, Keyword, QUICKEN_TOKEN_CARD
 from card_effects import EffectTrigger, EffectAction
 from game_state import Player, GameState, Equipment
 from actions import (
@@ -1222,6 +1222,15 @@ class FaBEnv:
                     self._apply_card_effects(eq.card, EffectTrigger.ON_DESTROYED, {}, player, opponent)
                     self._move_equipment_to_graveyard(player, eq)
 
+        # Consume arena tokens — move TOKEN cards from attacker's arena to graveyard
+        if attacker.arena:
+            token_names = [c.name for c in attacker.arena if c.card_type == CardType.TOKEN]
+            tokens = [c for c in attacker.arena if c.card_type == CardType.TOKEN]
+            if tokens:
+                self._log(f"  🪙  Arena token(s) consumed: {', '.join(token_names)} → graveyard.")
+                attacker.graveyard.extend(tokens)
+                attacker.arena = [c for c in attacker.arena if c.card_type != CardType.TOKEN]
+
     def _end_attack_phase(self, active: Player, opponent: Player):
         """Active player has passed — break combat chain, then open end-of-turn instant window, then arsenal."""
         self._break_combat_chain(active, opponent)
@@ -1385,8 +1394,10 @@ class FaBEnv:
                 else:
                     self._log(f"    🎴 {card.name} — {active.name} draws a card (deck empty).")
             elif effect.action == EffectAction.QUICKEN_TOKEN:
+                token = QUICKEN_TOKEN_CARD
+                active.arena.append(token)
                 self._pending_attack_go_again = True
-                self._log(f"    ⚡ {card.name} — Quicken token created, attack gains Go Again!")
+                self._log(f"    ⚡ {card.name} — Quicken token created and placed in arena, attack gains Go Again!")
             elif effect.action == EffectAction.NEXT_WEAPON_POWER_BONUS:
                 active.next_weapon_power_bonus += effect.magnitude
                 self._log(f"    ⚡ {card.name} — next weapon attack gains +{effect.magnitude} power.")
