@@ -351,6 +351,7 @@ def legal_defend_actions(player: 'Player', attack_power: int,
     defenders = [(i, c) for i, c in enumerate(player.hand)
                  if c.defense > 0
                  and not c.no_block
+                 and c.card_type != CardType.ATTACK_REACTION
                  and i not in already_indices]
     equip_slots = [slot for slot, eq in player.equipment.items()
                    if eq.active and eq.defense > 0 and slot not in already_equip
