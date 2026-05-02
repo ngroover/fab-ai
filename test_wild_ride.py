@@ -45,7 +45,7 @@ def _setup_and_play_wild_ride(seed: int) -> FaBEnv:
     env.step(wra)
 
     # PITCH: greedy (highest pitch card first) until cost is covered
-    while env._phase == Phase.PITCH:
+    while env._phase in (Phase.PITCH, Phase.INSTANT):
         env.step(env.legal_actions()[0])
 
     return env

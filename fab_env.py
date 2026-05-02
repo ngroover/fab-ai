@@ -285,6 +285,8 @@ class FaBEnv:
 
         # ── Auto-execute forced (single-legal-action) states ──
         while not self.done:
+            if self._phase == Phase.INSTANT:
+                break  # INSTANT always requires explicit player passes
             forced = self.legal_actions()
             if len(forced) != 1:
                 break
@@ -900,9 +902,6 @@ class FaBEnv:
         """Place *card* onto the instant stack owned by *owner_idx*, then pass
         priority to the opponent so they may respond."""
         owner = self._game.players[owner_idx]
-        if card.name == "Sigil of Solace":
-            owner.gain_life(1)
-            self._log(f"    💚 Sigil of Solace played — {owner.name} gains 1 life ({owner.life}).")
         self._instant_stack.append((owner_idx, card))
         owner_name = owner.name
         self._log(f"    📌  {owner_name} puts {card.name} on the stack "

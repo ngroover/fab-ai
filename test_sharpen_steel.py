@@ -124,6 +124,9 @@ class TestSharpenSteelEffect(unittest.TestCase):
         legal = env.legal_actions()
         env.step(legal[0])
 
+        while env._phase == Phase.INSTANT:
+            env.step(env.legal_actions()[0])
+
         # Rhinar does not defend
         assert env._phase == Phase.DEFEND
         legal = env.legal_actions()
@@ -153,6 +156,9 @@ class TestSharpenSteelEffect(unittest.TestCase):
         assert env._phase == Phase.PITCH
         legal = env.legal_actions()
         env.step(legal[0])
+
+        while env._phase == Phase.INSTANT:
+            env.step(env.legal_actions()[0])
 
         assert env._phase == Phase.DEFEND
         legal = env.legal_actions()

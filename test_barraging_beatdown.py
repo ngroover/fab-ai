@@ -69,6 +69,9 @@ def _setup_after_bb_and_bare_fangs(env):
                  if a.action_type == ActionType.PITCH and 1 in a.pitch_indices)
     env.step(pitch)
 
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
+
     assert env._phase == Phase.DEFEND, f"Expected DEFEND, got {env._phase}"
     return rhinar, dorinthea
 

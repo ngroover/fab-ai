@@ -351,16 +351,16 @@ class TestInstantWindowTurn1(unittest.TestCase):
         env.step(wild_ride)
 
         # Pay Wild Ride's cost; after the last pitch step Wild Ride resolves,
-        # the instant window opens and is immediately auto-executed (no instants
-        # in either hand), leaving the env at Phase.DEFEND.
-        while env._phase == Phase.PITCH:
+        # the instant window opens. Neither player has instants so both pass
+        # through, leaving the env at Phase.DEFEND.
+        while env._phase in (Phase.PITCH, Phase.INSTANT):
             env.step(env.legal_actions()[0])
 
         return env
 
     def test_defend_phase_reached_after_wild_ride(self):
-        """When neither player has instants the pre-DEFEND instant window is
-        auto-executed and the game lands directly in Phase.DEFEND."""
+        """When neither player has instants both pass through the instant
+        window and the game lands at Phase.DEFEND."""
         env = self._advance_to_defend_phase()
         self.assertEqual(env._phase, Phase.DEFEND)
 

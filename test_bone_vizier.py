@@ -53,6 +53,9 @@ def _advance_to_defend(env):
     legal = env.legal_actions()
     env.step(next(a for a in legal if a.pitch_indices == [2]))
 
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
+
     return rhinar, dorinthea
 
 
