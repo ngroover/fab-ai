@@ -393,20 +393,20 @@ class TestInstantWindowTurn1(unittest.TestCase):
         self.assertEqual(play_card_actions, [],
                          f"No PLAY_CARD should be offered in DEFEND phase; got {legal}")
 
-    def test_attack_reactions_not_offered_as_blocks(self):
-        """Attack reaction cards must NOT appear as block options in the DEFEND
-        phase.  They are only playable as reactions after blocks are committed."""
+    def test_no_block_cards_not_offered_as_blocks(self):
+        """Cards with no_block=True must not appear as block options in the DEFEND
+        phase, regardless of card type. Attack reactions with defense value and
+        no_block=False are legitimately blockable."""
         env = self._advance_to_defend_phase()
-        from cards import CardType
         legal = env.legal_actions()
         for a in legal:
             if a.action_type == ActionType.DEFEND and a.defend_hand_indices:
                 dorinthea = env._game.players[1]
                 for i in a.defend_hand_indices:
                     card = dorinthea.hand[i]
-                    self.assertNotEqual(
-                        card.card_type, CardType.ATTACK_REACTION,
-                        f"Attack reaction {card.name} should not be offered as a block",
+                    self.assertFalse(
+                        card.no_block,
+                        f"{card.name} has no_block=True but was offered as a block",
                     )
 
     def test_defend_phase_is_active_after_instant_window(self):
