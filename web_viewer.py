@@ -2878,10 +2878,12 @@ PLAY_TEMPLATE = """
         popup.style.display = 'block';
         const r = el.getBoundingClientRect();
         const pw = popup.offsetWidth || 260;
+        const ph = popup.offsetHeight || 120;
         let left = r.left;
         if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
         popup.style.left = Math.max(4, left) + 'px';
-        popup.style.top = (r.bottom + 6) + 'px';
+        const fitsBelow = r.bottom + 6 + ph <= window.innerHeight - 8;
+        popup.style.top = fitsBelow ? (r.bottom + 6) + 'px' : Math.max(4, r.top - ph - 6) + 'px';
       };
     })();
 
