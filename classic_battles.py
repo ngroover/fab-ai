@@ -379,7 +379,8 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "gallantry_gold": Card("Gallantry Gold", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.ARMS,
                            card_class=CardClass.WARRIOR,
-                           text="Action — 1: destroy Gallantry Gold: Your weapon attacks gain +1 power this turn. Go again. Battleworn."),
+                           text="Action — 1: destroy Gallantry Gold: Your weapon attacks gain +1 power this turn. Go again. Battleworn.",
+                           keywords=[Keyword.BATTLEWORN]),
 
     "ironrot_helm": Card("Ironrot Helm", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.ARMS,
                          text="Blade Break.", keywords=[Keyword.BLADE_BREAK]),
