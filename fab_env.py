@@ -285,8 +285,6 @@ class FaBEnv:
 
         # ── Auto-execute forced (single-legal-action) states ──
         while not self.done:
-            if self._phase == Phase.INSTANT:
-                break  # INSTANT always requires explicit player passes
             forced = self.legal_actions()
             if len(forced) != 1:
                 break
