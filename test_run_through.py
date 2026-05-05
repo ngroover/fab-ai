@@ -57,7 +57,7 @@ def _setup(env):
 
     # Step 3: Pitch Sharpen Steel (index 2, pitch=1) to cover Dawnblade cost=1
     legal = env.legal_actions()
-    env.step(next(a for a in legal if a.pitch_indices == [2]))
+    env.step(next(a for a in legal if a.pitch_index == 2))
 
     # Step 4: Rhinar does not defend
     legal = env.legal_actions()
@@ -65,7 +65,7 @@ def _setup(env):
         a for a in legal
         if a.action_type == ActionType.DEFEND
         and a.hand_index is None
-        and not a.defend_equip_slots
+        and a.equip_slot is None
     )
     env.step(no_defend)
 
@@ -84,7 +84,7 @@ def _setup(env):
     # Remaining hand after Sharpen Steel pitched: [Driving Blade(0), Thrust(1)]
     assert env._phase == Phase.PITCH, f"Expected PITCH for Run Through cost, got {env._phase}"
     legal = env.legal_actions()
-    env.step(next(a for a in legal if a.pitch_indices == [1]))
+    env.step(next(a for a in legal if a.pitch_index == 1))
     # Run Through resolves; combat resolves; Dorinthea enters go-again ATTACK phase
 
     return dorinthea, rhinar

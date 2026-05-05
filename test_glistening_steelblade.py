@@ -62,7 +62,7 @@ def _play_glistening_steelblade(env):
     # Pitch Sigil of Solace (index 0 in remaining hand, pitch=3)
     assert env._phase == Phase.PITCH
     legal = env.legal_actions()
-    env.step(next(a for a in legal if a.pitch_indices == [0]))
+    env.step(next(a for a in legal if a.pitch_index == 0))
 
     assert env._phase == Phase.ATTACK
     return dorinthea, rhinar
@@ -89,7 +89,7 @@ def _play_gsb_and_attack_hit(env):
         a for a in legal
         if a.action_type == ActionType.DEFEND
         and a.hand_index is None
-        and not a.defend_equip_slots
+        and a.equip_slot is None
     ))
 
     # Collapse reaction window
@@ -120,7 +120,7 @@ def _play_gsb_and_attack_miss(env):
         a for a in legal
         if a.action_type == ActionType.DEFEND
         and a.hand_index == 0
-        and not a.defend_equip_slots
+        and a.equip_slot is None
     ))
     assert env._phase == Phase.DEFEND
 
@@ -130,7 +130,7 @@ def _play_gsb_and_attack_miss(env):
         a for a in legal
         if a.action_type == ActionType.DEFEND
         and a.hand_index is None
-        and not a.defend_equip_slots
+        and a.equip_slot is None
     ))
 
     while env._phase == Phase.REACTION:
@@ -345,7 +345,7 @@ class TestGlisteningSteebladeNoCounterWithoutFlag(unittest.TestCase):
         # Dawnblade costs 1; pitch Sigil of Solace (index 1, pitch=3) to cover it
         assert self.env._phase == Phase.PITCH
         legal = self.env.legal_actions()
-        self.env.step(next(a for a in legal if a.pitch_indices == [1]))
+        self.env.step(next(a for a in legal if a.pitch_index == 1))
 
         legal = self.env.legal_actions()
         self.env.step(next(

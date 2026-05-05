@@ -57,7 +57,7 @@ def _setup_to_second_weapon_reaction(env):
     legal = env.legal_actions()
     env.step(next(
         a for a in legal
-        if a.action_type == ActionType.PITCH and a.pitch_indices == [bf_idx]
+        if a.action_type == ActionType.PITCH and a.pitch_index == bf_idx
     ))
 
     # Rhinar passes the defend step
@@ -66,7 +66,7 @@ def _setup_to_second_weapon_reaction(env):
         a for a in legal
         if a.action_type == ActionType.DEFEND
         and a.hand_index is None
-        and not a.defend_equip_slots
+        and a.equip_slot is None
     ))
 
     # Both players pass priority in the first attack's reaction window
@@ -85,7 +85,7 @@ def _setup_to_second_weapon_reaction(env):
         a for a in legal
         if a.action_type == ActionType.DEFEND
         and a.hand_index is None
-        and not a.defend_equip_slots
+        and a.equip_slot is None
     ))
 
     # Now in the reaction window of the second weapon attack

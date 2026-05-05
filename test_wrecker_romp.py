@@ -144,7 +144,7 @@ class TestWreckerRompPitchConstraint(unittest.TestCase):
         legal = self.env.legal_actions()
         pitch_with_card = [a for a in legal
                            if a.action_type == ActionType.PITCH
-                           and a.pitch_indices]
+                           and a.pitch_index is not None]
         self.assertEqual(pitch_with_card, [],
                          "Must not offer pitching the last card when Wrecker Romp needs a discard")
 
@@ -155,7 +155,7 @@ class TestWreckerRompPitchConstraint(unittest.TestCase):
                          "Expected 3 cards remaining after Wrecker Romp was selected to play")
         legal = self.env.legal_actions()
         pitch_actions = [a for a in legal
-                         if a.action_type == ActionType.PITCH and a.pitch_indices]
+                         if a.action_type == ActionType.PITCH and a.pitch_index is not None]
         self.assertGreater(len(pitch_actions), 0,
                            "Pitch options must be available when hand still has multiple cards")
 

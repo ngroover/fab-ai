@@ -66,7 +66,7 @@ def _setup_after_bb_and_bare_fangs(env):
     # Step 4: Pitch Pack Call (index 1, pitch value 2) to cover cost 2
     legal = env.legal_actions()
     pitch = next(a for a in legal
-                 if a.action_type == ActionType.PITCH and 1 in a.pitch_indices)
+                 if a.action_type == ActionType.PITCH and a.pitch_index == 1)
     env.step(pitch)
 
     assert env._phase == Phase.DEFEND, f"Expected DEFEND, got {env._phase}"
@@ -80,7 +80,7 @@ def _commit_no_block(env):
         a for a in legal
         if a.action_type == ActionType.DEFEND
         and a.hand_index is None
-        and not a.defend_equip_slots
+        and a.equip_slot is None
     )
     env.step(no_block)
 
@@ -197,7 +197,7 @@ class TestBarragingBeatdownBonusApplies_OneBlock(unittest.TestCase):
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND
                            and a.hand_index is None
-                           and not a.defend_equip_slots))
+                           and a.equip_slot is None))
         _pass_reactions(self.env)
 
     def test_bonus_applied_one_block(self):
@@ -233,7 +233,7 @@ class TestBarragingBeatdownBonusNullified_TwoBlocks(unittest.TestCase):
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND
                            and a.hand_index is None
-                           and not a.defend_equip_slots))
+                           and a.equip_slot is None))
         _pass_reactions(self.env)
 
     def test_bonus_nullified_two_blocks(self):

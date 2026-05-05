@@ -158,6 +158,7 @@ class FaBEnv:
         self._reaction_defense_bonus: int = 0             # defense from resolved defense reactions
         self._committed_defend_action: Optional[Action] = None
         self._committed_defend_cards: List[Card] = []  # cards already moved to combat chain when block committed
+        self._committed_defend_equip_slots: List[str] = []
         self._pending_reaction_play: bool = False         # True when PITCH phase is paying for a reaction card
         self._pending_reaction_player_idx: int = 0
         # Isolated RNG — seeded in reset() so game randomness is never shared with external code.
@@ -240,6 +241,7 @@ class FaBEnv:
         self._reaction_defense_bonus = 0
         self._committed_defend_action = None
         self._committed_defend_cards = []
+        self._committed_defend_equip_slots = []
         self._pending_reaction_play = False
         self._pending_reaction_player_idx = 0
 
@@ -441,9 +443,9 @@ class FaBEnv:
         Stays in PITCH phase until resource_points >= pending card's cost, then resolves."""
         card = self._pending_play_card
 
-        if action.pitch_indices:
+        if action.pitch_index is not None:
             # Pitch the single selected card immediately
-            idx = action.pitch_indices[0]
+            idx = action.pitch_index
             if 0 <= idx < len(active.hand):
                 pc = active.hand[idx]
                 active.pitch(pc)  # removes from hand, adds pitch value to resource_points
@@ -566,18 +568,18 @@ class FaBEnv:
         the stack at all.
         """
         # Single card/equipment addition — accumulate and stay in DEFEND phase
-        if action.hand_index is not None or action.defend_equip_slots:
+        if action.hand_index is not None or action.equip_slot is not None:
             if action.hand_index is not None:
                 self._pending_defend_indices.append(action.hand_index)
-            self._pending_defend_equip_slots.extend(action.defend_equip_slots)
+            if action.equip_slot is not None:
+                self._pending_defend_equip_slots.append(action.equip_slot)
             return  # defender picks again next step
 
         # Done — commit blocks and open the reaction window before resolving combat
         attacker_idx = self._game.active_player_idx
         defender_idx = 1 - attacker_idx
         defender = self._game.players[defender_idx]
-        full_action = Action(ActionType.DEFEND,
-                             defend_equip_slots=list(self._pending_defend_equip_slots))
+        full_action = Action(ActionType.DEFEND)
         # Move blocking cards from hand to combat chain immediately so the game
         # state is correct during the reaction phase.
         def_cards = self._snapshot_by_indices(defender.hand, self._pending_defend_indices)
@@ -587,7 +589,8 @@ class FaBEnv:
             defender.combat_chain.append(c)
         self._committed_defend_cards = def_cards
         self._pending_defend_indices = []
-        equip_slots_snapshot = list(full_action.defend_equip_slots)
+        equip_slots_snapshot = list(self._pending_defend_equip_slots)
+        self._committed_defend_equip_slots = equip_slots_snapshot
         self._pending_defend_equip_slots = []
         self._committed_defend_action = full_action
         block_names = [c.name for c in def_cards] + [
@@ -612,10 +615,11 @@ class FaBEnv:
         def_cards = self._committed_defend_cards
         self._committed_defend_cards = []
         def_equip = []
-        for slot in action.defend_equip_slots:
+        for slot in self._committed_defend_equip_slots:
             eq = defender.equipment.get(slot)
             if eq and eq.active:
                 def_equip.append(eq)
+        self._committed_defend_equip_slots = []
 
         # Use the power stored when the attack was declared. It already includes
         # weapon bonuses (set by _trigger_defend_phase) and any modifications from

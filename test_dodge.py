@@ -55,7 +55,7 @@ def _advance_to_reaction(env):
         a for a in env.legal_actions()
         if a.action_type == ActionType.DEFEND
         and a.hand_index is None
-        and not a.defend_equip_slots
+        and a.equip_slot is None
     )
     env.step(no_defend)
     return env._game.players[0], env._game.players[1]

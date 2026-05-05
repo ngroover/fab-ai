@@ -131,7 +131,7 @@ class TestSharpenSteelEffect(unittest.TestCase):
             a for a in legal
             if a.action_type == ActionType.DEFEND
             and a.hand_index is None
-            and not a.defend_equip_slots
+            and a.equip_slot is None
         )
         env.step(no_defend)
 
@@ -160,7 +160,7 @@ class TestSharpenSteelEffect(unittest.TestCase):
             a for a in legal
             if a.action_type == ActionType.DEFEND
             and a.hand_index is None
-            and not a.defend_equip_slots
+            and a.equip_slot is None
         )
         env.step(no_defend)
 

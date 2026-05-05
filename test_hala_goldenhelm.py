@@ -40,7 +40,7 @@ def _skip_to(env, phases, max_steps=300):
             a for a in legal
             if a.action_type in (ActionType.PASS, ActionType.PASS_PRIORITY, ActionType.DEFEND)
             and getattr(a, 'hand_index', None) is None
-            and not getattr(a, 'defend_equip_slots', [])
+            and getattr(a, 'equip_slot', None) is None
         ]
         env.step(passables[0] if passables else legal[0])
     return False

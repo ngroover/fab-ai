@@ -50,7 +50,7 @@ def _advance_to_defend(env):
     env.step(next(a for a in legal if a.action_type == ActionType.WEAPON))
 
     legal = env.legal_actions()
-    env.step(next(a for a in legal if a.pitch_indices == [2]))
+    env.step(next(a for a in legal if a.pitch_index == 2))
 
     return rhinar, dorinthea
 
@@ -64,7 +64,7 @@ def _defend_with_pack_call(env, rhinar):
     env.step(next(a for a in legal
                   if a.action_type == ActionType.DEFEND
                   and a.hand_index is None
-                  and not a.defend_equip_slots))
+                  and a.equip_slot is None))
 
 
 class TestPackCallCardDefinition(unittest.TestCase):

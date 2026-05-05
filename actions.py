@@ -21,7 +21,7 @@ ActionType enum:
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import List, Optional, TYPE_CHECKING
 
@@ -54,14 +54,13 @@ class Action:
     from_arsenal: bool = False
 
     # PITCH fields (step 2: choose which hand cards to pitch to cover the cost)
-    pitch_indices: List[int] = field(default_factory=list)  # indices into player.hand
+    pitch_index: Optional[int] = None  # index into player.hand (None = no pitch needed)
 
     # DEFEND / ARSENAL shared field — index into player.hand (None = no card)
     hand_index: Optional[int] = None
-    defend_equip_slots: List[str] = field(default_factory=list)  # e.g. ["head", "legs"]
 
-    # ACTIVATE_EQUIPMENT field
-    equip_slot: str = ""  # e.g. "head"
+    # DEFEND / ACTIVATE_EQUIPMENT shared field — equipment slot (None = no equipment)
+    equip_slot: Optional[str] = None  # e.g. "head"
 
     # PITCH_ORDER field
     pitch_order_index: int = -1  # index into player.pitch_zone
@@ -74,13 +73,13 @@ class Action:
             src = f"hand[{self.card.name}]"
             return f"Action(PLAY_CARD {src})"
         if self.action_type == ActionType.PITCH:
-            return f"Action(PITCH indices={self.pitch_indices})"
+            return f"Action(PITCH index={self.pitch_index})"
         if self.action_type == ActionType.WEAPON:
             return "Action(WEAPON)"
         if self.action_type == ActionType.PASS:
             return "Action(PASS)"
         if self.action_type == ActionType.DEFEND:
-            return f"Action(DEFEND hand={self.hand_index} equip={self.defend_equip_slots})"
+            return f"Action(DEFEND hand={self.hand_index} equip={self.equip_slot})"
         if self.action_type == ActionType.ARSENAL:
             return f"Action(ARSENAL store={self.hand_index})"
         if self.action_type == ActionType.ACTIVATE_EQUIPMENT:
@@ -284,7 +283,7 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
     needed = max(0, pending_card.cost - player.resource_points)
 
     if needed == 0:
-        return [Action(ActionType.PITCH, pitch_indices=[])]
+        return [Action(ActionType.PITCH)]
 
     has_discard_cost = _card_has_discard_cost(pending_card)
     has_reveal_cost = _card_has_reveal_cost(pending_card)
@@ -307,19 +306,19 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
             if remaining_needed <= 0:
                 # This card alone covers the cost; need >= 1 left for discard
                 if len(remaining) >= 1:
-                    actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
+                    actions.append(Action(ActionType.PITCH, pitch_index=i))
             else:
                 # Still need more after this pitch — remaining cards must be able to cover
                 if _has_discard_available(remaining, remaining_needed):
-                    actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
+                    actions.append(Action(ActionType.PITCH, pitch_index=i))
         else:
             if has_reveal_cost:
                 # Don't pitch this card if it would leave no cost ≤ 1 card in hand to reveal
                 hand_after = [card for j, card in enumerate(player.hand) if j != i]
                 if not any(card.cost <= 1 for card in hand_after):
                     continue
-            actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
-    return actions if actions else [Action(ActionType.PITCH, pitch_indices=[])]
+            actions.append(Action(ActionType.PITCH, pitch_index=i))
+    return actions if actions else [Action(ActionType.PITCH)]
 
 
 def legal_defend_actions(player: 'Player', attack_power: int,
@@ -362,7 +361,7 @@ def legal_defend_actions(player: 'Player', attack_power: int,
 
     # One equipment slot at a time
     for slot in equip_slots:
-        actions.append(Action(ActionType.DEFEND, defend_equip_slots=[slot]))
+        actions.append(Action(ActionType.DEFEND, equip_slot=slot))
 
     return actions
 
