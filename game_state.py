@@ -14,9 +14,7 @@ class Equipment:
         self.card = card
         self.destroyed = False
         self.used_this_turn = False
-        self.blocking = False  # True while this equipment is committed to block the current attack
         self.block_counters = 0        # accumulated -1 block counters (Battleworn)
-        self.battleworn_blocked = False  # True if used to block in current combat chain
 
     def reset_turn(self):
         self.used_this_turn = False

@@ -339,8 +339,7 @@ def legal_defend_actions(player: 'Player', attack_power: int) -> List[Action]:
     defenders = [(i, c) for i, c in enumerate(player.hand)
                  if not c.no_block]
     equip_slots = [slot for slot, eq in player.equipment.items()
-                   if eq.active and eq.defense > 0 and not eq.blocking
-                   and not (Keyword.BLADE_BREAK in eq.card.keywords and eq.used_this_turn)]
+                   if eq.active and eq.defense > 0]
 
     # One card at a time — deduplicate identical cards (same choice regardless of copy)
     seen_defend_names: set = set()

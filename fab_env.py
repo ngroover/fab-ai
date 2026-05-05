@@ -156,7 +156,8 @@ class FaBEnv:
         self._reaction_defense_bonus: int = 0             # defense from resolved defense reactions
         self._committed_defend_action: Optional[Action] = None
         self._committed_defend_cards: List[Card] = []  # cards already moved to combat chain when block committed
-        self._committed_defend_equip_slots: List[str] = []
+        self._committed_defend_equip: List = []   # Equipment objects committed this link
+        self._equipment_on_chain: dict = {}       # id(card) → Equipment for whole chain lifetime
         self._pending_reaction_play: bool = False         # True when PITCH phase is paying for a reaction card
         self._pending_reaction_player_idx: int = 0
         # Isolated RNG — seeded in reset() so game randomness is never shared with external code.
@@ -239,7 +240,7 @@ class FaBEnv:
         self._reaction_defense_bonus = 0
         self._committed_defend_action = None
         self._committed_defend_cards = []
-        self._committed_defend_equip_slots = []
+        self._committed_defend_equip = []
         self._pending_reaction_play = False
         self._pending_reaction_player_idx = 0
 
@@ -543,11 +544,7 @@ class FaBEnv:
         player_idx = int(self.agent_selection[-1])
         player = self._game.players[player_idx]
         total = sum(c.defense for c in self._committed_defend_cards)
-        total += sum(
-            player.equipment[slot].defense
-            for slot in self._committed_defend_equip_slots
-            if slot in player.equipment
-        )
+        total += sum(eq.defense for eq in self._committed_defend_equip)
         return total
 
     def _handle_defend_action(self, action: Action, defender: Player, attacker: Player):
@@ -571,17 +568,18 @@ class FaBEnv:
             return  # defender picks again next step
 
         if action.equip_slot is not None:
-            eq = defender.equipment.get(action.equip_slot)
+            slot = action.equip_slot
+            eq = defender.equipment.get(slot)
             if eq and eq.active:
-                eq.blocking = True
-                self._committed_defend_equip_slots.append(action.equip_slot)
+                del defender.equipment[slot]
+                defender.combat_chain.append(eq.card)
+                self._committed_defend_equip.append(eq)
+                self._equipment_on_chain[id(eq.card)] = eq
             return  # defender picks again next step
 
         # Done — lock in current blocks and open the reaction window
         block_names = [c.name for c in self._committed_defend_cards] + [
-            defender.equipment[s].card.name
-            for s in self._committed_defend_equip_slots
-            if s in defender.equipment
+            eq.card.name for eq in self._committed_defend_equip
         ]
         if block_names:
             self._log(f"    🛡  {defender.name} commits blocks: {', '.join(block_names)}")
@@ -600,14 +598,8 @@ class FaBEnv:
         # (in _handle_defend_action). Retrieve that list and clear the reference.
         def_cards = self._committed_defend_cards
         self._committed_defend_cards = []
-        def_equip = []
-        for slot in self._committed_defend_equip_slots:
-            eq = defender.equipment.get(slot)
-            if eq:
-                eq.blocking = False
-                if eq.active:
-                    def_equip.append(eq)
-        self._committed_defend_equip_slots = []
+        def_equip = self._committed_defend_equip
+        self._committed_defend_equip = []
 
         # Use the power stored when the attack was declared. It already includes
         # weapon bonuses (set by _trigger_defend_phase) and any modifications from
@@ -653,16 +645,6 @@ class FaBEnv:
             self._rewards[atk_agent] += damage * 0.01
         else:
             self._log(f"    ✅  Fully blocked!")
-
-        # Battleworn — block counter applied when combat chain closes (not immediately)
-        for eq in def_equip:
-            if Keyword.BATTLEWORN in eq.card.keywords and not eq.destroyed:
-                eq.battleworn_blocked = True
-
-        # Blade Break — mark as used so it cannot block again this combat chain
-        for eq in def_equip:
-            if Keyword.BLADE_BREAK in eq.card.keywords and not eq.destroyed:
-                eq.used_this_turn = True
 
         # def_cards are already on the combat chain (placed there at block commit time).
 
@@ -1182,50 +1164,45 @@ class FaBEnv:
         self.agent_selection = f"agent_{self._game.active_player_idx}"
 
     def _break_combat_chain(self, attacker: Player, defender: Player) -> None:
-        """Close the combat chain — move all chained cards to their owners' graveyards."""
+        """Close the combat chain — move all chained cards to their owners' graveyards,
+        returning battleworn equipment to its slot and destroying blade-break equipment."""
         has_chain_cards = bool(attacker.combat_chain or defender.combat_chain)
-        has_blade_break = any(
-            Keyword.BLADE_BREAK in eq.card.keywords and eq.used_this_turn and not eq.destroyed
-            for player in (attacker, defender)
-            for eq in player.equipment.values()
-        )
-        has_battleworn = any(
-            eq.battleworn_blocked and not eq.destroyed
-            for player in (attacker, defender)
-            for eq in player.equipment.values()
-        )
-        if not has_chain_cards and not has_blade_break and not has_battleworn:
+        if not has_chain_cards and not self._equipment_on_chain:
             return
-        if has_chain_cards:
-            all_names = [c.name for c in attacker.combat_chain] + [c.name for c in defender.combat_chain]
-            self._log(f"  ⛓  Combat chain closes ({', '.join(all_names)} → graveyard).")
-            attacker.graveyard.extend(attacker.combat_chain)
-            attacker.combat_chain.clear()
-            defender.graveyard.extend(defender.combat_chain)
-            defender.combat_chain.clear()
 
-        # Blade Break — destroy any equipment used to block this chain
+        if has_chain_cards:
+            chain_names = [c.name for c in attacker.combat_chain] + [c.name for c in defender.combat_chain]
+            self._log(f"  ⛓  Combat chain closes ({', '.join(chain_names)} → graveyard).")
+
         for player in (attacker, defender):
             opponent = defender if player is attacker else attacker
-            for eq in list(player.equipment.values()):
-                if Keyword.BLADE_BREAK in eq.card.keywords and eq.used_this_turn and not eq.destroyed:
+            for card in player.combat_chain:
+                eq = self._equipment_on_chain.get(id(card))
+                if eq is None:
+                    # Normal hand card — goes to graveyard
+                    player.graveyard.append(card)
+                    continue
+                # Equipment card
+                if Keyword.BLADE_BREAK in eq.card.keywords:
                     eq.destroyed = True
                     self._log(f"    💀 {eq.card.name} destroyed (Blade Break).")
                     self._apply_card_effects(eq.card, EffectTrigger.ON_DESTROYED, {}, player, opponent)
-                    self._move_equipment_to_graveyard(player, eq)
-
-        # Battleworn — apply -1 block counter; destroy only when defense reaches 0
-        for player in (attacker, defender):
-            for eq in list(player.equipment.values()):
-                if eq.battleworn_blocked and not eq.destroyed:
-                    eq.battleworn_blocked = False
+                    player.graveyard.append(card)
+                elif Keyword.BATTLEWORN in eq.card.keywords:
                     eq.block_counters += 1
                     if eq.defense == 0:
                         eq.destroyed = True
                         self._log(f"    💀 {eq.card.name} worn out (Battleworn) → graveyard.")
-                        self._move_equipment_to_graveyard(player, eq)
+                        player.graveyard.append(card)
                     else:
                         self._log(f"    🔨 {eq.card.name} gets -1 block counter (Battleworn, {eq.defense} def remaining).")
+                        player.equipment[eq.card.equip_slot.value] = eq
+                else:
+                    # Equipment with no special chain keyword goes to graveyard
+                    player.graveyard.append(card)
+            player.combat_chain.clear()
+
+        self._equipment_on_chain.clear()
 
 
     def _end_attack_phase(self, active: Player, opponent: Player):
@@ -1262,10 +1239,7 @@ class FaBEnv:
         self._pending_attack_power = power
         self._pending_attack_go_again = False
         self._committed_defend_cards = []
-        self._committed_defend_equip_slots = []
-        defender_idx = 1 - self._game.active_player_idx
-        for eq in self._game.players[defender_idx].equipment.values():
-            eq.blocking = False
+        self._committed_defend_equip = []
 
         # Consume any Quicken token in the attacker's arena — it grants Go Again
         # to the next attack declared after it was created (not the attack that made it).
