@@ -381,7 +381,8 @@ def legal_mentor_flip_actions() -> List[Action]:
 
 
 def legal_reaction_actions(player: 'Player', attacker_idx: int,
-                           priority_idx: int) -> List[Action]:
+                           priority_idx: int,
+                           pending_is_sword_attack: bool = False) -> List[Action]:
     """
     Legal actions during the reaction phase (between defender committing blocks
     and combat damage resolution).
@@ -391,6 +392,7 @@ def legal_reaction_actions(player: 'Player', attacker_idx: int,
     Either player may always pass priority.
     """
     from cards import CardType
+    from card_effects import EffectTrigger, EffectAction
 
     actions: List[Action] = [Action(ActionType.PASS_PRIORITY)]
     is_attacker = priority_idx == attacker_idx
@@ -409,6 +411,13 @@ def legal_reaction_actions(player: 'Player', attacker_idx: int,
         elif card.card_type == CardType.ATTACK_REACTION and is_attacker:
             ctx = {"weapon_attack_count": player.weapon_attack_count}
             if card.play_condition is not None and not card.play_condition(ctx):
+                continue
+            requires_sword = any(
+                e.trigger == EffectTrigger.ON_ATTACK_REACTION
+                and e.action == EffectAction.SWORD_ATTACK_GO_AGAIN
+                for e in (card.effects or [])
+            )
+            if requires_sword and not pending_is_sword_attack:
                 continue
         elif card.card_type == CardType.DEFENSE_REACTION and not is_attacker:
             pass
