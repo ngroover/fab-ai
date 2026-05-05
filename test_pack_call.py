@@ -59,11 +59,11 @@ def _defend_with_pack_call(env, rhinar):
     """Commit Pack Call (index 2 in Rhinar's hand) as the sole blocker."""
     legal = env.legal_actions()
     env.step(next(a for a in legal
-                  if a.action_type == ActionType.DEFEND and a.defend_hand_indices == [2]))
+                  if a.action_type == ActionType.DEFEND and a.defend_hand_index == 2))
     legal = env.legal_actions()
     env.step(next(a for a in legal
                   if a.action_type == ActionType.DEFEND
-                  and not a.defend_hand_indices
+                  and a.defend_hand_index is None
                   and not a.defend_equip_slots))
 
 

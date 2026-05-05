@@ -79,7 +79,7 @@ def _commit_no_block(env):
     no_block = next(
         a for a in legal
         if a.action_type == ActionType.DEFEND
-        and not a.defend_hand_indices
+        and a.defend_hand_index is None
         and not a.defend_equip_slots
     )
     env.step(no_block)
@@ -191,12 +191,12 @@ class TestBarragingBeatdownBonusApplies_OneBlock(unittest.TestCase):
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND
-                           and a.defend_hand_indices == [0]))
+                           and a.defend_hand_index == 0))
         # Commit
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND
-                           and not a.defend_hand_indices
+                           and a.defend_hand_index is None
                            and not a.defend_equip_slots))
         _pass_reactions(self.env)
 
@@ -220,19 +220,19 @@ class TestBarragingBeatdownBonusNullified_TwoBlocks(unittest.TestCase):
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND
-                           and a.defend_hand_indices == [0]))
+                           and a.defend_hand_index == 0))
 
         # Block with On a Knife Edge (index 1, defense 2)
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND
-                           and a.defend_hand_indices == [1]))
+                           and a.defend_hand_index == 1))
 
         # Commit
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND
-                           and not a.defend_hand_indices
+                           and a.defend_hand_index is None
                            and not a.defend_equip_slots))
         _pass_reactions(self.env)
 

@@ -1631,14 +1631,13 @@ class _WebHumanAgent:
             total = sum(c.pitch for c in pitched)
             return f"PITCH — {', '.join(names)} (total: {total} resource{'s' if total != 1 else ''})"
         if action.action_type == ActionType.DEFEND:
-            if not action.defend_hand_indices and not action.defend_equip_slots:
+            if action.defend_hand_index is None and not action.defend_equip_slots:
                 return "NO BLOCK — take full damage"
             parts, total = [], 0
-            for i in action.defend_hand_indices:
-                if 0 <= i < len(player.hand):
-                    c = player.hand[i]
-                    parts.append(f"{c.name} (def:{c.defense})")
-                    total += c.defense
+            if action.defend_hand_index is not None and 0 <= action.defend_hand_index < len(player.hand):
+                c = player.hand[action.defend_hand_index]
+                parts.append(f"{c.name} (def:{c.defense})")
+                total += c.defense
             for slot in action.defend_equip_slots:
                 if slot in player.equipment:
                     eq = player.equipment[slot]

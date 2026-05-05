@@ -400,14 +400,13 @@ class TestInstantWindowTurn1(unittest.TestCase):
         env = self._advance_to_defend_phase()
         legal = env.legal_actions()
         for a in legal:
-            if a.action_type == ActionType.DEFEND and a.defend_hand_indices:
+            if a.action_type == ActionType.DEFEND and a.defend_hand_index is not None:
                 dorinthea = env._game.players[1]
-                for i in a.defend_hand_indices:
-                    card = dorinthea.hand[i]
-                    self.assertFalse(
-                        card.no_block,
-                        f"{card.name} has no_block=True but was offered as a block",
-                    )
+                card = dorinthea.hand[a.defend_hand_index]
+                self.assertFalse(
+                    card.no_block,
+                    f"{card.name} has no_block=True but was offered as a block",
+                )
 
     def test_defend_phase_is_active_after_instant_window(self):
         """After the instant window closes, the game is in DEFEND with the

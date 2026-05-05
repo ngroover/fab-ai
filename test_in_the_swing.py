@@ -65,7 +65,7 @@ def _setup_to_second_weapon_reaction(env):
     env.step(next(
         a for a in legal
         if a.action_type == ActionType.DEFEND
-        and a.defend_hand_indices == []
+        and a.defend_hand_index is None
         and not a.defend_equip_slots
     ))
 
@@ -84,7 +84,7 @@ def _setup_to_second_weapon_reaction(env):
     env.step(next(
         a for a in legal
         if a.action_type == ActionType.DEFEND
-        and a.defend_hand_indices == []
+        and a.defend_hand_index is None
         and not a.defend_equip_slots
     ))
 

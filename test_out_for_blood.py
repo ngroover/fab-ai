@@ -53,10 +53,10 @@ def _setup(env):
     env.step(Action(ActionType.PITCH, pitch_indices=[3]))
 
     # Step 4: Rhinar defends with Pack Hunt (index 1)
-    env.step(Action(ActionType.DEFEND, defend_hand_indices=[1]))
+    env.step(Action(ActionType.DEFEND, defend_hand_index=1))
 
     # Step 5: Rhinar commits block
-    env.step(Action(ActionType.DEFEND, defend_hand_indices=[], defend_equip_slots=[]))
+    env.step(Action(ActionType.DEFEND))
 
     # Step 6: Dorinthea plays Out for Blood (hand[1])
     env.step(Action(ActionType.PLAY_CARD, card=dorinthea.hand[1]))
@@ -103,7 +103,7 @@ class TestOutForBloodEffect(unittest.TestCase):
         env.step(Action(ActionType.PITCH, pitch_indices=[3]))
 
         # Rhinar does NOT block with a hand card — reprise condition NOT met
-        env.step(Action(ActionType.DEFEND, defend_hand_indices=[], defend_equip_slots=[]))
+        env.step(Action(ActionType.DEFEND))
 
         # Play Out for Blood
         env.step(Action(ActionType.PLAY_CARD, card=dorinthea.hand[1]))

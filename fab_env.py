@@ -566,8 +566,9 @@ class FaBEnv:
         the stack at all.
         """
         # Single card/equipment addition — accumulate and stay in DEFEND phase
-        if action.defend_hand_indices or action.defend_equip_slots:
-            self._pending_defend_indices.extend(action.defend_hand_indices)
+        if action.defend_hand_index is not None or action.defend_equip_slots:
+            if action.defend_hand_index is not None:
+                self._pending_defend_indices.append(action.defend_hand_index)
             self._pending_defend_equip_slots.extend(action.defend_equip_slots)
             return  # defender picks again next step
 
@@ -576,7 +577,6 @@ class FaBEnv:
         defender_idx = 1 - attacker_idx
         defender = self._game.players[defender_idx]
         full_action = Action(ActionType.DEFEND,
-                             defend_hand_indices=list(self._pending_defend_indices),
                              defend_equip_slots=list(self._pending_defend_equip_slots))
         # Move blocking cards from hand to combat chain immediately so the game
         # state is correct during the reaction phase.
@@ -1052,7 +1052,7 @@ class FaBEnv:
         if card.card_type == CardType.ATTACK_REACTION:
             attacker = self._game.players[self._reaction_attacker_idx]
             committed = self._committed_defend_action
-            reprise_met = bool(committed and committed.defend_hand_indices)
+            reprise_met = bool(committed and self._committed_defend_cards)
             reaction_ctx = {
                 "weapon_attack_count": attacker.weapon_attack_count,
                 "reprise_condition_met": reprise_met,

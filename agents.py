@@ -170,12 +170,12 @@ class RhinarAgent:
         for a in legal:
             if a.action_type != ActionType.DEFEND:
                 continue
-            if not a.defend_hand_indices and not a.defend_equip_slots:
+            if a.defend_hand_index is None and not a.defend_equip_slots:
                 continue  # skip "done" option
-            hand_def = sum(
-                player.hand[i].defense
-                for i in a.defend_hand_indices
-                if 0 <= i < len(player.hand)
+            hand_def = (
+                player.hand[a.defend_hand_index].defense
+                if a.defend_hand_index is not None and 0 <= a.defend_hand_index < len(player.hand)
+                else 0
             )
             equip_def = sum(
                 player.equipment[s].defense
@@ -326,16 +326,15 @@ class DorintheiAgent:
         for a in legal:
             if a.action_type != ActionType.DEFEND:
                 continue
-            if not a.defend_hand_indices and not a.defend_equip_slots:
+            if a.defend_hand_index is None and not a.defend_equip_slots:
                 continue  # skip "done" option
             hand_def = 0
             reaction_bonus = 0
-            for i in a.defend_hand_indices:
-                if 0 <= i < len(player.hand):
-                    c = player.hand[i]
-                    hand_def += c.defense
-                    if c.card_type in (CardType.DEFENSE_REACTION,):
-                        reaction_bonus += 1
+            if a.defend_hand_index is not None and 0 <= a.defend_hand_index < len(player.hand):
+                c = player.hand[a.defend_hand_index]
+                hand_def += c.defense
+                if c.card_type in (CardType.DEFENSE_REACTION,):
+                    reaction_bonus += 1
             equip_def = sum(
                 player.equipment[s].defense
                 for s in a.defend_equip_slots
@@ -358,12 +357,12 @@ class DorintheiAgent:
             for a in legal:
                 if a.action_type != ActionType.DEFEND:
                     continue
-                if not a.defend_hand_indices and not a.defend_equip_slots:
+                if a.defend_hand_index is None and not a.defend_equip_slots:
                     continue
-                hand_def = sum(
-                    player.hand[i].defense
-                    for i in a.defend_hand_indices
-                    if 0 <= i < len(player.hand)
+                hand_def = (
+                    player.hand[a.defend_hand_index].defense
+                    if a.defend_hand_index is not None and 0 <= a.defend_hand_index < len(player.hand)
+                    else 0
                 )
                 equip_def = sum(
                     player.equipment[s].defense
@@ -580,15 +579,14 @@ class HumanAgent:
                 label += f" — pitching: {', '.join(pitched)}"
             return label
         if action.action_type == ActionType.DEFEND:
-            if not action.defend_hand_indices and not action.defend_equip_slots:
+            if action.defend_hand_index is None and not action.defend_equip_slots:
                 return "DONE — stop adding block cards"
             parts = []
             total = 0
-            for i in action.defend_hand_indices:
-                if 0 <= i < len(player.hand):
-                    c = player.hand[i]
-                    parts.append(f"{c.name} (def:{c.defense})")
-                    total += c.defense
+            if action.defend_hand_index is not None and 0 <= action.defend_hand_index < len(player.hand):
+                c = player.hand[action.defend_hand_index]
+                parts.append(f"{c.name} (def:{c.defense})")
+                total += c.defense
             for slot in action.defend_equip_slots:
                 if slot in player.equipment:
                     eq = player.equipment[slot]

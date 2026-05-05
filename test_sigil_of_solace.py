@@ -305,8 +305,8 @@ class TestSigilNotPlayableDuringDefendPhase(unittest.TestCase):
         # No DEFEND action points to the Sigil (it has no_block=True anyway)
         for a in legal:
             if a.action_type == ActionType.DEFEND:
-                for idx in a.defend_hand_indices:
-                    self.assertNotEqual(dorinthea.hand[idx].name, "Sigil of Solace")
+                if a.defend_hand_index is not None:
+                    self.assertNotEqual(dorinthea.hand[a.defend_hand_index].name, "Sigil of Solace")
 
 
 if __name__ == "__main__":
