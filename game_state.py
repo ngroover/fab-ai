@@ -15,6 +15,8 @@ class Equipment:
         self.destroyed = False
         self.used_this_turn = False
         self.blocking = False  # True while this equipment is committed to block the current attack
+        self.block_counters = 0        # accumulated -1 block counters (Battleworn)
+        self.battleworn_blocked = False  # True if used to block in current combat chain
 
     def reset_turn(self):
         self.used_this_turn = False
@@ -25,7 +27,9 @@ class Equipment:
 
     @property
     def defense(self):
-        return self.card.defense if not self.destroyed else 0
+        if self.destroyed:
+            return 0
+        return max(0, self.card.defense - self.block_counters)
 
 
 class Player:
