@@ -1469,11 +1469,18 @@ def _build_gamestate_snapshot(env) -> dict:
     defender_idx = 1 - active_idx
     defender = players[defender_idx]
 
-    # Cards already moved from hand to combat chain when committed as blockers
-    all_defenders = [_card_to_dict(c) for c in env._committed_defend_cards]
-    total_block = sum(c.defense for c in env._committed_defend_cards)
+    # Cards already moved from hand/equipment to combat chain as blockers
+    all_defenders = []
+    total_block = 0
+    for c in env._committed_defend_cards:
+        d = _card_to_dict(c)
+        d["from_hand"] = True
+        all_defenders.append(d)
+        total_block += c.defense
     for eq in env._committed_defend_equip:
-        all_defenders.append(_card_to_dict(eq.card))
+        d = _card_to_dict(eq.card)
+        d["from_hand"] = False
+        all_defenders.append(d)
         total_block += eq.defense
 
     def _self_view(p):
@@ -1563,9 +1570,11 @@ def _build_gamestate_snapshot(env) -> dict:
         # Already-resolved links still on the chain (cleared when chain closes).
         # Exclude current-link cards from chained_defenders since those are in all_defenders.
         "chained_attacks": [_card_to_dict(c) for c in players[active_idx].combat_chain],
-        "_current_link_ids": {id(c) for c in env._committed_defend_cards} | {id(eq.card) for eq in env._committed_defend_equip},
-        "chained_defenders": [_card_to_dict(c) for c in defender.combat_chain
-                              if id(c) not in ({id(c) for c in env._committed_defend_cards} | {id(eq.card) for eq in env._committed_defend_equip})],
+        "chained_defenders": [
+            {**_card_to_dict(c), "from_hand": id(c) in env._defend_from_hand_ids}
+            for c in defender.combat_chain
+            if id(c) not in ({id(c) for c in env._committed_defend_cards} | {id(eq.card) for eq in env._committed_defend_equip})
+        ],
     }
 
     return {

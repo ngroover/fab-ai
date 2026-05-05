@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import random
 from enum import Enum, auto
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Set, Tuple, Any
 
 from cards import Card, CardType, Color, Keyword, QUICKEN_TOKEN_CARD
 from card_effects import EffectTrigger, EffectAction
@@ -160,6 +160,9 @@ class FaBEnv:
         self._equipment_on_chain: dict = {}       # id(card) → Equipment for whole chain lifetime
         self._pending_reaction_play: bool = False         # True when PITCH phase is paying for a reaction card
         self._pending_reaction_player_idx: int = 0
+        self._pending_reaction_from_hand: bool = True    # provenance of card being paid through pitch phase
+        self._reaction_from_hand: Dict[int, bool] = {}  # id(card) → from_hand for cards on reaction stack
+        self._defend_from_hand_ids: Set[int] = set()    # id(card) for current-link defender cards from hand
         # Isolated RNG — seeded in reset() so game randomness is never shared with external code.
         self._rng: random.Random = random.Random()
 
@@ -241,8 +244,11 @@ class FaBEnv:
         self._committed_defend_action = None
         self._committed_defend_cards = []
         self._committed_defend_equip = []
+        self._defend_from_hand_ids = set()
         self._pending_reaction_play = False
         self._pending_reaction_player_idx = 0
+        self._pending_reaction_from_hand = True
+        self._reaction_from_hand = {}
 
         # Randomly select which player gets to choose who goes first
         self._choosing_player_idx = self._rng.randint(0, 1)
@@ -474,12 +480,14 @@ class FaBEnv:
             # Card played during REACTION window — push to stack and return to REACTION.
             self._pending_reaction_play = False
             owner_idx = self._pending_reaction_player_idx
+            from_hand = self._pending_reaction_from_hand
+            self._pending_reaction_from_hand = True
             active.resource_points -= card.cost
             self._log(f"\n    ▶  {active.name} plays {card}"
                       + (f" (pitched: {', '.join(c.name for c in pitched)})"
                          if pitched else ""))
             self._phase = Phase.REACTION
-            self._push_reaction_to_stack(card, owner_idx)
+            self._push_reaction_to_stack(card, owner_idx, from_hand=from_hand)
             return
 
         self._phase = Phase.ATTACK
@@ -566,6 +574,7 @@ class FaBEnv:
                 defender.hand.remove(card)
                 defender.combat_chain.append(card)
                 self._committed_defend_cards.append(card)
+                self._defend_from_hand_ids.add(id(card))
             return  # defender picks again next step
 
         if action.equip_slot is not None:
@@ -601,6 +610,7 @@ class FaBEnv:
         self._committed_defend_cards = []
         def_equip = self._committed_defend_equip
         self._committed_defend_equip = []
+        self._defend_from_hand_ids.clear()
 
         # Use the power stored when the attack was declared. It already includes
         # weapon bonuses (set by _trigger_defend_phase) and any modifications from
@@ -977,6 +987,7 @@ class FaBEnv:
         self._reaction_passes = 0
         self._reaction_defense_bonus = 0
         self._instant_stack = []  # fresh stack for this reaction window
+        self._reaction_from_hand = {}
         self._phase = Phase.REACTION
         self.agent_selection = f"agent_{attacker_idx}"
         attacker_name = self._game.players[attacker_idx].name
@@ -994,9 +1005,10 @@ class FaBEnv:
         self._resolve_defend(committed, defender, attacker,
                              reaction_defense_bonus=self._reaction_defense_bonus)
 
-    def _push_reaction_to_stack(self, card: "Card", owner_idx: int) -> None:
+    def _push_reaction_to_stack(self, card: "Card", owner_idx: int, from_hand: bool = True) -> None:
         """Place *card* on the reaction stack and pass priority to the opponent."""
         self._instant_stack.append((owner_idx, card))
+        self._reaction_from_hand[id(card)] = from_hand
         owner_name = self._game.players[owner_idx].name
         self._log(f"    📌  {owner_name} puts {card.name} on the stack "
                   f"(stack size: {len(self._instant_stack)}).")
@@ -1007,12 +1019,13 @@ class FaBEnv:
     def _resolve_top_of_reaction_stack(self) -> None:
         """Pop and resolve the topmost card on the reaction stack (LIFO)."""
         owner_idx, card = self._instant_stack.pop()
+        from_hand = self._reaction_from_hand.pop(id(card), True)
         owner = self._game.players[owner_idx]
         opp = self._game.players[1 - owner_idx]
-        self._resolve_reaction_from_stack(card, owner, opp)
+        self._resolve_reaction_from_stack(card, owner, opp, from_hand=from_hand)
 
     def _resolve_reaction_from_stack(self, card: "Card", owner: "Player",
-                                     opponent: "Player") -> None:
+                                     opponent: "Player", from_hand: bool = True) -> None:
         """Resolve a card that was on the reaction stack."""
         if card.card_type == CardType.INSTANT:
             self._resolve_instant_from_stack(card, owner, opponent)
@@ -1022,7 +1035,7 @@ class FaBEnv:
         if card.card_type == CardType.ATTACK_REACTION:
             attacker = self._game.players[self._reaction_attacker_idx]
             committed = self._committed_defend_action
-            reprise_met = bool(committed and self._committed_defend_cards)
+            reprise_met = bool(committed and self._defend_from_hand_ids)
             reaction_ctx = {
                 "weapon_attack_count": attacker.weapon_attack_count,
                 "reprise_condition_met": reprise_met,
@@ -1056,6 +1069,8 @@ class FaBEnv:
             self._log(f"    🛡  {n} resolves — +{bonus} defense "
                       f"({self._reaction_defense_bonus} total reaction defense).")
             owner.combat_chain.append(card)
+            if from_hand:
+                self._defend_from_hand_ids.add(id(card))
             return
 
         owner.graveyard.append(card)
@@ -1120,6 +1135,7 @@ class FaBEnv:
                 self._pitched_this_play = []
                 self._pending_reaction_play = True
                 self._pending_reaction_player_idx = self._reaction_priority_idx
+                self._pending_reaction_from_hand = in_hand
                 self._phase = Phase.PITCH
                 self._log(f"\n    ▶  {active.name} plays {card.name} "
                           f"(needs {needed} more resource{'s' if needed != 1 else ''})")
@@ -1127,7 +1143,7 @@ class FaBEnv:
 
             active.resource_points -= card.cost
             self._log(f"\n    ▶  {active.name} plays {card.name}")
-            self._push_reaction_to_stack(card, active_idx)
+            self._push_reaction_to_stack(card, active_idx, from_hand=in_hand)
             return
 
         # Unknown action — treat as pass.
@@ -1204,6 +1220,7 @@ class FaBEnv:
             player.combat_chain.clear()
 
         self._equipment_on_chain.clear()
+        self._defend_from_hand_ids.clear()
 
 
     def _end_attack_phase(self, active: Player, opponent: Player):
@@ -1241,6 +1258,7 @@ class FaBEnv:
         self._pending_attack_go_again = False
         self._committed_defend_cards = []
         self._committed_defend_equip = []
+        self._defend_from_hand_ids.clear()
 
         # Consume any Quicken token in the attacker's arena — it grants Go Again
         # to the next attack declared after it was created (not the attack that made it).
