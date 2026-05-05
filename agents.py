@@ -170,17 +170,18 @@ class RhinarAgent:
         for a in legal:
             if a.action_type != ActionType.DEFEND:
                 continue
-            if not a.defend_hand_indices and not a.defend_equip_slots:
+            if a.hand_index is None and a.equip_slot is None:
                 continue  # skip "done" option
-            hand_def = sum(
-                player.hand[i].defense
-                for i in a.defend_hand_indices
-                if 0 <= i < len(player.hand)
+            hand_def = (
+                player.hand[a.hand_index].defense
+                if a.hand_index is not None and 0 <= a.hand_index < len(player.hand)
+                else 0
             )
-            equip_def = sum(
-                player.equipment[s].defense
-                for s in a.defend_equip_slots
-                if s in player.equipment and player.equipment[s].active
+            equip_def = (
+                player.equipment[a.equip_slot].defense
+                if a.equip_slot is not None and a.equip_slot in player.equipment
+                and player.equipment[a.equip_slot].active
+                else 0
             )
             total = hand_def + equip_def
             if total > 0:
@@ -196,20 +197,20 @@ class RhinarAgent:
         priority = ["Titanium Bauble", "Dodge", "Rally the Rearguard", "Clearing Bellow"]
         for name in priority:
             for a in legal:
-                if a.action_type != ActionType.ARSENAL or a.arsenal_hand_index < 0:
+                if a.action_type != ActionType.ARSENAL or a.hand_index is None:
                     continue
-                if 0 <= a.arsenal_hand_index < len(player.hand):
-                    if player.hand[a.arsenal_hand_index].name == name:
+                if 0 <= a.hand_index < len(player.hand):
+                    if player.hand[a.hand_index].name == name:
                         return a
         # Store any blue
         for a in legal:
-            if a.action_type != ActionType.ARSENAL or a.arsenal_hand_index < 0:
+            if a.action_type != ActionType.ARSENAL or a.hand_index is None:
                 continue
-            if 0 <= a.arsenal_hand_index < len(player.hand):
-                if player.hand[a.arsenal_hand_index].color == Color.BLUE:
+            if 0 <= a.hand_index < len(player.hand):
+                if player.hand[a.hand_index].color == Color.BLUE:
                     return a
         return next(a for a in legal if a.action_type == ActionType.ARSENAL
-                    and a.arsenal_hand_index == -1)
+                    and a.hand_index is None)
 
     def select_pitch(self, obs: dict, legal: List[Action], player: 'Player',
                      pending_card=None) -> Action:
@@ -326,20 +327,20 @@ class DorintheiAgent:
         for a in legal:
             if a.action_type != ActionType.DEFEND:
                 continue
-            if not a.defend_hand_indices and not a.defend_equip_slots:
+            if a.hand_index is None and a.equip_slot is None:
                 continue  # skip "done" option
             hand_def = 0
             reaction_bonus = 0
-            for i in a.defend_hand_indices:
-                if 0 <= i < len(player.hand):
-                    c = player.hand[i]
-                    hand_def += c.defense
-                    if c.card_type in (CardType.DEFENSE_REACTION,):
-                        reaction_bonus += 1
-            equip_def = sum(
-                player.equipment[s].defense
-                for s in a.defend_equip_slots
-                if s in player.equipment and player.equipment[s].active
+            if a.hand_index is not None and 0 <= a.hand_index < len(player.hand):
+                c = player.hand[a.hand_index]
+                hand_def += c.defense
+                if c.card_type in (CardType.DEFENSE_REACTION,):
+                    reaction_bonus += 1
+            equip_def = (
+                player.equipment[a.equip_slot].defense
+                if a.equip_slot is not None and a.equip_slot in player.equipment
+                and player.equipment[a.equip_slot].active
+                else 0
             )
             total = hand_def + equip_def
             if total >= needed:
@@ -358,17 +359,18 @@ class DorintheiAgent:
             for a in legal:
                 if a.action_type != ActionType.DEFEND:
                     continue
-                if not a.defend_hand_indices and not a.defend_equip_slots:
+                if a.hand_index is None and a.equip_slot is None:
                     continue
-                hand_def = sum(
-                    player.hand[i].defense
-                    for i in a.defend_hand_indices
-                    if 0 <= i < len(player.hand)
+                hand_def = (
+                    player.hand[a.hand_index].defense
+                    if a.hand_index is not None and 0 <= a.hand_index < len(player.hand)
+                    else 0
                 )
-                equip_def = sum(
-                    player.equipment[s].defense
-                    for s in a.defend_equip_slots
-                    if s in player.equipment and player.equipment[s].active
+                equip_def = (
+                    player.equipment[a.equip_slot].defense
+                    if a.equip_slot is not None and a.equip_slot in player.equipment
+                    and player.equipment[a.equip_slot].active
+                    else 0
                 )
                 total = hand_def + equip_def
                 if total > best_partial_def:
@@ -384,19 +386,19 @@ class DorintheiAgent:
                     "Toughen Up", "Flock of the Feather Walkers"]
         for name in priority:
             for a in legal:
-                if a.action_type != ActionType.ARSENAL or a.arsenal_hand_index < 0:
+                if a.action_type != ActionType.ARSENAL or a.hand_index is None:
                     continue
-                if 0 <= a.arsenal_hand_index < len(player.hand):
-                    if player.hand[a.arsenal_hand_index].name == name:
+                if 0 <= a.hand_index < len(player.hand):
+                    if player.hand[a.hand_index].name == name:
                         return a
         for a in legal:
-            if a.action_type != ActionType.ARSENAL or a.arsenal_hand_index < 0:
+            if a.action_type != ActionType.ARSENAL or a.hand_index is None:
                 continue
-            if 0 <= a.arsenal_hand_index < len(player.hand):
-                if player.hand[a.arsenal_hand_index].color == Color.BLUE:
+            if 0 <= a.hand_index < len(player.hand):
+                if player.hand[a.hand_index].color == Color.BLUE:
                     return a
         return next(a for a in legal if a.action_type == ActionType.ARSENAL
-                    and a.arsenal_hand_index == -1)
+                    and a.hand_index is None)
 
     def select_pitch(self, obs: dict, legal: List[Action], player: 'Player',
                      pending_card=None) -> Action:
@@ -575,37 +577,34 @@ class HumanAgent:
                 card = action.card
                 src = f"hand"
             label = f"PLAY {self._fmt_card(card)} from {src}"
-            if action.pitch_indices:
-                pitched = [player.hand[i].name for i in action.pitch_indices]
-                label += f" — pitching: {', '.join(pitched)}"
+            if action.pitch_index is not None and action.pitch_index < len(player.hand):
+                label += f" — pitching: {player.hand[action.pitch_index].name}"
             return label
         if action.action_type == ActionType.DEFEND:
-            if not action.defend_hand_indices and not action.defend_equip_slots:
+            if action.hand_index is None and action.equip_slot is None:
                 return "DONE — stop adding block cards"
             parts = []
             total = 0
-            for i in action.defend_hand_indices:
-                if 0 <= i < len(player.hand):
-                    c = player.hand[i]
-                    parts.append(f"{c.name} (def:{c.defense})")
-                    total += c.defense
-            for slot in action.defend_equip_slots:
-                if slot in player.equipment:
-                    eq = player.equipment[slot]
-                    parts.append(f"{eq.card.name}/{slot} (def:{eq.defense})")
-                    total += eq.defense
+            if action.hand_index is not None and 0 <= action.hand_index < len(player.hand):
+                c = player.hand[action.hand_index]
+                parts.append(f"{c.name} (def:{c.defense})")
+                total += c.defense
+            if action.equip_slot is not None and action.equip_slot in player.equipment:
+                eq = player.equipment[action.equip_slot]
+                parts.append(f"{eq.card.name}/{action.equip_slot} (def:{eq.defense})")
+                total += eq.defense
             return f"ADD to defense — {', '.join(parts)} [+{total} def]"
         if action.action_type == ActionType.PITCH:
-            if not action.pitch_indices:
+            if action.pitch_index is None:
                 return "PITCH — no cards needed (cost already covered)"
-            pitched = [player.hand[i] for i in action.pitch_indices if i < len(player.hand)]
+            pitched = [player.hand[action.pitch_index]] if action.pitch_index < len(player.hand) else []
             names = [self._fmt_card(c) for c in pitched]
             total = sum(c.pitch for c in pitched)
             return f"PITCH — {', '.join(names)} (total: {total} resource{'s' if total != 1 else ''})"
         if action.action_type == ActionType.ARSENAL:
-            if action.arsenal_hand_index == -1:
+            if action.hand_index is None:
                 return "DON'T store (no arsenal this turn)"
-            card = player.hand[action.arsenal_hand_index]
+            card = player.hand[action.hand_index]
             return f"STORE in arsenal — {self._fmt_card(card)}"
         if action.action_type == ActionType.PITCH_ORDER:
             if 0 <= action.pitch_order_index < len(player.pitch_zone):

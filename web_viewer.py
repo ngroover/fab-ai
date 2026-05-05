@@ -1619,36 +1619,33 @@ class _WebHumanAgent:
             else:
                 card, src = action.card, f"hand"
             label = f"PLAY {self._fmt_card(card)} from {src}"
-            if action.pitch_indices:
-                pitched = [player.hand[i].name for i in action.pitch_indices]
-                label += f" | pitch: {', '.join(pitched)}"
+            if action.pitch_index is not None and action.pitch_index < len(player.hand):
+                label += f" | pitch: {player.hand[action.pitch_index].name}"
             return label
         if action.action_type == ActionType.PITCH:
-            if not action.pitch_indices:
+            if action.pitch_index is None:
                 return "PITCH — no cards needed (cost already covered)"
-            pitched = [player.hand[i] for i in action.pitch_indices if i < len(player.hand)]
+            pitched = [player.hand[action.pitch_index]] if action.pitch_index < len(player.hand) else []
             names = [self._fmt_card(c) for c in pitched]
             total = sum(c.pitch for c in pitched)
             return f"PITCH — {', '.join(names)} (total: {total} resource{'s' if total != 1 else ''})"
         if action.action_type == ActionType.DEFEND:
-            if not action.defend_hand_indices and not action.defend_equip_slots:
+            if action.hand_index is None and action.equip_slot is None:
                 return "NO BLOCK — take full damage"
             parts, total = [], 0
-            for i in action.defend_hand_indices:
-                if 0 <= i < len(player.hand):
-                    c = player.hand[i]
-                    parts.append(f"{c.name} (def:{c.defense})")
-                    total += c.defense
-            for slot in action.defend_equip_slots:
-                if slot in player.equipment:
-                    eq = player.equipment[slot]
-                    parts.append(f"{eq.card.name}/{slot} (def:{eq.defense})")
-                    total += eq.defense
+            if action.hand_index is not None and 0 <= action.hand_index < len(player.hand):
+                c = player.hand[action.hand_index]
+                parts.append(f"{c.name} (def:{c.defense})")
+                total += c.defense
+            if action.equip_slot is not None and action.equip_slot in player.equipment:
+                eq = player.equipment[action.equip_slot]
+                parts.append(f"{eq.card.name}/{action.equip_slot} (def:{eq.defense})")
+                total += eq.defense
             return f"BLOCK — {', '.join(parts)} [total:{total}]"
         if action.action_type == ActionType.ARSENAL:
-            if action.arsenal_hand_index == -1:
+            if action.hand_index is None:
                 return "DON'T STORE — skip arsenal"
-            card = player.hand[action.arsenal_hand_index]
+            card = player.hand[action.hand_index]
             return f"STORE — {self._fmt_card(card)}"
         if action.action_type == ActionType.GO_FIRST:
             return "GO FIRST — you take the first turn"

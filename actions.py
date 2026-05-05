@@ -21,7 +21,7 @@ ActionType enum:
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import List, Optional, TYPE_CHECKING
 
@@ -54,17 +54,13 @@ class Action:
     from_arsenal: bool = False
 
     # PITCH fields (step 2: choose which hand cards to pitch to cover the cost)
-    pitch_indices: List[int] = field(default_factory=list)  # indices into player.hand
+    pitch_index: Optional[int] = None  # index into player.hand (None = no pitch needed)
 
-    # DEFEND fields
-    defend_hand_indices: List[int] = field(default_factory=list)
-    defend_equip_slots: List[str] = field(default_factory=list)  # e.g. ["head", "legs"]
+    # DEFEND / ARSENAL shared field — index into player.hand (None = no card)
+    hand_index: Optional[int] = None
 
-    # ARSENAL field
-    arsenal_hand_index: int = -1  # -1 means "don't store anything"
-
-    # ACTIVATE_EQUIPMENT field
-    equip_slot: str = ""  # e.g. "head"
+    # DEFEND / ACTIVATE_EQUIPMENT shared field — equipment slot (None = no equipment)
+    equip_slot: Optional[str] = None  # e.g. "head"
 
     # PITCH_ORDER field
     pitch_order_index: int = -1  # index into player.pitch_zone
@@ -77,15 +73,15 @@ class Action:
             src = f"hand[{self.card.name}]"
             return f"Action(PLAY_CARD {src})"
         if self.action_type == ActionType.PITCH:
-            return f"Action(PITCH indices={self.pitch_indices})"
+            return f"Action(PITCH index={self.pitch_index})"
         if self.action_type == ActionType.WEAPON:
             return "Action(WEAPON)"
         if self.action_type == ActionType.PASS:
             return "Action(PASS)"
         if self.action_type == ActionType.DEFEND:
-            return f"Action(DEFEND hand={self.defend_hand_indices} equip={self.defend_equip_slots})"
+            return f"Action(DEFEND hand={self.hand_index} equip={self.equip_slot})"
         if self.action_type == ActionType.ARSENAL:
-            return f"Action(ARSENAL store={self.arsenal_hand_index})"
+            return f"Action(ARSENAL store={self.hand_index})"
         if self.action_type == ActionType.ACTIVATE_EQUIPMENT:
             return f"Action(ACTIVATE_EQUIPMENT slot={self.equip_slot})"
         if self.action_type == ActionType.GO_FIRST:
@@ -287,7 +283,7 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
     needed = max(0, pending_card.cost - player.resource_points)
 
     if needed == 0:
-        return [Action(ActionType.PITCH, pitch_indices=[])]
+        return [Action(ActionType.PITCH)]
 
     has_discard_cost = _card_has_discard_cost(pending_card)
     has_reveal_cost = _card_has_reveal_cost(pending_card)
@@ -310,38 +306,30 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
             if remaining_needed <= 0:
                 # This card alone covers the cost; need >= 1 left for discard
                 if len(remaining) >= 1:
-                    actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
+                    actions.append(Action(ActionType.PITCH, pitch_index=i))
             else:
                 # Still need more after this pitch — remaining cards must be able to cover
                 if _has_discard_available(remaining, remaining_needed):
-                    actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
+                    actions.append(Action(ActionType.PITCH, pitch_index=i))
         else:
             if has_reveal_cost:
                 # Don't pitch this card if it would leave no cost ≤ 1 card in hand to reveal
                 hand_after = [card for j, card in enumerate(player.hand) if j != i]
                 if not any(card.cost <= 1 for card in hand_after):
                     continue
-            actions.append(Action(ActionType.PITCH, pitch_indices=[i]))
-    return actions if actions else [Action(ActionType.PITCH, pitch_indices=[])]
+            actions.append(Action(ActionType.PITCH, pitch_index=i))
+    return actions if actions else [Action(ActionType.PITCH)]
 
 
-def legal_defend_actions(player: 'Player', attack_power: int,
-                         already_indices: List[int] = None,
-                         already_equip: List[str] = None) -> List[Action]:
+def legal_defend_actions(player: 'Player', attack_power: int) -> List[Action]:
     """
     Legal DEFEND actions for one-card-at-a-time blocking.
 
-    Returns a "done" action plus one action per remaining blockable card/equip
-    that hasn't been committed yet this defend step.
-
-    already_indices / already_equip track cards already accumulated this step.
+    Returns a "done" action plus one action per remaining blockable card/equip.
+    Cards already chosen are removed from hand immediately; equipment already
+    chosen has eq.blocking=True and is excluded here.
     """
     from cards import CardType, Keyword
-
-    if already_indices is None:
-        already_indices = []
-    if already_equip is None:
-        already_equip = []
 
     actions: List[Action] = []
 
@@ -349,10 +337,9 @@ def legal_defend_actions(player: 'Player', attack_power: int,
     actions.append(Action(ActionType.DEFEND))
 
     defenders = [(i, c) for i, c in enumerate(player.hand)
-                 if not c.no_block
-                 and i not in already_indices]
+                 if not c.no_block]
     equip_slots = [slot for slot, eq in player.equipment.items()
-                   if eq.active and eq.defense > 0 and slot not in already_equip
+                   if eq.active and eq.defense > 0 and not eq.blocking
                    and not (Keyword.BLADE_BREAK in eq.card.keywords and eq.used_this_turn)]
 
     # One card at a time — deduplicate identical cards (same choice regardless of copy)
@@ -361,25 +348,25 @@ def legal_defend_actions(player: 'Player', attack_power: int,
         if c.name in seen_defend_names:
             continue
         seen_defend_names.add(c.name)
-        actions.append(Action(ActionType.DEFEND, defend_hand_indices=[i]))
+        actions.append(Action(ActionType.DEFEND, hand_index=i))
 
     # One equipment slot at a time
     for slot in equip_slots:
-        actions.append(Action(ActionType.DEFEND, defend_equip_slots=[slot]))
+        actions.append(Action(ActionType.DEFEND, equip_slot=slot))
 
     return actions
 
 
 def legal_arsenal_actions(player: 'Player') -> List[Action]:
     """End-of-turn: store a card or store nothing."""
-    actions = [Action(ActionType.ARSENAL, arsenal_hand_index=-1)]  # don't store
+    actions = [Action(ActionType.ARSENAL)]  # hand_index=None means don't store
     if not player.arsenal:
         seen_arsenal_names: set = set()
         for i, card in enumerate(player.hand):
             if card.name in seen_arsenal_names:
                 continue  # duplicate card — same choice regardless of which copy is stored
             seen_arsenal_names.add(card.name)
-            actions.append(Action(ActionType.ARSENAL, arsenal_hand_index=i))
+            actions.append(Action(ActionType.ARSENAL, hand_index=i))
     return actions
 
 

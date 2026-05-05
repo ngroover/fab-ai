@@ -69,7 +69,7 @@ def _setup_after_bb_and_bare_fangs(env):
     # Step 4: Pitch Pack Call (index 1, pitch value 2) to cover cost 2
     legal = env.legal_actions()
     pitch = next(a for a in legal
-                 if a.action_type == ActionType.PITCH and 1 in a.pitch_indices)
+                 if a.action_type == ActionType.PITCH and a.pitch_index == 1)
     env.step(pitch)
 
     while env._phase == Phase.INSTANT:
@@ -85,8 +85,8 @@ def _commit_no_block(env):
     no_block = next(
         a for a in legal
         if a.action_type == ActionType.DEFEND
-        and not a.defend_hand_indices
-        and not a.defend_equip_slots
+        and a.hand_index is None
+        and a.equip_slot is None
     )
     env.step(no_block)
 
@@ -200,13 +200,13 @@ class TestBarragingBeatdownBonusApplies_OneBlock(unittest.TestCase):
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND
-                           and a.defend_hand_indices == [0]))
+                           and a.hand_index == 0))
         # Commit
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND
-                           and not a.defend_hand_indices
-                           and not a.defend_equip_slots))
+                           and a.hand_index is None
+                           and a.equip_slot is None))
         _pass_reactions(self.env)
 
     def test_bonus_applied_one_block(self):
@@ -225,24 +225,26 @@ class TestBarragingBeatdownBonusNullified_TwoBlocks(unittest.TestCase):
         self.rhinar, self.dorinthea = _setup_after_bb_and_bare_fangs(self.env)
         self.life_before = self.dorinthea.life
 
-        # Block with Flock of the Feather Walkers (index 0, defense 2)
+        # Block with Flock of the Feather Walkers
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND
-                           and a.defend_hand_indices == [0]))
+                           and a.hand_index is not None
+                           and self.dorinthea.hand[a.hand_index].name == "Flock of the Feather Walkers"))
 
-        # Block with On a Knife Edge (index 1, defense 2)
+        # Block with On a Knife Edge (now shifted in hand after previous removal)
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND
-                           and a.defend_hand_indices == [1]))
+                           and a.hand_index is not None
+                           and self.dorinthea.hand[a.hand_index].name == "On a Knife Edge"))
 
         # Commit
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND
-                           and not a.defend_hand_indices
-                           and not a.defend_equip_slots))
+                           and a.hand_index is None
+                           and a.equip_slot is None))
         _pass_reactions(self.env)
 
     def test_bonus_nullified_two_blocks(self):

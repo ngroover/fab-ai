@@ -50,7 +50,7 @@ def _advance_to_defend(env):
     env.step(next(a for a in legal if a.action_type == ActionType.WEAPON))
 
     legal = env.legal_actions()
-    env.step(next(a for a in legal if a.pitch_indices == [2]))
+    env.step(next(a for a in legal if a.pitch_index == 2))
 
     while env._phase == Phase.INSTANT:
         env.step(env.legal_actions()[0])
@@ -62,12 +62,12 @@ def _defend_with_pack_call(env, rhinar):
     """Commit Pack Call (index 2 in Rhinar's hand) as the sole blocker."""
     legal = env.legal_actions()
     env.step(next(a for a in legal
-                  if a.action_type == ActionType.DEFEND and a.defend_hand_indices == [2]))
+                  if a.action_type == ActionType.DEFEND and a.hand_index == 2))
     legal = env.legal_actions()
     env.step(next(a for a in legal
                   if a.action_type == ActionType.DEFEND
-                  and not a.defend_hand_indices
-                  and not a.defend_equip_slots))
+                  and a.hand_index is None
+                  and a.equip_slot is None))
     while env._phase == Phase.INSTANT:
         env.step(env.legal_actions()[0])
 

@@ -62,7 +62,7 @@ def _play_warriors_valor(env):
     # This avoids a second PITCH step when attacking with Dawnblade (cost=1).
     assert env._phase == Phase.PITCH
     legal = env.legal_actions()
-    env.step(next(a for a in legal if a.pitch_indices == [2]))
+    env.step(next(a for a in legal if a.pitch_index == 2))
 
     while env._phase == Phase.INSTANT:
         env.step(env.legal_actions()[0])
@@ -95,8 +95,8 @@ def _setup_weapon_attack_hit(env):
     no_def = next(
         a for a in legal
         if a.action_type == ActionType.DEFEND
-        and not a.defend_hand_indices
-        and not a.defend_equip_slots
+        and a.hand_index is None
+        and a.equip_slot is None
     )
     env.step(no_def)
 
@@ -134,8 +134,8 @@ def _setup_weapon_attack_miss(env):
     env.step(next(
         a for a in legal
         if a.action_type == ActionType.DEFEND
-        and a.defend_hand_indices == [3]
-        and not a.defend_equip_slots
+        and a.hand_index == 3
+        and a.equip_slot is None
     ))
     assert env._phase == Phase.DEFEND, f"Expected DEFEND after adding blocker, got {env._phase}"
 
@@ -144,8 +144,8 @@ def _setup_weapon_attack_miss(env):
     env.step(next(
         a for a in legal
         if a.action_type == ActionType.DEFEND
-        and not a.defend_hand_indices
-        and not a.defend_equip_slots
+        and a.hand_index is None
+        and a.equip_slot is None
     ))
 
     return dorinthea, rhinar

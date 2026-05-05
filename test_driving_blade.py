@@ -58,7 +58,7 @@ def _play_driving_blade(env):
     env.step(next(
         a for a in legal
         if a.action_type == ActionType.PITCH
-        and sum(dorinthea.hand[i].pitch for i in a.pitch_indices) >= 2
+        and a.pitch_index is not None and dorinthea.hand[a.pitch_index].pitch >= 2
     ))
 
     while env._phase == Phase.INSTANT:
@@ -134,8 +134,8 @@ class TestDrivingBladeEffect(unittest.TestCase):
         self.env.step(next(
             a for a in legal
             if a.action_type == ActionType.DEFEND
-            and not a.defend_hand_indices
-            and not a.defend_equip_slots
+            and a.hand_index is None
+            and a.equip_slot is None
         ))
 
         # Pass priority to resolve reaction window
@@ -165,8 +165,8 @@ class TestDrivingBladeEffect(unittest.TestCase):
         self.env.step(next(
             a for a in legal
             if a.action_type == ActionType.DEFEND
-            and not a.defend_hand_indices
-            and not a.defend_equip_slots
+            and a.hand_index is None
+            and a.equip_slot is None
         ))
 
         # Pass reaction window
@@ -201,8 +201,8 @@ class TestDrivingBladeEffect(unittest.TestCase):
         self.env.step(next(
             a for a in legal
             if a.action_type == ActionType.DEFEND
-            and not a.defend_hand_indices
-            and not a.defend_equip_slots
+            and a.hand_index is None
+            and a.equip_slot is None
         ))
 
         # Pass reaction window
