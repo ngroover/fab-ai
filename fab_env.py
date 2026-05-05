@@ -331,8 +331,13 @@ class FaBEnv:
         elif self._phase == Phase.DEFEND:
             return legal_defend_actions(active, self._pending_attack_power)
         elif self._phase == Phase.REACTION:
+            pending_is_sword = (
+                self._pending_attack is not None
+                and FaBEnv._is_sword_attack(self._pending_attack, self._pending_is_weapon)
+            )
             return legal_reaction_actions(active, self._reaction_attacker_idx,
-                                          self._reaction_priority_idx)
+                                          self._reaction_priority_idx,
+                                          pending_is_sword_attack=pending_is_sword)
         elif self._phase == Phase.INSTANT:
             return legal_instant_actions(active)
         elif self._phase == Phase.ARSENAL:
