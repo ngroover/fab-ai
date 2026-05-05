@@ -64,6 +64,9 @@ def _play_warriors_valor(env):
     legal = env.legal_actions()
     env.step(next(a for a in legal if a.pitch_indices == [2]))
 
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
+
     return dorinthea, rhinar
 
 
@@ -80,6 +83,9 @@ def _setup_weapon_attack_hit(env):
     # Step 4: Attack with Dawnblade (cost 1; RP=2 left from Sigil of Solace pitch)
     legal = env.legal_actions()
     env.step(next(a for a in legal if a.action_type == ActionType.WEAPON))
+
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
 
     # Reaction window auto-collapses; now in DEFEND phase
     assert env._phase == Phase.DEFEND, f"Expected DEFEND, got {env._phase}"
@@ -114,6 +120,9 @@ def _setup_weapon_attack_miss(env):
     # Step 4: Attack with Dawnblade
     legal = env.legal_actions()
     env.step(next(a for a in legal if a.action_type == ActionType.WEAPON))
+
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
 
     assert env._phase == Phase.DEFEND, f"Expected DEFEND, got {env._phase}"
 

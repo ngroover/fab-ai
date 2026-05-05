@@ -44,6 +44,8 @@ def _play_slice_and_dice(env):
         if a.action_type == ActionType.PLAY_CARD and a.card.name == "Slice and Dice"
     )
     env.step(action)
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
     assert env._phase == Phase.ATTACK, f"Expected ATTACK after go-again, got {env._phase}"
 
 

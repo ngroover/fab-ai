@@ -57,7 +57,9 @@ def _setup(env):
     # Step 3: Pitch Thrust (legal[1] = PITCH [1]) to cover weapon cost
     legal = env.legal_actions()
     env.step(legal[1])
-    # Pre-DEFEND instant window auto-collapses; now in DEFEND phase
+    # Pre-DEFEND instant window: drain it so we reach DEFEND phase
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
 
     # Step 4: Rhinar does not defend
     legal = env.legal_actions()

@@ -52,6 +52,9 @@ def _setup(env):
     # Step 3: Pitch Thrust (index 3) — pitch=1 covers Dawnblade cost=1
     env.step(Action(ActionType.PITCH, pitch_indices=[3]))
 
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
+
     # Step 4: Rhinar defends with Pack Hunt (index 1)
     env.step(Action(ActionType.DEFEND, defend_hand_indices=[1]))
 
@@ -101,6 +104,9 @@ class TestOutForBloodEffect(unittest.TestCase):
         env.step(Action(ActionType.GO_SECOND))
         env.step(Action(ActionType.WEAPON))
         env.step(Action(ActionType.PITCH, pitch_indices=[3]))
+
+        while env._phase == Phase.INSTANT:
+            env.step(env.legal_actions()[0])
 
         # Rhinar does NOT block with a hand card — reprise condition NOT met
         env.step(Action(ActionType.DEFEND, defend_hand_indices=[], defend_equip_slots=[]))

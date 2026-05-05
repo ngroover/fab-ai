@@ -45,7 +45,7 @@ def _setup_and_play_wild_ride(seed: int) -> FaBEnv:
     env.step(wra)
 
     # PITCH: greedy (highest pitch card first) until cost is covered
-    while env._phase == Phase.PITCH:
+    while env._phase in (Phase.PITCH, Phase.INSTANT):
         env.step(env.legal_actions()[0])
 
     return env
@@ -90,6 +90,8 @@ class TestWildRideGoAgain(unittest.TestCase):
         """After combat resolves with go again, Rhinar gets action_points=1."""
         # Dorinthea takes no block
         self.env.step(self.env.legal_actions()[0])
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
         self.assertEqual(self.env._phase, Phase.ATTACK)
         self.assertEqual(self.rhinar.action_points, 1)
 

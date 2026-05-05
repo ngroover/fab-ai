@@ -40,6 +40,8 @@ def _advance_to_defend(env):
     env.step(next(a for a in env.legal_actions() if a.action_type == ActionType.GO_SECOND))
     env.step(next(a for a in env.legal_actions() if a.action_type == ActionType.WEAPON))
     env.step(env.legal_actions()[0])  # pitch Titanium Bauble to cover Dawnblade cost
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
 
 
 def _advance_to_reaction(env):
@@ -165,8 +167,9 @@ class TestDodgeDefenseEffect(unittest.TestCase):
             if a.action_type == ActionType.PLAY_CARD and a.card and a.card.name == "Dodge"
         )
         self.env.step(dodge_action)
-        # All subsequent REACTION steps (pitch empty, both players pass, Dodge
-        # resolves, both pass again, combat resolves) are auto-executed.
+        # Drain the INSTANT window that opens after Dodge is played onto the stack.
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
 
     def test_dodge_adds_two_to_reaction_defense_bonus(self):
         dodge_action = next(

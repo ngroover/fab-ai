@@ -61,6 +61,9 @@ def _play_driving_blade(env):
         and sum(dorinthea.hand[i].pitch for i in a.pitch_indices) >= 2
     ))
 
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
+
     return dorinthea, rhinar
 
 
@@ -123,6 +126,9 @@ class TestDrivingBladeEffect(unittest.TestCase):
             legal = self.env.legal_actions()
             self.env.step(legal[0])
 
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
+
         # Rhinar does not defend
         legal = self.env.legal_actions()
         self.env.step(next(
@@ -151,6 +157,9 @@ class TestDrivingBladeEffect(unittest.TestCase):
             legal = self.env.legal_actions()
             self.env.step(legal[0])
 
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
+
         # Rhinar does not defend
         legal = self.env.legal_actions()
         self.env.step(next(
@@ -166,6 +175,9 @@ class TestDrivingBladeEffect(unittest.TestCase):
                 legal = self.env.legal_actions()
                 self.env.step(next(a for a in legal if a.action_type == ActionType.PASS_PRIORITY))
 
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
+
         # After go again resolves, Dorinthea should have 1 action point and be in ATTACK phase
         self.assertEqual(self.dorinthea.action_points, 1,
                          "Driving Blade's go again on the weapon attack should grant +1 AP")
@@ -180,6 +192,9 @@ class TestDrivingBladeEffect(unittest.TestCase):
         if self.env._phase == Phase.PITCH:
             legal = self.env.legal_actions()
             self.env.step(legal[0])
+
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
 
         # Rhinar does not defend
         legal = self.env.legal_actions()

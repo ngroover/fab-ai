@@ -64,6 +64,9 @@ def _play_glistening_steelblade(env):
     legal = env.legal_actions()
     env.step(next(a for a in legal if a.pitch_indices == [0]))
 
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
+
     assert env._phase == Phase.ATTACK
     return dorinthea, rhinar
 
@@ -80,6 +83,9 @@ def _play_gsb_and_attack_hit(env):
     # Attack with Dawnblade (RP=2 >= cost 1, no pitch needed)
     legal = env.legal_actions()
     env.step(next(a for a in legal if a.action_type == ActionType.WEAPON))
+
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
 
     assert env._phase == Phase.DEFEND, f"Expected DEFEND, got {env._phase}"
 
@@ -111,6 +117,9 @@ def _play_gsb_and_attack_miss(env):
 
     legal = env.legal_actions()
     env.step(next(a for a in legal if a.action_type == ActionType.WEAPON))
+
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
 
     assert env._phase == Phase.DEFEND, f"Expected DEFEND, got {env._phase}"
 
@@ -280,6 +289,8 @@ class TestGlisteningSteebladeMultipleHits(unittest.TestCase):
         # First weapon attack — Rhinar no block → hit → counter 1
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal if a.action_type == ActionType.WEAPON))
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
         legal = self.env.legal_actions()
         self.env.step(next(
             a for a in legal
@@ -290,12 +301,17 @@ class TestGlisteningSteebladeMultipleHits(unittest.TestCase):
             legal = self.env.legal_actions()
             self.env.step(next(a for a in legal if a.action_type == ActionType.PASS_PRIORITY))
 
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
+
         self.assertEqual(self.dorinthea.dawnblade_counters, 1)
         self.assertEqual(self.dorinthea.action_points, 1)
 
         # Second weapon attack (weapon_additional_attack=True) — Rhinar no block → hit → counter 2
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal if a.action_type == ActionType.WEAPON))
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
         legal = self.env.legal_actions()
         self.env.step(next(
             a for a in legal
@@ -346,6 +362,9 @@ class TestGlisteningSteebladeNoCounterWithoutFlag(unittest.TestCase):
         assert self.env._phase == Phase.PITCH
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal if a.pitch_indices == [1]))
+
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
 
         legal = self.env.legal_actions()
         self.env.step(next(
