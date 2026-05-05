@@ -662,12 +662,10 @@ class FaBEnv:
         else:
             self._log(f"    ✅  Fully blocked!")
 
-        # Battleworn
+        # Battleworn — block counter applied when combat chain closes (not immediately)
         for eq in def_equip:
-            if "Battleworn" in eq.card.text and not eq.destroyed:
-                eq.destroyed = True
-                self._log(f"    🔨 {eq.card.name} destroyed (Battleworn).")
-                self._move_equipment_to_graveyard(defender, eq)
+            if Keyword.BATTLEWORN in eq.card.keywords and not eq.destroyed:
+                eq.battleworn_blocked = True
 
         # Blade Break — mark as used so it cannot block again this combat chain
         for eq in def_equip:
@@ -1202,7 +1200,12 @@ class FaBEnv:
             for player in (attacker, defender)
             for eq in player.equipment.values()
         )
-        if not has_chain_cards and not has_blade_break:
+        has_battleworn = any(
+            eq.battleworn_blocked and not eq.destroyed
+            for player in (attacker, defender)
+            for eq in player.equipment.values()
+        )
+        if not has_chain_cards and not has_blade_break and not has_battleworn:
             return
         if has_chain_cards:
             all_names = [c.name for c in attacker.combat_chain] + [c.name for c in defender.combat_chain]
@@ -1221,6 +1224,19 @@ class FaBEnv:
                     self._log(f"    💀 {eq.card.name} destroyed (Blade Break).")
                     self._apply_card_effects(eq.card, EffectTrigger.ON_DESTROYED, {}, player, opponent)
                     self._move_equipment_to_graveyard(player, eq)
+
+        # Battleworn — apply -1 block counter; destroy only when defense reaches 0
+        for player in (attacker, defender):
+            for eq in list(player.equipment.values()):
+                if eq.battleworn_blocked and not eq.destroyed:
+                    eq.battleworn_blocked = False
+                    eq.block_counters += 1
+                    if eq.defense == 0:
+                        eq.destroyed = True
+                        self._log(f"    💀 {eq.card.name} worn out (Battleworn) → graveyard.")
+                        self._move_equipment_to_graveyard(player, eq)
+                    else:
+                        self._log(f"    🔨 {eq.card.name} gets -1 block counter (Battleworn, {eq.defense} def remaining).")
 
 
     def _end_attack_phase(self, active: Player, opponent: Player):
