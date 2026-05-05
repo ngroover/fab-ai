@@ -43,6 +43,7 @@ class ActionType(Enum):
     PASS_PRIORITY      = auto()   # INSTANT phase: player passes priority without playing
     PITCH_ORDER        = auto()   # end-of-turn: place one card from pitch zone to deck bottom
     MENTOR_FLIP        = auto()   # start of turn: choose to flip face-down mentor face-up
+    ACTIVATE_CARD_ABILITY = auto()  # activate a defending card's once-per-turn instant ability
 
 
 @dataclass
@@ -94,6 +95,9 @@ class Action:
             return f"Action(PITCH_ORDER index={self.pitch_order_index})"
         if self.action_type == ActionType.MENTOR_FLIP:
             return f"Action(MENTOR_FLIP flip={self.flip})"
+        if self.action_type == ActionType.ACTIVATE_CARD_ABILITY:
+            card_name = self.card.name if self.card else None
+            return f"Action(ACTIVATE_CARD_ABILITY card={card_name} discard_hand={self.hand_index})"
         return f"Action({self.action_type})"
 
 
@@ -382,13 +386,17 @@ def legal_mentor_flip_actions() -> List[Action]:
 
 def legal_reaction_actions(player: 'Player', attacker_idx: int,
                            priority_idx: int,
-                           pending_is_sword_attack: bool = False) -> List[Action]:
+                           pending_is_sword_attack: bool = False,
+                           committed_defend_cards: Optional[List['Card']] = None,
+                           rally_ability_used: bool = False) -> List[Action]:
     """
     Legal actions during the reaction phase (between defender committing blocks
     and combat damage resolution).
 
     Attacker may play ATTACK_REACTION or INSTANT cards.
     Defender may play DEFENSE_REACTION or INSTANT cards.
+    Defender may also activate Rally the Rearguard's once-per-turn instant ability
+    (discard a card: +3 block) if Rally is among the committed blocking cards.
     Either player may always pass priority.
     """
     from cards import CardType
@@ -434,6 +442,22 @@ def legal_reaction_actions(player: 'Player', attacker_idx: int,
                                   if c is not card and c.pitch > 0)
             if pitchable_total >= needed:
                 actions.append(Action(ActionType.PLAY_CARD, card=card, from_arsenal=from_arsenal))
+
+    # Rally the Rearguard: "Once per turn Instant — Discard a card: +3 block.
+    # Activate only while Rally the Rearguard is defending."
+    if not is_attacker and not rally_ability_used and committed_defend_cards:
+        rally_card = next(
+            (c for c in committed_defend_cards if c.name == "Rally the Rearguard"),
+            None,
+        )
+        if rally_card is not None and player.hand:
+            seen_discard: set = set()
+            for i, c in enumerate(player.hand):
+                if c.name in seen_discard:
+                    continue
+                seen_discard.add(c.name)
+                actions.append(Action(ActionType.ACTIVATE_CARD_ABILITY,
+                                      card=rally_card, hand_index=i))
 
     return actions
 

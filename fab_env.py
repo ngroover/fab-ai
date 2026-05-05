@@ -163,6 +163,7 @@ class FaBEnv:
         self._pending_reaction_from_hand: bool = True    # provenance of card being paid through pitch phase
         self._reaction_from_hand: Dict[int, bool] = {}  # id(card) → from_hand for cards on reaction stack
         self._defend_from_hand_ids: Set[int] = set()    # id(card) for current-link defender cards from hand
+        self._rally_ability_used: bool = False            # once-per-turn Rally the Rearguard +3 block ability
         # Isolated RNG — seeded in reset() so game randomness is never shared with external code.
         self._rng: random.Random = random.Random()
 
@@ -249,6 +250,7 @@ class FaBEnv:
         self._pending_reaction_player_idx = 0
         self._pending_reaction_from_hand = True
         self._reaction_from_hand = {}
+        self._rally_ability_used = False
 
         # Randomly select which player gets to choose who goes first
         self._choosing_player_idx = self._rng.randint(0, 1)
@@ -337,7 +339,9 @@ class FaBEnv:
             )
             return legal_reaction_actions(active, self._reaction_attacker_idx,
                                           self._reaction_priority_idx,
-                                          pending_is_sword_attack=pending_is_sword)
+                                          pending_is_sword_attack=pending_is_sword,
+                                          committed_defend_cards=self._committed_defend_cards,
+                                          rally_ability_used=self._rally_ability_used)
         elif self._phase == Phase.INSTANT:
             return legal_instant_actions(active)
         elif self._phase == Phase.ARSENAL:
@@ -1151,6 +1155,23 @@ class FaBEnv:
             self._push_reaction_to_stack(card, active_idx, from_hand=in_hand)
             return
 
+        if action.action_type == ActionType.ACTIVATE_CARD_ABILITY:
+            # Rally the Rearguard: "Once per turn Instant — Discard a card: +3 block."
+            hand_idx = action.hand_index
+            if hand_idx is not None and 0 <= hand_idx < len(active.hand):
+                discarded = active.hand.pop(hand_idx)
+                active.graveyard.append(discarded)
+                self._reaction_defense_bonus += 3
+                self._rally_ability_used = True
+                card_name = action.card.name if action.card else "Rally the Rearguard"
+                self._log(f"    ⚡ {active.name} activates {card_name} — "
+                          f"discards {discarded.name}, gains +3 defense "
+                          f"({self._reaction_defense_bonus} total reaction defense).")
+                self._reaction_passes = 0
+                self._reaction_priority_idx = 1 - active_idx
+                self.agent_selection = f"agent_{self._reaction_priority_idx}"
+            return
+
         # Unknown action — treat as pass.
         self._reaction_passes += 1
         self._reaction_priority_idx = 1 - self._reaction_priority_idx
@@ -1264,6 +1285,7 @@ class FaBEnv:
         self._committed_defend_cards = []
         self._committed_defend_equip = []
         self._defend_from_hand_ids.clear()
+        self._rally_ability_used = False
 
         # Consume any Quicken token in the attacker's arena — it grants Go Again
         # to the next attack declared after it was created (not the attack that made it).
