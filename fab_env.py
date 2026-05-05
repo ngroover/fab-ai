@@ -142,8 +142,6 @@ class FaBEnv:
         self._pending_action_response_card: Optional[Card] = None  # ACTION card waiting to resolve after the instant response window
         self._pending_instant_play: bool = False         # True when PITCH phase is for an instant played during the INSTANT window
         self._pending_instant_player_idx: int = 0        # which player is paying for / owns the pending instant
-        self._pending_defend_indices: List[int] = []     # hand indices accumulated during defend step
-        self._pending_defend_equip_slots: List[str] = [] # equip slots accumulated during defend step
         self._choosing_player_idx: int = 0               # player who won the coin flip in CHOOSE_FIRST
         # Instant stack & priority bookkeeping — only meaningful in Phase.INSTANT
         self._instant_stack: List[Tuple[int, Card]] = []  # LIFO of (owner_idx, card)
@@ -324,9 +322,7 @@ class FaBEnv:
         elif self._phase == Phase.PITCH:
             return legal_pitch_actions(active, self._pending_play_card)
         elif self._phase == Phase.DEFEND:
-            return legal_defend_actions(active, self._pending_attack_power,
-                                        self._pending_defend_indices,
-                                        self._pending_defend_equip_slots)
+            return legal_defend_actions(active, self._pending_attack_power)
         elif self._phase == Phase.REACTION:
             return legal_reaction_actions(active, self._reaction_attacker_idx,
                                           self._reaction_priority_idx)
@@ -543,65 +539,55 @@ class FaBEnv:
 
     @property
     def _pending_defend_total(self) -> int:
-        """Total defense value accumulated so far this defend step."""
-        agent = self.agent_selection
-        player_idx = int(agent[-1])
+        """Total defense value committed so far this defend step."""
+        player_idx = int(self.agent_selection[-1])
         player = self._game.players[player_idx]
-        total = sum(
-            player.hand[i].defense
-            for i in self._pending_defend_indices
-            if 0 <= i < len(player.hand)
-        )
+        total = sum(c.defense for c in self._committed_defend_cards)
         total += sum(
             player.equipment[slot].defense
-            for slot in self._pending_defend_equip_slots
-            if slot in player.equipment and player.equipment[slot].active
+            for slot in self._committed_defend_equip_slots
+            if slot in player.equipment
         )
         return total
 
     def _handle_defend_action(self, action: Action, defender: Player, attacker: Player):
-        """Defender picks one card at a time; empty action commits the accumulated block.
+        """Defender picks one card/equipment at a time; empty action closes the block.
 
-        Instants are NOT played here — they go through the attack reaction
-        INSTANT window (opened before this DEFEND phase begins) and resolve
-        off the stack. Blocking cards are committed directly and do not use
-        the stack at all.
+        Each selection immediately updates game state: hand cards move to the
+        combat chain and equipment is flagged as blocking. The "done" action
+        (both hand_index and equip_slot are None) locks in the block and opens
+        the reaction window.
         """
-        # Single card/equipment addition — accumulate and stay in DEFEND phase
-        if action.hand_index is not None or action.equip_slot is not None:
-            if action.hand_index is not None:
-                self._pending_defend_indices.append(action.hand_index)
-            if action.equip_slot is not None:
-                self._pending_defend_equip_slots.append(action.equip_slot)
-            return  # defender picks again next step
-
-        # Done — commit blocks and open the reaction window before resolving combat
         attacker_idx = self._game.active_player_idx
         defender_idx = 1 - attacker_idx
         defender = self._game.players[defender_idx]
-        full_action = Action(ActionType.DEFEND)
-        # Move blocking cards from hand to combat chain immediately so the game
-        # state is correct during the reaction phase.
-        def_cards = self._snapshot_by_indices(defender.hand, self._pending_defend_indices)
-        for c in def_cards:
-            if c in defender.hand:
-                defender.hand.remove(c)
-            defender.combat_chain.append(c)
-        self._committed_defend_cards = def_cards
-        self._pending_defend_indices = []
-        equip_slots_snapshot = list(self._pending_defend_equip_slots)
-        self._committed_defend_equip_slots = equip_slots_snapshot
-        self._pending_defend_equip_slots = []
-        self._committed_defend_action = full_action
-        block_names = [c.name for c in def_cards] + [
+
+        if action.hand_index is not None:
+            if 0 <= action.hand_index < len(defender.hand):
+                card = defender.hand[action.hand_index]
+                defender.hand.remove(card)
+                defender.combat_chain.append(card)
+                self._committed_defend_cards.append(card)
+            return  # defender picks again next step
+
+        if action.equip_slot is not None:
+            eq = defender.equipment.get(action.equip_slot)
+            if eq and eq.active:
+                eq.blocking = True
+                self._committed_defend_equip_slots.append(action.equip_slot)
+            return  # defender picks again next step
+
+        # Done — lock in current blocks and open the reaction window
+        block_names = [c.name for c in self._committed_defend_cards] + [
             defender.equipment[s].card.name
-            for s in equip_slots_snapshot
-            if s in defender.equipment and defender.equipment[s].active
+            for s in self._committed_defend_equip_slots
+            if s in defender.equipment
         ]
         if block_names:
             self._log(f"    🛡  {defender.name} commits blocks: {', '.join(block_names)}")
         else:
             self._log(f"    🛡  {defender.name} commits no blocks")
+        self._committed_defend_action = Action(ActionType.DEFEND)
         self._enter_reaction_phase(attacker_idx, defender_idx)
 
     def _resolve_defend(self, action: Action, defender: Player, attacker: Player,
@@ -617,8 +603,10 @@ class FaBEnv:
         def_equip = []
         for slot in self._committed_defend_equip_slots:
             eq = defender.equipment.get(slot)
-            if eq and eq.active:
-                def_equip.append(eq)
+            if eq:
+                eq.blocking = False
+                if eq.active:
+                    def_equip.append(eq)
         self._committed_defend_equip_slots = []
 
         # Use the power stored when the attack was declared. It already includes
@@ -1260,8 +1248,11 @@ class FaBEnv:
         # modify _pending_attack_power (e.g., DRAW_DISCARD_POWER_BONUS adds +2).
         self._pending_attack_power = power
         self._pending_attack_go_again = False
-        self._pending_defend_indices = []
-        self._pending_defend_equip_slots = []
+        self._committed_defend_cards = []
+        self._committed_defend_equip_slots = []
+        defender_idx = 1 - self._game.active_player_idx
+        for eq in self._game.players[defender_idx].equipment.values():
+            eq.blocking = False
 
         # Consume any Quicken token in the attacker's arena — it grants Go Again
         # to the next attack declared after it was created (not the attack that made it).
@@ -1579,14 +1570,6 @@ class FaBEnv:
             if self._player_weapon_usable_with_no_cards(p):
                 return False
         return True
-
-    def _snapshot_by_indices(self, hand: List[Card], indices: List[int]) -> List[Card]:
-        """Return cards at given indices (safely, ignoring out-of-range)."""
-        cards = []
-        for i in sorted(set(indices)):
-            if 0 <= i < len(hand):
-                cards.append(hand[i])
-        return cards
 
     def _get_obs(self) -> Dict[str, dict]:
         if self._game is None:

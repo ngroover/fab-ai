@@ -321,23 +321,15 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
     return actions if actions else [Action(ActionType.PITCH)]
 
 
-def legal_defend_actions(player: 'Player', attack_power: int,
-                         already_indices: List[int] = None,
-                         already_equip: List[str] = None) -> List[Action]:
+def legal_defend_actions(player: 'Player', attack_power: int) -> List[Action]:
     """
     Legal DEFEND actions for one-card-at-a-time blocking.
 
-    Returns a "done" action plus one action per remaining blockable card/equip
-    that hasn't been committed yet this defend step.
-
-    already_indices / already_equip track cards already accumulated this step.
+    Returns a "done" action plus one action per remaining blockable card/equip.
+    Cards already chosen are removed from hand immediately; equipment already
+    chosen has eq.blocking=True and is excluded here.
     """
     from cards import CardType, Keyword
-
-    if already_indices is None:
-        already_indices = []
-    if already_equip is None:
-        already_equip = []
 
     actions: List[Action] = []
 
@@ -345,10 +337,9 @@ def legal_defend_actions(player: 'Player', attack_power: int,
     actions.append(Action(ActionType.DEFEND))
 
     defenders = [(i, c) for i, c in enumerate(player.hand)
-                 if not c.no_block
-                 and i not in already_indices]
+                 if not c.no_block]
     equip_slots = [slot for slot, eq in player.equipment.items()
-                   if eq.active and eq.defense > 0 and slot not in already_equip
+                   if eq.active and eq.defense > 0 and not eq.blocking
                    and not (Keyword.BLADE_BREAK in eq.card.keywords and eq.used_this_turn)]
 
     # One card at a time — deduplicate identical cards (same choice regardless of copy)

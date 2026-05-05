@@ -216,17 +216,19 @@ class TestBarragingBeatdownBonusNullified_TwoBlocks(unittest.TestCase):
         self.rhinar, self.dorinthea = _setup_after_bb_and_bare_fangs(self.env)
         self.life_before = self.dorinthea.life
 
-        # Block with Flock of the Feather Walkers (index 0, defense 2)
+        # Block with Flock of the Feather Walkers
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND
-                           and a.hand_index == 0))
+                           and a.hand_index is not None
+                           and self.dorinthea.hand[a.hand_index].name == "Flock of the Feather Walkers"))
 
-        # Block with On a Knife Edge (index 1, defense 2)
+        # Block with On a Knife Edge (now shifted in hand after previous removal)
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND
-                           and a.hand_index == 1))
+                           and a.hand_index is not None
+                           and self.dorinthea.hand[a.hand_index].name == "On a Knife Edge"))
 
         # Commit
         legal = self.env.legal_actions()

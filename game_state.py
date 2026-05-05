@@ -14,6 +14,7 @@ class Equipment:
         self.card = card
         self.destroyed = False
         self.used_this_turn = False
+        self.blocking = False  # True while this equipment is committed to block the current attack
 
     def reset_turn(self):
         self.used_this_turn = False
