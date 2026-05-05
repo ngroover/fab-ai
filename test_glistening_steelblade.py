@@ -88,7 +88,7 @@ def _play_gsb_and_attack_hit(env):
     env.step(next(
         a for a in legal
         if a.action_type == ActionType.DEFEND
-        and a.defend_hand_index is None
+        and a.hand_index is None
         and not a.defend_equip_slots
     ))
 
@@ -119,7 +119,7 @@ def _play_gsb_and_attack_miss(env):
     env.step(next(
         a for a in legal
         if a.action_type == ActionType.DEFEND
-        and a.defend_hand_index == 0
+        and a.hand_index == 0
         and not a.defend_equip_slots
     ))
     assert env._phase == Phase.DEFEND
@@ -129,7 +129,7 @@ def _play_gsb_and_attack_miss(env):
     env.step(next(
         a for a in legal
         if a.action_type == ActionType.DEFEND
-        and a.defend_hand_index is None
+        and a.hand_index is None
         and not a.defend_equip_slots
     ))
 
@@ -284,7 +284,7 @@ class TestGlisteningSteebladeMultipleHits(unittest.TestCase):
         self.env.step(next(
             a for a in legal
             if a.action_type == ActionType.DEFEND
-            and a.defend_hand_index is None
+            and a.hand_index is None
         ))
         while self.env._phase == Phase.REACTION:
             legal = self.env.legal_actions()
@@ -300,7 +300,7 @@ class TestGlisteningSteebladeMultipleHits(unittest.TestCase):
         self.env.step(next(
             a for a in legal
             if a.action_type == ActionType.DEFEND
-            and a.defend_hand_index is None
+            and a.hand_index is None
         ))
         while self.env._phase == Phase.REACTION:
             legal = self.env.legal_actions()
@@ -351,7 +351,7 @@ class TestGlisteningSteebladeNoCounterWithoutFlag(unittest.TestCase):
         self.env.step(next(
             a for a in legal
             if a.action_type == ActionType.DEFEND
-            and a.defend_hand_index is None
+            and a.hand_index is None
         ))
 
         while self.env._phase == Phase.REACTION:

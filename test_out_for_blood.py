@@ -53,7 +53,7 @@ def _setup(env):
     env.step(Action(ActionType.PITCH, pitch_indices=[3]))
 
     # Step 4: Rhinar defends with Pack Hunt (index 1)
-    env.step(Action(ActionType.DEFEND, defend_hand_index=1))
+    env.step(Action(ActionType.DEFEND, hand_index=1))
 
     # Step 5: Rhinar commits block
     env.step(Action(ActionType.DEFEND))

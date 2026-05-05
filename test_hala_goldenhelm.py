@@ -39,7 +39,7 @@ def _skip_to(env, phases, max_steps=300):
         passables = [
             a for a in legal
             if a.action_type in (ActionType.PASS, ActionType.PASS_PRIORITY, ActionType.DEFEND)
-            and getattr(a, 'defend_hand_index', None) is None
+            and getattr(a, 'hand_index', None) is None
             and not getattr(a, 'defend_equip_slots', [])
         ]
         env.step(passables[0] if passables else legal[0])
@@ -72,18 +72,18 @@ def _advance_to_mentor_flip(env):
     hala_act = next(
         (a for a in legal
          if a.action_type == ActionType.ARSENAL
-         and a.arsenal_hand_index >= 0
-         and dorinthea.hand[a.arsenal_hand_index].name == 'Hala Goldenhelm'),
+         and a.hand_index is not None
+         and dorinthea.hand[a.hand_index].name == 'Hala Goldenhelm'),
         None
     )
-    env.step(hala_act or next(a for a in legal if a.arsenal_hand_index == -1))
+    env.step(hala_act or next(a for a in legal if a.hand_index is None))
     while env._phase == Phase.PITCH_ORDER:
         env.step(env.legal_actions()[0])
 
     # Turn 2 (Rhinar): skip to ARSENAL, store nothing
     _skip_to(env, [Phase.ARSENAL])
     env.step(next(a for a in env.legal_actions()
-                  if a.action_type == ActionType.ARSENAL and a.arsenal_hand_index == -1))
+                  if a.action_type == ActionType.ARSENAL and a.hand_index is None))
     while env._phase == Phase.PITCH_ORDER:
         env.step(env.legal_actions()[0])
 
@@ -150,8 +150,8 @@ class TestHalaStartsFaceDown(unittest.TestCase):
         hala_act = next(
             a for a in legal
             if a.action_type == ActionType.ARSENAL
-            and a.arsenal_hand_index >= 0
-            and self.dorinthea.hand[a.arsenal_hand_index].name == 'Hala Goldenhelm'
+            and a.hand_index is not None
+            and self.dorinthea.hand[a.hand_index].name == 'Hala Goldenhelm'
         )
         self.env.step(hala_act)
         self.assertIsNotNone(self.dorinthea.arsenal)
@@ -165,8 +165,8 @@ class TestHalaStartsFaceDown(unittest.TestCase):
         hala_act = next(
             a for a in legal
             if a.action_type == ActionType.ARSENAL
-            and a.arsenal_hand_index >= 0
-            and self.dorinthea.hand[a.arsenal_hand_index].name == 'Hala Goldenhelm'
+            and a.hand_index is not None
+            and self.dorinthea.hand[a.hand_index].name == 'Hala Goldenhelm'
         )
         self.env.step(hala_act)
         while self.env._phase == Phase.PITCH_ORDER:

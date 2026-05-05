@@ -64,7 +64,7 @@ def _setup(env):
     no_defend = next(
         a for a in legal
         if a.action_type == ActionType.DEFEND
-        and a.defend_hand_index is None
+        and a.hand_index is None
         and not a.defend_equip_slots
     )
     env.step(no_defend)

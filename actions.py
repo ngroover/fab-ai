@@ -56,12 +56,9 @@ class Action:
     # PITCH fields (step 2: choose which hand cards to pitch to cover the cost)
     pitch_indices: List[int] = field(default_factory=list)  # indices into player.hand
 
-    # DEFEND fields
-    defend_hand_index: Optional[int] = None
+    # DEFEND / ARSENAL shared field — index into player.hand (None = no card)
+    hand_index: Optional[int] = None
     defend_equip_slots: List[str] = field(default_factory=list)  # e.g. ["head", "legs"]
-
-    # ARSENAL field
-    arsenal_hand_index: int = -1  # -1 means "don't store anything"
 
     # ACTIVATE_EQUIPMENT field
     equip_slot: str = ""  # e.g. "head"
@@ -83,9 +80,9 @@ class Action:
         if self.action_type == ActionType.PASS:
             return "Action(PASS)"
         if self.action_type == ActionType.DEFEND:
-            return f"Action(DEFEND hand={self.defend_hand_index} equip={self.defend_equip_slots})"
+            return f"Action(DEFEND hand={self.hand_index} equip={self.defend_equip_slots})"
         if self.action_type == ActionType.ARSENAL:
-            return f"Action(ARSENAL store={self.arsenal_hand_index})"
+            return f"Action(ARSENAL store={self.hand_index})"
         if self.action_type == ActionType.ACTIVATE_EQUIPMENT:
             return f"Action(ACTIVATE_EQUIPMENT slot={self.equip_slot})"
         if self.action_type == ActionType.GO_FIRST:
@@ -361,7 +358,7 @@ def legal_defend_actions(player: 'Player', attack_power: int,
         if c.name in seen_defend_names:
             continue
         seen_defend_names.add(c.name)
-        actions.append(Action(ActionType.DEFEND, defend_hand_index=i))
+        actions.append(Action(ActionType.DEFEND, hand_index=i))
 
     # One equipment slot at a time
     for slot in equip_slots:
@@ -372,14 +369,14 @@ def legal_defend_actions(player: 'Player', attack_power: int,
 
 def legal_arsenal_actions(player: 'Player') -> List[Action]:
     """End-of-turn: store a card or store nothing."""
-    actions = [Action(ActionType.ARSENAL, arsenal_hand_index=-1)]  # don't store
+    actions = [Action(ActionType.ARSENAL)]  # hand_index=None means don't store
     if not player.arsenal:
         seen_arsenal_names: set = set()
         for i, card in enumerate(player.hand):
             if card.name in seen_arsenal_names:
                 continue  # duplicate card — same choice regardless of which copy is stored
             seen_arsenal_names.add(card.name)
-            actions.append(Action(ActionType.ARSENAL, arsenal_hand_index=i))
+            actions.append(Action(ActionType.ARSENAL, hand_index=i))
     return actions
 
 

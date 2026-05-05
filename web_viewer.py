@@ -1631,11 +1631,11 @@ class _WebHumanAgent:
             total = sum(c.pitch for c in pitched)
             return f"PITCH — {', '.join(names)} (total: {total} resource{'s' if total != 1 else ''})"
         if action.action_type == ActionType.DEFEND:
-            if action.defend_hand_index is None and not action.defend_equip_slots:
+            if action.hand_index is None and not action.defend_equip_slots:
                 return "NO BLOCK — take full damage"
             parts, total = [], 0
-            if action.defend_hand_index is not None and 0 <= action.defend_hand_index < len(player.hand):
-                c = player.hand[action.defend_hand_index]
+            if action.hand_index is not None and 0 <= action.hand_index < len(player.hand):
+                c = player.hand[action.hand_index]
                 parts.append(f"{c.name} (def:{c.defense})")
                 total += c.defense
             for slot in action.defend_equip_slots:
@@ -1645,9 +1645,9 @@ class _WebHumanAgent:
                     total += eq.defense
             return f"BLOCK — {', '.join(parts)} [total:{total}]"
         if action.action_type == ActionType.ARSENAL:
-            if action.arsenal_hand_index == -1:
+            if action.hand_index is None:
                 return "DON'T STORE — skip arsenal"
-            card = player.hand[action.arsenal_hand_index]
+            card = player.hand[action.hand_index]
             return f"STORE — {self._fmt_card(card)}"
         if action.action_type == ActionType.GO_FIRST:
             return "GO FIRST — you take the first turn"

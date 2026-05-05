@@ -89,7 +89,7 @@ def _setup_weapon_attack_hit(env):
     no_def = next(
         a for a in legal
         if a.action_type == ActionType.DEFEND
-        and a.defend_hand_index is None
+        and a.hand_index is None
         and not a.defend_equip_slots
     )
     env.step(no_def)
@@ -125,7 +125,7 @@ def _setup_weapon_attack_miss(env):
     env.step(next(
         a for a in legal
         if a.action_type == ActionType.DEFEND
-        and a.defend_hand_index == 3
+        and a.hand_index == 3
         and not a.defend_equip_slots
     ))
     assert env._phase == Phase.DEFEND, f"Expected DEFEND after adding blocker, got {env._phase}"
@@ -135,7 +135,7 @@ def _setup_weapon_attack_miss(env):
     env.step(next(
         a for a in legal
         if a.action_type == ActionType.DEFEND
-        and a.defend_hand_index is None
+        and a.hand_index is None
         and not a.defend_equip_slots
     ))
 

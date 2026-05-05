@@ -54,7 +54,7 @@ def _advance_to_reaction(env):
     no_defend = next(
         a for a in env.legal_actions()
         if a.action_type == ActionType.DEFEND
-        and a.defend_hand_index is None
+        and a.hand_index is None
         and not a.defend_equip_slots
     )
     env.step(no_defend)
@@ -100,8 +100,8 @@ class TestDodgeNotBlockableInDefendPhase(unittest.TestCase):
         defend_card_indices = set()
         for a in legal:
             if a.action_type == ActionType.DEFEND:
-                if a.defend_hand_index is not None:
-                    defend_card_indices.add(a.defend_hand_index)
+                if a.hand_index is not None:
+                    defend_card_indices.add(a.hand_index)
 
         blocked_names = {self.rhinar.hand[i].name for i in defend_card_indices}
         self.assertNotIn(
@@ -113,8 +113,8 @@ class TestDodgeNotBlockableInDefendPhase(unittest.TestCase):
         """Every card offered as a block must not be a DEFENSE_REACTION."""
         legal = self.env.legal_actions()
         for a in legal:
-            if a.action_type == ActionType.DEFEND and a.defend_hand_index is not None:
-                card = self.rhinar.hand[a.defend_hand_index]
+            if a.action_type == ActionType.DEFEND and a.hand_index is not None:
+                card = self.rhinar.hand[a.hand_index]
                 self.assertNotEqual(
                     card.card_type, CardType.DEFENSE_REACTION,
                     f"{card.name} is a DEFENSE_REACTION and must not be offered as a block",

@@ -400,9 +400,9 @@ class TestInstantWindowTurn1(unittest.TestCase):
         env = self._advance_to_defend_phase()
         legal = env.legal_actions()
         for a in legal:
-            if a.action_type == ActionType.DEFEND and a.defend_hand_index is not None:
+            if a.action_type == ActionType.DEFEND and a.hand_index is not None:
                 dorinthea = env._game.players[1]
-                card = dorinthea.hand[a.defend_hand_index]
+                card = dorinthea.hand[a.hand_index]
                 self.assertFalse(
                     card.no_block,
                     f"{card.name} has no_block=True but was offered as a block",

@@ -566,9 +566,9 @@ class FaBEnv:
         the stack at all.
         """
         # Single card/equipment addition — accumulate and stay in DEFEND phase
-        if action.defend_hand_index is not None or action.defend_equip_slots:
-            if action.defend_hand_index is not None:
-                self._pending_defend_indices.append(action.defend_hand_index)
+        if action.hand_index is not None or action.defend_equip_slots:
+            if action.hand_index is not None:
+                self._pending_defend_indices.append(action.hand_index)
             self._pending_defend_equip_slots.extend(action.defend_equip_slots)
             return  # defender picks again next step
 
@@ -725,9 +725,9 @@ class FaBEnv:
 
     def _handle_arsenal_action(self, action: Action, active: Player, opponent: Player):
         """Store a card (or nothing) in arsenal, then complete end phase."""
-        if action.arsenal_hand_index >= 0 and not active.arsenal:
-            if action.arsenal_hand_index < len(active.hand):
-                card = active.hand[action.arsenal_hand_index]
+        if action.hand_index is not None and not active.arsenal:
+            if action.hand_index < len(active.hand):
+                card = active.hand[action.hand_index]
                 active.hand.remove(card)
                 active.arsenal = card
                 active_idx = self._game.active_player_idx
