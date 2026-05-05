@@ -1366,7 +1366,7 @@ class FaBEnv:
                 active.next_brute_attack_bonus = max(active.next_brute_attack_bonus, effect.magnitude)
                 self._log(f"    ⚡ {card.name} — next Brute attack gains +{effect.magnitude} power.")
             elif effect.action == EffectAction.NEXT_BRUTE_ATTACK_CONDITIONAL_BONUS:
-                active.next_brute_attack_conditional_bonus = effect.magnitude
+                active.next_brute_attack_conditional_bonus += effect.magnitude
                 self._log(f"    ⚡ {card.name} — next Brute attack gains +{effect.magnitude} power if defended by <2 non-equipment cards.")
             elif effect.action == EffectAction.NEXT_ATTACK_GO_AGAIN:
                 active.next_attack_go_again = True

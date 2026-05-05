@@ -6,11 +6,16 @@ Seed 3 gives:
   Dorinthea:  En Garde, Flock of the Feather Walkers, Visit the Blacksmith, On a Knife Edge
   Dorinthea wins the coin flip; GO_SECOND puts Rhinar first.
 
+Seed 155 gives:
+  Rhinar:     Barraging Beatdown x2, Bare Fangs, Come to Fight
+  Rhinar wins the coin flip and goes first with GO_FIRST.
+
 Barraging Beatdown should:
   - Set next_brute_attack_conditional_bonus = 3 (not next_brute_attack_bonus)
   - Give +3 power to the next Brute attack when defended by 0 non-equipment cards
   - Give +3 power to the next Brute attack when defended by exactly 1 non-equipment card
   - NOT give +3 power when defended by 2 or more non-equipment cards
+  - Stack: two BBs played in the same turn give +6 conditional bonus
 """
 
 import unittest
@@ -257,6 +262,71 @@ class TestBarragingBeatdownBonusNullified_TwoBlocks(unittest.TestCase):
     def test_conditional_bonus_consumed_even_when_nullified(self):
         self.assertEqual(self.rhinar.next_brute_attack_conditional_bonus, 0,
                          "Conditional bonus must be cleared even when nullified")
+
+
+SEED_TWO_BB = 155
+
+
+def _setup_two_bb_then_bare_fangs(env):
+    """
+    Seed 155: Rhinar has BB x2, Bare Fangs, Come to Fight.
+    Sequence: GO_FIRST → BB1 → BB2 → Bare Fangs (auto-pitches Come to Fight).
+    Returns (rhinar, dorinthea) with env in DEFEND phase.
+    """
+    env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED_TWO_BB)
+    rhinar = env._game.players[0]
+    dorinthea = env._game.players[1]
+
+    env.step(next(a for a in env.legal_actions() if a.action_type == ActionType.GO_FIRST))
+
+    for _ in range(2):
+        legal = env.legal_actions()
+        env.step(next(a for a in legal if a.action_type == ActionType.PLAY_CARD
+                      and a.card and a.card.name == "Barraging Beatdown"))
+        while env._phase == Phase.INSTANT:
+            env.step(env.legal_actions()[0])
+
+    legal = env.legal_actions()
+    env.step(next(a for a in legal if a.action_type == ActionType.PLAY_CARD
+                  and a.card and a.card.name == "Bare Fangs"))
+    while env._phase == Phase.INSTANT:
+        env.step(env.legal_actions()[0])
+
+    assert env._phase == Phase.DEFEND, f"Expected DEFEND, got {env._phase}"
+    return rhinar, dorinthea
+
+
+class TestBarragingBeatdownStacking(unittest.TestCase):
+    """Two BBs played in one turn must stack to +6 conditional bonus."""
+
+    def setUp(self):
+        self.env = FaBEnv(verbose=False)
+        self.rhinar, self.dorinthea = _setup_two_bb_then_bare_fangs(self.env)
+        self.life_before = self.dorinthea.life
+
+        legal = self.env.legal_actions()
+        no_block = next(a for a in legal if a.action_type == ActionType.DEFEND
+                        and a.hand_index is None and a.equip_slot is None)
+        self.env.step(no_block)
+
+        while self.env._phase.name in ("REACTION", "INSTANT"):
+            legal = self.env.legal_actions()
+            pass_a = next((a for a in legal if a.action_type == ActionType.PASS_PRIORITY), None)
+            if pass_a:
+                self.env.step(pass_a)
+            else:
+                break
+
+    def test_two_bb_bonus_stacks_to_six(self):
+        # Bare Fangs base 6 + 2x BB conditional +6 = 12 damage (no block)
+        expected_damage = 12
+        self.assertEqual(self.dorinthea.life, self.life_before - expected_damage,
+                         f"Two BBs must give +6 bonus: expected {expected_damage} damage, "
+                         f"got {self.life_before - self.dorinthea.life}")
+
+    def test_conditional_bonus_consumed_after_attack(self):
+        self.assertEqual(self.rhinar.next_brute_attack_conditional_bonus, 0,
+                         "Conditional bonus must be cleared after attack resolves")
 
 
 if __name__ == "__main__":
