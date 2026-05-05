@@ -327,7 +327,7 @@ def legal_defend_actions(player: 'Player', attack_power: int) -> List[Action]:
 
     Returns a "done" action plus one action per remaining blockable card/equip.
     Cards already chosen are removed from hand immediately; equipment already
-    chosen has eq.blocking=True and is excluded here.
+    chosen is removed from player.equipment and placed on the combat chain.
     """
     from cards import CardType, Keyword
 

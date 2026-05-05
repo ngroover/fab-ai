@@ -551,7 +551,8 @@ class FaBEnv:
         """Defender picks one card/equipment at a time; empty action closes the block.
 
         Each selection immediately updates game state: hand cards move to the
-        combat chain and equipment is flagged as blocking. The "done" action
+        combat chain and equipment is removed from the equipment dict and placed
+        on the combat chain. The "done" action
         (both hand_index and equip_slot are None) locks in the block and opens
         the reaction window.
         """
