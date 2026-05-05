@@ -1469,15 +1469,14 @@ def _build_gamestate_snapshot(env) -> dict:
     defender_idx = 1 - active_idx
     defender = players[defender_idx]
 
-    pending_defend_cards = []
-    for idx in env._pending_defend_indices:
-        if 0 <= idx < len(defender.hand):
-            pending_defend_cards.append(_card_to_dict(defender.hand[idx]))
-    pending_defend_equip = []
-    for slot in env._pending_defend_equip_slots:
+    # Cards already moved from hand to combat chain when committed as blockers
+    all_defenders = [_card_to_dict(c) for c in env._committed_defend_cards]
+    total_block = sum(c.defense for c in env._committed_defend_cards)
+    for slot in env._committed_defend_equip_slots:
         eq = defender.equipment.get(slot)
         if eq is not None:
-            pending_defend_equip.append(_card_to_dict(eq.card))
+            all_defenders.append(_card_to_dict(eq.card))
+            total_block += eq.defense
 
     def _self_view(p):
         return {
@@ -1561,11 +1560,13 @@ def _build_gamestate_snapshot(env) -> dict:
         "defender_name": defender.name,
         "attack_card": _card_to_dict(env._pending_attack),
         "attack_power": env._pending_attack_power,
-        "defend_cards": pending_defend_cards,
-        "defend_equipment": pending_defend_equip,
-        # Already-resolved links still on the chain (cleared when chain closes)
+        "all_defenders": all_defenders,
+        "total_block": total_block,
+        # Already-resolved links still on the chain (cleared when chain closes).
+        # Exclude current-link cards from chained_defenders since those are in all_defenders.
         "chained_attacks": [_card_to_dict(c) for c in players[active_idx].combat_chain],
-        "chained_defenders": [_card_to_dict(c) for c in defender.combat_chain],
+        "chained_defenders": [_card_to_dict(c) for c in defender.combat_chain
+                              if c not in env._committed_defend_cards],
     }
 
     return {
@@ -2116,6 +2117,7 @@ PLAY_TEMPLATE = """
       font-size: 0.68rem; text-transform: uppercase;
       color: #718096; margin-bottom: 3px; letter-spacing: 0.04em;
     }
+    .block-total { color: #68d391; font-weight: 700; text-transform: none; }
     .gs-cards {
       display: flex; flex-wrap: wrap; gap: 4px;
     }
@@ -2729,17 +2731,17 @@ PLAY_TEMPLATE = """
 
       let pendingHtml = '';
       if (hasPending) {
-        const defenders = (ch.defend_cards && ch.defend_cards.length)
-          ? renderCards(ch.defend_cards)
+        const defenderCards = (ch.all_defenders && ch.all_defenders.length)
+          ? renderCards(ch.all_defenders)
           : '<span class="gs-empty">— no blockers committed —</span>';
-        const equip = (ch.defend_equipment && ch.defend_equipment.length)
-          ? renderZone('Defending equipment', renderCards(ch.defend_equipment)) : '';
+        const blockLabel = (ch.all_defenders && ch.all_defenders.length)
+          ? `Blockers <span class="block-total">(total block: ${ch.total_block})</span>`
+          : 'Blockers';
         pendingHtml = `
           <div class="subline">Current link — ${attackerLabel}</div>
           ${renderZone('Attack', '<div class="gs-cards">' + renderCard(ch.attack_card) + '</div>')}
           <div class="subline">Power: <b>${ch.attack_power}</b></div>
-          ${renderZone('Defenders', defenders)}
-          ${equip}`;
+          ${renderZone(blockLabel, defenderCards)}`;
       } else {
         pendingHtml = `<div class="subline">${attackerLabel} — awaiting next action</div>`;
       }
