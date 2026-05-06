@@ -377,10 +377,13 @@ CARD_CATALOG: Dict[str, Card] = {
                                   keywords=[Keyword.DAWNBLADE],
                                   text="Once per Turn Action — 1: Attack. The second time you attack with Dawnblade each turn, it gains +1 power until the end of turn."),
 
-    "gallantry_gold": Card("Gallantry Gold", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.ARMS,
+    "gallantry_gold": Card("Gallantry Gold", CardType.EQUIPMENT, defense=1, cost=1, equip_slot=EquipSlot.ARMS,
                            card_class=CardClass.WARRIOR,
                            text="Action — 1: destroy Gallantry Gold: Your weapon attacks gain +1 power this turn. Go again. Battleworn.",
-                           keywords=[Keyword.BATTLEWORN]),
+                           keywords=[Keyword.BATTLEWORN],
+                           effects=[
+                               CardEffect(trigger=EffectTrigger.ON_ACTIVATE, action=EffectAction.WEAPON_ATTACKS_POWER_BONUS_ALL_TURN, magnitude=1),
+                           ]),
 
     "ironrot_helm": Card("Ironrot Helm", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.HEAD,
                          text="Blade Break.", keywords=[Keyword.BLADE_BREAK]),

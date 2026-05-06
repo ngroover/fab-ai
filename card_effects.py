@@ -64,6 +64,7 @@ class EffectAction(Enum):
     QUICKEN_TOKEN                      = auto()   # when this attacks, create a Quicken token (grants Go Again)
     NEXT_WEAPON_POWER_BONUS            = auto()   # next weapon attack this turn gains +magnitude power
     NEXT_ATTACK_POWER_BONUS            = auto()   # next attack (weapon or action) this turn gains +magnitude power
+    WEAPON_ATTACKS_POWER_BONUS_ALL_TURN = auto()  # all weapon attacks this turn gain +magnitude power
 
 
 @dataclass

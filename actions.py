@@ -261,11 +261,19 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
             actions.append(Action(ActionType.WEAPON))
 
     # ── Equipment activations ──
-    # Blossom of Spring: Once per Combat Chain — 0: gain 1 resource, then destroy
+    # Blossom of Spring: Action — 0: gain 1 resource, go again, then destroy
     blossom = player.equipment.get("chest")
     if (blossom and blossom.active and not blossom.destroyed
             and blossom.card.name == "Blossom of Spring"):
         actions.append(Action(ActionType.ACTIVATE_EQUIPMENT, equip_slot="chest"))
+
+    # Gallantry Gold: Action — 1: weapon attacks +1 power this turn, go again, then destroy
+    gallantry = player.equipment.get("arms")
+    if (gallantry and gallantry.active and not gallantry.destroyed
+            and gallantry.card.name == "Gallantry Gold" and gallantry.card.effects):
+        available = player.resource_points + sum(c.pitch for c in player.hand)
+        if available >= gallantry.card.cost:
+            actions.append(Action(ActionType.ACTIVATE_EQUIPMENT, equip_slot="arms"))
 
     # Always legal to pass
     actions.append(Action(ActionType.PASS))
