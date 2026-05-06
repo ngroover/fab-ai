@@ -313,6 +313,7 @@ INDEX_TEMPLATE = """
     </div>
     <a class="refresh-btn" href="/decks" style="margin-right:6px;background:#276749;border-color:#2f855a;color:#9ae6b4;">🃏 Decks</a>
     <a class="refresh-btn" href="/play" style="margin-right:6px;background:#1a365d;border-color:#2b4c7e;color:#90cdf4;">▶ Play</a>
+    <a class="refresh-btn" href="/train" style="margin-right:6px;background:#44337a;border-color:#553c9a;color:#d6bcfa;">🧠 Train</a>
     <a class="refresh-btn" href="/">↻ Refresh</a>
   </header>
   <div class="container">
@@ -2906,6 +2907,790 @@ PLAY_TEMPLATE = """
 """
 
 
+TRAIN_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FaB — Trainer</title>
+  <style>
+    {{ css }}
+
+    .container { padding: 14px; max-width: 960px; margin: 0 auto; }
+
+    /* ── Status pill row ─────────────────────────────── */
+    .status-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 12px; background: #111826;
+      border: 1px solid #2d3748; border-radius: 10px;
+      margin-bottom: 12px; flex-wrap: wrap;
+    }
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 999px;
+      font-size: 0.78rem; font-weight: 700;
+      background: #2d3748; color: #a0aec0;
+    }
+    .status-pill .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #718096;
+    }
+    .status-pill[data-state="self-play"] { background: #1e3a5f; color: #90cdf4; }
+    .status-pill[data-state="self-play"] .dot { background: #63b3ed; animation: blink 1.2s infinite; }
+    .status-pill[data-state="training"]  { background: #1c4532; color: #9ae6b4; }
+    .status-pill[data-state="training"] .dot  { background: #68d391; animation: blink 1.2s infinite; }
+    .status-pill[data-state="evaluating"] { background: #44337a; color: #d6bcfa; }
+    .status-pill[data-state="evaluating"] .dot { background: #b794f4; animation: blink 1.2s infinite; }
+    .status-pill[data-state="paused"]    { background: #744210; color: #fbd38d; }
+    .status-pill[data-state="paused"] .dot    { background: #f6ad55; }
+    .status-pill[data-state="error"]     { background: #742a2a; color: #feb2b2; }
+    .status-pill[data-state="error"] .dot     { background: #fc8181; }
+    @keyframes blink { 50% { opacity: 0.3; } }
+    .status-meta { font-size: 0.78rem; color: #718096; }
+    .status-meta strong { color: #e2e8f0; font-weight: 600; }
+
+    /* ── Tab nav ────────────────────────────────────── */
+    .tab-nav {
+      display: flex; gap: 4px; margin-bottom: 12px;
+      border-bottom: 1px solid #2d3748;
+    }
+    .tab-btn {
+      background: transparent; border: 1px solid transparent;
+      border-bottom: none; border-radius: 8px 8px 0 0;
+      color: #a0aec0; font-family: inherit;
+      font-size: 0.85rem; font-weight: 600;
+      padding: 8px 16px; cursor: pointer;
+      margin-bottom: -1px;
+    }
+    .tab-btn:hover { color: #e2e8f0; background: #1a202c; }
+    .tab-btn.active {
+      background: #1a202c; color: #f6e05e;
+      border-color: #2d3748; border-bottom-color: #1a202c;
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Cards / panels ─────────────────────────────── */
+    .panel {
+      background: #1a202c; border: 1px solid #2d3748;
+      border-radius: 10px; padding: 14px 16px; margin-bottom: 12px;
+    }
+    .panel h2 {
+      font-size: 0.78rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      color: #f6e05e; margin-bottom: 10px;
+    }
+    .panel h3 {
+      font-size: 0.82rem; font-weight: 600;
+      color: #e2e8f0; margin: 14px 0 6px;
+    }
+
+    /* ── Form fields ────────────────────────────────── */
+    .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .field label {
+      font-size: 0.75rem; color: #a0aec0;
+      font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .field input[type=number],
+    .field input[type=text],
+    .field select {
+      background: #0f1117; border: 1px solid #4a5568;
+      border-radius: 6px; color: #e2e8f0;
+      font-size: 0.85rem; padding: 6px 10px; font-family: inherit;
+    }
+    .field input:focus, .field select:focus {
+      outline: none; border-color: #63b3ed;
+    }
+    .field-grid {
+      display: grid; gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+    .help {
+      font-size: 0.7rem; color: #718096;
+    }
+
+    /* ── Chips (multi-select) ───────────────────────── */
+    .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip {
+      background: #0f1117; border: 1px solid #4a5568;
+      border-radius: 999px; color: #a0aec0;
+      font-size: 0.78rem; padding: 4px 12px;
+      cursor: pointer; user-select: none;
+      font-family: inherit;
+    }
+    .chip:hover { border-color: #63b3ed; color: #e2e8f0; }
+    .chip.active {
+      background: #1e3a5f; border-color: #2b6cb0; color: #90cdf4;
+    }
+
+    /* ── Collapsible ────────────────────────────────── */
+    details.advanced {
+      background: #111826; border: 1px solid #2d3748;
+      border-radius: 8px; margin: 10px 0; padding: 0;
+    }
+    details.advanced[open] { padding-bottom: 8px; }
+    details.advanced summary {
+      cursor: pointer; padding: 8px 12px;
+      font-size: 0.82rem; font-weight: 600;
+      color: #e2e8f0;
+      list-style: none;
+    }
+    details.advanced summary::before {
+      content: "▸"; display: inline-block; width: 14px;
+      color: #718096; transition: transform 0.15s;
+    }
+    details.advanced[open] summary::before { transform: rotate(90deg); }
+    details.advanced .field-grid { padding: 0 12px; }
+
+    /* ── Buttons ─────────────────────────────────────── */
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    button.tbtn {
+      font-family: inherit;
+      font-size: 0.85rem; font-weight: 600;
+      padding: 7px 16px; border-radius: 6px;
+      border: 1px solid transparent; cursor: pointer;
+    }
+    .tbtn-primary  { background: #2b6cb0; color: #fff; }
+    .tbtn-primary:hover  { background: #3182ce; }
+    .tbtn-warn     { background: #744210; color: #fbd38d; }
+    .tbtn-warn:hover { background: #975a16; }
+    .tbtn-success  { background: #276749; color: #9ae6b4; }
+    .tbtn-success:hover  { background: #2f855a; }
+    .tbtn-danger   { background: #742a2a; color: #feb2b2; }
+    .tbtn-danger:hover  { background: #9b2c2c; }
+    .tbtn-ghost    { background: transparent; color: #a0aec0; border-color: #4a5568; }
+    .tbtn-ghost:hover  { background: #2d3748; color: #e2e8f0; }
+    .tbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Counters grid ──────────────────────────────── */
+    .counters {
+      display: grid; gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    }
+    .counter {
+      background: #0f1117; border: 1px solid #2d3748;
+      border-radius: 8px; padding: 10px 12px;
+    }
+    .counter .k {
+      font-size: 0.68rem; color: #718096;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      font-weight: 700;
+    }
+    .counter .v {
+      font-size: 1.1rem; font-weight: 700;
+      color: #f6e05e; margin-top: 2px;
+      font-variant-numeric: tabular-nums;
+    }
+    .counter .v.small { font-size: 0.85rem; color: #e2e8f0; font-weight: 600; }
+
+    /* ── Sparkline grid ─────────────────────────────── */
+    .sparks {
+      display: grid; gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+    .spark {
+      background: #0f1117; border: 1px solid #2d3748;
+      border-radius: 8px; padding: 10px 12px;
+    }
+    .spark-title {
+      display: flex; justify-content: space-between;
+      align-items: baseline; margin-bottom: 4px;
+    }
+    .spark-title .t {
+      font-size: 0.78rem; font-weight: 600; color: #e2e8f0;
+    }
+    .spark-title .v {
+      font-size: 0.8rem; font-weight: 700; color: #f6e05e;
+      font-variant-numeric: tabular-nums;
+    }
+    .spark svg {
+      display: block; width: 100%; height: 60px;
+      background: #0a0e18; border-radius: 4px;
+    }
+    .spark .axis { stroke: #2d3748; stroke-width: 1; }
+    .spark .line { fill: none; stroke-width: 1.6; }
+    .spark .line.loss { stroke: #fc8181; }
+    .spark .line.value-loss { stroke: #f6ad55; }
+    .spark .line.win { stroke: #68d391; }
+    .spark .line.length { stroke: #90cdf4; }
+    .spark .line.value-pred { stroke: #b794f4; }
+    .spark .line.value-real { stroke: #f6e05e; stroke-dasharray: 3 2; }
+
+    .legend {
+      display: flex; gap: 10px; flex-wrap: wrap;
+      font-size: 0.7rem; color: #a0aec0;
+      margin-top: 4px;
+    }
+    .legend span { display: inline-flex; align-items: center; gap: 4px; }
+    .legend .sw { width: 10px; height: 2px; display: inline-block; }
+    .sw.loss { background: #fc8181; }
+    .sw.value-loss { background: #f6ad55; }
+    .sw.win { background: #68d391; }
+    .sw.length { background: #90cdf4; }
+    .sw.value-pred { background: #b794f4; }
+    .sw.value-real { background: #f6e05e; }
+
+    /* ── Log tail ───────────────────────────────────── */
+    .log-tail {
+      background: #0a0e18; border: 1px solid #2d3748;
+      border-radius: 6px; padding: 10px;
+      font-family: 'Menlo', 'Monaco', monospace;
+      font-size: 0.72rem; line-height: 1.45;
+      color: #cbd5e0; height: 240px; overflow-y: auto;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .log-tail .lvl-info { color: #cbd5e0; }
+    .log-tail .lvl-warn { color: #f6ad55; }
+    .log-tail .lvl-err  { color: #fc8181; }
+    .log-tail .lvl-ok   { color: #68d391; }
+    .log-tail .ts { color: #4a5568; }
+
+    /* ── Models table ───────────────────────────────── */
+    table.models {
+      width: 100%; border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    table.models th, table.models td {
+      padding: 8px 10px; text-align: left;
+      border-bottom: 1px solid #2d3748;
+    }
+    table.models th {
+      font-size: 0.7rem; text-transform: uppercase;
+      letter-spacing: 0.06em; color: #718096;
+      font-weight: 700;
+    }
+    table.models tr:hover td { background: #111826; }
+    table.models td.num { font-variant-numeric: tabular-nums; color: #a0aec0; }
+    table.models .actions { display: flex; gap: 4px; flex-wrap: wrap; }
+    table.models .actions button { padding: 3px 8px; font-size: 0.72rem; }
+    .pill-promoted {
+      display: inline-block; font-size: 0.65rem; font-weight: 700;
+      padding: 1px 6px; border-radius: 999px;
+      background: #1c4532; color: #9ae6b4;
+      margin-left: 6px;
+    }
+    .em-dash { color: #4a5568; }
+
+    /* ── Empty state for monitor when idle ──────────── */
+    .empty-monitor {
+      text-align: center; padding: 40px 20px;
+      color: #718096;
+    }
+    .empty-monitor .big { font-size: 2.2rem; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>🧠 FaB Trainer</h1>
+      <div class="subtitle">Self-play & neural-net training</div>
+    </div>
+    <a class="back-link" href="/">← Home</a>
+    <a class="back-link" href="/play" style="background:#1a365d;border-color:#2b4c7e;color:#90cdf4;">▶ Play</a>
+  </header>
+
+  <div class="container">
+
+    <!-- ── Status pill row ───────────────────── -->
+    <div class="status-row">
+      <span id="status-pill" class="status-pill" data-state="idle">
+        <span class="dot"></span>
+        <span id="status-text">idle</span>
+      </span>
+      <span class="status-meta">
+        Iteration <strong id="status-iter">—</strong> ·
+        Self-play games <strong id="status-games">—</strong> ·
+        Grad steps <strong id="status-steps">—</strong> ·
+        Wall <strong id="status-wall">—</strong>
+      </span>
+      <span style="flex:1"></span>
+      <button class="tbtn tbtn-ghost" id="demo-btn" title="Populate the monitor with fake data so you can preview the live UI">▶ Demo data</button>
+    </div>
+
+    <!-- ── Tab nav ───────────────────────────── -->
+    <div class="tab-nav">
+      <button class="tab-btn active" data-tab="run">⚙️ Run</button>
+      <button class="tab-btn" data-tab="monitor">📈 Monitor</button>
+      <button class="tab-btn" data-tab="models">💾 Models</button>
+    </div>
+
+    <!-- ────────────────────────────────────────
+         RUN TAB
+         ──────────────────────────────────────── -->
+    <div class="tab-panel active" id="tab-run">
+
+      <div class="panel">
+        <h2>Base model</h2>
+        <div class="field-grid">
+          <div class="field">
+            <label>Initialize from</label>
+            <select id="cfg-base">
+              <option value="random">Random init</option>
+              <option value="ckpt-iter-0042">ckpt-iter-0042 · 2.1 MB</option>
+              <option value="ckpt-iter-0030">ckpt-iter-0030 · 2.1 MB</option>
+              <option value="ckpt-iter-0010">ckpt-iter-0010 · 2.1 MB</option>
+            </select>
+            <span class="help">Pick a saved checkpoint or start from scratch.</span>
+          </div>
+          <div class="field">
+            <label>Run name</label>
+            <input type="text" id="cfg-name" placeholder="rhinar-vs-dorinthea-run-1" value="">
+            <span class="help">Used as filename prefix for checkpoints.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Opponent pool</h2>
+        <div class="chip-row" id="opp-chips">
+          <button class="chip active" data-opp="self">Self (current)</button>
+          <button class="chip" data-opp="past">Past checkpoint</button>
+          <button class="chip" data-opp="rhinar">RhinarAgent</button>
+          <button class="chip" data-opp="dorinthea">DorintheiAgent</button>
+          <button class="chip" data-opp="random">RandomAgent</button>
+          <button class="chip" data-opp="mcts">MCTSAgent (200 sims)</button>
+        </div>
+        <span class="help">Selected opponents are sampled uniformly per self-play game.</span>
+      </div>
+
+      <div class="panel">
+        <h2>Loop sizes</h2>
+        <div class="field-grid">
+          <div class="field">
+            <label>Self-play games / iter</label>
+            <input type="number" id="cfg-games" value="200" min="1">
+          </div>
+          <div class="field">
+            <label>Gradient steps / iter</label>
+            <input type="number" id="cfg-steps" value="1000" min="1">
+          </div>
+          <div class="field">
+            <label>Total iterations</label>
+            <input type="number" id="cfg-iters" value="50" min="0">
+            <span class="help">Use 0 for "until stopped".</span>
+          </div>
+          <div class="field">
+            <label>Random seed</label>
+            <input type="number" id="cfg-seed" placeholder="auto">
+          </div>
+        </div>
+
+        <details class="advanced">
+          <summary>Hyperparameters</summary>
+          <div class="field-grid">
+            <div class="field">
+              <label>Learning rate</label>
+              <input type="number" id="cfg-lr" value="0.0003" step="0.00001">
+            </div>
+            <div class="field">
+              <label>Batch size</label>
+              <input type="number" id="cfg-batch" value="256" min="1">
+            </div>
+            <div class="field">
+              <label>Value-loss coef</label>
+              <input type="number" id="cfg-vloss" value="0.5" step="0.05">
+            </div>
+            <div class="field">
+              <label>Entropy coef</label>
+              <input type="number" id="cfg-ent" value="0.01" step="0.005">
+            </div>
+            <div class="field">
+              <label>Discount γ</label>
+              <input type="number" id="cfg-gamma" value="0.99" step="0.01">
+            </div>
+            <div class="field">
+              <label>Exploration temp (start → end)</label>
+              <input type="text" id="cfg-temp" value="1.0 → 0.1">
+            </div>
+            <div class="field">
+              <label>PIMC determinization</label>
+              <select id="cfg-pimc">
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+              <span class="help">Sample opponent's hidden hand for self-play rollouts.</span>
+            </div>
+          </div>
+        </details>
+
+        <div class="btn-row">
+          <button class="tbtn tbtn-primary" id="btn-start">▶ Start</button>
+          <button class="tbtn tbtn-warn"    id="btn-pause"  disabled>⏸ Pause</button>
+          <button class="tbtn tbtn-warn"    id="btn-resume" disabled style="display:none">▶ Resume</button>
+          <button class="tbtn tbtn-danger"  id="btn-stop"   disabled>⏹ Stop</button>
+          <span style="flex:1"></span>
+          <button class="tbtn tbtn-success" id="btn-save"   disabled>💾 Save Checkpoint Now</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────
+         MONITOR TAB
+         ──────────────────────────────────────── -->
+    <div class="tab-panel" id="tab-monitor">
+
+      <div class="panel" id="monitor-empty">
+        <div class="empty-monitor">
+          <div class="big">📈</div>
+          <p>No active run.</p>
+          <p style="margin-top:6px;font-size:0.85rem;">
+            Start a run from the <strong>Run</strong> tab,
+            or click <strong>▶ Demo data</strong> above to preview live UI.
+          </p>
+        </div>
+      </div>
+
+      <div id="monitor-live" style="display:none;">
+        <div class="panel">
+          <h2>Counters</h2>
+          <div class="counters">
+            <div class="counter"><div class="k">Iteration</div><div class="v" id="m-iter">—</div></div>
+            <div class="counter"><div class="k">Self-play games</div><div class="v" id="m-games">—</div></div>
+            <div class="counter"><div class="k">Gradient steps</div><div class="v" id="m-steps">—</div></div>
+            <div class="counter"><div class="k">Wall time</div><div class="v small" id="m-wall">—</div></div>
+            <div class="counter"><div class="k">Latest checkpoint</div><div class="v small" id="m-ckpt">—</div></div>
+            <div class="counter"><div class="k">Last hash</div><div class="v small" id="m-hash">—</div></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Losses & training</h2>
+          <div class="sparks">
+            <div class="spark">
+              <div class="spark-title"><span class="t">Policy loss</span><span class="v" id="sv-ploss">—</span></div>
+              <svg viewBox="0 0 200 60" preserveAspectRatio="none"><polyline class="line loss" id="sl-ploss" points=""/></svg>
+            </div>
+            <div class="spark">
+              <div class="spark-title"><span class="t">Value loss</span><span class="v" id="sv-vloss">—</span></div>
+              <svg viewBox="0 0 200 60" preserveAspectRatio="none"><polyline class="line value-loss" id="sl-vloss" points=""/></svg>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Win rate vs opponents</h2>
+          <div class="sparks">
+            <div class="spark">
+              <div class="spark-title"><span class="t">vs RhinarAgent</span><span class="v" id="sv-wr-rhinar">—</span></div>
+              <svg viewBox="0 0 200 60" preserveAspectRatio="none"><polyline class="line win" id="sl-wr-rhinar" points=""/></svg>
+            </div>
+            <div class="spark">
+              <div class="spark-title"><span class="t">vs DorintheiAgent</span><span class="v" id="sv-wr-dor">—</span></div>
+              <svg viewBox="0 0 200 60" preserveAspectRatio="none"><polyline class="line win" id="sl-wr-dor" points=""/></svg>
+            </div>
+            <div class="spark">
+              <div class="spark-title"><span class="t">vs RandomAgent</span><span class="v" id="sv-wr-rand">—</span></div>
+              <svg viewBox="0 0 200 60" preserveAspectRatio="none"><polyline class="line win" id="sl-wr-rand" points=""/></svg>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Episode stats</h2>
+          <div class="sparks">
+            <div class="spark">
+              <div class="spark-title"><span class="t">Mean episode length</span><span class="v" id="sv-len">—</span></div>
+              <svg viewBox="0 0 200 60" preserveAspectRatio="none"><polyline class="line length" id="sl-len" points=""/></svg>
+            </div>
+            <div class="spark">
+              <div class="spark-title"><span class="t">Predicted vs realized return</span><span class="v" id="sv-val">—</span></div>
+              <svg viewBox="0 0 200 60" preserveAspectRatio="none">
+                <polyline class="line value-pred" id="sl-vpred" points=""/>
+                <polyline class="line value-real" id="sl-vreal" points=""/>
+              </svg>
+              <div class="legend">
+                <span><span class="sw value-pred"></span>predicted</span>
+                <span><span class="sw value-real"></span>realized</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Training log
+            <button class="tbtn tbtn-ghost" id="btn-watch" style="float:right;font-size:0.72rem;padding:3px 10px;">👁 Watch self-play game</button>
+          </h2>
+          <div class="log-tail" id="log-tail"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────
+         MODELS TAB
+         ──────────────────────────────────────── -->
+    <div class="tab-panel" id="tab-models">
+      <div class="panel">
+        <h2>Saved checkpoints</h2>
+        <table class="models">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Iter</th>
+              <th>Created</th>
+              <th>Size</th>
+              <th>vs Rhinar</th>
+              <th>vs Dorinthea</th>
+              <th>vs Random</th>
+              <th>vs MCTS</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="models-body">
+            <!-- demo rows; replaced by /train/models when wired -->
+            <tr>
+              <td><strong>ckpt-iter-0042</strong><span class="pill-promoted">★ active</span></td>
+              <td class="num">42</td>
+              <td class="num">2026-05-06 09:14</td>
+              <td class="num">2.1 MB</td>
+              <td class="num">68%</td>
+              <td class="num">61%</td>
+              <td class="num">94%</td>
+              <td class="num">52%</td>
+              <td class="actions">
+                <button class="tbtn tbtn-primary">Evaluate</button>
+                <button class="tbtn tbtn-ghost">Rename</button>
+                <button class="tbtn tbtn-ghost">Download</button>
+                <button class="tbtn tbtn-danger">Delete</button>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>ckpt-iter-0030</strong></td>
+              <td class="num">30</td>
+              <td class="num">2026-05-06 08:02</td>
+              <td class="num">2.1 MB</td>
+              <td class="num">59%</td>
+              <td class="num">54%</td>
+              <td class="num">88%</td>
+              <td class="em-dash">—</td>
+              <td class="actions">
+                <button class="tbtn tbtn-primary">Evaluate</button>
+                <button class="tbtn tbtn-success">Promote</button>
+                <button class="tbtn tbtn-ghost">Rename</button>
+                <button class="tbtn tbtn-ghost">Download</button>
+                <button class="tbtn tbtn-danger">Delete</button>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>ckpt-iter-0010</strong></td>
+              <td class="num">10</td>
+              <td class="num">2026-05-06 06:48</td>
+              <td class="num">2.1 MB</td>
+              <td class="num">42%</td>
+              <td class="num">38%</td>
+              <td class="num">71%</td>
+              <td class="em-dash">—</td>
+              <td class="actions">
+                <button class="tbtn tbtn-primary">Evaluate</button>
+                <button class="tbtn tbtn-success">Promote</button>
+                <button class="tbtn tbtn-ghost">Rename</button>
+                <button class="tbtn tbtn-ghost">Download</button>
+                <button class="tbtn tbtn-danger">Delete</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="help" style="margin-top:10px;">
+          Backend not wired yet — these rows are placeholders to show the layout.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── Tab switching ────────────────────────────────
+    const tabs = document.querySelectorAll('.tab-btn');
+    const panels = document.querySelectorAll('.tab-panel');
+    tabs.forEach(b => b.addEventListener('click', () => {
+      tabs.forEach(x => x.classList.remove('active'));
+      panels.forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      document.getElementById('tab-' + b.dataset.tab).classList.add('active');
+    }));
+
+    // ── Opponent chip toggling ───────────────────────
+    document.querySelectorAll('#opp-chips .chip').forEach(c =>
+      c.addEventListener('click', () => c.classList.toggle('active')));
+
+    // ── Wire-up disabled state for run buttons (visual only) ──
+    const btnStart  = document.getElementById('btn-start');
+    const btnPause  = document.getElementById('btn-pause');
+    const btnResume = document.getElementById('btn-resume');
+    const btnStop   = document.getElementById('btn-stop');
+    const btnSave   = document.getElementById('btn-save');
+    btnStart.addEventListener('click', () => alert('Backend not wired yet — this is a UI preview.'));
+
+    // ── Status pill helpers ──────────────────────────
+    function setStatus(state, opts={}) {
+      const pill = document.getElementById('status-pill');
+      pill.dataset.state = state;
+      document.getElementById('status-text').textContent = state;
+      if (opts.iter   !== undefined) document.getElementById('status-iter').textContent  = opts.iter;
+      if (opts.games  !== undefined) document.getElementById('status-games').textContent = opts.games;
+      if (opts.steps  !== undefined) document.getElementById('status-steps').textContent = opts.steps;
+      if (opts.wall   !== undefined) document.getElementById('status-wall').textContent  = opts.wall;
+    }
+
+    // ── Sparkline drawing ────────────────────────────
+    function drawSpark(id, values, opts={}) {
+      const el = document.getElementById(id);
+      if (!el || !values.length) return;
+      const W = 200, H = 60, pad = 2;
+      let lo = opts.min, hi = opts.max;
+      if (lo === undefined) lo = Math.min(...values);
+      if (hi === undefined) hi = Math.max(...values);
+      if (hi - lo < 1e-9) hi = lo + 1;
+      const n = values.length;
+      const pts = values.map((v, i) => {
+        const x = n === 1 ? W/2 : pad + (W - 2*pad) * i / (n-1);
+        const y = H - pad - (H - 2*pad) * (v - lo) / (hi - lo);
+        return x.toFixed(1) + ',' + y.toFixed(1);
+      }).join(' ');
+      el.setAttribute('points', pts);
+    }
+    function fmt(v, digits=3) {
+      if (v === null || v === undefined) return '—';
+      return Number(v).toFixed(digits);
+    }
+    function fmtPct(v) {
+      if (v === null || v === undefined) return '—';
+      return (Number(v)*100).toFixed(1) + '%';
+    }
+
+    // ── Demo data generator (preview only) ───────────
+    let demoTimer = null;
+    let demo = null;
+    function startDemo() {
+      // initial pre-baked points
+      demo = {
+        ploss: [], vloss: [],
+        wrR: [], wrD: [], wrRand: [],
+        len: [], vpred: [], vreal: [],
+        log: [],
+        startTs: Date.now(),
+        iter: 0, games: 0, steps: 0,
+      };
+      // seed with some history
+      let p = 1.4, v = 1.1, wR = 0.20, wD = 0.18, wN = 0.45, ln = 28, vp = 0.0, vr = 0.0;
+      for (let i = 0; i < 30; i++) {
+        p  = Math.max(0.05, p  - 0.025 + (Math.random()-0.5)*0.05);
+        v  = Math.max(0.05, v  - 0.018 + (Math.random()-0.5)*0.04);
+        wR = Math.min(0.95, wR + 0.012 + (Math.random()-0.5)*0.04);
+        wD = Math.min(0.95, wD + 0.010 + (Math.random()-0.5)*0.04);
+        wN = Math.min(0.99, wN + 0.018 + (Math.random()-0.5)*0.03);
+        ln = Math.max(8,    ln + (Math.random()-0.5)*1.5);
+        vp = vp + (Math.random()-0.5)*0.05;
+        vr = vp + (Math.random()-0.5)*0.10;
+        demo.ploss.push(p); demo.vloss.push(v);
+        demo.wrR.push(wR);  demo.wrD.push(wD);  demo.wrRand.push(wN);
+        demo.len.push(ln);  demo.vpred.push(vp); demo.vreal.push(vr);
+      }
+      demo.iter = 30; demo.games = 30 * 200; demo.steps = 30 * 1000;
+      demo.log = [
+        '[09:14:02] ▶ Run started: rhinar-vs-dorinthea-run-1',
+        '[09:14:02]   base=random_init opponents=[self, RhinarAgent, RandomAgent]',
+        '[09:14:02]   games/iter=200 steps/iter=1000 total_iters=50',
+        '[09:14:03] iter 1/50 · self-play 200 games · mean_len=27.4',
+        '[09:14:09] iter 1/50 · grad steps 1000 · ploss=1.412 vloss=1.103',
+        '[09:14:09] iter 1/50 · eval vs RhinarAgent: 21% vs DorintheiAgent: 19% vs Random: 47%',
+        '[09:14:14] iter 2/50 · self-play 200 games · mean_len=26.9',
+        '[09:14:18] iter 2/50 · grad steps 1000 · ploss=1.253 vloss=0.984',
+        '[09:14:19] ✓ checkpoint saved: ckpt-iter-0002 (2.1 MB)',
+        '[09:14:24] iter 3/50 · self-play 200 games · mean_len=26.3',
+        '... (truncated)',
+        '[09:18:51] iter 30/50 · grad steps 1000 · ploss=0.683 vloss=0.342',
+        '[09:18:52] iter 30/50 · eval vs RhinarAgent: 68% vs DorintheiAgent: 61% vs Random: 94%',
+      ];
+
+      document.getElementById('monitor-empty').style.display = 'none';
+      document.getElementById('monitor-live').style.display  = 'block';
+      // jump to monitor tab
+      document.querySelector('.tab-btn[data-tab="monitor"]').click();
+      renderDemo();
+
+      // tick: generate a new datapoint every 1s
+      demoTimer = setInterval(() => {
+        const last = arr => arr[arr.length-1];
+        demo.ploss.push(Math.max(0.05, last(demo.ploss) - 0.005 + (Math.random()-0.5)*0.04));
+        demo.vloss.push(Math.max(0.05, last(demo.vloss) - 0.004 + (Math.random()-0.5)*0.03));
+        demo.wrR.push(Math.min(0.95, last(demo.wrR) + 0.002 + (Math.random()-0.5)*0.03));
+        demo.wrD.push(Math.min(0.95, last(demo.wrD) + 0.002 + (Math.random()-0.5)*0.03));
+        demo.wrRand.push(Math.min(0.99, last(demo.wrRand) + 0.001 + (Math.random()-0.5)*0.02));
+        demo.len.push(Math.max(8, last(demo.len) + (Math.random()-0.5)*1.0));
+        const nvp = last(demo.vpred) + (Math.random()-0.5)*0.05;
+        demo.vpred.push(nvp);
+        demo.vreal.push(nvp + (Math.random()-0.5)*0.10);
+        // cap length
+        for (const k of ['ploss','vloss','wrR','wrD','wrRand','len','vpred','vreal']) {
+          if (demo[k].length > 200) demo[k].shift();
+        }
+        demo.iter  += 1;
+        demo.games += 200;
+        demo.steps += 1000;
+        const ts = new Date().toTimeString().slice(0,8);
+        demo.log.push(`[${ts}] iter ${demo.iter}/50 · grad steps 1000 · ploss=${last(demo.ploss).toFixed(3)} vloss=${last(demo.vloss).toFixed(3)}`);
+        if (demo.log.length > 200) demo.log.shift();
+        renderDemo();
+      }, 1000);
+    }
+
+    function renderDemo() {
+      const last = a => a[a.length-1];
+      const elapsed = Math.floor((Date.now() - demo.startTs) / 1000);
+      const wall = `${Math.floor(elapsed/60)}m ${elapsed%60}s`;
+      setStatus('training', { iter: demo.iter, games: demo.games, steps: demo.steps, wall });
+
+      document.getElementById('m-iter').textContent  = demo.iter;
+      document.getElementById('m-games').textContent = demo.games.toLocaleString();
+      document.getElementById('m-steps').textContent = demo.steps.toLocaleString();
+      document.getElementById('m-wall').textContent  = wall;
+      document.getElementById('m-ckpt').textContent  = `ckpt-iter-${String(demo.iter).padStart(4,'0')}`;
+      document.getElementById('m-hash').textContent  = 'a1f3…d7e2';
+
+      drawSpark('sl-ploss', demo.ploss);
+      drawSpark('sl-vloss', demo.vloss);
+      drawSpark('sl-wr-rhinar', demo.wrR, {min:0, max:1});
+      drawSpark('sl-wr-dor',    demo.wrD, {min:0, max:1});
+      drawSpark('sl-wr-rand',   demo.wrRand, {min:0, max:1});
+      drawSpark('sl-len',   demo.len);
+      // share scale across vpred/vreal
+      const vCombined = demo.vpred.concat(demo.vreal);
+      const vMin = Math.min(...vCombined), vMax = Math.max(...vCombined);
+      drawSpark('sl-vpred', demo.vpred, {min:vMin, max:vMax});
+      drawSpark('sl-vreal', demo.vreal, {min:vMin, max:vMax});
+
+      document.getElementById('sv-ploss').textContent = fmt(last(demo.ploss));
+      document.getElementById('sv-vloss').textContent = fmt(last(demo.vloss));
+      document.getElementById('sv-wr-rhinar').textContent = fmtPct(last(demo.wrR));
+      document.getElementById('sv-wr-dor').textContent    = fmtPct(last(demo.wrD));
+      document.getElementById('sv-wr-rand').textContent   = fmtPct(last(demo.wrRand));
+      document.getElementById('sv-len').textContent  = fmt(last(demo.len), 1);
+      document.getElementById('sv-val').textContent  = `${fmt(last(demo.vpred),2)} / ${fmt(last(demo.vreal),2)}`;
+
+      document.getElementById('log-tail').textContent = demo.log.join('\\n');
+      const lt = document.getElementById('log-tail');
+      lt.scrollTop = lt.scrollHeight;
+    }
+
+    function stopDemo() {
+      if (demoTimer) clearInterval(demoTimer);
+      demoTimer = null;
+      setStatus('idle', { iter: '—', games: '—', steps: '—', wall: '—' });
+      document.getElementById('monitor-empty').style.display = 'block';
+      document.getElementById('monitor-live').style.display  = 'none';
+    }
+
+    document.getElementById('demo-btn').addEventListener('click', () => {
+      if (demoTimer) { stopDemo(); document.getElementById('demo-btn').textContent = '▶ Demo data'; }
+      else            { startDemo(); document.getElementById('demo-btn').textContent = '⏹ Stop demo'; }
+    });
+  </script>
+</body>
+</html>
+"""
+
+
 # ──────────────────────────────────────────────────────────────
 # Interactive play — routes
 # ──────────────────────────────────────────────────────────────
@@ -2957,6 +3742,16 @@ def play_action():
     idx = data.get("index", -1)
     ok = _session.submit_choice(int(idx))
     return jsonify({"ok": ok})
+
+
+# ──────────────────────────────────────────────────────────────
+# Trainer — UI route only (backend not yet wired)
+# ──────────────────────────────────────────────────────────────
+
+@app.route("/train")
+@login_required
+def train_page():
+    return render_template_string(TRAIN_TEMPLATE, css=BASE_CSS)
 
 
 # ──────────────────────────────────────────────────────────────
