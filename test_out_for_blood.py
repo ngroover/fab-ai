@@ -137,6 +137,42 @@ class TestOutForBloodEffect(unittest.TestCase):
         # next_attack_power_bonus persists until turn resets
         self.assertEqual(dorinthea.next_attack_power_bonus, 1)
 
+    def test_not_legal_during_card_attack(self):
+        """Out for Blood must NOT be playable as a reaction to a non-weapon attack.
+
+        Seed 30: Dorinthea opens with Flock of the Feather Walkers + Out for Blood.
+        Rhinar wins the coin flip; GO_SECOND lets Dorinthea attack first.
+        After pitching Sharpen Steel to pay for Flock, Out for Blood stays in hand.
+        In the REACTION phase the pending attack is a card attack (not a weapon),
+        so Out for Blood should NOT appear in legal actions.
+        """
+        env = self.env
+        env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=30)
+        dorinthea = env._game.players[1]
+
+        env.step(Action(ActionType.GO_SECOND))  # Dorinthea goes first
+
+        # Dorinthea hand: [Flock of the Feather Walkers, Blade Flash, Out for Blood, Sharpen Steel]
+        fotfw = dorinthea.hand[0]  # Flock of the Feather Walkers
+        self.assertEqual(fotfw.name, "Flock of the Feather Walkers")
+        env.step(Action(ActionType.PLAY_CARD, card=fotfw))
+
+        # Pitch Sharpen Steel (index 2 in remaining hand, pitch=1) — keeps Out for Blood in hand
+        env.step(Action(ActionType.PITCH, pitch_index=2))
+
+        # Rhinar passes defend
+        env.step(Action(ActionType.DEFEND))
+
+        self.assertEqual(env._phase.name, "REACTION")
+        self.assertFalse(env._pending_is_weapon)
+
+        ofb_legal = any(
+            a.card is not None and a.card.name == "Out for Blood"
+            for a in env.legal_actions()
+        )
+        self.assertFalse(ofb_legal,
+                         "Out for Blood must not be playable as a reaction to a card attack")
+
 
 if __name__ == "__main__":
     unittest.main()
