@@ -90,8 +90,9 @@ class Player:
         self.slice_and_dice_active = False # from Slice and Dice: +1 1st weapon, +2 2nd weapon
         self.next_attack_go_again = False  # from Come to Fight
         self.next_attack_power_bonus = 0             # from Out for Blood reprise, etc.
-        self.next_brute_attack_bonus = 0             # from Beast Mode (unconditional)
+        self.next_brute_attack_bonus = 0             # Awakening Bellow: +N to next Brute attack (unconditional)
         self.next_brute_attack_conditional_bonus = 0  # from Barraging Beatdown (conditional on < 2 non-equip blockers)
+        self.intimidated_this_turn = False            # True if player has triggered intimidate this turn
         self.attacks_this_turn = 0
         self.weapon_additional_attack = False  # Dawnblade: one extra attack when go again fires
         # Persistent Dawnblade counters (from Glistening Steelblade on-hit effect; never reset)
@@ -150,6 +151,7 @@ class Player:
         self.next_attack_power_bonus = 0
         self.next_brute_attack_bonus = 0
         self.next_brute_attack_conditional_bonus = 0
+        self.intimidated_this_turn = False
         self.attacks_this_turn = 0
         self.weapon_additional_attack = False
         self.glistening_steelblade_active = False
