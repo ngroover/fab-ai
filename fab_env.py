@@ -168,16 +168,18 @@ class FaBEnv:
         # Isolated RNG — seeded in reset() so game randomness is never shared with external code.
         self._rng: random.Random = random.Random()
 
-        # Observation / action spaces (agent-specific but symmetric structure)
+        # Observation / action spaces (agent-specific but symmetric structure).
+        # Card slots use learned embeddings with unbounded floats, so bounds are
+        # left wide; per-feature normalized scalars still fit within them.
         obs_size = PLAYER_OBS_SIZE
         self.observation_spaces = {
             a: DictSpace({
-                "agent":        Box(0.0, 1.0, shape=(obs_size,)),
-                "opponent":     Box(0.0, 1.0, shape=(obs_size,)),
+                "agent":        Box(-float("inf"), float("inf"), shape=(obs_size,)),
+                "opponent":     Box(-float("inf"), float("inf"), shape=(obs_size,)),
                 "global":       Box(0.0, 1.0, shape=(2,)),
                 # During the PITCH phase, encodes the card the agent has committed to play.
                 # All zeros in every other phase.
-                "pending_card": Box(0.0, 1.0, shape=(CARD_FEATURES,)),
+                "pending_card": Box(-float("inf"), float("inf"), shape=(CARD_FEATURES,)),
             })
             for a in self.agents
         }
