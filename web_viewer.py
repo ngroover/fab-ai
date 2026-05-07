@@ -1669,6 +1669,13 @@ class _WebHumanAgent:
         if action.action_type == ActionType.MENTOR_FLIP:
             mentor_name = player.arsenal.name if player.arsenal else "mentor"
             return f"FLIP {mentor_name} FACE-UP" if action.flip else f"KEEP {mentor_name} FACE-DOWN"
+        if action.action_type == ActionType.ACTIVATE_CARD_ABILITY:
+            card_name = action.card.name if action.card else "Card"
+            if action.hand_index is not None and 0 <= action.hand_index < len(player.hand):
+                discard_name = player.hand[action.hand_index].name
+            else:
+                discard_name = f"hand[{action.hand_index}]"
+            return f"ACTIVATE {card_name} — discard {discard_name} → +3 block"
         return str(action)
 
     def _pend(self, legal, player, phase, attack_power=0):
