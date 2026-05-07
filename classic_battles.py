@@ -301,6 +301,7 @@ CARD_CATALOG: Dict[str, Card] = {
                                  power=0, defense=3, color=Color.YELLOW,
                                  card_class=CardClass.WARRIOR,
                                  text="Target weapon attack gains +2 power.  Reprise - If the defending hero has defended with a card from their hand this chain link, your next attack this turn gains +1 power.",
+                                 play_condition=lambda ctx: ctx.get("is_weapon_attack", False),
                                  effects=[
                                      CardEffect(trigger=EffectTrigger.ON_ATTACK_REACTION, action=EffectAction.ATTACK_POWER_BOOST, magnitude=2),
                                      CardEffect(trigger=EffectTrigger.ON_ATTACK_REACTION, action=EffectAction.NEXT_ATTACK_POWER_BONUS, magnitude=1,

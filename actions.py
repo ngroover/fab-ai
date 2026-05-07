@@ -395,6 +395,7 @@ def legal_mentor_flip_actions() -> List[Action]:
 def legal_reaction_actions(player: 'Player', attacker_idx: int,
                            priority_idx: int,
                            pending_is_sword_attack: bool = False,
+                           pending_is_weapon_attack: bool = False,
                            committed_defend_cards: Optional[List['Card']] = None,
                            rally_ability_used: bool = False) -> List[Action]:
     """
@@ -425,7 +426,8 @@ def legal_reaction_actions(player: 'Player', attacker_idx: int,
         if card.card_type == CardType.INSTANT:
             pass  # either player may play instants
         elif card.card_type == CardType.ATTACK_REACTION and is_attacker:
-            ctx = {"weapon_attack_count": player.weapon_attack_count}
+            ctx = {"weapon_attack_count": player.weapon_attack_count,
+                   "is_weapon_attack": pending_is_weapon_attack}
             if card.play_condition is not None and not card.play_condition(ctx):
                 continue
             requires_sword = any(

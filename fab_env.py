@@ -342,6 +342,7 @@ class FaBEnv:
             return legal_reaction_actions(active, self._reaction_attacker_idx,
                                           self._reaction_priority_idx,
                                           pending_is_sword_attack=pending_is_sword,
+                                          pending_is_weapon_attack=self._pending_is_weapon,
                                           committed_defend_cards=self._committed_defend_cards,
                                           rally_ability_used=self._rally_ability_used)
         elif self._phase == Phase.INSTANT:
