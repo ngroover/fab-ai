@@ -882,6 +882,7 @@ class FaBEnv:
                     self._log(f"    🎓 Chief Ruk'utan — 6+ power attack triggers intimidate + lesson counter!")
                     self._mentor_lesson(attacker)
                 if Keyword.INTIMIDATE in self._pending_attack.keywords or mentor_intimidate:
+                    attacker.intimidated_this_turn = True
                     if defender.hand:
                         banished = self._rng.choice(defender.hand)
                         defender.hand.remove(banished)
@@ -1295,6 +1296,9 @@ class FaBEnv:
             attacker.next_sword_attack_power_bonus = 0  # consumed by this attack declaration
         else:
             power = self._pending_attack.power + attacker.next_brute_attack_bonus
+            if self._pending_attack.name == "Beast Mode" and attacker.intimidated_this_turn:
+                power += 2
+                self._log(f"    ⚡ Beast Mode — intimidated this turn, +2 power!")
         if attacker.next_attack_power_bonus:
             power += attacker.next_attack_power_bonus
             self._log(f"    ⚡ next attack power bonus +{attacker.next_attack_power_bonus} applied.")
@@ -1344,6 +1348,7 @@ class FaBEnv:
             if not effect.matches(trigger, context):
                 continue
             if effect.action == EffectAction.INTIMIDATE:
+                player.intimidated_this_turn = True
                 if opponent.hand:
                     banished = self._rng.choice(opponent.hand)
                     opponent.hand.remove(banished)
@@ -1391,6 +1396,7 @@ class FaBEnv:
                             self._log(f"    ⚡ {card.name} — discarded 6+ power card, +2 power! "
                                       f"({self._pending_attack_power} total)")
                         elif effect.action == EffectAction.DRAW_DISCARD_INTIMIDATE:
+                            active.intimidated_this_turn = True
                             if opponent.hand:
                                 banished = self._rng.choice(opponent.hand)
                                 opponent.hand.remove(banished)
@@ -1541,6 +1547,7 @@ class FaBEnv:
         self._break_combat_chain(active, opponent)
 
         if Keyword.INTIMIDATE in card.keywords:
+            active.intimidated_this_turn = True
             if opponent.hand:
                 banished = self._rng.choice(opponent.hand)
                 opponent.hand.remove(banished)
