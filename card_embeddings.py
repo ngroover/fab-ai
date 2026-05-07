@@ -324,6 +324,55 @@ def ensure_embeddings(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Similarity helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def similar_cards(
+    name: str,
+    top_k: int = 10,
+    metric: str = "dot",
+    embeddings: Dict[str, np.ndarray] = None,
+) -> List[Tuple[str, float]]:
+    """Return the top_k cards most similar to `name`, scored by `metric`.
+
+    metric: "dot" (raw dot product) or "cosine" (length-normalized).
+    The query card itself is excluded from the result.
+    """
+    if embeddings is None:
+        embeddings = load_embeddings()
+    if name not in embeddings:
+        matches = [n for n in embeddings if name.lower() in n.lower()]
+        hint = f" Did you mean: {matches}?" if matches else ""
+        raise KeyError(f"Card {name!r} not in embeddings.{hint}")
+
+    query = embeddings[name]
+    names = [n for n in embeddings if n != name]
+    mat = np.stack([embeddings[n] for n in names])
+
+    if metric == "dot":
+        scores = mat @ query
+    elif metric == "cosine":
+        q_norm = query / (np.linalg.norm(query) + 1e-12)
+        m_norm = mat / (np.linalg.norm(mat, axis=1, keepdims=True) + 1e-12)
+        scores = m_norm @ q_norm
+    else:
+        raise ValueError(f"Unknown metric {metric!r}; use 'dot' or 'cosine'.")
+
+    order = np.argsort(-scores)[:top_k]
+    return [(names[i], float(scores[i])) for i in order]
+
+
+def _print_similar(name: str, top_k: int, metric: str,
+                   out_dir: str = DEFAULT_OUT_DIR) -> None:
+    embeddings = load_embeddings(out_dir)
+    results = similar_cards(name, top_k=top_k, metric=metric,
+                            embeddings=embeddings)
+    print(f"\nTop {top_k} cards similar to {name!r} (metric={metric}):\n")
+    for i, (n, score) in enumerate(results, 1):
+        print(f"  {i:>2}. {score:+.4f}  {n}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CLI
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -334,7 +383,18 @@ def main() -> None:
     parser.add_argument("--lr",        type=float, default=1e-3)
     parser.add_argument("--seed",      type=int, default=42)
     parser.add_argument("--out-dir",   type=str, default=DEFAULT_OUT_DIR)
+    parser.add_argument("--similar",   type=str, default=None,
+                        help="Card name to query — prints most-similar cards "
+                             "instead of training.")
+    parser.add_argument("--top",       type=int, default=10,
+                        help="How many similar cards to show.")
+    parser.add_argument("--metric",    type=str, default="dot",
+                        choices=["dot", "cosine"])
     args = parser.parse_args()
+
+    if args.similar is not None:
+        _print_similar(args.similar, args.top, args.metric, args.out_dir)
+        return
 
     print("Building feature matrix...")
     names, features = build_feature_matrix()
