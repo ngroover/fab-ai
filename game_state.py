@@ -87,6 +87,7 @@ class Player:
         self.next_weapon_go_again_if_hits = False  # from Warrior's Valor: go again only if weapon attack hits
         self.next_weapon_power_bonus = 0   # from En Garde, Sharpen Steel, etc.
         self.next_sword_attack_power_bonus = 0  # from Run Through (set during reaction window, consumed on next attack)
+        self.weapon_attacks_power_bonus_all_turn = 0  # from Gallantry Gold: all weapon attacks this turn +N power
         self.slice_and_dice_active = False # from Slice and Dice: +1 1st weapon, +2 2nd weapon
         self.next_attack_go_again = False  # from Come to Fight
         self.next_attack_power_bonus = 0             # from Out for Blood reprise, etc.
@@ -145,6 +146,7 @@ class Player:
         self.next_weapon_go_again_if_hits = False
         self.next_weapon_power_bonus = 0
         self.next_sword_attack_power_bonus = 0
+        self.weapon_attacks_power_bonus_all_turn = 0
         self.slice_and_dice_active = False
         self.next_attack_go_again = False
         self.next_attack_power_bonus = 0
@@ -170,7 +172,7 @@ class Player:
             base += self.dawnblade_counters  # permanent +1 counters from Glistening Steelblade
             if self.weapon_attack_count >= 1:
                 base += 1  # second attack gains +1 power until end of turn
-        bonus = self.next_weapon_power_bonus + self.next_sword_attack_power_bonus
+        bonus = self.next_weapon_power_bonus + self.next_sword_attack_power_bonus + self.weapon_attacks_power_bonus_all_turn
         if self.slice_and_dice_active:
             if self.weapon_attack_count == 0:
                 bonus += 1

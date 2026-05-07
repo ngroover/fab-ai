@@ -139,6 +139,7 @@ class FaBEnv:
         self._pending_play_card: Optional[Card] = None  # card chosen in PLAY_CARD step, awaiting pitch
         self._pitched_this_play: List[Card] = []         # cards pitched so far for the current pending card
         self._pending_weapon_attack: bool = False        # True when PITCH phase is for a weapon attack
+        self._pending_equip_activate_slot: Optional[str] = None  # set when PITCH phase is paying for equipment activation
         self._pending_action_response_card: Optional[Card] = None  # ACTION card waiting to resolve after the instant response window
         self._pending_instant_play: bool = False         # True when PITCH phase is for an instant played during the INSTANT window
         self._pending_instant_player_idx: int = 0        # which player is paying for / owns the pending instant
@@ -251,6 +252,7 @@ class FaBEnv:
         self._pending_reaction_from_hand = True
         self._reaction_from_hand = {}
         self._rally_ability_used = False
+        self._pending_equip_activate_slot = None
 
         # Randomly select which player gets to choose who goes first
         self._choosing_player_idx = self._rng.randint(0, 1)
@@ -411,7 +413,19 @@ class FaBEnv:
             return
 
         if action.action_type == ActionType.ACTIVATE_EQUIPMENT:
-            self._resolve_equipment_activation(action.equip_slot, active)
+            slot = action.equip_slot
+            eq = active.equipment.get(slot)
+            if eq and eq.card.cost > 0 and active.resource_points < eq.card.cost:
+                # Need to pitch cards to cover the activation cost
+                self._pending_play_card = eq.card
+                self._pitched_this_play = []
+                self._pending_equip_activate_slot = slot
+                self._phase = Phase.PITCH
+                needed = eq.card.cost - active.resource_points
+                self._log(f"\n  ▶  {active.name} activates {eq.card.name} "
+                          f"(needs {needed} more resource{'s' if needed != 1 else ''})")
+                return
+            self._resolve_equipment_activation(slot, active)
             return
 
         if action.action_type == ActionType.PLAY_CARD:
@@ -504,6 +518,13 @@ class FaBEnv:
         if self._pending_weapon_attack:
             self._pending_weapon_attack = False
             self._resolve_weapon_attack(active, opponent, pitched)
+            return
+
+        if self._pending_equip_activate_slot:
+            slot = self._pending_equip_activate_slot
+            self._pending_equip_activate_slot = None
+            self._pending_play_card = None
+            self._resolve_equipment_activation(slot, active)
             return
 
         active.resource_points -= card.cost
@@ -1428,6 +1449,9 @@ class FaBEnv:
             elif effect.action == EffectAction.NEXT_WEAPON_POWER_BONUS:
                 active.next_weapon_power_bonus += effect.magnitude
                 self._log(f"    ⚡ {card.name} — next weapon attack gains +{effect.magnitude} power.")
+            elif effect.action == EffectAction.WEAPON_ATTACKS_POWER_BONUS_ALL_TURN:
+                active.weapon_attacks_power_bonus_all_turn += effect.magnitude
+                self._log(f"    ⚡ {card.name} — all weapon attacks this turn gain +{effect.magnitude} power.")
             elif effect.action == EffectAction.REVEAL_TOP_DECK_POWER_CHECK:
                 if active.deck:
                     top = active.deck[0]
@@ -1451,12 +1475,13 @@ class FaBEnv:
         player.graveyard.append(eq.card)
 
     def _resolve_equipment_activation(self, slot: str, active: Player):
-        """Resolve an equipment activate ability (no action point cost, then destroy)."""
+        """Resolve an equipment activate ability: pay cost, apply effects, give go again, destroy."""
         eq = active.equipment.get(slot)
         if not eq or not eq.active or eq.destroyed:
             return
         if not eq.card.effects:
             return
+        active.resource_points -= eq.card.cost
         active_idx = self._game.players.index(active)
         opponent = self._game.players[1 - active_idx]
         self._log(f"\n  ▶  {active.name} activates {eq.card.name}.")
