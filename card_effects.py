@@ -48,7 +48,7 @@ class EffectAction(Enum):
     SWORD_ATTACK_GO_AGAIN          = auto()   # target sword attack gains go again
     NEXT_SWORD_ATTACK_POWER_BONUS  = auto()   # next sword attack this turn gains +magnitude power
     WEAPON_ATTACK_POWER_BONUS          = auto()   # next weapon attack this turn gains +magnitude power
-    WEAPON_ATTACK_BONUS_PER_SWING      = auto()   # 1st weapon attack this turn +1, 2nd weapon attack this turn +2
+    WEAPON_SWING_POWER_BONUS           = auto()   # weapon attack at swing_index this turn gains +magnitude power
     REVEAL_TOP_DECK_POWER_CHECK        = auto()   # reveal top card of deck; if 6+ power keep on top, else move to bottom
     DISCARD_CARD_COST                  = auto()   # as an additional cost to play this card, discard a card from hand
     NEXT_BRUTE_ATTACK_BONUS            = auto()   # next Brute attack action card this turn gains +magnitude power
@@ -88,6 +88,7 @@ class CardEffect:
     trigger: EffectTrigger
     action: EffectAction
     magnitude: int = 0
+    swing_index: Optional[int] = None
     condition: Optional[Callable[[Dict[str, Any]], bool]] = field(
         default=None, compare=False
     )

@@ -1367,9 +1367,11 @@ class FaBEnv:
             if effect.action == EffectAction.WEAPON_ATTACK_POWER_BONUS:
                 active.next_weapon_power_bonus += effect.magnitude
                 self._log(f"    ⚡ {card.name} — next weapon attack gains +{effect.magnitude} power.")
-            elif effect.action == EffectAction.WEAPON_ATTACK_BONUS_PER_SWING:
-                active.slice_and_dice_active += 1
-                self._log(f"    ⚡ {card.name} — first weapon attack +1, second weapon attack +2 power this turn.")
+            elif effect.action == EffectAction.WEAPON_SWING_POWER_BONUS:
+                if active.weapon_attack_count <= effect.swing_index:
+                    active.weapon_swing_bonuses.append((effect.swing_index, effect.magnitude))
+                    swing_label = "1st" if effect.swing_index == 0 else f"{effect.swing_index + 1}th"
+                    self._log(f"    ⚡ {card.name} — {swing_label} weapon attack gains +{effect.magnitude} power.")
             elif effect.action in (EffectAction.DRAW_DISCARD_GO_AGAIN,
                                    EffectAction.DRAW_DISCARD_POWER_BONUS,
                                    EffectAction.DRAW_DISCARD_INTIMIDATE):
