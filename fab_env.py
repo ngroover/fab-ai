@@ -1368,7 +1368,7 @@ class FaBEnv:
                 active.next_weapon_power_bonus += effect.magnitude
                 self._log(f"    ⚡ {card.name} — next weapon attack gains +{effect.magnitude} power.")
             elif effect.action == EffectAction.WEAPON_ATTACK_BONUS_PER_SWING:
-                active.slice_and_dice_active = True
+                active.slice_and_dice_active += 1
                 self._log(f"    ⚡ {card.name} — first weapon attack +1, second weapon attack +2 power this turn.")
             elif effect.action in (EffectAction.DRAW_DISCARD_GO_AGAIN,
                                    EffectAction.DRAW_DISCARD_POWER_BONUS,

@@ -88,7 +88,7 @@ class Player:
         self.next_weapon_power_bonus = 0   # from En Garde, Sharpen Steel, etc.
         self.next_sword_attack_power_bonus = 0  # from Run Through (set during reaction window, consumed on next attack)
         self.weapon_attacks_power_bonus_all_turn = 0  # from Gallantry Gold: all weapon attacks this turn +N power
-        self.slice_and_dice_active = False # from Slice and Dice: +1 1st weapon, +2 2nd weapon
+        self.slice_and_dice_active = 0 # count of Slice and Dice played: +N 1st weapon, +2N 2nd weapon
         self.next_attack_go_again = False  # from Come to Fight
         self.next_attack_power_bonus = 0             # from Out for Blood reprise, etc.
         self.next_brute_attack_bonus = 0             # Awakening Bellow: +N to next Brute attack (unconditional)
@@ -148,7 +148,7 @@ class Player:
         self.next_weapon_power_bonus = 0
         self.next_sword_attack_power_bonus = 0
         self.weapon_attacks_power_bonus_all_turn = 0
-        self.slice_and_dice_active = False
+        self.slice_and_dice_active = 0
         self.next_attack_go_again = False
         self.next_attack_power_bonus = 0
         self.next_brute_attack_bonus = 0
@@ -177,9 +177,9 @@ class Player:
         bonus = self.next_weapon_power_bonus + self.next_sword_attack_power_bonus + self.weapon_attacks_power_bonus_all_turn
         if self.slice_and_dice_active:
             if self.weapon_attack_count == 0:
-                bonus += 1
+                bonus += 1 * self.slice_and_dice_active
             elif self.weapon_attack_count == 1:
-                bonus += 2
+                bonus += 2 * self.slice_and_dice_active
         return base + bonus
 
 
