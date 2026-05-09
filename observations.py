@@ -5,13 +5,15 @@ Observation is a Dict space with two keys: "agent" and "opponent".
 Each is a fixed-size float array describing that player's visible state.
 
 Card encoding uses a fixed vocabulary of all card names in both decks.
-Each card slot is encoded as a one-hot over the vocabulary + [cost, pitch, power, defense].
+Each card slot is encoded as a one-hot over the vocabulary + numeric stats +
+card_type one-hot + card_class one-hot + additional-cost flags.
 """
 
 from __future__ import annotations
 from typing import List, Dict, TYPE_CHECKING
 
-from cards import Keyword
+from cards import Keyword, CardType, CardClass
+from card_effects import EffectAction
 
 if TYPE_CHECKING:
     from game_state import Player, GameState
@@ -44,10 +46,29 @@ CARD_VOCAB: List[str] = [
 VOCAB_SIZE = len(CARD_VOCAB)
 CARD_IDX: Dict[str, int] = {name: i for i, name in enumerate(CARD_VOCAB)}
 
+# Card type one-hot ordering (all CardType values)
+_CARD_TYPE_ORDER = [
+    CardType.ACTION_ATTACK, CardType.ACTION, CardType.INSTANT,
+    CardType.ATTACK_REACTION, CardType.DEFENSE_REACTION, CardType.EQUIPMENT,
+    CardType.WEAPON, CardType.HERO, CardType.MENTOR, CardType.RESOURCE, CardType.TOKEN,
+]
+_CARD_TYPE_IDX: Dict[CardType, int] = {ct: i for i, ct in enumerate(_CARD_TYPE_ORDER)}
+CARD_TYPE_COUNT = len(_CARD_TYPE_ORDER)
+
+# Card class one-hot ordering
+_CARD_CLASS_ORDER = [CardClass.GENERIC, CardClass.BRUTE, CardClass.WARRIOR]
+_CARD_CLASS_IDX: Dict[CardClass, int] = {cc: i for i, cc in enumerate(_CARD_CLASS_ORDER)}
+CARD_CLASS_COUNT = len(_CARD_CLASS_ORDER)
+
 # Cards in hand: up to 8 slots (intellect 4 + arsenal overage buffer)
 MAX_HAND = 8
-# Numeric features per card: vocab one-hot (VOCAB_SIZE) + [cost, pitch, power, defense, go_again, color]
-CARD_FEATURES = VOCAB_SIZE + 6
+# Numeric features per card:
+#   vocab one-hot (VOCAB_SIZE)
+#   + [cost, pitch, power, defense, go_again, color]  (6)
+#   + card_type one-hot (CARD_TYPE_COUNT)
+#   + card_class one-hot (CARD_CLASS_COUNT)
+#   + [has_discard_cost, has_reveal_cost]  (2)
+CARD_FEATURES = VOCAB_SIZE + 6 + CARD_TYPE_COUNT + CARD_CLASS_COUNT + 2
 # Total per-player feature vector size
 PLAYER_OBS_SIZE = (
     MAX_HAND * CARD_FEATURES   # hand
@@ -63,11 +84,9 @@ PLAYER_OBS_SIZE = (
 
 
 def _encode_card(card) -> List[float]:
-    """Return a fixed-length float vector for one card (or zeros for PAD)."""
+    """Return a fixed-length float vector of length CARD_FEATURES for one card (or zeros for PAD)."""
     if card is None:
-        vec = [0.0] * VOCAB_SIZE
-        vec += [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        return vec
+        return [0.0] * CARD_FEATURES
     one_hot = [0.0] * VOCAB_SIZE
     idx = CARD_IDX.get(card.name, CARD_IDX["<PAD>"])
     one_hot[idx] = 1.0
@@ -80,7 +99,15 @@ def _encode_card(card) -> List[float]:
         float(Keyword.GO_AGAIN in card.keywords),
         color_val,
     ]
-    return one_hot + numeric
+    type_hot = [0.0] * CARD_TYPE_COUNT
+    if card.card_type in _CARD_TYPE_IDX:
+        type_hot[_CARD_TYPE_IDX[card.card_type]] = 1.0
+    class_hot = [0.0] * CARD_CLASS_COUNT
+    if card.card_class in _CARD_CLASS_IDX:
+        class_hot[_CARD_CLASS_IDX[card.card_class]] = 1.0
+    has_discard = float(any(e.action == EffectAction.DISCARD_CARD_COST for e in card.effects))
+    has_reveal = float(any(e.action == EffectAction.REVEAL_CARD_COST for e in card.effects))
+    return one_hot + numeric + type_hot + class_hot + [has_discard, has_reveal]
 
 
 def encode_player(player: 'Player') -> List[float]:
@@ -98,7 +125,6 @@ def encode_player(player: 'Player') -> List[float]:
         obs += _encode_card(None)
 
     # Arsenal card
-    from cards import CardType
     if player.arsenal and player.arsenal.card_type != CardType.MENTOR:
         obs += _encode_card(player.arsenal)
     else:
