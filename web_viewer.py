@@ -2388,13 +2388,12 @@ PLAY_TEMPLATE = """
 
   <!-- ── Game area ── -->
   <div id="game-area" style="display:none">
-    <div id="quit-bar">
-      <button class="quit-btn" onclick="quitGame()">✕ Quit &amp; New Game</button>
-    </div>
-
     <div id="main-content">
       <div id="left-panel">
         <div id="view-tabs"></div>
+        <div id="quit-bar">
+          <button class="quit-btn" onclick="quitGame()">✕ Quit</button>
+        </div>
         <div id="log-label" style="padding:2px 14px;font-size:0.65rem;color:#718096;background:#0a0e18;border-bottom:1px solid #1a2030;display:none"></div>
         <div id="log-area"></div>
         <div id="gamestate-area" style="display:none"></div>
@@ -2857,7 +2856,7 @@ PLAY_TEMPLATE = """
     }
 
     function quitGame() {
-      if (!confirm('Quit the current game and start a new one?')) return;
+      if (!confirm('Quit?')) return;
       newGame();
     }
 

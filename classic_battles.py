@@ -321,8 +321,14 @@ CARD_CATALOG: Dict[str, Card] = {
                                   power=0, defense=3, color=Color.YELLOW, keywords=[Keyword.GO_AGAIN],
                                   card_class=CardClass.WARRIOR,
                                   text="The first time you attack with a weapon this turn, if it's a sword or dagger it gains +1 power.  The second time you attack with a weapon this turn if it's a sword or dagger it gains +2 power.  Go again.",
-                                  effects=[CardEffect(trigger=EffectTrigger.ON_PLAY,
-                                                      action=EffectAction.WEAPON_ATTACK_BONUS_PER_SWING)]),
+                                  effects=[
+                                      CardEffect(trigger=EffectTrigger.ON_PLAY,
+                                                 action=EffectAction.WEAPON_SWING_POWER_BONUS,
+                                                 magnitude=1, swing_index=0),
+                                      CardEffect(trigger=EffectTrigger.ON_PLAY,
+                                                 action=EffectAction.WEAPON_SWING_POWER_BONUS,
+                                                 magnitude=2, swing_index=1),
+                                  ]),
 
     # ── DORINTHEA — BLUE ────────────────────────────────────────────────────
 

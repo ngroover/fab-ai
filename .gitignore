@@ -64,6 +64,9 @@ db.sqlite3-journal
 # FaB deck database
 decks.db
 
+# Generated card embeddings (auto-rebuilt by card_embeddings.ensure_embeddings)
+card_embeddings_out/
+
 # Flask stuff:
 instance/
 .webassets-cache
