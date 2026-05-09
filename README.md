@@ -6,3 +6,10 @@ openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -node
 
 # Run with certificate
 python3 web_viewer.py --ssl-cert cert.pem --ssl-key key.pem --port=8080
+
+# Generate card embeddings
+python3 card_embeddings.py --embed-dim 32 --out-dir embeddings
+
+# Look at similiar cards embeddings
+python3 card_embeddings.py --similar "Alpha Rampage" --out-dir embeddings
+
