@@ -256,12 +256,20 @@ class TestGallantryGoldBattleworn(unittest.TestCase):
         self.assertEqual(eq.defense, 1)
 
     def test_block_counter_incremented(self):
+        eq = self.dorinthea.equipment["arms"]  # capture before block
         _block_with_gallantry_gold(self.env)
         # Gallantry Gold has defense=1: after one block, block_counters=1 → defense=0 → graveyard
         # Verify it was properly tracked as battleworn (not blade-break)
         grave_names = [c.name for c in self.dorinthea.graveyard]
         self.assertIn("Gallantry Gold", grave_names,
                       "Gallantry Gold (defense=1 Battleworn) must go to graveyard after one block")
+        # Battleworn counter must be applied (not a direct Blade Break graveyard)
+        self.assertEqual(eq.block_counters, 1,
+                         "Battleworn must increment block_counters to 1 before destroying")
+        self.assertTrue(eq.destroyed,
+                        "Equipment must be marked destroyed after Battleworn reaches 0 DEF")
+        self.assertEqual(eq.defense, 0,
+                         "Defense must be 0 after the -1 Battleworn counter")
 
     def test_arms_slot_empty_after_block(self):
         _block_with_gallantry_gold(self.env)
@@ -273,6 +281,20 @@ class TestGallantryGoldBattleworn(unittest.TestCase):
         eq = self.dorinthea.equipment["arms"]
         self.assertIn(Keyword.BATTLEWORN, eq.card.keywords)
         self.assertNotIn(Keyword.BLADE_BREAK, eq.card.keywords)
+
+    def test_not_in_graveyard_while_blocking(self):
+        """Gallantry Gold must stay on the combat chain (not in graveyard) while blocking is committed."""
+        eq = self.dorinthea.equipment["arms"]
+        # Commit the equip to block (one step only — chain not yet closed)
+        legal = self.env.legal_actions()
+        self.env.step(next(a for a in legal
+                           if a.action_type == ActionType.DEFEND and a.equip_slot == "arms"))
+        # Gallantry Gold is now on the combat chain — must NOT be in graveyard yet
+        grave_names = [c.name for c in self.dorinthea.graveyard]
+        self.assertNotIn("Gallantry Gold", grave_names,
+                         "Gallantry Gold must not be in graveyard at block-commit time (only at chain close)")
+        self.assertIn(eq.card, self.dorinthea.combat_chain,
+                      "Gallantry Gold card must be on the combat chain after being committed to block")
 
     def test_battleworn_stays_if_defense_remains(self):
         """A Battleworn item with defense > 1 stays in equipment zone after first block."""
