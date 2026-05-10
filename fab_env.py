@@ -1239,8 +1239,11 @@ class FaBEnv:
         self.agent_selection = f"agent_{self._game.active_player_idx}"
 
     def _break_combat_chain(self, attacker: Player, defender: Player) -> None:
-        """Close the combat chain — move all chained cards to their owners' graveyards,
-        returning battleworn equipment to its slot and destroying blade-break equipment."""
+        """Close the combat chain — move chained cards to graveyards.
+
+        Blade Break equipment is destroyed. Battleworn equipment gets a -1 DEF counter
+        and returns to the equipment zone (it never goes to graveyard from blocking).
+        """
         has_chain_cards = bool(attacker.combat_chain or defender.combat_chain)
         if not has_chain_cards and not self._equipment_on_chain:
             return
@@ -1265,13 +1268,10 @@ class FaBEnv:
                     player.graveyard.append(card)
                 elif Keyword.BATTLEWORN in eq.card.keywords:
                     eq.block_counters += 1
-                    if eq.defense == 0:
-                        eq.destroyed = True
-                        self._log(f"    💀 {eq.card.name} worn out (Battleworn) → graveyard.")
-                        player.graveyard.append(card)
-                    else:
-                        self._log(f"    🔨 {eq.card.name} gets -1 block counter (Battleworn, {eq.defense} def remaining).")
-                        player.equipment[eq.card.equip_slot.value] = eq
+                    # Battleworn equipment NEVER goes to graveyard from blocking — it stays in
+                    # the equipment zone with a -1 DEF counter. Defense floors at 0 (never negative).
+                    self._log(f"    🔨 {eq.card.name} gets -1 block counter (Battleworn, {eq.defense} def remaining).")
+                    player.equipment[eq.card.equip_slot.value] = eq
                 else:
                     # Equipment with no special chain keyword goes to graveyard
                     player.graveyard.append(card)
