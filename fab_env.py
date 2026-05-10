@@ -34,13 +34,13 @@ from cards import Card, CardType, Color, Keyword, QUICKEN_TOKEN_CARD
 from card_effects import EffectTrigger, EffectAction
 from game_state import Player, GameState, Equipment
 from actions import (
-    Action, ActionType,
+    Action, ActionType, record_from_action,
     legal_attack_actions, legal_pitch_actions,
     legal_defend_actions, legal_arsenal_actions, legal_choose_first_actions,
     legal_instant_actions, legal_reaction_actions,
     legal_pitch_order_actions, legal_mentor_flip_actions,
 )
-from observations import build_observation, PLAYER_OBS_SIZE, CARD_FEATURES
+from observations import build_observation, PLAYER_OBS_SIZE, CARD_FEATURES, ACTION_SEQ_SIZE
 from spaces import Discrete, Box, Dict as DictSpace
 
 
@@ -174,12 +174,14 @@ class FaBEnv:
         obs_size = PLAYER_OBS_SIZE
         self.observation_spaces = {
             a: DictSpace({
-                "agent":        Box(-float("inf"), float("inf"), shape=(obs_size,)),
-                "opponent":     Box(-float("inf"), float("inf"), shape=(obs_size,)),
-                "global":       Box(0.0, 1.0, shape=(2,)),
+                "agent":           Box(-float("inf"), float("inf"), shape=(obs_size,)),
+                "opponent":        Box(-float("inf"), float("inf"), shape=(obs_size,)),
+                "global":          Box(0.0, 1.0, shape=(2,)),
                 # During the PITCH phase, encodes the card the agent has committed to play.
                 # All zeros in every other phase.
-                "pending_card": Box(-float("inf"), float("inf"), shape=(CARD_FEATURES,)),
+                "pending_card":    Box(-float("inf"), float("inf"), shape=(CARD_FEATURES,)),
+                # Rolling history of the last 64 actions across both players.
+                "action_sequence": Box(-float("inf"), float("inf"), shape=(ACTION_SEQ_SIZE,)),
             })
             for a in self.agents
         }
@@ -362,6 +364,11 @@ class FaBEnv:
     # ──────────────────────────────────────────────────────────
 
     def _dispatch_action(self, action: Action, active: Player, opponent: Player):
+        # Record the action BEFORE dispatch so card references resolve against
+        # the pre-mutation hand/pitch_zone.
+        actor_idx = self._game.players.index(active)
+        self._game.action_history.append(record_from_action(action, actor_idx, active))
+
         if self._phase == Phase.CHOOSE_FIRST:
             self._handle_choose_first_action(action)
         elif self._phase == Phase.ATTACK:
@@ -1649,9 +1656,9 @@ class FaBEnv:
         pending = self._pending_play_card if self._phase == Phase.PITCH else None
         active_idx = int(self.agent_selection[-1]) if self.agent_selection else 0
         return {
-            "agent_0": build_observation(p0, p1, self._game,
+            "agent_0": build_observation(p0, p1, self._game, viewer_idx=0,
                                          pending_card=pending if active_idx == 0 else None),
-            "agent_1": build_observation(p1, p0, self._game,
+            "agent_1": build_observation(p1, p0, self._game, viewer_idx=1,
                                          pending_card=pending if active_idx == 1 else None),
         }
 

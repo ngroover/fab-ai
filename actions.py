@@ -101,6 +101,46 @@ class Action:
         return f"Action({self.action_type})"
 
 
+@dataclass(frozen=True)
+class RecordedAction:
+    """Snapshot of an executed action for the action-history observation."""
+    action_type: ActionType
+    actor_idx: int                 # absolute player index (0 or 1)
+    card: Optional['Card'] = None  # may be None for non-card actions
+
+
+def record_from_action(action: Action, actor_idx: int,
+                       active: 'Player') -> RecordedAction:
+    """Resolve an Action into a RecordedAction snapshot.
+
+    Card references are resolved BEFORE the action mutates state so that
+    index-based actions (PITCH/DEFEND/ARSENAL/PITCH_ORDER) capture the card
+    that was actually selected.
+    """
+    at = action.action_type
+    card = None
+    if at in (ActionType.PLAY_CARD, ActionType.ACTIVATE_CARD_ABILITY):
+        card = action.card
+    elif at == ActionType.PITCH:
+        if action.pitch_index is not None and 0 <= action.pitch_index < len(active.hand):
+            card = active.hand[action.pitch_index]
+    elif at in (ActionType.DEFEND, ActionType.ARSENAL):
+        if action.hand_index is not None and 0 <= action.hand_index < len(active.hand):
+            card = active.hand[action.hand_index]
+    elif at == ActionType.PITCH_ORDER:
+        idx = action.pitch_order_index
+        if 0 <= idx < len(active.pitch_zone):
+            card = active.pitch_zone[idx]
+    elif at == ActionType.WEAPON:
+        card = active.weapon
+    elif at == ActionType.ACTIVATE_EQUIPMENT:
+        if action.equip_slot is not None:
+            eq = active.equipment.get(action.equip_slot)
+            if eq is not None:
+                card = eq.card
+    return RecordedAction(action_type=at, actor_idx=actor_idx, card=card)
+
+
 # ──────────────────────────────────────────────────────────────
 # Legal action generation
 # ──────────────────────────────────────────────────────────────
