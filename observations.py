@@ -28,8 +28,9 @@ MAX_HAND = 8
 PLAYER_OBS_SIZE = (
     MAX_HAND * CARD_FEATURES   # hand
     + CARD_FEATURES            # arsenal card (or zeros)
-    + 4                        # equipment defense values [head, chest, arms, legs]
-    + 1                        # weapon power (effective)
+    + 4 * CARD_FEATURES        # equipment card embeddings [head, chest, arms, legs]
+    + CARD_FEATURES            # weapon card embedding
+    + CARD_FEATURES            # hero card embedding
     + 9                        # turn state flags/values:
                                #   life, action_points, resource_points,
                                #   next_weapon_go_again, next_weapon_power_bonus,
@@ -69,13 +70,16 @@ def encode_player(player: 'Player') -> List[float]:
     else:
         obs += _encode_card(None)
 
-    # Equipment defense values (normalized)
+    # Equipment card embeddings (zeros if slot empty or piece destroyed)
     for slot in ["head", "chest", "arms", "legs"]:
         eq = player.equipment.get(slot)
-        obs.append(eq.defense / 3.0 if eq else 0.0)
+        obs += _encode_card(eq.card if eq and not eq.destroyed else None)
 
-    # Weapon effective power
-    obs.append(player.get_effective_weapon_power() / 10.0)
+    # Weapon card embedding
+    obs += _encode_card(player.weapon)
+
+    # Hero card embedding
+    obs += _encode_card(player.hero_card)
 
     # Turn state
     obs += [
@@ -110,13 +114,16 @@ def encode_opponent_public(player: 'Player') -> List[float]:
     # Arsenal — hidden
     obs += _encode_card(None)
 
-    # Equipment
+    # Equipment card embeddings (public — opponent can see what you have equipped)
     for slot in ["head", "chest", "arms", "legs"]:
         eq = player.equipment.get(slot)
-        obs.append(eq.defense / 3.0 if eq else 0.0)
+        obs += _encode_card(eq.card if eq and not eq.destroyed else None)
 
-    # Weapon power
-    obs.append(player.get_effective_weapon_power() / 10.0)
+    # Weapon card embedding (public)
+    obs += _encode_card(player.weapon)
+
+    # Hero card embedding (public)
+    obs += _encode_card(player.hero_card)
 
     # Turn state (public info only — life, attacks, weapon used)
     obs += [
