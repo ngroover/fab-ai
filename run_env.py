@@ -151,6 +151,11 @@ def run_game(
                 action = agent.select_mentor_flip(obs[agent_id], legal, player)
             else:
                 action = next(a for a in legal if a.action_type == ActionType.MENTOR_FLIP and a.flip)
+        elif env._phase == Phase.REVEAL:
+            if hasattr(agent, 'select_reveal'):
+                action = agent.select_reveal(obs[agent_id], legal, player)
+            else:
+                action = legal[0]
         else:
             action = legal[0]
 

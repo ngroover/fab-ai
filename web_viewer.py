@@ -1676,6 +1676,10 @@ class _WebHumanAgent:
             else:
                 discard_name = f"hand[{action.hand_index}]"
             return f"ACTIVATE {card_name} — discard {discard_name} → +3 block"
+        if action.action_type == ActionType.REVEAL:
+            if action.hand_index is not None and 0 <= action.hand_index < len(player.hand):
+                card = player.hand[action.hand_index]
+                return f"REVEAL — {self._fmt_card(card)} (cost:{card.cost})"
         return str(action)
 
     def _pend(self, legal, player, phase, attack_power=0):
@@ -1707,6 +1711,9 @@ class _WebHumanAgent:
 
     def select_mentor_flip(self, obs, legal, player):
         return self._pend(legal, player, "MENTOR_FLIP")
+
+    def select_reveal(self, obs, legal, player):
+        return self._pend(legal, player, "REVEAL")
 
     def select_choose_first(self, legal, player):
         return self._pend(legal, player, "CHOOSE_FIRST")
@@ -1969,6 +1976,11 @@ class _GameSession:
                     action = agent.select_mentor_flip(obs[agent_id], legal, player)
                 else:
                     action = next(a for a in legal if a.action_type == ActionType.MENTOR_FLIP and a.flip)
+            elif env._phase == Phase.REVEAL:
+                if hasattr(agent, 'select_reveal'):
+                    action = agent.select_reveal(obs[agent_id], legal, player)
+                else:
+                    action = legal[0]
             else:
                 action = legal[0]
 
