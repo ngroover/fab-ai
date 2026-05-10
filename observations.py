@@ -24,17 +24,26 @@ _ZERO_FEATURES: List[float] = [0.0] * CARD_FEATURES
 
 # Cards in hand: up to 8 slots (intellect 4 + arsenal overage buffer)
 MAX_HAND = 8
+# Pitch zone: at most intellect-many cards per turn
+MAX_PITCH = 4
+# Combat chain: cards that stay on the chain until it closes
+MAX_CHAIN = 4
 # Total per-player feature vector size
 PLAYER_OBS_SIZE = (
-    MAX_HAND * CARD_FEATURES   # hand
-    + CARD_FEATURES            # arsenal card (or zeros)
-    + 4                        # equipment defense values [head, chest, arms, legs]
-    + 1                        # weapon power (effective)
-    + 9                        # turn state flags/values:
-                               #   life, action_points, resource_points,
-                               #   next_weapon_go_again, next_weapon_power_bonus,
-                               #   next_brute_attack_bonus, weapon_used, attacks_this_turn,
-                               #   arena_card_count
+    MAX_HAND * CARD_FEATURES     # hand
+    + CARD_FEATURES              # arsenal card (or zeros)
+    + 4                          # equipment defense values [head, chest, arms, legs]
+    + 1                          # weapon power (effective)
+    + 9                          # turn state flags/values:
+                                 #   life, action_points, resource_points,
+                                 #   next_weapon_go_again, next_weapon_power_bonus,
+                                 #   next_brute_attack_bonus, weapon_used, attacks_this_turn,
+                                 #   arena_card_count
+    + MAX_PITCH * CARD_FEATURES  # pitch zone (cards pitched this turn)
+    + MAX_CHAIN * CARD_FEATURES  # combat chain (cards currently on chain)
+    + CARD_FEATURES + 1          # graveyard: summed embeddings + count
+    + CARD_FEATURES + 1          # banish zone: summed embeddings + count
+    + CARD_FEATURES + 1          # deck remaining: summed embeddings + count
 )
 
 
@@ -46,6 +55,17 @@ def _encode_card(card) -> List[float]:
     if emb is None:
         return list(_ZERO_FEATURES)
     return emb.tolist()
+
+
+def _sum_embeddings(cards) -> List[float]:
+    """Sum embeddings of a card list (order-invariant zone representation)."""
+    result = [0.0] * CARD_FEATURES
+    for card in cards:
+        emb = _EMBEDDINGS.get(card.name)
+        if emb is not None:
+            for i, v in enumerate(emb.tolist()):
+                result[i] += v
+    return result
 
 
 def encode_player(player: 'Player') -> List[float]:
@@ -90,6 +110,33 @@ def encode_player(player: 'Player') -> List[float]:
         len(player.arena) / 4.0,
     ]
 
+    # Pitch zone (cards pitched this turn — visible to self)
+    pitch_cards = player.pitch_zone[:MAX_PITCH]
+    for card in pitch_cards:
+        obs += _encode_card(card)
+    for _ in range(MAX_PITCH - len(pitch_cards)):
+        obs += _encode_card(None)
+
+    # Combat chain (cards on the chain — public info)
+    chain_cards = player.combat_chain[:MAX_CHAIN]
+    for card in chain_cards:
+        obs += _encode_card(card)
+    for _ in range(MAX_CHAIN - len(chain_cards)):
+        obs += _encode_card(None)
+
+    # Graveyard: summed embeddings + count
+    obs += _sum_embeddings(player.graveyard)
+    obs.append(len(player.graveyard) / 20.0)
+
+    # Banish zone: summed embeddings + count
+    all_banished = player.banished + player.permanently_banished
+    obs += _sum_embeddings(all_banished)
+    obs.append(len(all_banished) / 4.0)
+
+    # Deck remaining: summed embeddings + count
+    obs += _sum_embeddings(player.deck)
+    obs.append(len(player.deck) / 20.0)
+
     assert len(obs) == PLAYER_OBS_SIZE, (
         f"Obs size mismatch: got {len(obs)}, expected {PLAYER_OBS_SIZE}"
     )
@@ -130,6 +177,33 @@ def encode_opponent_public(player: 'Player') -> List[float]:
         player.attacks_this_turn / 5.0,
         len(player.arena) / 4.0,  # arena is public
     ]
+
+    # Pitch zone — public (opponent can see what was pitched)
+    pitch_cards = player.pitch_zone[:MAX_PITCH]
+    for card in pitch_cards:
+        obs += _encode_card(card)
+    for _ in range(MAX_PITCH - len(pitch_cards)):
+        obs += _encode_card(None)
+
+    # Combat chain — public
+    chain_cards = player.combat_chain[:MAX_CHAIN]
+    for card in chain_cards:
+        obs += _encode_card(card)
+    for _ in range(MAX_CHAIN - len(chain_cards)):
+        obs += _encode_card(None)
+
+    # Graveyard: summed embeddings + count (public)
+    obs += _sum_embeddings(player.graveyard)
+    obs.append(len(player.graveyard) / 20.0)
+
+    # Banish zone: summed embeddings + count (public)
+    all_banished = player.banished + player.permanently_banished
+    obs += _sum_embeddings(all_banished)
+    obs.append(len(all_banished) / 4.0)
+
+    # Deck remaining: summed embeddings + count (opponent deck is trackable from public info)
+    obs += _sum_embeddings(player.deck)
+    obs.append(len(player.deck) / 20.0)
 
     assert len(obs) == PLAYER_OBS_SIZE
     return obs

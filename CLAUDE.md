@@ -57,8 +57,9 @@ Other types: `WEAPON`, `PASS`, `DEFEND`, `ARSENAL`, `ACTIVATE_EQUIPMENT`.
 }
 ```
 
-`PLAYER_OBS_SIZE = MAX_HAND * CARD_FEATURES + CARD_FEATURES + 4 + 1 + 1 + 8`
-where `CARD_FEATURES = VOCAB_SIZE + 6` and `VOCAB_SIZE = len(CARD_VOCAB)` (currently 47).
+`PLAYER_OBS_SIZE = MAX_HAND * CARD_FEATURES + CARD_FEATURES + 4 + 1 + 9 + MAX_PITCH * CARD_FEATURES + MAX_CHAIN * CARD_FEATURES + (CARD_FEATURES + 1) * 3`
+where `CARD_FEATURES = embed_dim`, `MAX_HAND = 8`, `MAX_PITCH = 4`, `MAX_CHAIN = 4`.
+The trailing `(CARD_FEATURES + 1) * 3` is graveyard, banish zone, and deck remaining — each encoded as a summed embedding + count scalar.
 
 ---
 
