@@ -10,8 +10,9 @@ Seed 1 gives:
 Gallantry Gold rules:
   ARMS equipment for Dorinthea with defense 1 and Battleworn.
   Action — 1: Destroy Gallantry Gold: Your weapon attacks gain +1 power this turn. Go again.
-  Battleworn: when used to defend, gets a -1 defense counter instead of going to graveyard.
-              Destroyed when defense reaches 0.
+  Battleworn: when used to defend, gets a -1 DEF counter instead of going to graveyard.
+              NEVER goes to graveyard from blocking — stays in the equipment zone with accumulated
+              counters. Defense is always clamped to a minimum of 0 (never blocks for negative).
 
 Test scenarios:
   1. Card definition: arms slot, defense=1, cost=1, BATTLEWORN keyword, ON_ACTIVATE effect.
@@ -19,7 +20,10 @@ Test scenarios:
      after activation arms slot is empty, Gallantry Gold is in graveyard,
      weapon_attacks_power_bonus_all_turn = +1.
   3. Weapon power bonus: Dawnblade attacks gain +1 power after activation.
-  4. Battleworn blocking: defense drops by 1 when used to block; goes to graveyard when defense reaches 0.
+  4. Battleworn blocking: defense drops by 1 (min 0) when used to block; ALWAYS stays in the
+     equipment zone after the chain closes — never goes to graveyard from blocking.
+  5. Activation still available after blocking: since it stays in play, the activation ability
+     remains usable even after Gallantry Gold has accumulated block counters.
 """
 
 import unittest
@@ -256,69 +260,96 @@ class TestGallantryGoldBattleworn(unittest.TestCase):
         self.assertEqual(eq.defense, 1)
 
     def test_block_counter_incremented(self):
-        eq = self.dorinthea.equipment["arms"]  # capture before block
+        eq = self.dorinthea.equipment["arms"]  # capture reference before block
         _block_with_gallantry_gold(self.env)
-        # Gallantry Gold has defense=1: after one block, block_counters=1 → defense=0 → graveyard
-        # Verify it was properly tracked as battleworn (not blade-break)
-        grave_names = [c.name for c in self.dorinthea.graveyard]
-        self.assertIn("Gallantry Gold", grave_names,
-                      "Gallantry Gold (defense=1 Battleworn) must go to graveyard after one block")
-        # Battleworn counter must be applied (not a direct Blade Break graveyard)
         self.assertEqual(eq.block_counters, 1,
-                         "Battleworn must increment block_counters to 1 before destroying")
-        self.assertTrue(eq.destroyed,
-                        "Equipment must be marked destroyed after Battleworn reaches 0 DEF")
-        self.assertEqual(eq.defense, 0,
-                         "Defense must be 0 after the -1 Battleworn counter")
+                         "Battleworn must increment block_counters by 1 when used to block")
 
-    def test_arms_slot_empty_after_block(self):
+    def test_defense_floors_at_zero_after_block(self):
+        eq = self.dorinthea.equipment["arms"]
         _block_with_gallantry_gold(self.env)
-        self.assertNotIn("arms", self.dorinthea.equipment,
-                         "Arms slot must be empty after Gallantry Gold is destroyed by Battleworn")
+        # defense=1 card with block_counters=1 → max(0, 1-1)=0, never negative
+        self.assertEqual(eq.defense, 0,
+                         "Defense must floor at 0 after the -1 Battleworn counter")
+
+    def test_stays_in_equipment_zone_after_block(self):
+        """Battleworn equipment NEVER goes to graveyard from blocking — always returns to the slot."""
+        _block_with_gallantry_gold(self.env)
+        self.assertIn("arms", self.dorinthea.equipment,
+                      "Gallantry Gold must stay in the arms slot after blocking (Battleworn rule)")
+
+    def test_not_destroyed_after_block(self):
+        eq = self.dorinthea.equipment["arms"]
+        _block_with_gallantry_gold(self.env)
+        self.assertFalse(eq.destroyed,
+                         "Battleworn blocking must not set destroyed=True")
+
+    def test_not_in_graveyard_after_block(self):
+        _block_with_gallantry_gold(self.env)
+        grave_names = [c.name for c in self.dorinthea.graveyard]
+        self.assertNotIn("Gallantry Gold", grave_names,
+                         "Gallantry Gold must not go to graveyard from blocking (Battleworn)")
 
     def test_battleworn_not_blade_break(self):
-        """Gallantry Gold should be destroyed by Battleworn (defense 0), not Blade Break."""
         eq = self.dorinthea.equipment["arms"]
         self.assertIn(Keyword.BATTLEWORN, eq.card.keywords)
         self.assertNotIn(Keyword.BLADE_BREAK, eq.card.keywords)
 
     def test_not_in_graveyard_while_blocking(self):
-        """Gallantry Gold must stay on the combat chain (not in graveyard) while blocking is committed."""
+        """Equipment stays on the combat chain during block commitment — not in graveyard."""
         eq = self.dorinthea.equipment["arms"]
-        # Commit the equip to block (one step only — chain not yet closed)
         legal = self.env.legal_actions()
         self.env.step(next(a for a in legal
                            if a.action_type == ActionType.DEFEND and a.equip_slot == "arms"))
-        # Gallantry Gold is now on the combat chain — must NOT be in graveyard yet
         grave_names = [c.name for c in self.dorinthea.graveyard]
         self.assertNotIn("Gallantry Gold", grave_names,
-                         "Gallantry Gold must not be in graveyard at block-commit time (only at chain close)")
+                         "Gallantry Gold must not be in graveyard at block-commit time")
         self.assertIn(eq.card, self.dorinthea.combat_chain,
-                      "Gallantry Gold card must be on the combat chain after being committed to block")
+                      "Gallantry Gold card must be on the combat chain after block commit")
 
-    def test_battleworn_stays_if_defense_remains(self):
-        """A Battleworn item with defense > 1 stays in equipment zone after first block."""
-        # Manually bump Gallantry Gold's defense to 2 (as if it were a 2-defense Battleworn)
-        eq = self.dorinthea.equipment["arms"]
-        original_defense = eq.card.defense
-
-        from classic_battles import CARD_CATALOG
-        from cards import Card, CardType, EquipSlot, CardClass
-        from card_effects import CardEffect
-
-        # Create a temporary 2-defense Gallantry Gold to test the mechanics
-        two_def_eq = __import__('game_state').Equipment(
-            Card("Gallantry Gold", CardType.EQUIPMENT, defense=2, cost=1,
-                 equip_slot=EquipSlot.ARMS, card_class=CardClass.WARRIOR,
-                 keywords=[Keyword.BATTLEWORN])
-        )
-        self.dorinthea.equipment["arms"] = two_def_eq
+    def test_stays_after_two_blocks(self):
+        """After blocking twice the equipment still stays in the slot (defense floors at 0)."""
         _block_with_gallantry_gold(self.env)
-        # After first block: block_counters=1, defense=max(0,2-1)=1 → stays
-        self.assertIn("arms", self.dorinthea.equipment,
-                      "Battleworn equipment with defense>1 must stay in arms slot after first block")
-        self.assertEqual(self.dorinthea.equipment["arms"].block_counters, 1)
-        self.assertEqual(self.dorinthea.equipment["arms"].defense, 1)
+        eq = self.dorinthea.equipment.get("arms")
+        self.assertIsNotNone(eq, "Must still be in arms slot after first block")
+
+        # Advance to the next attack so Dorinthea can block again
+        while self.env._phase in (Phase.INSTANT, Phase.ARSENAL, Phase.PITCH_ORDER):
+            self.env.step(self.env.legal_actions()[0])
+        # Dorinthea's own turn — pass
+        if self.env.agent_selection == "agent_1":
+            self.env.step(next(a for a in self.env.legal_actions()
+                               if a.action_type == ActionType.PASS))
+        while self.env._phase in (Phase.INSTANT, Phase.ARSENAL, Phase.PITCH_ORDER):
+            self.env.step(self.env.legal_actions()[0])
+        # Rhinar attacks again
+        self.env.step(next(a for a in self.env.legal_actions()
+                           if a.action_type == ActionType.WEAPON))
+        while self.env._phase in (Phase.PITCH, Phase.INSTANT):
+            self.env.step(self.env.legal_actions()[0])
+        _block_with_gallantry_gold(self.env)
+
+        eq2 = self.dorinthea.equipment.get("arms")
+        self.assertIsNotNone(eq2, "Must still be in arms slot after second block")
+        self.assertEqual(eq2.block_counters, 2)
+        self.assertEqual(eq2.defense, 0, "Defense floors at 0 — never negative")
+        grave_names = [c.name for c in self.dorinthea.graveyard]
+        self.assertNotIn("Gallantry Gold", grave_names,
+                         "Must not be in graveyard even after two blocks (Battleworn)")
+
+    def test_activation_available_after_block(self):
+        """Since Battleworn keeps it in play, the activation ability must still be legal after blocking."""
+        _block_with_gallantry_gold(self.env)
+        # Advance to Dorinthea's next turn
+        while self.env._phase in (Phase.INSTANT, Phase.ARSENAL, Phase.PITCH_ORDER):
+            self.env.step(self.env.legal_actions()[0])
+        # Now it's Dorinthea's turn (agent_1)
+        if self.env.agent_selection == "agent_1" and self.env._phase == Phase.ATTACK:
+            legal = self.env.legal_actions()
+            has_activate = any(a.action_type == ActionType.ACTIVATE_EQUIPMENT
+                               and a.equip_slot == "arms" for a in legal)
+            self.assertTrue(has_activate,
+                            "ACTIVATE_EQUIPMENT must still be legal after Gallantry Gold blocked once")
 
 
 if __name__ == "__main__":
