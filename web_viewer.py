@@ -2004,6 +2004,8 @@ PLAY_TEMPLATE = """
   <style>
     {{ css }}
 
+    header { padding: 4px 8px; }
+
     /* ── Setup form ──────────────────────────────────── */
     #setup-area { padding: 16px; max-width: 480px; margin: 0 auto; }
     .setup-card {
@@ -2049,29 +2051,30 @@ PLAY_TEMPLATE = """
 
     /* ── Stats bar ───────────────────────────────────── */
     #stats-bar {
-      flex: 1; display: flex; align-items: stretch;
+      flex: 1; display: flex; align-items: center;
       border-left: 1px solid #2d3748;
     }
     .player-box {
-      flex: 1; padding: 8px 12px;
+      flex: 1; padding: 3px 8px;
       border-right: 1px solid #2d3748;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 1px 6px;
       transition: background 0.2s;
     }
     .player-box:last-child { border-right: none; }
     .player-box.active { background: #1e3a5f; }
-    .player-name { font-weight: 700; font-size: 0.82rem; color: #e2e8f0; }
-    .player-life-row { display: flex; align-items: baseline; gap: 8px; }
-    .player-life { font-size: 1.25rem; font-weight: 800; color: #fc8181; line-height: 1.2; }
-    .player-resources { font-size: 0.72rem; color: #90cdf4; white-space: nowrap; }
-    .player-meta { font-size: 0.68rem; color: #718096; margin-top: 2px; }
+    .player-name { font-weight: 700; font-size: 0.75rem; color: #e2e8f0; }
+    .player-life-row { display: flex; align-items: baseline; gap: 5px; }
+    .player-life { font-size: 0.88rem; font-weight: 800; color: #fc8181; line-height: 1.2; }
+    .player-resources { font-size: 0.68rem; color: #90cdf4; white-space: nowrap; }
+    .player-meta { font-size: 0.65rem; color: #718096; margin-top: 0; }
     .turn-box {
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
-      padding: 6px 12px; border-right: 1px solid #2d3748;
-      min-width: 70px;
+      padding: 3px 8px; border-right: 1px solid #2d3748;
+      min-width: 60px;
     }
-    .turn-label { font-size: 0.65rem; color: #718096; text-transform: uppercase; }
-    .phase-label { font-size: 0.78rem; font-weight: 700; color: #f6e05e; }
+    .turn-label { font-size: 0.58rem; color: #718096; text-transform: uppercase; }
+    .phase-label { font-size: 0.7rem; font-weight: 700; color: #f6e05e; }
 
     /* ── View tabs ───────────────────────────────────── */
     #view-tabs {
