@@ -37,11 +37,6 @@ PLAYER_OBS_SIZE = (
     + 4 * CARD_FEATURES        # equipment card embeddings [head, chest, arms, legs]
     + CARD_FEATURES            # weapon card embedding
     + CARD_FEATURES            # hero card embedding
-    + 9                        # turn state flags/values:
-                               #   life, action_points, resource_points,
-                               #   next_weapon_go_again, next_weapon_power_bonus,
-                               #   next_brute_attack_bonus, weapon_used, attacks_this_turn,
-                               #   arena_card_count
     + MAX_PITCH * CARD_FEATURES  # pitch zone (cards pitched this turn)
     + MAX_CHAIN * CARD_FEATURES  # combat chain (cards currently on chain)
     + CARD_FEATURES + 1          # graveyard: summed embeddings + count
@@ -70,7 +65,7 @@ def _encode_card(card) -> List[float]:
     emb = _EMBEDDINGS.get(card.name)
     if emb is None:
         return list(_ZERO_FEATURES)
-    return emb.tolist()
+    return list(emb)
 
 
 def _sum_embeddings(cards) -> List[float]:
@@ -79,7 +74,7 @@ def _sum_embeddings(cards) -> List[float]:
     for card in cards:
         emb = _EMBEDDINGS.get(card.name)
         if emb is not None:
-            for i, v in enumerate(emb.tolist()):
+            for i, v in enumerate(emb):
                 result[i] += v
     return result
 

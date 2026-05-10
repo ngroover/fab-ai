@@ -105,6 +105,7 @@ class TestRallyCardDefinition(unittest.TestCase):
     def test_rally_in_rhinar_opening_hand_at_seed_6(self):
         env = FaBEnv(verbose=False)
         env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
+        env.step(env.legal_actions()[0])  # resolve CHOOSE_FIRST
         rhinar = env._game.players[0]
         self.assertIn("Rally the Rearguard", [c.name for c in rhinar.hand])
 

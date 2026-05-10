@@ -65,6 +65,7 @@ class TestChiefRukutanCardDefinition(unittest.TestCase):
     def setUp(self):
         env = FaBEnv()
         env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
+        env.step(env.legal_actions()[0])  # resolve CHOOSE_FIRST
         rhinar = env._game.players[0]
         self.card = next(c for c in rhinar.hand if c.name == "Chief Ruk'utan")
 
@@ -74,6 +75,7 @@ class TestChiefRukutanCardDefinition(unittest.TestCase):
     def test_card_is_in_opening_hand(self):
         env = FaBEnv()
         env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
+        env.step(env.legal_actions()[0])  # resolve CHOOSE_FIRST
         rhinar = env._game.players[0]
         names = [c.name for c in rhinar.hand]
         self.assertIn("Chief Ruk'utan", names)

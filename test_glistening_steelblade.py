@@ -155,6 +155,7 @@ class TestGlisteningSteebladeDefinition(unittest.TestCase):
     def setUp(self):
         self.env = FaBEnv(verbose=False)
         self.env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)
+        self.env.step(self.env.legal_actions()[0])  # resolve CHOOSE_FIRST
         self.dorinthea = self.env._game.players[1]
 
     def test_in_dorinthea_opening_hand(self):
