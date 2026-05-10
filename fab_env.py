@@ -222,10 +222,6 @@ class FaBEnv:
 
         self._game = GameState(p0, p1, rng=self._rng)
 
-        # Opening hands
-        for p in self._game.players:
-            p.draw_to_intellect()
-
         self._rewards = {"agent_0": 0.0, "agent_1": 0.0}
         self._terminations = {"agent_0": False, "agent_1": False}
         self._truncations = {"agent_0": False, "agent_1": False}
@@ -390,6 +386,10 @@ class FaBEnv:
         chooser = self._game.players[self._choosing_player_idx]
         first = self._game.active
         self._log(f"  ▶  {chooser.name} chooses: {first.name} goes first.")
+        # Draw opening hands after the first-player decision so neither player
+        # can see their cards when making this choice.
+        for p in self._game.players:
+            p.draw_to_intellect()
         self._begin_turn()
 
     def _handle_attack_action(self, action: Action, active: Player, opponent: Player):
