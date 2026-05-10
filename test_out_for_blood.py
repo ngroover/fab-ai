@@ -160,6 +160,9 @@ class TestOutForBloodEffect(unittest.TestCase):
         # Pitch Sharpen Steel (index 2 in remaining hand, pitch=1) — keeps Out for Blood in hand
         env.step(Action(ActionType.PITCH, pitch_index=2))
 
+        # REVEAL phase: Flock requires revealing a cost ≤ 1 card — pick the first legal option
+        env.step(env.legal_actions()[0])
+
         # Rhinar passes defend
         env.step(Action(ActionType.DEFEND))
 

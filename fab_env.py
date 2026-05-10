@@ -39,6 +39,7 @@ from actions import (
     legal_defend_actions, legal_arsenal_actions, legal_choose_first_actions,
     legal_instant_actions, legal_reaction_actions,
     legal_pitch_order_actions, legal_mentor_flip_actions,
+    legal_reveal_actions,
 )
 from observations import build_observation, PLAYER_OBS_SIZE, CARD_FEATURES, ACTION_SEQ_SIZE
 from spaces import Discrete, Box, Dict as DictSpace
@@ -53,6 +54,7 @@ class Phase(Enum):
     CHOOSE_FIRST = auto()  # pre-game: randomly selected player chooses who goes first
     ATTACK       = auto()
     PITCH        = auto()   # second step of playing a card: choose which cards to pitch
+    REVEAL       = auto()   # additional cost: player picks a cost ≤ 1 card from hand to reveal
     DEFEND       = auto()
     REACTION     = auto()   # after defender commits blocks: attacker plays attack reactions, then defender plays defense reactions
     INSTANT      = auto()   # either player may play instants onto a stack; LIFO resolution
@@ -332,6 +334,8 @@ class FaBEnv:
             return legal_attack_actions(active)
         elif self._phase == Phase.PITCH:
             return legal_pitch_actions(active, self._pending_play_card)
+        elif self._phase == Phase.REVEAL:
+            return legal_reveal_actions(active)
         elif self._phase == Phase.DEFEND:
             return legal_defend_actions(active, self._pending_attack_power)
         elif self._phase == Phase.REACTION:
@@ -371,6 +375,8 @@ class FaBEnv:
             self._handle_attack_action(action, active, opponent)
         elif self._phase == Phase.PITCH:
             self._handle_pitch_action(action, active, opponent)
+        elif self._phase == Phase.REVEAL:
+            self._handle_reveal_action(action, active, opponent)
         elif self._phase == Phase.DEFEND:
             self._handle_defend_action(action, active, opponent)
         elif self._phase == Phase.REACTION:
@@ -569,22 +575,43 @@ class FaBEnv:
                     self._log(f"    🎲 Additional cost — {active.name} discards {discarded.name}.")
                     self._fire_effects(EffectTrigger.ON_DISCARD, {"card": discarded}, active, opponent)
                 elif effect.action == EffectAction.REVEAL_CARD_COST:
-                    revealed = next((c for c in active.hand if c.cost <= 1), None)
-                    if revealed:
-                        active.hand_revealed.append(revealed)
-                        self._log(f"    👁  Additional cost — {active.name} reveals {revealed.name} (cost {revealed.cost}).")
+                    if any(c.cost <= 1 for c in active.hand):
+                        # Transition to REVEAL phase so the player chooses which card to reveal
+                        self._pending_play_card = card
+                        self._phase = Phase.REVEAL
+                        self._log(f"    👁  Additional cost — {active.name} must reveal a card with cost ≤ 1.")
+                        return
                     else:
                         self._log(f"    👁  Additional cost — {active.name} has no cost ≤ 1 card to reveal.")
-            self._apply_card_effects(card, EffectTrigger.ON_ATTACK_PLAY, {}, active, opponent)
-            self._pending_attack = card
-            self._pending_is_weapon = False
-            self._pending_attack_intimidate = card.power >= 6 and active.mentor_face_up
-            self._trigger_defend_phase(active, opponent)
+            self._launch_action_attack(card, active, opponent)
             return  # defend phase takes over; returns to ATTACK after defend resolves
 
         # After instant/action: end turn if no action points remain
         if active.action_points <= 0:
             self._end_attack_phase(active, opponent)
+
+    def _launch_action_attack(self, card: Card, active: Player, opponent: Player):
+        """Apply ON_ATTACK_PLAY effects and enter the defend phase for an action-attack card."""
+        from card_effects import EffectTrigger
+        self._apply_card_effects(card, EffectTrigger.ON_ATTACK_PLAY, {}, active, opponent)
+        self._pending_attack = card
+        self._pending_is_weapon = False
+        self._pending_attack_intimidate = card.power >= 6 and active.mentor_face_up
+        self._trigger_defend_phase(active, opponent)
+
+    def _handle_reveal_action(self, action: Action, active: Player, opponent: Player):
+        """REVEAL phase: player selects a cost ≤ 1 card from hand to reveal as additional play cost."""
+        card = self._pending_play_card
+        self._pending_play_card = None
+        idx = action.hand_index
+        if idx is not None and 0 <= idx < len(active.hand) and active.hand[idx].cost <= 1:
+            revealed = active.hand[idx]
+            active.hand_revealed.append(revealed)
+            self._log(f"    👁  Additional cost — {active.name} reveals {revealed.name} (cost {revealed.cost}).")
+        else:
+            self._log(f"    👁  Additional cost — {active.name} reveal was invalid; skipping.")
+        self._phase = Phase.ATTACK
+        self._launch_action_attack(card, active, opponent)
 
     @property
     def _pending_defend_total(self) -> int:

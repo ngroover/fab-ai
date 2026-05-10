@@ -44,6 +44,7 @@ class ActionType(Enum):
     PITCH_ORDER        = auto()   # end-of-turn: place one card from pitch zone to deck bottom
     MENTOR_FLIP        = auto()   # start of turn: choose to flip face-down mentor face-up
     ACTIVATE_CARD_ABILITY = auto()  # activate a defending card's once-per-turn instant ability
+    REVEAL             = auto()   # REVEAL phase: choose a cost ≤ 1 card in hand to reveal as additional play cost
 
 
 @dataclass
@@ -98,6 +99,8 @@ class Action:
         if self.action_type == ActionType.ACTIVATE_CARD_ABILITY:
             card_name = self.card.name if self.card else None
             return f"Action(ACTIVATE_CARD_ABILITY card={card_name} discard_hand={self.hand_index})"
+        if self.action_type == ActionType.REVEAL:
+            return f"Action(REVEAL hand_index={self.hand_index})"
         return f"Action({self.action_type})"
 
 
@@ -371,6 +374,17 @@ def legal_pitch_actions(player: 'Player', pending_card: 'Card') -> List[Action]:
                     continue
             actions.append(Action(ActionType.PITCH, pitch_index=i))
     return actions if actions else [Action(ActionType.PITCH)]
+
+
+def legal_reveal_actions(player: 'Player') -> List[Action]:
+    """REVEAL phase: player picks one cost ≤ 1 card from hand to reveal as additional play cost."""
+    seen: set = set()
+    actions = []
+    for i, c in enumerate(player.hand):
+        if c.cost <= 1 and c.name not in seen:
+            seen.add(c.name)
+            actions.append(Action(ActionType.REVEAL, hand_index=i))
+    return actions
 
 
 def legal_defend_actions(player: 'Player', attack_power: int) -> List[Action]:
