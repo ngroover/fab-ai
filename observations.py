@@ -43,6 +43,7 @@ PLAYER_OBS_SIZE = (
     + MAX_CHAIN * CARD_FEATURES  # combat chain (cards currently on chain)
     + CARD_FEATURES + 1          # graveyard: summed embeddings + count
     + CARD_FEATURES + 1          # banish zone: summed embeddings + count
+    + CARD_FEATURES + 1          # deck remaining: summed embeddings + count
 )
 
 
@@ -132,6 +133,10 @@ def encode_player(player: 'Player') -> List[float]:
     obs += _sum_embeddings(all_banished)
     obs.append(len(all_banished) / 4.0)
 
+    # Deck remaining: summed embeddings + count
+    obs += _sum_embeddings(player.deck)
+    obs.append(len(player.deck) / 20.0)
+
     assert len(obs) == PLAYER_OBS_SIZE, (
         f"Obs size mismatch: got {len(obs)}, expected {PLAYER_OBS_SIZE}"
     )
@@ -195,6 +200,10 @@ def encode_opponent_public(player: 'Player') -> List[float]:
     all_banished = player.banished + player.permanently_banished
     obs += _sum_embeddings(all_banished)
     obs.append(len(all_banished) / 4.0)
+
+    # Deck remaining: summed embeddings + count (opponent deck is trackable from public info)
+    obs += _sum_embeddings(player.deck)
+    obs.append(len(player.deck) / 20.0)
 
     assert len(obs) == PLAYER_OBS_SIZE
     return obs
