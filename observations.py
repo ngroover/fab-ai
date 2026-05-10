@@ -13,9 +13,11 @@ from __future__ import annotations
 from typing import List, TYPE_CHECKING
 
 from card_embeddings import ensure_embeddings, get_embed_dim, DEFAULT_OUT_DIR
+from actions import ActionType
 
 if TYPE_CHECKING:
     from game_state import Player
+    from actions import RecordedAction
 
 # ── Card embeddings (loaded once at import time) ─────────────────────────
 _EMBEDDINGS = ensure_embeddings()
@@ -45,7 +47,20 @@ PLAYER_OBS_SIZE = (
     + CARD_FEATURES + 1          # graveyard: summed embeddings + count
     + CARD_FEATURES + 1          # banish zone: summed embeddings + count
     + CARD_FEATURES + 1          # deck remaining: summed embeddings + count
+    + 4                        # turn state values:
+                               #   life, action_points, resource_points, arena_card_count
 )
+
+# ── Action sequence (top-level rolling history) ──────────────────────────
+# One-hot ActionType ordering follows the enum's natural definition order.
+ACTION_TYPE_VOCAB = list(ActionType)
+ACTION_TYPE_DIM = len(ACTION_TYPE_VOCAB)
+# Per-slot features: action_type one-hot + card embedding + actor bit.
+ACTION_FEATURES = ACTION_TYPE_DIM + CARD_FEATURES + 1
+# Rolling window length — must match GameState.action_history's maxlen.
+ACTION_SEQ_LEN = 64
+ACTION_SEQ_SIZE = ACTION_SEQ_LEN * ACTION_FEATURES
+_ACTION_TYPE_TO_INDEX = {at: i for i, at in enumerate(ACTION_TYPE_VOCAB)}
 
 
 def _encode_card(card) -> List[float]:
@@ -101,16 +116,13 @@ def encode_player(player: 'Player') -> List[float]:
     # Hero card embedding
     obs += _encode_card(player.hero_card)
 
-    # Turn state
+    # Turn state. Per-turn buff flags (next_weapon_*, next_brute_attack_bonus,
+    # weapon_used_this_turn, attacks_this_turn) are derivable from the
+    # action_sequence field and intentionally omitted here.
     obs += [
         player.life / 20.0,
         float(player.action_points),
         player.resource_points / 5.0,
-        float(player.next_weapon_go_again),
-        player.next_weapon_power_bonus / 5.0,
-        player.next_brute_attack_bonus / 5.0,
-        float(player.weapon_used_this_turn),
-        player.attacks_this_turn / 5.0,
         len(player.arena) / 4.0,
     ]
 
@@ -172,16 +184,12 @@ def encode_opponent_public(player: 'Player') -> List[float]:
     # Hero card embedding (public)
     obs += _encode_card(player.hero_card)
 
-    # Turn state (public info only — life, attacks, weapon used)
+    # Turn state (public info only). Per-turn buff/attack flags are derivable
+    # from the action_sequence field and intentionally omitted here.
     obs += [
         player.life / 20.0,
         0.0,  # action_points hidden
         0.0,  # resource_points hidden
-        0.0,  # next_weapon_go_again hidden
-        0.0,  # next_weapon_power_bonus hidden
-        0.0,  # next_brute_attack_bonus hidden
-        float(player.weapon_used_this_turn),
-        player.attacks_this_turn / 5.0,
         len(player.arena) / 4.0,  # arena is public
     ]
 
@@ -216,22 +224,44 @@ def encode_opponent_public(player: 'Player') -> List[float]:
     return obs
 
 
+def encode_action(rec: 'RecordedAction', viewer_idx: int) -> List[float]:
+    """Encode a single RecordedAction relative to the viewing player."""
+    one_hot = [0.0] * ACTION_TYPE_DIM
+    one_hot[_ACTION_TYPE_TO_INDEX[rec.action_type]] = 1.0
+    actor_bit = 0.0 if rec.actor_idx == viewer_idx else 1.0
+    return one_hot + _encode_card(rec.card) + [actor_bit]
+
+
+def encode_action_sequence(history, viewer_idx: int) -> List[float]:
+    """Encode the rolling action history into a flat float list of length ACTION_SEQ_SIZE.
+
+    Left-padded with zeros: oldest entries first, most recent at the end.
+    """
+    pad = ACTION_SEQ_LEN - len(history)
+    out: List[float] = [0.0] * (pad * ACTION_FEATURES) if pad > 0 else []
+    for rec in history:  # deque iterates oldest -> newest
+        out.extend(encode_action(rec, viewer_idx))
+    return out
+
+
 def build_observation(player: 'Player', opponent: 'Player', game,
-                      pending_card=None) -> dict:
+                      viewer_idx: int, pending_card=None) -> dict:
     """
     Build the full observation dict for the active agent.
 
     Returns:
         {
-            "agent":        float list [PLAYER_OBS_SIZE],   # full self info
-            "opponent":     float list [PLAYER_OBS_SIZE],   # public opponent info
-            "global":       float list [2],                 # [turn_number/80, is_first_turn]
-            "pending_card": float list [CARD_FEATURES],     # card committed to play (PITCH phase only)
+            "agent":           float list [PLAYER_OBS_SIZE],   # full self info
+            "opponent":        float list [PLAYER_OBS_SIZE],   # public opponent info
+            "global":          float list [2],                 # [turn_number/80, is_first_turn]
+            "pending_card":    float list [CARD_FEATURES],     # card committed to play (PITCH only)
+            "action_sequence": float list [ACTION_SEQ_SIZE],   # rolling action history
         }
     """
     return {
-        "agent":        encode_player(player),
-        "opponent":     encode_opponent_public(opponent),
-        "global":       [game.turn_number / 80.0, float(game.is_first_turn)],
-        "pending_card": _encode_card(pending_card),  # zeros when not in PITCH phase
+        "agent":           encode_player(player),
+        "opponent":        encode_opponent_public(opponent),
+        "global":          [game.turn_number / 80.0, float(game.is_first_turn)],
+        "pending_card":    _encode_card(pending_card),  # zeros when not in PITCH phase
+        "action_sequence": encode_action_sequence(game.action_history, viewer_idx),
     }

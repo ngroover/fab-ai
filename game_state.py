@@ -4,6 +4,7 @@ Both heroes are young heroes — 20 life, intellect 4, Blitz format.
 """
 
 import random
+from collections import deque
 from typing import List, Optional, Dict, Union
 from cards import Card, CardType, EquipSlot, Color
 from card_effects import CardEffect
@@ -191,6 +192,9 @@ class GameState:
         self.turn_number = 1
         self.active_player_idx = 0
         self.is_first_turn = True
+        # Rolling buffer of the last N actions executed across both players,
+        # consumed by the action-sequence observation field.
+        self.action_history: deque = deque(maxlen=64)
 
     @property
     def active(self) -> Player:
