@@ -69,6 +69,7 @@ class TestOpeningHand(unittest.TestCase):
         from fab_env import FaBEnv
         self.env = FaBEnv(verbose=False)
         self.game = self.env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED)[0]
+        self.env.step(self.env.legal_actions()[0])  # resolve CHOOSE_FIRST
         self.rhinar_hand = self.env._game.players[0].hand
         self.dorinthea_hand = self.env._game.players[1].hand
 

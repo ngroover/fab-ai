@@ -27,10 +27,6 @@ import os
 import warnings
 from typing import Dict, List, Tuple
 
-import numpy as np
-import torch
-import torch.nn as nn
-
 from card_effects import EffectAction, EffectTrigger
 from cards import Card, CardClass, CardType, Color, EquipSlot, Keyword
 from classic_battles import CARD_CATALOG
@@ -51,6 +47,13 @@ SLOT_VALUES      = list(EquipSlot)
 KEYWORD_VALUES   = list(Keyword)
 TRIGGER_VALUES   = list(EffectTrigger)
 ACTION_VALUES    = list(EffectAction)
+
+# Dimension of the pure-Python hand-crafted feature vector (no autoencoder, no name one-hot).
+PURE_EMBED_DIM = (
+    len(CARD_TYPE_VALUES) + len(COLOR_VALUES) + len(CLASS_VALUES) +
+    len(SLOT_VALUES) + len(KEYWORD_VALUES) + 2 + 6 +
+    len(TRIGGER_VALUES) + len(ACTION_VALUES) + 2
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -79,7 +82,7 @@ def _one_hot(value, options: List) -> List[float]:
     return vec
 
 
-def encode_card(card: Card, vocab: List[str]) -> np.ndarray:
+def encode_card(card: Card, vocab: List[str]) -> List[float]:
     """Return the hand-crafted feature vector for a single card.
 
     Layout (concatenated):
@@ -149,14 +152,25 @@ def encode_card(card: Card, vocab: List[str]) -> np.ndarray:
     parts.append(len(card.effects) / 4.0)
     parts.append(total_mag / 10.0)
 
-    return np.asarray(parts, dtype=np.float32)
+    return parts
 
 
-def build_feature_matrix() -> Tuple[List[str], np.ndarray]:
-    """Encode every unique card in CARD_CATALOG → (names, feature matrix)."""
+def _pure_embeddings() -> Dict[str, List[float]]:
+    """Pure-Python fallback: hand-crafted features without name one-hot, no torch/numpy required."""
+    result: Dict[str, List[float]] = {}
+    seen: set = set()
+    for card in CARD_CATALOG.values():
+        if card.name not in seen:
+            result[card.name] = encode_card(card, [])
+            seen.add(card.name)
+    return result
+
+
+def build_feature_matrix() -> Tuple[List[str], List[List[float]]]:
+    """Encode every unique card in CARD_CATALOG → (names, feature matrix as list of lists)."""
     cards = _unique_cards_in_order()
     names = [c.name for c in cards]
-    feats = np.stack([encode_card(c, names) for c in cards])
+    feats = [encode_card(c, names) for c in cards]
     return names, feats
 
 
@@ -164,38 +178,41 @@ def build_feature_matrix() -> Tuple[List[str], np.ndarray]:
 # Autoencoder
 # ─────────────────────────────────────────────────────────────────────────────
 
-class CardAutoencoder(nn.Module):
-    def __init__(self, input_dim: int, embed_dim: int, hidden: int = 64):
-        super().__init__()
-        self.encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden),
-            nn.ReLU(),
-            nn.Linear(hidden, embed_dim),
-        )
-        self.decoder = nn.Sequential(
-            nn.Linear(embed_dim, hidden),
-            nn.ReLU(),
-            nn.Linear(hidden, input_dim),
-        )
-
-    def forward(self, x):
-        z = self.encoder(x)
-        return z, self.decoder(z)
+class CardAutoencoder:
+    """Placeholder definition; real class uses torch.nn — see train_autoencoder."""
+    pass
 
 
 def train_autoencoder(
-    features: np.ndarray,
+    features: List[List[float]],
     embed_dim: int = DEFAULT_EMBED_DIM,
     epochs: int = DEFAULT_EPOCHS,
     lr: float = 1e-3,
     seed: int = 42,
     verbose: bool = True,
-) -> Tuple[CardAutoencoder, np.ndarray, List[float]]:
+):
+    import numpy as np
+    import torch
+    import torch.nn as nn
+
+    class _Autoencoder(nn.Module):
+        def __init__(self, input_dim: int, embed_dim: int, hidden: int = 64):
+            super().__init__()
+            self.encoder = nn.Sequential(
+                nn.Linear(input_dim, hidden), nn.ReLU(), nn.Linear(hidden, embed_dim))
+            self.decoder = nn.Sequential(
+                nn.Linear(embed_dim, hidden), nn.ReLU(), nn.Linear(hidden, input_dim))
+
+        def forward(self, x):
+            z = self.encoder(x)
+            return z, self.decoder(z)
+
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    X = torch.from_numpy(features).float()
-    model = CardAutoencoder(features.shape[1], embed_dim)
+    feat_array = np.array(features, dtype=np.float32)
+    X = torch.from_numpy(feat_array).float()
+    model = _Autoencoder(feat_array.shape[1], embed_dim)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.MSELoss()
 
@@ -239,17 +256,22 @@ def _build_meta(names: List[str], feature_dim: int, embed_dim: int,
     }
 
 
-def save_embeddings(out_dir: str, names: List[str], features: np.ndarray,
-                    embeddings: np.ndarray, model: CardAutoencoder,
+def save_embeddings(out_dir: str, names: List[str], features,
+                    embeddings, model,
                     meta: Dict) -> None:
+    import numpy as np
+    import torch
     os.makedirs(out_dir, exist_ok=True)
-    np.save(os.path.join(out_dir, "card_features.npy"),   features)
-    np.save(os.path.join(out_dir, "card_embeddings.npy"), embeddings)
+    feat_arr = np.array(features, dtype=np.float32) if not hasattr(features, 'shape') else features
+    emb_arr  = np.array(embeddings, dtype=np.float32) if not hasattr(embeddings, 'shape') else embeddings
+    np.save(os.path.join(out_dir, "card_features.npy"),   feat_arr)
+    np.save(os.path.join(out_dir, "card_embeddings.npy"), emb_arr)
     with open(os.path.join(out_dir, "card_names.json"), "w") as f:
         json.dump(names, f, indent=2)
     with open(os.path.join(out_dir, "meta.json"), "w") as f:
         json.dump(meta, f, indent=2)
-    torch.save(model.state_dict(), os.path.join(out_dir, "autoencoder.pt"))
+    if model is not None and hasattr(model, 'state_dict'):
+        torch.save(model.state_dict(), os.path.join(out_dir, "autoencoder.pt"))
 
 
 def _check_schema_drift(meta: Dict) -> None:
@@ -276,7 +298,7 @@ def _check_schema_drift(meta: Dict) -> None:
         )
 
 
-def load_embeddings(out_dir: str = DEFAULT_OUT_DIR) -> Dict[str, np.ndarray]:
+def load_embeddings(out_dir: str = DEFAULT_OUT_DIR) -> Dict[str, List[float]]:
     """Load embeddings from `out_dir`. Raises FileNotFoundError if absent."""
     emb_path = os.path.join(out_dir, "card_embeddings.npy")
     if not os.path.exists(emb_path):
@@ -284,6 +306,7 @@ def load_embeddings(out_dir: str = DEFAULT_OUT_DIR) -> Dict[str, np.ndarray]:
             f"Embeddings not found at {emb_path}. "
             f"Run `python card_embeddings.py` to generate them."
         )
+    import numpy as np
     with open(os.path.join(out_dir, "card_names.json")) as f:
         names = json.load(f)
     with open(os.path.join(out_dir, "meta.json")) as f:
@@ -291,11 +314,14 @@ def load_embeddings(out_dir: str = DEFAULT_OUT_DIR) -> Dict[str, np.ndarray]:
     meta["_card_names_cache"] = names
     _check_schema_drift(meta)
     embeddings = np.load(emb_path)
-    return {name: embeddings[i] for i, name in enumerate(names)}
+    return {name: embeddings[i].tolist() for i, name in enumerate(names)}
 
 
 def get_embed_dim(out_dir: str = DEFAULT_OUT_DIR) -> int:
-    with open(os.path.join(out_dir, "meta.json")) as f:
+    meta_path = os.path.join(out_dir, "meta.json")
+    if not os.path.exists(meta_path):
+        return PURE_EMBED_DIM
+    with open(meta_path) as f:
         return int(json.load(f)["embed_dim"])
 
 
@@ -303,20 +329,26 @@ def ensure_embeddings(
     out_dir: str = DEFAULT_OUT_DIR,
     embed_dim: int = DEFAULT_EMBED_DIM,
     epochs: int = DEFAULT_EPOCHS,
-) -> Dict[str, np.ndarray]:
+) -> Dict[str, List[float]]:
     """Load embeddings, training them on the fly if artifacts are missing.
 
-    Generation takes a few seconds for the current 46-card catalog, so this
-    keeps a fresh checkout working without an explicit setup step.
+    Falls back to pure hand-crafted feature vectors when torch/numpy are not
+    installed — PURE_EMBED_DIM floats per card, no autoencoder compression.
     """
     emb_path = os.path.join(out_dir, "card_embeddings.npy")
     if not os.path.exists(emb_path):
+        try:
+            import torch  # noqa: F401
+            import numpy  # noqa: F401
+        except ImportError:
+            return _pure_embeddings()
+
         print(f"[card_embeddings] No artifacts at {out_dir!r}; generating...")
         names, features = build_feature_matrix()
         model, embeddings, losses = train_autoencoder(
             features, embed_dim=embed_dim, epochs=epochs, verbose=False,
         )
-        meta = _build_meta(names, features.shape[1], embed_dim, losses)
+        meta = _build_meta(names, len(features[0]), embed_dim, losses)
         save_embeddings(out_dir, names, features, embeddings, model, meta)
         print(f"[card_embeddings] Generated {len(names)} embeddings "
               f"(dim={embed_dim}, final loss={losses[-1]:.6f}).")
@@ -331,13 +363,14 @@ def similar_cards(
     name: str,
     top_k: int = 10,
     metric: str = "dot",
-    embeddings: Dict[str, np.ndarray] = None,
+    embeddings: Dict[str, List[float]] = None,
 ) -> List[Tuple[str, float]]:
     """Return the top_k cards most similar to `name`, scored by `metric`.
 
     metric: "dot" (raw dot product) or "cosine" (length-normalized).
     The query card itself is excluded from the result.
     """
+    import numpy as np
     if embeddings is None:
         embeddings = load_embeddings()
     if name not in embeddings:
@@ -345,9 +378,9 @@ def similar_cards(
         hint = f" Did you mean: {matches}?" if matches else ""
         raise KeyError(f"Card {name!r} not in embeddings.{hint}")
 
-    query = embeddings[name]
+    query = np.array(embeddings[name], dtype=np.float32)
     names = [n for n in embeddings if n != name]
-    mat = np.stack([embeddings[n] for n in names])
+    mat = np.array([embeddings[n] for n in names], dtype=np.float32)
 
     if metric == "dot":
         scores = mat @ query
@@ -398,7 +431,7 @@ def main() -> None:
 
     print("Building feature matrix...")
     names, features = build_feature_matrix()
-    print(f"  cards: {len(names)},  feature dim: {features.shape[1]}")
+    print(f"  cards: {len(names)},  feature dim: {len(features[0])}")
 
     print(f"Training autoencoder "
           f"(embed_dim={args.embed_dim}, epochs={args.epochs})...")
@@ -412,7 +445,7 @@ def main() -> None:
     print(f"  initial loss: {losses[0]:.6f}")
     print(f"  final loss:   {losses[-1]:.6f}")
 
-    meta = _build_meta(names, features.shape[1], args.embed_dim, losses)
+    meta = _build_meta(names, len(features[0]), args.embed_dim, losses)
     save_embeddings(args.out_dir, names, features, embeddings, model, meta)
     print(f"Saved to {args.out_dir}/")
 
