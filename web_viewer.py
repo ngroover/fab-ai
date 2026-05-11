@@ -2115,11 +2115,9 @@ PLAY_TEMPLATE = """
       background: #0a0e18; border-bottom: 1px solid #2d3748;
       white-space: pre-wrap; word-break: break-word;
     }
-    #log-area.compact { height: 20vh; }
-
     /* ── Gamestate area ──────────────────────────────── */
     #gamestate-area {
-      padding: 10px 12px; overflow-y: auto; height: 20vh;
+      padding: 10px 12px; overflow-y: auto; height: 38vh;
       background: #0a0e18; border-bottom: 1px solid #2d3748;
       font-size: 0.78rem;
     }
@@ -2424,7 +2422,7 @@ PLAY_TEMPLATE = """
     let lastLogKey = null;
     let lastActionKey = null;
     let polling = false;
-    let activeView = 'log';     // 'log' | 'p0' | 'p1'
+    let activeView = 'log';     // 'log' | 'p0_log' | 'p0_state' | 'p1_log' | 'p1_state'
     let lastViewKey = null;
     let lastTabKey = null;
 
@@ -2460,11 +2458,13 @@ PLAY_TEMPLATE = """
       const tabs = [{key: 'log', label: '📜 Logs'}];
       if (s.p0_agent === 'human') {
         const name = (s.player_stats.agent_0 && s.player_stats.agent_0.name) || 'Player 1';
-        tabs.push({key: 'p0', label: '👁 ' + name + ' view'});
+        tabs.push({key: 'p0_log',   label: '📜 ' + name + ' Logs'});
+        tabs.push({key: 'p0_state', label: '📊 ' + name + ' State'});
       }
       if (s.p1_agent === 'human') {
         const name = (s.player_stats.agent_1 && s.player_stats.agent_1.name) || 'Player 2';
-        tabs.push({key: 'p1', label: '👁 ' + name + ' view'});
+        tabs.push({key: 'p1_log',   label: '📜 ' + name + ' Logs'});
+        tabs.push({key: 'p1_state', label: '📊 ' + name + ' State'});
       }
 
       const validKeys = tabs.map(t => t.key);
@@ -2480,23 +2480,10 @@ PLAY_TEMPLATE = """
         }).join('');
       }
 
-      const inPlayerView = (activeView === 'p0' || activeView === 'p1');
-      document.getElementById('log-area').style.display = '';
-      document.getElementById('log-area').classList.toggle('compact', inPlayerView);
-      document.getElementById('gamestate-area').style.display = inPlayerView ? '' : 'none';
-      const lbl = document.getElementById('log-label');
-      if (activeView === 'p0') {
-        const n0 = (s.player_stats.agent_0 && s.player_stats.agent_0.name) || 'Player 1';
-        lbl.textContent = '📜 ' + n0 + "'s private log";
-        lbl.style.display = '';
-      } else if (activeView === 'p1') {
-        const n1 = (s.player_stats.agent_1 && s.player_stats.agent_1.name) || 'Player 2';
-        lbl.textContent = '📜 ' + n1 + "'s private log";
-        lbl.style.display = '';
-      } else {
-        lbl.textContent = '';
-        lbl.style.display = 'none';
-      }
+      const inStateView = (activeView === 'p0_state' || activeView === 'p1_state');
+      document.getElementById('log-area').style.display = inStateView ? 'none' : '';
+      document.getElementById('gamestate-area').style.display = inStateView ? '' : 'none';
+      document.getElementById('log-label').style.display = 'none';
     }
 
     function setView(k) {
@@ -2538,10 +2525,10 @@ PLAY_TEMPLATE = """
     // ── Log area ───────────────────────────────────────────────
     function updateLog(s) {
       let logData, logTotal;
-      if (activeView === 'p0') {
+      if (activeView === 'p0_log') {
         logData = s.log_p0 || [];
         logTotal = s.log_total_p0 || 0;
-      } else if (activeView === 'p1') {
+      } else if (activeView === 'p1_log') {
         logData = s.log_p1 || [];
         logTotal = s.log_total_p1 || 0;
       } else {
@@ -2567,19 +2554,19 @@ PLAY_TEMPLATE = """
 
     // ── Gamestate area ─────────────────────────────────────────
     function updateGamestate(s) {
-      if (activeView === 'log') return;
+      if (activeView !== 'p0_state' && activeView !== 'p1_state') return;
       const viewKey = activeView + ':' + JSON.stringify(s.gamestate || {});
       if (viewKey === lastViewKey) return;
       lastViewKey = viewKey;
 
       const area = document.getElementById('gamestate-area');
       const gs = s.gamestate || {};
-      const view = (activeView === 'p0') ? gs.p0_view : gs.p1_view;
+      const view = (activeView === 'p0_state') ? gs.p0_view : gs.p1_view;
       if (!view) {
         area.innerHTML = '<div class="gs-empty">Gamestate not available yet…</div>';
         return;
       }
-      const viewerIdx = (activeView === 'p0') ? 0 : 1;
+      const viewerIdx = (activeView === 'p0_state') ? 0 : 1;
       area.innerHTML =
         renderChain(view.combat_chain, viewerIdx) +
         renderSelfSide(view.self) +
