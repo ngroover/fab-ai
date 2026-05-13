@@ -23,10 +23,11 @@ from typing import Optional
 
 from fab_env import FaBEnv, Phase
 from agents import RhinarAgent, DorintheiAgent, HumanAgent, RandomAgent
+from neural_agent import NeuralAgent
 from actions import ActionType
 from cards import build_rhinar_deck, build_dorinthea_deck
 
-_AGENT_CHOICES = ("rhinar", "dorinthea", "random", "human")
+_AGENT_CHOICES = ("rhinar", "dorinthea", "random", "human", "neural")
 
 
 def _make_agent(name: str):
@@ -40,6 +41,8 @@ def _make_agent(name: str):
         return RandomAgent()
     if name == "human":
         return HumanAgent()
+    if name == "neural":
+        return NeuralAgent(seed=0)
     raise argparse.ArgumentTypeError(
         f"Unknown agent '{name}'. Choose from: {', '.join(_AGENT_CHOICES)}"
     )
