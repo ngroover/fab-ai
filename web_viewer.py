@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import ssl
 from datetime import datetime
 from pathlib import Path
 
@@ -4441,6 +4442,61 @@ def api_delete_deck(deck_id: int):
 
 
 # ──────────────────────────────────────────────────────────────
+# Hot-swappable SSL certificate support
+# ──────────────────────────────────────────────────────────────
+
+# Mutable at runtime; keys: "active", "cert", "key", "profiles"
+_ssl_state: dict = {"active": None, "cert": None, "key": None, "profiles": {}}
+
+
+def _make_reloading_ssl_context(cert: str, key: str) -> ssl.SSLContext:
+    """Return an SSLContext whose SNI callback reloads the current cert on every handshake."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(cert, key)
+
+    def _sni_callback(ssl_sock, server_name, _ctx):
+        fresh = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        try:
+            fresh.load_cert_chain(_ssl_state["cert"], _ssl_state["key"])
+        except Exception as exc:
+            print(f"[SSL] reload failed: {exc}")
+            return
+        ssl_sock.context = fresh
+
+    ctx.sni_callback = _sni_callback
+    return ctx
+
+
+@app.route("/api/ssl", methods=["GET"])
+@login_required
+def api_ssl_status():
+    profiles = list(_ssl_state["profiles"].keys())
+    return jsonify({
+        "active": _ssl_state["active"],
+        "cert": _ssl_state["cert"],
+        "key": _ssl_state["key"],
+        "profiles": profiles,
+    })
+
+
+@app.route("/api/ssl/swap", methods=["POST"])
+@login_required
+def api_ssl_swap():
+    data = request.get_json(force=True) or {}
+    profile = (data.get("profile") or "").strip()
+    if not profile:
+        return jsonify({"error": "profile required"}), 400
+    profiles = _ssl_state["profiles"]
+    if profile not in profiles:
+        return jsonify({"error": f"unknown profile '{profile}', available: {list(profiles)}"}), 404
+    _ssl_state["cert"] = profiles[profile]["cert"]
+    _ssl_state["key"] = profiles[profile]["key"]
+    _ssl_state["active"] = profile
+    print(f"[SSL] swapped to profile '{profile}' ({_ssl_state['cert']})")
+    return jsonify({"ok": True, "active": profile})
+
+
+# ──────────────────────────────────────────────────────────────
 # Entry point
 # ──────────────────────────────────────────────────────────────
 
@@ -4450,13 +4506,39 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
     parser.add_argument("--ssl-cert", metavar="CERT", help="Path to SSL certificate file (PEM) to enable HTTPS")
     parser.add_argument("--ssl-key", metavar="KEY", help="Path to SSL private key file (PEM) to enable HTTPS")
+    parser.add_argument("--ssl-cert-home", metavar="CERT", help="Home-network SSL certificate (PEM)")
+    parser.add_argument("--ssl-key-home", metavar="KEY", help="Home-network SSL private key (PEM)")
+    parser.add_argument("--ssl-cert-away", metavar="CERT", help="Away-network SSL certificate (PEM)")
+    parser.add_argument("--ssl-key-away", metavar="KEY", help="Away-network SSL private key (PEM)")
     args = parser.parse_args()
 
+    # Build named profiles for hot-swapping
+    if args.ssl_cert_home and args.ssl_key_home:
+        _ssl_state["profiles"]["home"] = {"cert": args.ssl_cert_home, "key": args.ssl_key_home}
+    if args.ssl_cert_away and args.ssl_key_away:
+        _ssl_state["profiles"]["away"] = {"cert": args.ssl_cert_away, "key": args.ssl_key_away}
+
     ssl_context = None
+    initial_cert = initial_key = None
+
     if args.ssl_cert or args.ssl_key:
         if not args.ssl_cert or not args.ssl_key:
             parser.error("--ssl-cert and --ssl-key must both be provided to enable HTTPS")
-        ssl_context = (args.ssl_cert, args.ssl_key)
+        initial_cert, initial_key = args.ssl_cert, args.ssl_key
+        _ssl_state["active"] = "default"
+    elif "home" in _ssl_state["profiles"]:
+        p = _ssl_state["profiles"]["home"]
+        initial_cert, initial_key = p["cert"], p["key"]
+        _ssl_state["active"] = "home"
+    elif "away" in _ssl_state["profiles"]:
+        p = _ssl_state["profiles"]["away"]
+        initial_cert, initial_key = p["cert"], p["key"]
+        _ssl_state["active"] = "away"
+
+    if initial_cert:
+        _ssl_state["cert"] = initial_cert
+        _ssl_state["key"] = initial_key
+        ssl_context = _make_reloading_ssl_context(initial_cert, initial_key)
 
     scheme = "https" if ssl_context else "http"
     print(f"\n  FaB Game Log Viewer")
@@ -4465,7 +4547,11 @@ if __name__ == "__main__":
     print(f"  Open on your phone: {scheme}://<your-ip>:{args.port}")
     print(f"  Local:              {scheme}://localhost:{args.port}")
     if ssl_context:
-        print(f"  SSL:                enabled")
+        profiles = list(_ssl_state["profiles"].keys())
+        print(f"  SSL:                enabled (active profile: {_ssl_state['active']})")
+        if profiles:
+            print(f"  SSL profiles:       {', '.join(profiles)}")
+            print(f"  Swap endpoint:      POST {scheme}://localhost:{args.port}/api/ssl/swap")
     print()
 
     app.run(host=args.host, port=args.port, debug=False, ssl_context=ssl_context)
