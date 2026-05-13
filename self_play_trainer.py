@@ -1,0 +1,743 @@
+"""
+self_play_trainer.py — AlphaZero-style self-play trainer for FaBEnv.
+
+A single iteration is:
+
+    1. SELF-PLAY: play `games_per_iter` games. At every decision point use
+       `PUCTSearch` (alpha_zero_mcts) seeded by the current PolicyValueNetwork
+       to produce a visit distribution π over legal actions. Sample the chosen
+       action from π with a temperature schedule. Append the transition
+       (obs, legal_actions, π, to_play) to a replay buffer.
+
+    2. TRAIN: run `steps_per_iter` gradient steps. Each step samples a batch
+       from the buffer and minimizes
+            L = cross_entropy(softmax(logits), π)  +  c_value · MSE(value, z)
+       where z is the game outcome from each transition's `to_play` view.
+
+    3. EVAL (every `eval_every` iters): play `eval_games` games against each
+       fixed opponent (RhinarAgent, DorintheiAgent, RandomAgent) with greedy
+       net inference (no MCTS) and record win rates.
+
+    4. CHECKPOINT: write `state_dict` to `./checkpoints/<name>.pt` and update
+       `./checkpoints/index.json`.
+
+The class accepts a `callbacks` dict so the web UI can render live metrics
+without coupling the trainer to Flask.
+
+CLI usage:
+    python self_play_trainer.py --iters 1 --games 2 --steps 4 --sims 8
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import json
+import os
+import random
+import time
+from collections import deque
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
+
+import torch
+import torch.nn.functional as F
+
+from actions import Action
+from agents import DorintheiAgent, RandomAgent, RhinarAgent
+from cards import build_dorinthea_deck, build_rhinar_deck
+from fab_env import FaBEnv, Phase
+from neural_agent import (
+    NeuralAgent,
+    PolicyValueNetwork,
+    flatten_obs,
+    stack_action_features,
+)
+from alpha_zero_mcts import PUCTSearch, sample_action_index
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Config
+# ─────────────────────────────────────────────────────────────────────────────
+
+CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
+INDEX_PATH = os.path.join(CHECKPOINT_DIR, "index.json")
+
+
+@dataclass
+class TrainerConfig:
+    # Loop sizes
+    games_per_iter: int = 8
+    steps_per_iter: int = 32
+    total_iters: int = 10            # 0 → run until stopped
+
+    # MCTS
+    n_simulations: int = 32
+    c_puct: float = 1.5
+    determinize: bool = True
+    dirichlet_alpha: float = 0.3
+    dirichlet_frac: float = 0.25
+
+    # Temperature schedule (greedy after `temp_drop_step` decisions per game)
+    temp_start: float = 1.0
+    temp_end: float = 0.1
+    temp_drop_step: int = 12
+
+    # PyTorch optimization
+    lr: float = 3e-4
+    batch_size: int = 64
+    weight_decay: float = 1e-4
+    c_value: float = 0.5
+    grad_clip: float = 5.0
+    buffer_size: int = 20_000
+
+    # Evaluation
+    eval_games: int = 4
+    eval_every: int = 1              # evaluate after every N iterations
+    eval_opponents: Tuple[str, ...] = ("rhinar", "dorinthea", "random")
+
+    # Bookkeeping
+    opponent_pool: Tuple[str, ...] = ("self",)
+    run_name: str = ""               # auto-set if blank
+    base_checkpoint: Optional[str] = None  # name in ./checkpoints/, or None
+    seed: Optional[int] = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Replay buffer
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class Transition:
+    obs: dict                       # observation dict at decision time
+    legal_actions: List[Action]
+    pi: List[float]                  # MCTS visit distribution
+    to_play: int                     # 0 or 1
+    z: float = 0.0                   # game outcome (filled after game ends)
+
+
+class ReplayBuffer:
+    """Bounded ring buffer of completed transitions."""
+
+    def __init__(self, capacity: int):
+        self._buf: deque[Transition] = deque(maxlen=capacity)
+
+    def __len__(self) -> int:
+        return len(self._buf)
+
+    def push_many(self, items: Sequence[Transition]) -> None:
+        for t in items:
+            self._buf.append(t)
+
+    def sample(self, n: int, rng: random.Random) -> List[Transition]:
+        n = min(n, len(self._buf))
+        if n <= 0:
+            return []
+        return rng.sample(list(self._buf), n)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase-aware action dispatch (mirrors run_env.run_game)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _dispatch_agent_action(env: FaBEnv, agent, obs: dict) -> Action:
+    """Ask `agent` for an action in the env's current phase. Mirrors the
+    dispatch block in run_env.run_game so any rule-based agent slots in."""
+    agent_id = env.agent_selection
+    player_idx = int(agent_id[-1])
+    player = env._game.players[player_idx]
+    opponent = env._game.players[1 - player_idx]
+    legal = env.legal_actions()
+    agent_obs = obs.get(agent_id) if isinstance(obs, dict) else None
+
+    phase = env._phase
+    if phase == Phase.ATTACK:
+        return agent.select_action(agent_obs, legal, player, opponent)
+    if phase == Phase.DEFEND:
+        return agent.select_defend(
+            agent_obs, legal, player,
+            env._pending_attack_power, env._pending_defend_total,
+        )
+    if phase == Phase.PITCH:
+        return agent.select_pitch(
+            agent_obs, legal, player, env._pending_play_card
+        )
+    if phase == Phase.REACTION:
+        ap = env._pending_attack_power
+        is_attacker = player_idx == env._reaction_attacker_idx
+        return agent.select_reaction(agent_obs, legal, player, ap, is_attacker)
+    if phase == Phase.INSTANT:
+        ap = env._pending_attack_power if env._pending_attack is not None else 0
+        return agent.select_instant(agent_obs, legal, player, ap)
+    if phase == Phase.ARSENAL:
+        return agent.select_arsenal(agent_obs, legal, player)
+    if phase == Phase.PITCH_ORDER:
+        return agent.select_pitch_order(agent_obs, legal, player)
+    if phase == Phase.CHOOSE_FIRST:
+        return agent.select_choose_first(legal, player)
+    if phase == Phase.MENTOR_FLIP:
+        if hasattr(agent, "select_mentor_flip"):
+            return agent.select_mentor_flip(agent_obs, legal, player)
+    if phase == Phase.REVEAL:
+        if hasattr(agent, "select_reveal"):
+            return agent.select_reveal(agent_obs, legal, player)
+    return legal[0]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Trainer
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SelfPlayTrainer:
+    """AlphaZero loop wrapped in a single class.
+
+    The web viewer drives this through `callbacks` (`on_log`, `on_metrics`,
+    `on_status`, `on_checkpoint`, `should_stop`, `wait_if_paused`); the
+    standalone CLI uses sensible defaults.
+    """
+
+    def __init__(
+        self,
+        config: TrainerConfig,
+        callbacks: Optional[Dict[str, Callable]] = None,
+    ) -> None:
+        self.config = config
+        callbacks = callbacks or {}
+        self._on_log: Callable[[str], None] = callbacks.get(
+            "on_log", lambda msg: print(msg))
+        self._on_metrics: Callable[[dict], None] = callbacks.get(
+            "on_metrics", lambda m: None)
+        self._on_status: Callable[[str], None] = callbacks.get(
+            "on_status", lambda s: None)
+        self._on_checkpoint: Callable[[dict], None] = callbacks.get(
+            "on_checkpoint", lambda c: None)
+        self._should_stop: Callable[[], bool] = callbacks.get(
+            "should_stop", lambda: False)
+        self._wait_if_paused: Callable[[], None] = callbacks.get(
+            "wait_if_paused", lambda: None)
+
+        seed = config.seed if config.seed is not None else random.randrange(2**31)
+        self._rng = random.Random(seed)
+        torch.manual_seed(seed)
+
+        self.net = PolicyValueNetwork()
+        if config.base_checkpoint:
+            self._load_checkpoint(config.base_checkpoint)
+        self.optimizer = torch.optim.Adam(
+            self.net.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+        )
+        self.buffer = ReplayBuffer(config.buffer_size)
+
+        self._iter = 0
+        self._games_done = 0
+        self._grad_steps = 0
+        self._start_time = time.time()
+
+        if not config.run_name:
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            self.config.run_name = f"run-{ts}"
+
+    # ──────────────────────────────────────────────────────────
+    # Main entry point
+    # ──────────────────────────────────────────────────────────
+
+    def run(self) -> None:
+        self._start_time = time.time()
+        self._log(f"  ▶  Trainer starting: run={self.config.run_name} "
+                  f"seed={self.config.seed}")
+        os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+
+        try:
+            while True:
+                if self._should_stop():
+                    self._log("  ⏹  Stop requested — exiting before iteration.")
+                    break
+                if self.config.total_iters > 0 and self._iter >= self.config.total_iters:
+                    self._log(f"  ✓  Reached total_iters={self.config.total_iters}.")
+                    break
+
+                self._iter += 1
+                self._log(f"\n══ Iteration {self._iter} ══")
+
+                # ── 1. Self-play ──────────────────────────────
+                self._on_status("self-play")
+                ep_lens, value_pred_avg, value_real_avg = \
+                    self._run_self_play_phase()
+                if self._should_stop():
+                    break
+
+                # ── 2. Training ────────────────────────────────
+                self._on_status("training")
+                ploss, vloss = self._run_training_phase()
+                if self._should_stop():
+                    break
+
+                # ── 3. Eval ────────────────────────────────────
+                eval_wr: Dict[str, float] = {}
+                if (self.config.eval_every > 0
+                        and self._iter % self.config.eval_every == 0):
+                    self._on_status("evaluating")
+                    eval_wr = self._run_eval_phase()
+                    if self._should_stop():
+                        break
+
+                # ── 4. Checkpoint ──────────────────────────────
+                ckpt = self._save_checkpoint(self._iter, eval_wr)
+
+                # ── 5. Publish metrics ─────────────────────────
+                self._on_metrics({
+                    "iter": self._iter,
+                    "games": self._games_done,
+                    "grad_steps": self._grad_steps,
+                    "policy_loss": ploss,
+                    "value_loss": vloss,
+                    "wr_rhinar": eval_wr.get("rhinar"),
+                    "wr_dorinthea": eval_wr.get("dorinthea"),
+                    "wr_random": eval_wr.get("random"),
+                    "mean_len": (sum(ep_lens) / len(ep_lens)) if ep_lens else 0.0,
+                    "value_pred": value_pred_avg,
+                    "value_real": value_real_avg,
+                    "checkpoint": ckpt["name"] if ckpt else None,
+                })
+                self._wait_if_paused()
+        except Exception as exc:  # surface errors to the UI
+            import traceback
+            self._on_status("error")
+            self._log(f"  ⚠  Trainer error: {exc}")
+            self._log(traceback.format_exc())
+            raise
+        finally:
+            self._on_status("idle")
+
+    # ──────────────────────────────────────────────────────────
+    # Self-play phase
+    # ──────────────────────────────────────────────────────────
+
+    def _run_self_play_phase(self) -> Tuple[List[int], float, float]:
+        ep_lens: List[int] = []
+        val_preds: List[float] = []
+        val_reals: List[float] = []
+        for game_i in range(self.config.games_per_iter):
+            if self._should_stop():
+                break
+            self._wait_if_paused()
+            opp_kind = self._rng.choice(self.config.opponent_pool or ("self",))
+            transitions, outcome, length, pred_avg = \
+                self._play_one_self_play_game(opp_kind)
+            ep_lens.append(length)
+            val_preds.append(pred_avg)
+            val_reals.append(outcome)
+            self.buffer.push_many(transitions)
+            self._games_done += 1
+            self._log(
+                f"  ⚔  game {game_i+1}/{self.config.games_per_iter} "
+                f"(opp={opp_kind}) length={length} "
+                f"outcome(p0)={outcome:+.0f} "
+                f"v̂(p0)={pred_avg:+.3f} "
+                f"buffer={len(self.buffer)}"
+            )
+        avg_pred = sum(val_preds) / len(val_preds) if val_preds else 0.0
+        avg_real = sum(val_reals) / len(val_reals) if val_reals else 0.0
+        return ep_lens, avg_pred, avg_real
+
+    def _play_one_self_play_game(
+        self, opp_kind: str
+    ) -> Tuple[List[Transition], float, int, float]:
+        """Play one game and return (transitions, p0_outcome, length, avg_pred_v_p0)."""
+        env = FaBEnv(verbose=False)
+        env.reset(
+            build_rhinar_deck(),
+            build_dorinthea_deck(),
+            seed=self._rng.randrange(2**31),
+        )
+
+        # The "self" opponent uses the same net; otherwise it's a fixed agent.
+        opp_agent = self._make_opponent(opp_kind)
+        # If the opponent is fixed, "self" plays as player 0 by default;
+        # randomize side per game so the net learns both heroes.
+        learning_idx = self._rng.choice((0, 1)) if opp_kind != "self" else None
+
+        search = PUCTSearch(
+            self.net,
+            n_simulations=self.config.n_simulations,
+            c_puct=self.config.c_puct,
+            determinize=self.config.determinize,
+            dirichlet_alpha=self.config.dirichlet_alpha,
+            dirichlet_frac=self.config.dirichlet_frac,
+            seed=self._rng.randrange(2**31),
+        )
+
+        decisions: List[Transition] = []
+        # Per-side decision count for the temperature schedule.
+        per_side = [0, 0]
+        net_root_values: List[float] = []
+        length = 0
+
+        while not env.done:
+            length += 1
+            if self._should_stop():
+                break
+            agent_id = env.agent_selection
+            to_play = int(agent_id[-1])
+
+            legal = env.legal_actions()
+            if not legal:
+                break
+
+            # Forced action — env auto-executes in step(), but defensively
+            # handle here in case the loop encounters one.
+            if len(legal) == 1:
+                env.step(legal[0])
+                continue
+
+            mcts_owns_this_decision = (
+                opp_kind == "self" or to_play == learning_idx
+            )
+
+            if mcts_owns_this_decision:
+                obs_dict = env._get_obs()[agent_id]
+                root_legal, pi, root_q = search.run(env)
+                if not root_legal:
+                    break
+                net_root_values.append(root_q if to_play == 0 else -root_q)
+                tau = self._temperature_for(per_side[to_play])
+                idx = sample_action_index(pi, tau, self._rng)
+                action = root_legal[idx]
+                decisions.append(Transition(
+                    obs=obs_dict,
+                    legal_actions=list(root_legal),
+                    pi=list(pi),
+                    to_play=to_play,
+                ))
+                per_side[to_play] += 1
+                env.step(action)
+            else:
+                # Opponent (fixed rule-based agent) moves.
+                obs_full = env._get_obs()
+                action = _dispatch_agent_action(env, opp_agent, obs_full)
+                env.step(action)
+
+        # Outcome from agent_0's view, clipped to {-1, 0, +1}.
+        r0 = env._rewards.get("agent_0", 0.0)
+        if r0 > 0.5:
+            z0, z1 = 1.0, -1.0
+        elif r0 < -0.5:
+            z0, z1 = -1.0, 1.0
+        else:
+            z0, z1 = 0.0, 0.0
+
+        for t in decisions:
+            t.z = z0 if t.to_play == 0 else z1
+
+        avg_root_v = (sum(net_root_values) / len(net_root_values)
+                      if net_root_values else 0.0)
+        return decisions, z0, length, avg_root_v
+
+    def _temperature_for(self, decision_idx: int) -> float:
+        cfg = self.config
+        if decision_idx < cfg.temp_drop_step:
+            return cfg.temp_start
+        return cfg.temp_end
+
+    def _make_opponent(self, kind: str):
+        if kind in ("self",):
+            return None  # PUCTSearch handles both sides
+        if kind == "rhinar":
+            return RhinarAgent()
+        if kind == "dorinthea":
+            return DorintheiAgent()
+        if kind == "random":
+            return RandomAgent(seed=self._rng.randrange(2**31))
+        # Unknown → self
+        return None
+
+    # ──────────────────────────────────────────────────────────
+    # Training phase
+    # ──────────────────────────────────────────────────────────
+
+    def _run_training_phase(self) -> Tuple[float, float]:
+        """Run `steps_per_iter` grad steps and return (avg_p_loss, avg_v_loss)."""
+        if len(self.buffer) == 0:
+            self._log("  ⚠  Skipping training: buffer is empty.")
+            return 0.0, 0.0
+
+        self.net.train()
+        total_p = 0.0
+        total_v = 0.0
+        steps = 0
+        for step in range(self.config.steps_per_iter):
+            if self._should_stop():
+                break
+            self._wait_if_paused()
+            batch = self.buffer.sample(self.config.batch_size, self._rng)
+            if not batch:
+                break
+            p_loss, v_loss = self._train_step(batch)
+            total_p += p_loss
+            total_v += v_loss
+            steps += 1
+            self._grad_steps += 1
+        self.net.eval()
+
+        avg_p = total_p / steps if steps else 0.0
+        avg_v = total_v / steps if steps else 0.0
+        self._log(
+            f"  ∇  {steps} grad steps · "
+            f"policy_loss={avg_p:.4f} value_loss={avg_v:.4f}"
+        )
+        return avg_p, avg_v
+
+    def _train_step(self, batch: List[Transition]) -> Tuple[float, float]:
+        """One gradient step over a list of transitions.
+
+        Because legal-action list length varies per state we accumulate the
+        per-example losses one at a time then divide by batch size. This is
+        slower than a fully batched forward but keeps the code simple and
+        correct.
+        """
+        self.optimizer.zero_grad(set_to_none=True)
+
+        policy_loss = torch.zeros((), dtype=torch.float32)
+        value_loss = torch.zeros((), dtype=torch.float32)
+
+        for t in batch:
+            obs_vec = flatten_obs(t.obs)
+            action_feats = stack_action_features(t.legal_actions)
+            logits, value = self.net.forward(obs_vec, action_feats)
+            # Policy target: π. Cross entropy = -Σ π * log_softmax(logits).
+            log_probs = F.log_softmax(logits, dim=-1)
+            pi = torch.tensor(t.pi, dtype=torch.float32)
+            policy_loss = policy_loss + (-(pi * log_probs).sum())
+            # Value target: z.
+            z = torch.tensor(t.z, dtype=torch.float32)
+            value_loss = value_loss + (value - z) ** 2
+
+        n = float(len(batch))
+        policy_loss = policy_loss / n
+        value_loss = value_loss / n
+        total = policy_loss + self.config.c_value * value_loss
+        total.backward()
+        torch.nn.utils.clip_grad_norm_(
+            self.net.parameters(), max_norm=self.config.grad_clip
+        )
+        self.optimizer.step()
+        return float(policy_loss.item()), float(value_loss.item())
+
+    # ──────────────────────────────────────────────────────────
+    # Eval phase
+    # ──────────────────────────────────────────────────────────
+
+    def _run_eval_phase(self) -> Dict[str, float]:
+        """Play `eval_games` games against each opponent. Greedy net, no MCTS."""
+        results: Dict[str, float] = {}
+        self.net.eval()
+        for opp_name in self.config.eval_opponents:
+            if self._should_stop():
+                break
+            wins = 0
+            total = 0
+            for g in range(self.config.eval_games):
+                if self._should_stop():
+                    break
+                net_seat = self._rng.choice((0, 1))
+                outcome = self._play_one_eval_game(opp_name, net_seat)
+                total += 1
+                if outcome > 0:
+                    wins += 1
+            wr = (wins / total) if total else 0.0
+            results[opp_name] = wr
+            self._log(f"  🎯  vs {opp_name}: {wins}/{total} = {wr*100:.0f}%")
+        return results
+
+    def _play_one_eval_game(self, opp_name: str, net_seat: int) -> float:
+        """Return +1/0/-1 from the *network's* perspective."""
+        env = FaBEnv(verbose=False)
+        env.reset(
+            build_rhinar_deck(),
+            build_dorinthea_deck(),
+            seed=self._rng.randrange(2**31),
+        )
+        net_agent = NeuralAgent(model=self.net)
+        opp_agent = self._make_opponent(opp_name) or RandomAgent()
+
+        while not env.done:
+            if self._should_stop():
+                return 0.0
+            agent_id = env.agent_selection
+            to_play = int(agent_id[-1])
+            legal = env.legal_actions()
+            if not legal:
+                break
+            if len(legal) == 1:
+                env.step(legal[0])
+                continue
+            obs_full = env._get_obs()
+            agent = net_agent if to_play == net_seat else opp_agent
+            action = _dispatch_agent_action(env, agent, obs_full)
+            env.step(action)
+
+        r = env._rewards.get(f"agent_{net_seat}", 0.0)
+        if r > 0.5:
+            return 1.0
+        if r < -0.5:
+            return -1.0
+        return 0.0
+
+    # ──────────────────────────────────────────────────────────
+    # Checkpoint I/O
+    # ──────────────────────────────────────────────────────────
+
+    def _save_checkpoint(
+        self, iter_: int, eval_wr: Dict[str, float]
+    ) -> Optional[dict]:
+        os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+        name = f"{self.config.run_name}-iter-{iter_:04d}"
+        path = os.path.join(CHECKPOINT_DIR, f"{name}.pt")
+        torch.save({
+            "state_dict": self.net.state_dict(),
+            "iter": iter_,
+            "config": asdict(self.config),
+        }, path)
+        size = os.path.getsize(path)
+        meta = {
+            "name": name,
+            "iter": iter_,
+            "created": datetime.now().isoformat(timespec="seconds"),
+            "size_bytes": size,
+            "metrics": dict(eval_wr),
+            "run_name": self.config.run_name,
+        }
+        self._append_to_index(meta)
+        self._log(
+            f"  💾  saved checkpoint {name} ({size/1024:.1f} KB)"
+        )
+        self._on_checkpoint(meta)
+        return meta
+
+    def _append_to_index(self, meta: dict) -> None:
+        idx = _load_index()
+        idx["checkpoints"].append(meta)
+        with open(INDEX_PATH, "w") as f:
+            json.dump(idx, f, indent=2)
+
+    def _load_checkpoint(self, name: str) -> None:
+        path = os.path.join(CHECKPOINT_DIR, f"{name}.pt")
+        if not os.path.isfile(path):
+            self._log(f"  ⚠  base_checkpoint {name!r} not found at {path}")
+            return
+        data = torch.load(path, map_location="cpu", weights_only=False)
+        self.net.load_state_dict(data["state_dict"])
+        self._log(f"  📂  loaded base checkpoint {name}")
+
+    # ──────────────────────────────────────────────────────────
+    # Small helpers
+    # ──────────────────────────────────────────────────────────
+
+    def _log(self, msg: str) -> None:
+        self._on_log(msg)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Index file helpers (used by web_viewer to render the Models tab)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _load_index() -> dict:
+    if os.path.isfile(INDEX_PATH):
+        try:
+            with open(INDEX_PATH) as f:
+                data = json.load(f)
+            if isinstance(data, dict) and "checkpoints" in data:
+                return data
+        except (OSError, json.JSONDecodeError):
+            pass
+    return {"checkpoints": []}
+
+
+def list_checkpoints() -> List[dict]:
+    return _load_index()["checkpoints"]
+
+
+def delete_checkpoint(name: str) -> bool:
+    idx = _load_index()
+    new = [c for c in idx["checkpoints"] if c["name"] != name]
+    if len(new) == len(idx["checkpoints"]):
+        return False
+    idx["checkpoints"] = new
+    with open(INDEX_PATH, "w") as f:
+        json.dump(idx, f, indent=2)
+    path = os.path.join(CHECKPOINT_DIR, f"{name}.pt")
+    if os.path.isfile(path):
+        os.remove(path)
+    return True
+
+
+def rename_checkpoint(old: str, new: str) -> bool:
+    if not new or "/" in new or "\\" in new:
+        return False
+    idx = _load_index()
+    found = False
+    for c in idx["checkpoints"]:
+        if c["name"] == old:
+            c["name"] = new
+            found = True
+            break
+    if not found:
+        return False
+    old_path = os.path.join(CHECKPOINT_DIR, f"{old}.pt")
+    new_path = os.path.join(CHECKPOINT_DIR, f"{new}.pt")
+    if os.path.isfile(old_path):
+        os.rename(old_path, new_path)
+    with open(INDEX_PATH, "w") as f:
+        json.dump(idx, f, indent=2)
+    return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CLI
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_cli() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="AlphaZero-style self-play trainer for FaBEnv"
+    )
+    p.add_argument("--iters", type=int, default=1, help="Total iterations (0 = until stopped)")
+    p.add_argument("--games", type=int, default=2, help="Self-play games per iteration")
+    p.add_argument("--steps", type=int, default=4, help="Gradient steps per iteration")
+    p.add_argument("--sims", type=int, default=8, help="MCTS simulations per decision")
+    p.add_argument("--batch", type=int, default=32, help="Batch size for grad steps")
+    p.add_argument("--lr", type=float, default=3e-4, help="Adam learning rate")
+    p.add_argument("--eval-games", type=int, default=2, help="Eval games per opponent")
+    p.add_argument("--eval-every", type=int, default=1, help="Eval every N iterations")
+    p.add_argument("--seed", type=int, default=None, help="Random seed")
+    p.add_argument("--run-name", type=str, default="", help="Checkpoint prefix")
+    p.add_argument("--base", type=str, default=None,
+                   help="Base checkpoint name (under ./checkpoints/)")
+    p.add_argument("--no-pimc", action="store_true",
+                   help="Disable PIMC determinization")
+    return p
+
+
+def main() -> None:
+    args = _build_cli().parse_args()
+    cfg = TrainerConfig(
+        games_per_iter=args.games,
+        steps_per_iter=args.steps,
+        total_iters=args.iters,
+        n_simulations=args.sims,
+        batch_size=args.batch,
+        lr=args.lr,
+        eval_games=args.eval_games,
+        eval_every=args.eval_every,
+        determinize=not args.no_pimc,
+        seed=args.seed,
+        run_name=args.run_name,
+        base_checkpoint=args.base,
+    )
+    SelfPlayTrainer(cfg).run()
+
+
+if __name__ == "__main__":
+    main()

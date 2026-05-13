@@ -2003,6 +2003,281 @@ _session = _GameSession()
 
 
 # ──────────────────────────────────────────────────────────────
+# Self-play training session
+# ──────────────────────────────────────────────────────────────
+
+
+class _TrainingSession:
+    """Background AlphaZero self-play trainer driven by `self_play_trainer`.
+
+    Mirrors `_GameSession`: holds mutex-protected state, runs the trainer
+    in a daemon thread, and exposes start/pause/resume/stop + a JSON snapshot
+    for polling from the frontend.
+    """
+
+    _MAX_LOG = 500
+    _SPARK_LEN = 200
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._stop_flag = threading.Event()
+        self._save_flag = threading.Event()
+        self._paused_event = threading.Event()
+        self._paused_event.set()  # unset → paused
+        self._reset_state()
+
+    def _reset_state(self):
+        self.status = "idle"
+        self.iteration = 0
+        self.games_done = 0
+        self.grad_steps = 0
+        self.start_time = None
+        self.latest_checkpoint = None
+        self.log_lines: list = []
+        self.run_name = None
+        # Sparkline history (capped at _SPARK_LEN per series)
+        self.sparks = {
+            "policy_loss": [],
+            "value_loss": [],
+            "wr_rhinar": [],
+            "wr_dorinthea": [],
+            "wr_random": [],
+            "mean_len": [],
+            "value_pred": [],
+            "value_real": [],
+        }
+
+    # ── Public control surface ─────────────────────────────────
+
+    def start(self, config_dict: dict) -> tuple[bool, str]:
+        with self._lock:
+            if self.status not in ("idle", "error", "stopped", "done"):
+                return False, f"already running (status={self.status})"
+            self._stop_flag.clear()
+            self._save_flag.clear()
+            self._paused_event.set()
+            self._reset_state()
+            self.status = "starting"
+            self.start_time = datetime.now()
+
+        cfg = self._build_config(config_dict)
+        with self._lock:
+            self.run_name = cfg.run_name
+
+        t = threading.Thread(
+            target=self._run_thread,
+            args=(cfg,),
+            daemon=True,
+        )
+        t.start()
+        return True, "started"
+
+    def pause(self) -> bool:
+        with self._lock:
+            if self.status in ("idle", "stopped", "error", "done"):
+                return False
+            self._paused_event.clear()
+            self.status = "paused"
+        return True
+
+    def resume(self) -> bool:
+        with self._lock:
+            if self.status != "paused":
+                return False
+            self.status = "self-play"
+        self._paused_event.set()
+        return True
+
+    def stop(self) -> bool:
+        with self._lock:
+            if self.status in ("idle", "stopped"):
+                return False
+        self._stop_flag.set()
+        self._paused_event.set()  # unblock any paused wait
+        return True
+
+    def request_save(self) -> bool:
+        with self._lock:
+            if self.status in ("idle", "stopped", "error", "done"):
+                return False
+        self._save_flag.set()
+        return True
+
+    def get_state_json(self) -> dict:
+        with self._lock:
+            elapsed = (
+                (datetime.now() - self.start_time).total_seconds()
+                if self.start_time else 0.0
+            )
+            return {
+                "status": self.status,
+                "iteration": self.iteration,
+                "games_done": self.games_done,
+                "grad_steps": self.grad_steps,
+                "elapsed_seconds": elapsed,
+                "run_name": self.run_name,
+                "latest_checkpoint": self.latest_checkpoint,
+                "log": list(self.log_lines[-150:]),
+                "sparks": {k: list(v) for k, v in self.sparks.items()},
+            }
+
+    # ── Trainer callbacks ──────────────────────────────────────
+
+    def _on_log(self, msg: str) -> None:
+        ts = datetime.now().strftime("%H:%M:%S")
+        with self._lock:
+            for line in str(msg).split("\n"):
+                if line.strip():
+                    self.log_lines.append(f"[{ts}] {line}")
+            if len(self.log_lines) > self._MAX_LOG:
+                self.log_lines = self.log_lines[-self._MAX_LOG:]
+
+    def _on_metrics(self, m: dict) -> None:
+        with self._lock:
+            self.iteration = m.get("iter", self.iteration)
+            self.games_done = m.get("games", self.games_done)
+            self.grad_steps = m.get("grad_steps", self.grad_steps)
+            self.latest_checkpoint = m.get("checkpoint", self.latest_checkpoint)
+            mapping = {
+                "policy_loss": "policy_loss",
+                "value_loss": "value_loss",
+                "wr_rhinar": "wr_rhinar",
+                "wr_dorinthea": "wr_dorinthea",
+                "wr_random": "wr_random",
+                "mean_len": "mean_len",
+                "value_pred": "value_pred",
+                "value_real": "value_real",
+            }
+            for metric_key, spark_key in mapping.items():
+                v = m.get(metric_key)
+                if v is None:
+                    continue
+                arr = self.sparks[spark_key]
+                arr.append(float(v))
+                if len(arr) > self._SPARK_LEN:
+                    del arr[: len(arr) - self._SPARK_LEN]
+
+    def _on_status(self, s: str) -> None:
+        with self._lock:
+            # Don't overwrite a user-requested "paused" — that's reasserted
+            # whenever the trainer ticks past `_wait_if_paused`.
+            if self._paused_event.is_set():
+                self.status = s
+
+    def _on_checkpoint(self, meta: dict) -> None:
+        with self._lock:
+            self.latest_checkpoint = meta.get("name")
+
+    def _should_stop(self) -> bool:
+        return self._stop_flag.is_set()
+
+    def _wait_if_paused(self) -> None:
+        # Block here while paused. The user calling stop() also sets the
+        # event so we don't deadlock on shutdown.
+        if not self._paused_event.is_set():
+            with self._lock:
+                self.status = "paused"
+            self._paused_event.wait()
+
+    # ── Internals ──────────────────────────────────────────────
+
+    @staticmethod
+    def _build_config(raw: dict):
+        from self_play_trainer import TrainerConfig
+
+        def _get_int(key, default):
+            try:
+                return int(raw.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        def _get_float(key, default):
+            try:
+                return float(raw.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        def _get_bool(key, default):
+            v = raw.get(key, default)
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, str):
+                return v.lower() in ("1", "true", "on", "yes")
+            return bool(default)
+
+        opp_pool = raw.get("opponent_pool") or ["self"]
+        if isinstance(opp_pool, str):
+            opp_pool = [o.strip() for o in opp_pool.split(",") if o.strip()]
+
+        seed_raw = raw.get("seed")
+        seed = None
+        if seed_raw not in (None, "", "auto"):
+            try:
+                seed = int(seed_raw)
+            except (TypeError, ValueError):
+                seed = None
+
+        base_ckpt = raw.get("base_checkpoint") or None
+        if base_ckpt in ("random", "", None):
+            base_ckpt = None
+
+        return TrainerConfig(
+            games_per_iter=_get_int("games_per_iter", 8),
+            steps_per_iter=_get_int("steps_per_iter", 32),
+            total_iters=_get_int("total_iters", 10),
+            n_simulations=_get_int("n_simulations", 32),
+            c_puct=_get_float("c_puct", 1.5),
+            determinize=_get_bool("determinize", True),
+            lr=_get_float("lr", 3e-4),
+            batch_size=_get_int("batch_size", 64),
+            c_value=_get_float("c_value", 0.5),
+            eval_games=_get_int("eval_games", 4),
+            eval_every=_get_int("eval_every", 1),
+            opponent_pool=tuple(opp_pool),
+            run_name=str(raw.get("run_name") or ""),
+            base_checkpoint=base_ckpt,
+            seed=seed,
+        )
+
+    def _run_thread(self, cfg) -> None:
+        from self_play_trainer import SelfPlayTrainer
+
+        with self._lock:
+            self.status = "self-play"
+        try:
+            trainer = SelfPlayTrainer(
+                cfg,
+                callbacks={
+                    "on_log": self._on_log,
+                    "on_metrics": self._on_metrics,
+                    "on_status": self._on_status,
+                    "on_checkpoint": self._on_checkpoint,
+                    "should_stop": self._should_stop,
+                    "wait_if_paused": self._wait_if_paused,
+                },
+            )
+            trainer.run()
+            with self._lock:
+                if self._stop_flag.is_set():
+                    self.status = "stopped"
+                else:
+                    self.status = "done"
+        except Exception as exc:
+            import traceback
+            with self._lock:
+                self.status = "error"
+                self.log_lines.append(
+                    f"[{datetime.now().strftime('%H:%M:%S')}] ⚠ {exc}"
+                )
+                for line in traceback.format_exc().split("\n"):
+                    if line.strip():
+                        self.log_lines.append(line)
+
+
+_training_session = _TrainingSession()
+
+
+# ──────────────────────────────────────────────────────────────
 # Interactive play — HTML template
 # ──────────────────────────────────────────────────────────────
 
@@ -3521,13 +3796,76 @@ TRAIN_TEMPLATE = """
     document.querySelectorAll('#opp-chips .chip').forEach(c =>
       c.addEventListener('click', () => c.classList.toggle('active')));
 
-    // ── Wire-up disabled state for run buttons (visual only) ──
+    // ── Buttons + backend wiring ──────────────────────────────
     const btnStart  = document.getElementById('btn-start');
     const btnPause  = document.getElementById('btn-pause');
     const btnResume = document.getElementById('btn-resume');
     const btnStop   = document.getElementById('btn-stop');
     const btnSave   = document.getElementById('btn-save');
-    btnStart.addEventListener('click', () => alert('Backend not wired yet — this is a UI preview.'));
+
+    function setButtonsForState(state) {
+      const running = (state !== 'idle' && state !== 'stopped'
+                       && state !== 'error' && state !== 'done');
+      const paused = (state === 'paused');
+      btnStart.disabled  = running;
+      btnPause.disabled  = !running || paused;
+      btnStop.disabled   = !running;
+      btnSave.disabled   = !running;
+      btnResume.disabled = !paused;
+      btnPause.style.display  = paused ? 'none' : '';
+      btnResume.style.display = paused ? '' : 'none';
+    }
+    setButtonsForState('idle');
+
+    function collectConfig() {
+      // Opponent pool from the active chips
+      const opps = Array.from(document.querySelectorAll('#opp-chips .chip.active'))
+        .map(c => c.dataset.opp);
+      const baseRaw = document.getElementById('cfg-base').value;
+      return {
+        games_per_iter: document.getElementById('cfg-games').value,
+        steps_per_iter: document.getElementById('cfg-steps').value,
+        total_iters:    document.getElementById('cfg-iters').value,
+        seed:           document.getElementById('cfg-seed').value || null,
+        lr:             document.getElementById('cfg-lr').value,
+        batch_size:     document.getElementById('cfg-batch').value,
+        c_value:        document.getElementById('cfg-vloss').value,
+        determinize:    document.getElementById('cfg-pimc').value === 'on',
+        n_simulations:  32,
+        opponent_pool:  opps.length ? opps : ['self'],
+        run_name:       document.getElementById('cfg-name').value || '',
+        base_checkpoint: (baseRaw && baseRaw !== 'random') ? baseRaw : null,
+      };
+    }
+
+    async function postJSON(url, body) {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body || {}),
+      });
+      return resp.json();
+    }
+    async function getJSON(url) {
+      const resp = await fetch(url);
+      return resp.json();
+    }
+
+    btnStart.addEventListener('click', async () => {
+      btnStart.disabled = true;
+      const res = await postJSON('/train/start', collectConfig());
+      if (!res.ok) {
+        alert('Could not start: ' + (res.message || 'unknown'));
+        btnStart.disabled = false;
+        return;
+      }
+      // jump to monitor tab
+      document.querySelector('.tab-btn[data-tab="monitor"]').click();
+    });
+    btnPause.addEventListener('click', () => postJSON('/train/pause'));
+    btnResume.addEventListener('click', () => postJSON('/train/resume'));
+    btnStop.addEventListener('click', () => postJSON('/train/stop'));
+    btnSave.addEventListener('click', () => postJSON('/train/save'));
 
     // ── Status pill helpers ──────────────────────────
     function setStatus(state, opts={}) {
@@ -3693,6 +4031,164 @@ TRAIN_TEMPLATE = """
       if (demoTimer) { stopDemo(); document.getElementById('demo-btn').textContent = '▶ Demo data'; }
       else            { startDemo(); document.getElementById('demo-btn').textContent = '⏹ Stop demo'; }
     });
+
+    // ── Live training state polling ────────────────────
+    function fmtElapsed(secs) {
+      secs = Math.max(0, Math.floor(secs));
+      const h = Math.floor(secs / 3600);
+      const m = Math.floor((secs % 3600) / 60);
+      const s = secs % 60;
+      if (h > 0) return `${h}h ${m}m ${s}s`;
+      return `${m}m ${s}s`;
+    }
+
+    function renderLive(state) {
+      // Toggle empty vs live monitor panel
+      const running = (state.status !== 'idle' && state.status !== 'stopped'
+                       && state.status !== 'error' && state.status !== 'done')
+                      || (state.iteration || 0) > 0;
+      document.getElementById('monitor-empty').style.display = running ? 'none' : '';
+      document.getElementById('monitor-live').style.display  = running ? 'block' : 'none';
+
+      const wall = fmtElapsed(state.elapsed_seconds || 0);
+      setStatus(state.status || 'idle', {
+        iter:  state.iteration ?? '—',
+        games: state.games_done ?? '—',
+        steps: state.grad_steps ?? '—',
+        wall:  wall,
+      });
+      setButtonsForState(state.status || 'idle');
+
+      document.getElementById('m-iter').textContent  = state.iteration ?? '—';
+      document.getElementById('m-games').textContent = (state.games_done ?? '—').toLocaleString
+        ? state.games_done.toLocaleString() : state.games_done;
+      document.getElementById('m-steps').textContent = (state.grad_steps ?? '—').toLocaleString
+        ? state.grad_steps.toLocaleString() : state.grad_steps;
+      document.getElementById('m-wall').textContent  = wall;
+      document.getElementById('m-ckpt').textContent  = state.latest_checkpoint || '—';
+      document.getElementById('m-hash').textContent  = state.run_name || '—';
+
+      const s = state.sparks || {};
+      drawSpark('sl-ploss', s.policy_loss || []);
+      drawSpark('sl-vloss', s.value_loss || []);
+      drawSpark('sl-wr-rhinar', s.wr_rhinar || [], {min:0, max:1});
+      drawSpark('sl-wr-dor',    s.wr_dorinthea || [], {min:0, max:1});
+      drawSpark('sl-wr-rand',   s.wr_random || [], {min:0, max:1});
+      drawSpark('sl-len',       s.mean_len || []);
+      const vp = s.value_pred || [], vr = s.value_real || [];
+      const combined = vp.concat(vr);
+      if (combined.length) {
+        const vMin = Math.min(...combined), vMax = Math.max(...combined);
+        drawSpark('sl-vpred', vp, {min:vMin, max:vMax});
+        drawSpark('sl-vreal', vr, {min:vMin, max:vMax});
+      }
+
+      const last = a => (a && a.length) ? a[a.length - 1] : null;
+      document.getElementById('sv-ploss').textContent    = fmt(last(s.policy_loss));
+      document.getElementById('sv-vloss').textContent    = fmt(last(s.value_loss));
+      document.getElementById('sv-wr-rhinar').textContent= fmtPct(last(s.wr_rhinar));
+      document.getElementById('sv-wr-dor').textContent   = fmtPct(last(s.wr_dorinthea));
+      document.getElementById('sv-wr-rand').textContent  = fmtPct(last(s.wr_random));
+      document.getElementById('sv-len').textContent      = fmt(last(s.mean_len), 1);
+      const lp = last(s.value_pred), lr = last(s.value_real);
+      document.getElementById('sv-val').textContent = `${fmt(lp,2)} / ${fmt(lr,2)}`;
+
+      const log = state.log || [];
+      const lt = document.getElementById('log-tail');
+      lt.textContent = log.join('\\n');
+      lt.scrollTop = lt.scrollHeight;
+    }
+
+    let pollTimer = null;
+    async function pollOnce() {
+      try {
+        const state = await getJSON('/train/state');
+        if (demoTimer) return;          // don't fight the demo simulator
+        renderLive(state);
+        if (['stopped', 'done', 'error'].includes(state.status)) {
+          // refresh models tab once on completion
+          refreshModels();
+        }
+      } catch (err) { /* ignore transient fetch errors */ }
+    }
+    pollTimer = setInterval(pollOnce, 1000);
+    pollOnce();
+
+    // ── Models tab ─────────────────────────────────────
+    function fmtBytes(n) {
+      if (!n) return '—';
+      if (n < 1024) return n + ' B';
+      if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+      return (n/1024/1024).toFixed(1) + ' MB';
+    }
+    function fmtTs(iso) {
+      if (!iso) return '—';
+      return iso.replace('T', ' ').slice(0, 16);
+    }
+    function rowFor(ckpt) {
+      const m = ckpt.metrics || {};
+      const wr = k => (m[k] === undefined || m[k] === null) ? '—' : (m[k]*100).toFixed(0) + '%';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${ckpt.name}</strong></td>
+        <td class="num">${ckpt.iter ?? '—'}</td>
+        <td class="num">${fmtTs(ckpt.created)}</td>
+        <td class="num">${fmtBytes(ckpt.size_bytes)}</td>
+        <td class="num">${wr('rhinar')}</td>
+        <td class="num">${wr('dorinthea')}</td>
+        <td class="num">${wr('random')}</td>
+        <td class="em-dash">—</td>
+        <td class="actions">
+          <button class="tbtn tbtn-ghost" data-action="rename" data-name="${ckpt.name}">Rename</button>
+          <a class="tbtn tbtn-ghost" href="/train/models/${ckpt.name}/download">Download</a>
+          <button class="tbtn tbtn-danger" data-action="delete" data-name="${ckpt.name}">Delete</button>
+        </td>`;
+      return tr;
+    }
+    async function refreshModels() {
+      try {
+        const res = await getJSON('/train/models');
+        const tbody = document.getElementById('models-body');
+        tbody.innerHTML = '';
+        const list = (res.checkpoints || []).slice().reverse();
+        if (!list.length) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = '<td colspan="9" class="em-dash" style="text-align:center;padding:20px;">No checkpoints saved yet.</td>';
+          tbody.appendChild(tr);
+        } else {
+          for (const c of list) tbody.appendChild(rowFor(c));
+        }
+        // Also refresh the "Initialize from" dropdown.
+        const sel = document.getElementById('cfg-base');
+        const keep = sel.value;
+        sel.innerHTML = '<option value="random">Random init</option>';
+        for (const c of list) {
+          const opt = document.createElement('option');
+          opt.value = c.name;
+          opt.textContent = `${c.name} · ${fmtBytes(c.size_bytes)}`;
+          sel.appendChild(opt);
+        }
+        if (Array.from(sel.options).some(o => o.value === keep)) sel.value = keep;
+      } catch (err) { /* ignore */ }
+    }
+    document.getElementById('models-body').addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('button[data-action]');
+      if (!btn) return;
+      const name = btn.dataset.name;
+      if (btn.dataset.action === 'delete') {
+        if (!confirm(`Delete checkpoint "${name}"?`)) return;
+        await postJSON(`/train/models/${encodeURIComponent(name)}/delete`);
+      } else if (btn.dataset.action === 'rename') {
+        const newName = prompt('New name', name);
+        if (!newName || newName === name) return;
+        await postJSON(`/train/models/${encodeURIComponent(name)}/rename`,
+                       {new_name: newName});
+      }
+      refreshModels();
+    });
+    // Refresh models when the user clicks the Models tab.
+    document.querySelector('.tab-btn[data-tab="models"]').addEventListener('click', refreshModels);
+    refreshModels();
   </script>
 </body>
 </html>
@@ -3753,13 +4249,87 @@ def play_action():
 
 
 # ──────────────────────────────────────────────────────────────
-# Trainer — UI route only (backend not yet wired)
+# Trainer — page + control routes
 # ──────────────────────────────────────────────────────────────
 
 @app.route("/train")
 @login_required
 def train_page():
     return render_template_string(TRAIN_TEMPLATE, css=BASE_CSS)
+
+
+@app.route("/train/start", methods=["POST"])
+@login_required
+def train_start():
+    data = request.get_json(silent=True) or {}
+    ok, msg = _training_session.start(data)
+    return jsonify({"ok": ok, "message": msg})
+
+
+@app.route("/train/pause", methods=["POST"])
+@login_required
+def train_pause():
+    return jsonify({"ok": _training_session.pause()})
+
+
+@app.route("/train/resume", methods=["POST"])
+@login_required
+def train_resume():
+    return jsonify({"ok": _training_session.resume()})
+
+
+@app.route("/train/stop", methods=["POST"])
+@login_required
+def train_stop():
+    return jsonify({"ok": _training_session.stop()})
+
+
+@app.route("/train/save", methods=["POST"])
+@login_required
+def train_save():
+    return jsonify({"ok": _training_session.request_save()})
+
+
+@app.route("/train/state")
+@login_required
+def train_state():
+    return jsonify(_training_session.get_state_json())
+
+
+@app.route("/train/models")
+@login_required
+def train_models():
+    from self_play_trainer import list_checkpoints
+    return jsonify({"checkpoints": list_checkpoints()})
+
+
+@app.route("/train/models/<name>/delete", methods=["POST"])
+@login_required
+def train_model_delete(name: str):
+    from self_play_trainer import delete_checkpoint
+    return jsonify({"ok": delete_checkpoint(name)})
+
+
+@app.route("/train/models/<name>/rename", methods=["POST"])
+@login_required
+def train_model_rename(name: str):
+    from self_play_trainer import rename_checkpoint
+    data = request.get_json(silent=True) or {}
+    new_name = (data.get("new_name") or "").strip()
+    if not new_name:
+        return jsonify({"ok": False, "error": "new_name required"}), 400
+    return jsonify({"ok": rename_checkpoint(name, new_name)})
+
+
+@app.route("/train/models/<name>/download")
+@login_required
+def train_model_download(name: str):
+    from flask import send_from_directory
+    from self_play_trainer import CHECKPOINT_DIR
+    safe_name = os.path.basename(name)
+    return send_from_directory(
+        CHECKPOINT_DIR, f"{safe_name}.pt", as_attachment=True
+    )
 
 
 # ──────────────────────────────────────────────────────────────

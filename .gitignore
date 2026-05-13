@@ -67,6 +67,9 @@ decks.db
 # Generated card embeddings (auto-rebuilt by card_embeddings.ensure_embeddings)
 card_embeddings_out/
 
+# Self-play trainer checkpoints
+checkpoints/
+
 # Flask stuff:
 instance/
 .webassets-cache
