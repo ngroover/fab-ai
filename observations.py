@@ -59,10 +59,14 @@ _ACTION_TYPE_TO_INDEX = {at: i for i, at in enumerate(ACTION_TYPE_VOCAB)}
 
 
 def _encode_card(card) -> List[float]:
-    """Return the learned embedding vector for a card (zeros for None / unknown)."""
+    """Return the learned embedding vector for a card (zeros for None / unknown).
+
+    Looked up by `card_id` so different-colored versions of the same card
+    (red/yellow/blue) get distinct embeddings.
+    """
     if card is None:
         return list(_ZERO_FEATURES)
-    emb = _EMBEDDINGS.get(card.name)
+    emb = _EMBEDDINGS.get(card.card_id)
     if emb is None:
         return list(_ZERO_FEATURES)
     return list(emb)
@@ -72,7 +76,7 @@ def _sum_embeddings(cards) -> List[float]:
     """Sum embeddings of a card list (order-invariant zone representation)."""
     result = [0.0] * CARD_FEATURES
     for card in cards:
-        emb = _EMBEDDINGS.get(card.name)
+        emb = _EMBEDDINGS.get(card.card_id)
         if emb is not None:
             for i, v in enumerate(emb):
                 result[i] += v
