@@ -167,6 +167,7 @@ class FaBEnv:
         self._reaction_from_hand: Dict[int, bool] = {}  # id(card) → from_hand for cards on reaction stack
         self._defend_from_hand_ids: Set[int] = set()    # id(card) for current-link defender cards from hand
         self._rally_ability_used: bool = False            # once-per-turn Rally the Rearguard +3 block ability
+        self._pay_block_bonus_used_ids: Set[int] = set()  # id(equipment.card) → pay-for-block-bonus already activated this combat
         # Isolated RNG — seeded in reset() so game randomness is never shared with external code.
         self._rng: random.Random = random.Random()
 
@@ -254,6 +255,7 @@ class FaBEnv:
         self._pending_reaction_from_hand = True
         self._reaction_from_hand = {}
         self._rally_ability_used = False
+        self._pay_block_bonus_used_ids = set()
         self._pending_equip_activate_slot = None
 
         # Randomly select which player gets to choose who goes first
@@ -348,6 +350,8 @@ class FaBEnv:
                                           pending_is_sword_attack=pending_is_sword,
                                           pending_is_weapon_attack=self._pending_is_weapon,
                                           committed_defend_cards=self._committed_defend_cards,
+                                          committed_defend_equip=self._committed_defend_equip,
+                                          pay_block_bonus_used_ids=self._pay_block_bonus_used_ids,
                                           rally_ability_used=self._rally_ability_used)
         elif self._phase == Phase.INSTANT:
             return legal_instant_actions(active)
@@ -1214,6 +1218,44 @@ class FaBEnv:
             self._push_reaction_to_stack(card, active_idx, from_hand=in_hand)
             return
 
+        if action.action_type == ActionType.PAY_FOR_BLOCK_BONUS:
+            # Defender pays a resource to boost a committed equipment's block
+            # (e.g. Ironhide Gauntlet / Ironhide Legs). The equipment is marked
+            # for destruction when the combat chain closes.
+            target_card = action.card
+            eq = next((e for e in self._committed_defend_equip
+                       if e.card is target_card), None)
+            if eq is None or id(eq.card) in self._pay_block_bonus_used_ids:
+                # Stale or already-used selection — treat as a pass.
+                self._reaction_passes += 1
+                self._reaction_priority_idx = 1 - active_idx
+                self.agent_selection = f"agent_{self._reaction_priority_idx}"
+                return
+            effect = next(
+                (e for e in eq.card.effects
+                 if e.action == EffectAction.PAY_FOR_BLOCK_BONUS),
+                None,
+            )
+            if effect is None or active.resource_points < effect.cost:
+                self._reaction_passes += 1
+                self._reaction_priority_idx = 1 - active_idx
+                self.agent_selection = f"agent_{self._reaction_priority_idx}"
+                return
+            active.resource_points -= effect.cost
+            self._reaction_defense_bonus += effect.magnitude
+            eq.destroy_on_chain_close = True
+            self._pay_block_bonus_used_ids.add(id(eq.card))
+            self._log(
+                f"    💰 {active.name} pays {effect.cost} resource — "
+                f"{eq.card.name} gains +{effect.magnitude} block "
+                f"({self._reaction_defense_bonus} total reaction defense). "
+                f"Will be destroyed when the combat chain closes."
+            )
+            self._reaction_passes = 0
+            self._reaction_priority_idx = 1 - active_idx
+            self.agent_selection = f"agent_{self._reaction_priority_idx}"
+            return
+
         if action.action_type == ActionType.ACTIVATE_CARD_ABILITY:
             # Rally the Rearguard: "Once per turn Instant — Discard a card: +3 block."
             hand_idx = action.hand_index
@@ -1293,6 +1335,12 @@ class FaBEnv:
                     self._log(f"    💀 {eq.card.name} destroyed (Blade Break).")
                     self._apply_card_effects(eq.card, EffectTrigger.ON_DESTROYED, {}, player, opponent)
                     player.graveyard.append(card)
+                elif eq.destroy_on_chain_close:
+                    eq.destroyed = True
+                    eq.destroy_on_chain_close = False
+                    self._log(f"    💀 {eq.card.name} destroyed (combat chain closed).")
+                    self._apply_card_effects(eq.card, EffectTrigger.ON_DESTROYED, {}, player, opponent)
+                    player.graveyard.append(card)
                 elif Keyword.BATTLEWORN in eq.card.keywords:
                     eq.block_counters += 1
                     # Battleworn equipment NEVER goes to graveyard from blocking — it stays in
@@ -1300,8 +1348,8 @@ class FaBEnv:
                     self._log(f"    🔨 {eq.card.name} gets -1 block counter (Battleworn, {eq.defense} def remaining).")
                     player.equipment[eq.card.equip_slot.value] = eq
                 else:
-                    # Equipment with no special chain keyword goes to graveyard
-                    player.graveyard.append(card)
+                    # Plain equipment returns to its slot after the chain closes.
+                    player.equipment[eq.card.equip_slot.value] = eq
             player.combat_chain.clear()
 
         self._equipment_on_chain.clear()
@@ -1348,6 +1396,7 @@ class FaBEnv:
         self._committed_defend_equip = []
         self._defend_from_hand_ids.clear()
         self._rally_ability_used = False
+        self._pay_block_bonus_used_ids = set()
 
         # Consume any Quicken token in the attacker's arena — it grants Go Again
         # to the next attack declared after it was created (not the attack that made it).

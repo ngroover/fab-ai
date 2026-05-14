@@ -45,6 +45,7 @@ class ActionType(Enum):
     MENTOR_FLIP        = auto()   # start of turn: choose to flip face-down mentor face-up
     ACTIVATE_CARD_ABILITY = auto()  # activate a defending card's once-per-turn instant ability
     REVEAL             = auto()   # REVEAL phase: choose a cost ≤ 1 card in hand to reveal as additional play cost
+    PAY_FOR_BLOCK_BONUS = auto()  # pay resource(s) on a defending equipment to add block (destroys equipment on chain close)
 
 
 @dataclass
@@ -101,6 +102,9 @@ class Action:
             return f"Action(ACTIVATE_CARD_ABILITY card={card_name} discard_hand={self.hand_index})"
         if self.action_type == ActionType.REVEAL:
             return f"Action(REVEAL hand_index={self.hand_index})"
+        if self.action_type == ActionType.PAY_FOR_BLOCK_BONUS:
+            card_name = self.card.name if self.card else None
+            return f"Action(PAY_FOR_BLOCK_BONUS card={card_name})"
         return f"Action({self.action_type})"
 
 
@@ -122,7 +126,8 @@ def record_from_action(action: Action, actor_idx: int,
     """
     at = action.action_type
     card = None
-    if at in (ActionType.PLAY_CARD, ActionType.ACTIVATE_CARD_ABILITY):
+    if at in (ActionType.PLAY_CARD, ActionType.ACTIVATE_CARD_ABILITY,
+              ActionType.PAY_FOR_BLOCK_BONUS):
         card = action.card
     elif at == ActionType.PITCH:
         if action.pitch_index is not None and 0 <= action.pitch_index < len(active.hand):
@@ -451,6 +456,8 @@ def legal_reaction_actions(player: 'Player', attacker_idx: int,
                            pending_is_sword_attack: bool = False,
                            pending_is_weapon_attack: bool = False,
                            committed_defend_cards: Optional[List['Card']] = None,
+                           committed_defend_equip: Optional[List] = None,
+                           pay_block_bonus_used_ids: Optional[set] = None,
                            rally_ability_used: bool = False) -> List[Action]:
     """
     Legal actions during the reaction phase (between defender committing blocks
@@ -506,6 +513,22 @@ def legal_reaction_actions(player: 'Player', attacker_idx: int,
                                   if c is not card and c.pitch > 0)
             if pitchable_total >= needed:
                 actions.append(Action(ActionType.PLAY_CARD, card=card, from_arsenal=from_arsenal))
+
+    # Pay-for-block-bonus (e.g. Ironhide Gauntlet / Ironhide Legs):
+    # defender may pay `cost` resources on any committed equipment with a
+    # PAY_FOR_BLOCK_BONUS effect, once per equipment instance per combat.
+    if (not is_attacker and committed_defend_equip):
+        used = pay_block_bonus_used_ids or set()
+        for eq in committed_defend_equip:
+            if id(eq.card) in used:
+                continue
+            for effect in eq.card.effects:
+                if effect.action != EffectAction.PAY_FOR_BLOCK_BONUS:
+                    continue
+                if player.resource_points < effect.cost:
+                    continue
+                actions.append(Action(ActionType.PAY_FOR_BLOCK_BONUS, card=eq.card))
+                break  # one PAY action per equipment instance
 
     # Rally the Rearguard: "Once per turn Instant — Discard a card: +3 block.
     # Activate only while Rally the Rearguard is defending."

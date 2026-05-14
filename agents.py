@@ -610,6 +610,9 @@ class HumanAgent:
             if 0 <= action.pitch_order_index < len(player.pitch_zone):
                 card = player.pitch_zone[action.pitch_order_index]
                 return f"PLACE at deck bottom — {self._fmt_card(card)}"
+        if action.action_type == ActionType.PAY_FOR_BLOCK_BONUS:
+            card_name = action.card.name if action.card else "equipment"
+            return f"PAY 1 resource — {card_name} gains +2 block (destroyed when chain closes)"
         return str(action)
 
     def _choose(self, legal: List[Action], player: 'Player', prompt: str) -> Action:
