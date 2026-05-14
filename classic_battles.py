@@ -96,8 +96,8 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "raging_onslaught_yellow": Card("Raging Onslaught", CardType.ACTION_ATTACK, cost=3, pitch=2,
                                     power=6, defense=3, color=Color.YELLOW,
-                                    card_class=CardClass.BRUTE,
-                                    text="When Raging Onslaught hits, draw a card.",
+                                    card_class=CardClass.GENERIC,
+                                    text="",
                                     effects=[
                                         CardEffect(trigger=EffectTrigger.ON_HIT, action=EffectAction.DRAW_CARD, magnitude=1),
                                     ]),
