@@ -1623,7 +1623,7 @@ class FaBEnv:
 
         self._apply_card_effects(card, EffectTrigger.ON_HIT, {}, attacker, defender)
 
-        if is_weapon and Keyword.DAWNBLADE in card.keywords and attacker.glistening_steelblade_active:
+        if is_weapon and "Dawnblade" in card.name and attacker.glistening_steelblade_active:
             attacker.dawnblade_counters += 1
             self._log(f"    ✨ Glistening Steelblade! Dawnblade hit — +1 power counter "
                       f"({attacker.dawnblade_counters} total, permanent).")
