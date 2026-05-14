@@ -1719,6 +1719,32 @@ class _WebHumanAgent:
         return self._pend(legal, player, "CHOOSE_FIRST")
 
 
+def _load_neural_agent(ckpt_name: str):
+    """Load a trained PolicyValueNetwork checkpoint and wrap it in a NeuralAgent.
+
+    Returns None if the checkpoint file is missing or fails to load.
+    """
+    import torch
+    from neural_agent import NeuralAgent, PolicyValueNetwork
+    from self_play_trainer import CHECKPOINT_DIR
+
+    safe_name = os.path.basename(ckpt_name)
+    path = os.path.join(CHECKPOINT_DIR, f"{safe_name}.pt")
+    if not os.path.isfile(path):
+        return None
+    try:
+        data = torch.load(path, map_location="cpu", weights_only=False)
+    except Exception:
+        return None
+    net = PolicyValueNetwork()
+    state_dict = data.get("state_dict") if isinstance(data, dict) else None
+    if state_dict is None:
+        return None
+    net.load_state_dict(state_dict)
+    net.eval()
+    return NeuralAgent(model=net)
+
+
 class _GameSession:
     """
     Holds the state of one running interactive game.
@@ -1908,6 +1934,12 @@ class _GameSession:
                 return MCTSAgent(player_idx=player_idx)
             if agent_type == "random":
                 return RandomAgent()
+            if agent_type.startswith("model:"):
+                ckpt_name = agent_type.split(":", 1)[1]
+                neural = _load_neural_agent(ckpt_name)
+                if neural is not None:
+                    return neural
+                self.append_log(f"  ⚠  Model {ckpt_name!r} not found; falling back to rule-based agent.")
             return RhinarAgent() if player_idx == 0 else DorintheiAgent()
 
         agent_0 = _make_agent(p0_agent, 0)
@@ -2644,6 +2676,13 @@ PLAY_TEMPLATE = """
               <option value="mcts">🌲 MCTS</option>
               <option value="random">🎲 Random</option>
               <option value="human">👤 Human</option>
+              {% if saved_models %}
+              <optgroup label="Trained Models">
+                {% for m in saved_models %}
+                  <option value="model:{{ m.name }}">🧠 {{ m.name }}</option>
+                {% endfor %}
+              </optgroup>
+              {% endif %}
             </select>
           </div>
           <div class="vs-col">VS</div>
@@ -2662,6 +2701,13 @@ PLAY_TEMPLATE = """
               <option value="mcts">🌲 MCTS</option>
               <option value="random">🎲 Random</option>
               <option value="human">👤 Human</option>
+              {% if saved_models %}
+              <optgroup label="Trained Models">
+                {% for m in saved_models %}
+                  <option value="model:{{ m.name }}">🧠 {{ m.name }}</option>
+                {% endfor %}
+              </optgroup>
+              {% endif %}
             </select>
           </div>
         </div>
@@ -2774,7 +2820,7 @@ PLAY_TEMPLATE = """
       const agents = ['agent_0', 'agent_1'];
       const suffixes = ['a0', 'a1'];
       const agentTypes = [s.p0_agent, s.p1_agent];
-      const agentLabels = {'human': '👤 You', 'mcts': '🌲 MCTS', 'ai': '🤖 AI'};
+      const agentLabels = {'human': '👤 You', 'mcts': '🌲 MCTS', 'ai': '🤖 AI', 'random': '🎲 Random'};
 
       agents.forEach((aid, i) => {
         const info = s.player_stats[aid];
@@ -2786,7 +2832,10 @@ PLAY_TEMPLATE = """
           if (info.action_points > 0) resParts.push('⚡' + info.action_points + ' AP');
           if (info.resource_points > 0) resParts.push('💰' + info.resource_points);
           document.getElementById('res-' + sfx).textContent = resParts.join('  ');
-          const lbl = agentLabels[agentTypes[i]] || '🤖 AI';
+          const at = agentTypes[i] || '';
+          const lbl = at.startsWith('model:')
+            ? '🧠 ' + at.slice(6)
+            : (agentLabels[at] || '🤖 AI');
           document.getElementById('meta-' + sfx).textContent =
             lbl + '  ·  🃏 ' + info.hand_size + '  ·  🂠 ' + info.deck_size;
         }
@@ -4202,20 +4251,37 @@ TRAIN_TEMPLATE = """
 @app.route("/play")
 @login_required
 def play_page():
+    from self_play_trainer import list_checkpoints
     saved_decks = deck_db.list_decks()
-    return render_template_string(PLAY_TEMPLATE, css=BASE_CSS, saved_decks=saved_decks)
+    saved_models = sorted(
+        list_checkpoints(),
+        key=lambda c: c.get("created", ""),
+        reverse=True,
+    )
+    return render_template_string(
+        PLAY_TEMPLATE,
+        css=BASE_CSS,
+        saved_decks=saved_decks,
+        saved_models=saved_models,
+    )
 
 
 @app.route("/play/start", methods=["POST"])
 @login_required
 def play_start():
-    valid_agents = {"human", "ai", "mcts", "random"}
-    p0_agent = request.form.get("player0", "ai")
-    p1_agent = request.form.get("player1", "ai")
-    if p0_agent not in valid_agents:
-        p0_agent = "ai"
-    if p1_agent not in valid_agents:
-        p1_agent = "ai"
+    from self_play_trainer import list_checkpoints
+    valid_builtin = {"human", "ai", "mcts", "random"}
+    known_models = {c["name"] for c in list_checkpoints()}
+
+    def _coerce(value: str) -> str:
+        if value in valid_builtin:
+            return value
+        if value.startswith("model:") and value.split(":", 1)[1] in known_models:
+            return value
+        return "ai"
+
+    p0_agent = _coerce(request.form.get("player0", "ai"))
+    p1_agent = _coerce(request.form.get("player1", "ai"))
     seed_str = request.form.get("seed", "").strip()
     seed = int(seed_str) if seed_str.isdigit() else None
     deck0_str = request.form.get("deck0", "").strip()
