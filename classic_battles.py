@@ -381,7 +381,6 @@ CARD_CATALOG: Dict[str, Card] = {
     "dawnblade_resplendent": Card("Dawnblade, Resplendent", CardType.WEAPON, cost=1, power=2,
                                   equip_slot=EquipSlot.WEAPON,
                                   card_class=CardClass.WARRIOR,
-                                  keywords=[Keyword.DAWNBLADE],
                                   text="Once per Turn Action — 1: Attack. The second time you attack with Dawnblade each turn, it gains +1 power until the end of turn."),
 
     "gallantry_gold": Card("Gallantry Gold", CardType.EQUIPMENT, defense=1, cost=1, equip_slot=EquipSlot.ARMS,
