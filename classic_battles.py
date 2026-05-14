@@ -178,11 +178,11 @@ CARD_CATALOG: Dict[str, Card] = {
                         effects=[CardEffect(trigger=EffectTrigger.ON_DESTROYED, action=EffectAction.REVEAL_TOP_DECK_POWER_CHECK)]),
 
     "ironhide_gauntlet": Card("Ironhide Gauntlet", CardType.EQUIPMENT, defense=0, equip_slot=EquipSlot.ARMS,
-                              card_class=CardClass.BRUTE,
+                              card_class=CardClass.GENERIC,
                               text="When you defend with Ironhide Gauntlet you may pay 1 resource.  If you do, it gains +2 block and 'When the combat chain closes, destroy Ironhide Gauntlets'"),
 
     "ironhide_legs": Card("Ironhide Legs", CardType.EQUIPMENT, defense=0, equip_slot=EquipSlot.LEGS,
-                          card_class=CardClass.BRUTE,
+                          card_class=CardClass.GENERIC,
                           text="When you defend with Ironhide Legs you may pay 1 resource.  If you do, it gains +2 block and 'When the combat chain closes, destroy Ironhide Legs'"),
 
     # ── DORINTHEA — RED ─────────────────────────────────────────────────────
@@ -351,6 +351,7 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "sigil_of_solace_blue": Card("Sigil of Solace", CardType.INSTANT, cost=0, pitch=3,
                                  power=0, defense=0, color=Color.BLUE, no_block=True,
+                                 card_class=CardClass.GENERIC,
                                  text="Gain 1 life.",
                                  effects=[
                                      CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.GAIN_LIFE, magnitude=1),
@@ -358,6 +359,7 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "toughen_up_blue": Card("Toughen Up", CardType.DEFENSE_REACTION, cost=2, pitch=3,
                             power=0, defense=4, color=Color.BLUE,
+                            card_class=CardClass.GENERIC,
                             no_block=True, # this card cannot block normally it can block as defense reaction in the defense reaction step
                             text=""),
 
