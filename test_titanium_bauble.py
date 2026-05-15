@@ -34,7 +34,7 @@ class TestTitaniumBaubleCardDefinition(unittest.TestCase):
 
     def test_card_type_is_resource(self):
         card = next(c for c in self.rhinar.hand if c.name == "Titanium Bauble")
-        self.assertEqual(card.card_type, CardType.RESOURCE)
+        self.assertEqual(card.card_type, [CardType.RESOURCE])
 
     def test_card_properties(self):
         card = next(c for c in self.rhinar.hand if c.name == "Titanium Bauble")

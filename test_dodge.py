@@ -76,7 +76,7 @@ class TestDodgeCardDefinition(unittest.TestCase):
 
     def test_card_properties(self):
         card = next(c for c in self.rhinar.hand if c.name == "Dodge")
-        self.assertEqual(card.card_type, CardType.DEFENSE_REACTION)
+        self.assertEqual(card.card_type, [CardType.DEFENSE_REACTION])
         self.assertEqual(card.cost, 0)
         self.assertEqual(card.defense, 2)
         self.assertEqual(card.color, Color.BLUE)
@@ -118,8 +118,8 @@ class TestDodgeNotBlockableInDefendPhase(unittest.TestCase):
         for a in legal:
             if a.action_type == ActionType.DEFEND and a.hand_index is not None:
                 card = self.rhinar.hand[a.hand_index]
-                self.assertNotEqual(
-                    card.card_type, CardType.DEFENSE_REACTION,
+                self.assertNotIn(
+                    CardType.DEFENSE_REACTION, card.card_type,
                     f"{card.name} is a DEFENSE_REACTION and must not be offered as a block",
                 )
 

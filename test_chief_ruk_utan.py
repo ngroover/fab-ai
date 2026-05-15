@@ -70,7 +70,7 @@ class TestChiefRukutanCardDefinition(unittest.TestCase):
         self.card = next(c for c in rhinar.hand if c.name == "Chief Ruk'utan")
 
     def test_card_type_is_mentor(self):
-        self.assertEqual(self.card.card_type, CardType.MENTOR)
+        self.assertEqual(self.card.card_type, [CardType.MENTOR])
 
     def test_card_is_in_opening_hand(self):
         env = FaBEnv()

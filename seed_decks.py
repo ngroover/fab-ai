@@ -21,7 +21,10 @@ _DECK_ONLY = {CardType.HERO, CardType.EQUIPMENT, CardType.WEAPON}
 
 def _build_card_counts(card_list):
     """Return a dict of card_id -> quantity for the 40-card deck body only."""
-    return dict(Counter(card.card_id for card in card_list if card.card_type not in _DECK_ONLY))
+    return dict(Counter(
+        card.card_id for card in card_list
+        if not any(t in _DECK_ONLY for t in card.card_type)
+    ))
 
 
 def main():

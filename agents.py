@@ -106,7 +106,7 @@ class RhinarAgent:
 
         # 2. Beast Mode — only if we have a big attack to follow
         if player.next_brute_attack_bonus == 0:
-            big_attacks = [c for c in hand if c.card_type == CardType.ACTION_ATTACK and c.power >= 6]
+            big_attacks = [c for c in hand if CardType.ATTACK in c.card_type and c.power >= 6]
             if big_attacks:
                 a = _find_play(legal, ["Beast Mode"], player)
                 if a:
@@ -123,7 +123,7 @@ class RhinarAgent:
                 card = a.card
             else:
                 continue
-            if card and card.card_type == CardType.ACTION_ATTACK:
+            if card and CardType.ATTACK in card.card_type:
                 score = card.power + player.next_brute_attack_bonus
                 if Keyword.GO_AGAIN in card.keywords:
                     score += 1
@@ -334,7 +334,7 @@ class DorintheiAgent:
             if a.hand_index is not None and 0 <= a.hand_index < len(player.hand):
                 c = player.hand[a.hand_index]
                 hand_def += c.defense
-                if c.card_type in (CardType.DEFENSE_REACTION,):
+                if CardType.DEFENSE_REACTION in c.card_type:
                     reaction_bonus += 1
             equip_def = (
                 player.equipment[a.equip_slot].defense
@@ -425,7 +425,7 @@ class DorintheiAgent:
             # Play attack reactions: Thrust, In the Swing, Ironsong Response, etc.
             for a in legal:
                 if a.action_type == ActionType.PLAY_CARD and a.card is not None:
-                    if a.card.card_type == CardType.ATTACK_REACTION:
+                    if CardType.ATTACK_REACTION in a.card.card_type:
                         return a
         else:
             # Play defense reactions when life is threatened
@@ -433,7 +433,7 @@ class DorintheiAgent:
             if player.life - effective_power <= 8:
                 for a in legal:
                     if a.action_type == ActionType.PLAY_CARD and a.card is not None:
-                        if a.card.card_type == CardType.DEFENSE_REACTION:
+                        if CardType.DEFENSE_REACTION in a.card.card_type:
                             return a
         # Play instants of opportunity
         for a in legal:

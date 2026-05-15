@@ -118,7 +118,7 @@ class TestHalaGoldenheimCardDefinition(unittest.TestCase):
     def test_hala_is_mentor_type(self):
         deck = build_dorinthea_deck()
         hala = next(c for c in deck if c.name == 'Hala Goldenhelm')
-        self.assertEqual(hala.card_type, CardType.MENTOR)
+        self.assertEqual(hala.card_type, [CardType.MENTOR])
 
     def test_hala_defense_value(self):
         deck = build_dorinthea_deck()

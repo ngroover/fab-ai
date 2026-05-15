@@ -75,16 +75,17 @@ def _player_from_decklist(decklist: List[Card],
     hero_intellect set. The weapon card (CardType.WEAPON) is separated from the
     other equipment (CardType.EQUIPMENT) before constructing the Player.
     """
-    hero = next((c for c in decklist if c.card_type == CardType.HERO), None)
+    hero = next((c for c in decklist if CardType.HERO in c.card_type), None)
     if hero is None:
         raise ValueError("Decklist must contain exactly one hero card.")
     if hero.hero_life is None or hero.hero_intellect is None:
         raise ValueError(f"Hero card '{hero.name}' must have hero_life and hero_intellect set.")
 
-    weapon = next((c for c in decklist if c.card_type == CardType.WEAPON), None)
-    equipment = [c for c in decklist if c.card_type == CardType.EQUIPMENT]
+    weapon = next((c for c in decklist if CardType.WEAPON in c.card_type), None)
+    equipment = [c for c in decklist if CardType.EQUIPMENT in c.card_type]
     # Pass hero + action/attack/reaction cards to Player; it extracts the hero internally.
-    deck_cards = [c for c in decklist if c.card_type not in (CardType.WEAPON, CardType.EQUIPMENT)]
+    _equip_types = {CardType.WEAPON, CardType.EQUIPMENT}
+    deck_cards = [c for c in decklist if not any(t in _equip_types for t in c.card_type)]
 
     # Derive short display name: everything before first comma or parenthesis.
     name = hero.name
@@ -450,7 +451,7 @@ class FaBEnv:
 
         if action.action_type == ActionType.PLAY_CARD:
             # Remove the chosen card from hand / arsenal
-            if action.from_arsenal and active.arsenal and active.arsenal.card_type != CardType.MENTOR:
+            if action.from_arsenal and active.arsenal and CardType.MENTOR not in active.arsenal.card_type:
                 card = active.arsenal
                 active.arsenal = None
             elif action.card in active.hand:
@@ -556,19 +557,9 @@ class FaBEnv:
 
     def _resolve_played_card(self, card: Card, active: Player, opponent: Player):
         """Dispatch card resolution after cost/pitch have been handled."""
-        if card.card_type == CardType.INSTANT:
+        if CardType.INSTANT in card.card_type:
             self._resolve_instant(card, active, opponent)
-        elif card.card_type == CardType.ACTION:
-            # Open an instant window so both players may respond before the card resolves
-            self._pending_action_response_card = card
-            active_idx = self._game.active_player_idx
-            self._enter_instant_phase(
-                return_phase=Phase.ATTACK,
-                return_agent_idx=active_idx,
-                priority_idx=1 - active_idx,
-            )
-            return
-        elif card.card_type == CardType.ACTION_ATTACK:
+        elif CardType.ATTACK in card.card_type:
             # Pay any additional play costs before declaring the attack
             from card_effects import EffectAction, EffectTrigger
             for effect in card.effects:
@@ -589,6 +580,16 @@ class FaBEnv:
                         self._log(f"    👁  Additional cost — {active.name} has no cost ≤ 1 card to reveal.")
             self._launch_action_attack(card, active, opponent)
             return  # defend phase takes over; returns to ATTACK after defend resolves
+        elif CardType.ACTION in card.card_type:
+            # Non-attack action: open an instant window so both players may respond before the card resolves
+            self._pending_action_response_card = card
+            active_idx = self._game.active_player_idx
+            self._enter_instant_phase(
+                return_phase=Phase.ATTACK,
+                return_agent_idx=active_idx,
+                priority_idx=1 - active_idx,
+            )
+            return
 
         # After instant/action: end turn if no action points remain
         if active.action_points <= 0:
@@ -1010,7 +1011,7 @@ class FaBEnv:
                 self._instant_priority_idx = 1 - self._instant_priority_idx
                 self.agent_selection = f"agent_{self._instant_priority_idx}"
                 return
-            if card.card_type != CardType.INSTANT:
+            if CardType.INSTANT not in card.card_type:
                 self._log(f"  ⚠  {card.name} is not an instant; passing priority.")
                 self._instant_passes += 1
                 self._instant_priority_idx = 1 - self._instant_priority_idx
@@ -1099,12 +1100,12 @@ class FaBEnv:
     def _resolve_reaction_from_stack(self, card: "Card", owner: "Player",
                                      opponent: "Player", from_hand: bool = True) -> None:
         """Resolve a card that was on the reaction stack."""
-        if card.card_type == CardType.INSTANT:
+        if CardType.INSTANT in card.card_type:
             self._resolve_instant_from_stack(card, owner, opponent)
             return
 
         n = card.name
-        if card.card_type == CardType.ATTACK_REACTION:
+        if CardType.ATTACK_REACTION in card.card_type:
             attacker = self._game.players[self._reaction_attacker_idx]
             committed = self._committed_defend_action
             reprise_met = bool(committed and self._defend_from_hand_ids)
@@ -1135,7 +1136,7 @@ class FaBEnv:
                         self._log(f"    ⚔  {n} resolves — Reprise! next attack this turn gains +{effect.magnitude} power.")
             self._log(f"    ⚔  {n} resolves.")
 
-        elif card.card_type == CardType.DEFENSE_REACTION:
+        elif CardType.DEFENSE_REACTION in card.card_type:
             bonus = card.defense
             self._reaction_defense_bonus += bonus
             self._log(f"    🛡  {n} resolves — +{bonus} defense "
@@ -1183,11 +1184,11 @@ class FaBEnv:
                 return
 
             valid = False
-            if card.card_type == CardType.INSTANT:
+            if CardType.INSTANT in card.card_type:
                 valid = True
-            elif card.card_type == CardType.ATTACK_REACTION and is_attacker:
+            elif CardType.ATTACK_REACTION in card.card_type and is_attacker:
                 valid = True
-            elif card.card_type == CardType.DEFENSE_REACTION and not is_attacker:
+            elif CardType.DEFENSE_REACTION in card.card_type and not is_attacker:
                 valid = True
 
             if not valid:
@@ -1299,7 +1300,7 @@ class FaBEnv:
 
         # If the active player has a face-down mentor in arsenal, give them the flip option
         if (active.arsenal is not None
-                and active.arsenal.card_type == CardType.MENTOR
+                and CardType.MENTOR in active.arsenal.card_type
                 and not active.mentor_face_up):
             self._phase = Phase.MENTOR_FLIP
             self._log(f"  🎓  {active.name} has {active.arsenal.name} face-down in arsenal — flip face-up?")
@@ -1662,7 +1663,7 @@ class FaBEnv:
     @staticmethod
     def _is_sword_attack(card: Card, is_weapon: bool) -> bool:
         """Return True when the attack qualifies as a 'sword attack' for Hala Goldenhelm."""
-        return is_weapon and card.card_class.value == "Warrior" and card.card_type.value == "Weapon"
+        return is_weapon and card.card_class.value == "Warrior" and CardType.WEAPON in card.card_type
 
     def _on_hit(self, card: Card, attacker: Player, defender: Player, is_weapon: bool):
         if self._is_sword_attack(card, is_weapon) and attacker.mentor_face_up:
@@ -1684,7 +1685,7 @@ class FaBEnv:
             player.mentor_lesson_counters = 0
             player.mentor_face_up = False
             # Banish the mentor card permanently (does not return to hand)
-            if player.arsenal and player.arsenal.card_type == CardType.MENTOR:
+            if player.arsenal and CardType.MENTOR in player.arsenal.card_type:
                 player.permanently_banished.append(player.arsenal)
                 self._log(f"    🎓 {player.arsenal.name} banished.")
                 player.arsenal = None

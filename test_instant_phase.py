@@ -93,7 +93,7 @@ class TestSigilOfSolaceOnStack(unittest.TestCase):
 
     def test_sigil_of_solace_is_playable_in_instant_window(self):
         sigil = CARD_CATALOG["sigil_of_solace_blue"]
-        self.assertEqual(sigil.card_type, CardType.INSTANT)
+        self.assertEqual(sigil.card_type, [CardType.INSTANT])
 
         # Give agent_1 a Sigil; give agent_0 a non-instant card so it has
         # only PASS_PRIORITY available (auto-execute fires for agent_0 on PASS,

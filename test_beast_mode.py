@@ -57,7 +57,7 @@ class TestBeastModeCardDefinition(unittest.TestCase):
 
     def test_card_properties(self):
         card = next(c for c in self.rhinar.hand if c.name == "Beast Mode")
-        self.assertEqual(card.card_type, CardType.ACTION_ATTACK)
+        self.assertEqual(card.card_type, [CardType.ATTACK, CardType.ACTION])
         self.assertEqual(card.cost, 3)
         self.assertEqual(card.pitch, 1)
         self.assertEqual(card.power, 6)

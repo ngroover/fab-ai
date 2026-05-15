@@ -78,7 +78,7 @@ class TestSigilOfSolaceCard(unittest.TestCase):
     def test_sigil_card_properties(self):
         from cards import CardType, Color
         sigil = next(c for c in self.dorinthea.hand if c.name == "Sigil of Solace")
-        self.assertEqual(sigil.card_type, CardType.INSTANT)
+        self.assertEqual(sigil.card_type, [CardType.INSTANT])
         self.assertEqual(sigil.cost, 0)
         self.assertEqual(sigil.color, Color.BLUE)
         self.assertTrue(sigil.no_block)

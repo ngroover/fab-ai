@@ -31,6 +31,7 @@ import deck_db
 from cards import (
     build_rhinar_deck,
     build_dorinthea_deck,
+    CardType,
     Keyword,
 )
 from card_effects import EffectAction
@@ -569,7 +570,7 @@ def _build_card_catalog() -> list:
                 seen[c.card_id] = {
                     "card_id": c.card_id,
                     "name": c.name,
-                    "card_type": c.card_type.value,
+                    "card_type": [t.value for t in c.card_type],
                     "cost": c.cost,
                     "pitch": c.pitch,
                     "power": c.power,
@@ -589,10 +590,12 @@ def _build_card_catalog() -> list:
     try:
         for row in deck_db.get_catalog_cards():
             if row["card_id"] not in seen:
+                row_type = row["card_type"]
+                type_list = ["Attack", "Action"] if row_type == "Action - Attack" else [row_type]
                 seen[row["card_id"]] = {
                     "card_id":   row["card_id"],
                     "name":      row["name"],
-                    "card_type": row["card_type"],
+                    "card_type": type_list,
                     "cost":      row["cost"],
                     "pitch":     row["pitch"],
                     "power":     row["power"],
@@ -626,13 +629,19 @@ def _catalog_row_to_card(row: dict):
     }
     class_map  = {v.value: v for v in CardClass}
 
+    raw_type = row["card_type"]
+    if raw_type == "Action - Attack":
+        card_types = [CardType.ATTACK, CardType.ACTION]
+    else:
+        card_types = [type_map.get(raw_type, CardType.ACTION)]
+
     kws = []
     if bool(row["go_again"]):
         kws.append(Keyword.GO_AGAIN)
 
     return Card(
         name      = row["name"],
-        card_type = type_map.get(row["card_type"], CardType.ACTION),
+        card_type = card_types,
         cost      = row["cost"],
         pitch     = row["pitch"],
         power     = row["power"],
@@ -708,8 +717,8 @@ def _decklist_from_deck(deck_record: dict) -> list:
     else:  # Rhinar or Custom
         full_deck = build_rhinar_deck()
 
-    hero_card = next(c for c in full_deck if c.card_type.value == "Hero")
-    equip = [c for c in full_deck if c.card_type.value in ("Equipment", "Weapon")]
+    hero_card = next(c for c in full_deck if CardType.HERO in c.card_type)
+    equip = [c for c in full_deck if any(t in (CardType.EQUIPMENT, CardType.WEAPON) for t in c.card_type)]
     return [hero_card] + equip + deck_cards
 
 
@@ -1071,7 +1080,7 @@ DECK_BUILDER_TEMPLATE = """
         <input id="searchInput" placeholder="Search cards…" oninput="renderCatalog()">
         <select id="filterType" onchange="renderCatalog()">
           <option value="">All types</option>
-          <option>Action - Attack</option>
+          <option>Attack</option>
           <option>Action</option>
           <option>Instant</option>
           <option>Attack Reaction</option>
@@ -1139,7 +1148,7 @@ DECK_BUILDER_TEMPLATE = """
 
       const filtered = ALL_CARDS.filter(c => {
         if (q && !c.name.toLowerCase().includes(q)) return false;
-        if (fType  && c.card_type   !== fType)      return false;
+        if (fType  && !c.card_type.includes(fType)) return false;
         if (fColor && c.color       !== fColor)     return false;
         if (fClass && c.card_class  !== fClass)     return false;
         return true;
@@ -1170,7 +1179,7 @@ DECK_BUILDER_TEMPLATE = """
               <div class="card-stats">
                 ${colorPill}
                 ${classPill}
-                <span style="color:#a0aec0">${escHtml(c.card_type)}</span>
+                <span style="color:#a0aec0">${escHtml(c.card_type.join(' / '))}</span>
                 ${stats.map(s=>`<span>${s}</span>`).join('')}
               </div>
             </div>
@@ -1441,7 +1450,7 @@ def _card_to_dict(card):
         return None
     return {
         "name": card.name,
-        "type": card.card_type.value,
+        "type": [t.value for t in card.card_type],
         "cost": card.cost,
         "pitch": card.pitch,
         "power": card.power,

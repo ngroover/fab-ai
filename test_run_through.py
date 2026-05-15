@@ -109,7 +109,7 @@ class TestRunThroughCardDefinition(unittest.TestCase):
 
     def test_card_properties(self):
         card = next(c for c in self.dorinthea.hand if c.name == "Run Through")
-        self.assertEqual(card.card_type, CardType.ATTACK_REACTION)
+        self.assertEqual(card.card_type, [CardType.ATTACK_REACTION])
         self.assertEqual(card.cost, 1)
         self.assertEqual(card.defense, 3)
         self.assertEqual(card.color, Color.YELLOW)

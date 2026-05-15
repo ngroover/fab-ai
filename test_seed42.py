@@ -386,7 +386,7 @@ class TestInstantWindowTurn1(unittest.TestCase):
         from cards import CardType
         dorinthea = env._game.players[1]
         # Confirm Dorinthea has no instants (so the instant window was a no-op)
-        instant_names = [c.name for c in dorinthea.hand if c.card_type == CardType.INSTANT]
+        instant_names = [c.name for c in dorinthea.hand if CardType.INSTANT in c.card_type]
         self.assertEqual(instant_names, [], "Dorinthea has no instants in hand at seed 42")
 
         legal = env.legal_actions()

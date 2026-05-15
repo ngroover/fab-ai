@@ -90,7 +90,7 @@ class TestRallyCardDefinition(unittest.TestCase):
 
     def test_rally_card_properties(self):
         rally = CARD_CATALOG["rally_the_rearguard_blue"]
-        self.assertEqual(rally.card_type, CardType.ACTION_ATTACK)
+        self.assertEqual(rally.card_type, [CardType.ATTACK, CardType.ACTION])
         self.assertEqual(rally.cost, 2)
         self.assertEqual(rally.power, 4)
         self.assertEqual(rally.defense, 2)

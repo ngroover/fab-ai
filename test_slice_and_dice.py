@@ -66,7 +66,7 @@ class TestSliceAndDiceCardDefinition(unittest.TestCase):
     def test_card_properties(self):
         from cards import CardType, Color
         card = next(c for c in self.dorinthea.hand if c.name == "Slice and Dice")
-        self.assertEqual(card.card_type, CardType.ACTION)
+        self.assertEqual(card.card_type, [CardType.ACTION])
         self.assertEqual(card.cost, 0)
         self.assertEqual(card.defense, 3)
         self.assertEqual(card.color, Color.YELLOW)

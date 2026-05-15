@@ -94,7 +94,7 @@ def encode_card(card: Card, vocab: List[str]) -> List[float]:
 
     Layout (concatenated):
       - card_id one-hot             (len(vocab))
-      - card_type one-hot           (len(CARD_TYPE_VALUES))
+      - card_type multi-hot         (len(CARD_TYPE_VALUES))
       - color one-hot               (len(COLOR_VALUES))
       - card_class one-hot          (len(CLASS_VALUES))
       - equip_slot one-hot          (len(SLOT_VALUES))
@@ -113,8 +113,16 @@ def encode_card(card: Card, vocab: List[str]) -> List[float]:
         id_oh[vocab.index(card.card_id)] = 1.0
     parts += id_oh
 
+    # card_type multi-hot (cards can have multiple types, e.g. Attack + Action)
+    type_vec = [0.0] * len(CARD_TYPE_VALUES)
+    for ct in card.card_type:
+        for i, opt in enumerate(CARD_TYPE_VALUES):
+            if opt == ct:
+                type_vec[i] = 1.0
+                break
+    parts += type_vec
+
     # Categorical one-hots
-    parts += _one_hot(card.card_type, CARD_TYPE_VALUES)
     parts += _one_hot(card.color, COLOR_VALUES)
     parts += _one_hot(card.card_class, CLASS_VALUES)
     parts += _one_hot(card.equip_slot, SLOT_VALUES)

@@ -49,7 +49,7 @@ class Player:
         self.hero_card: Optional[Card] = None
         play_deck: List[Card] = []
         for c in deck:
-            if c.card_type == CardType.HERO:
+            if CardType.HERO in c.card_type:
                 self.hero_card = c
             else:
                 play_deck.append(c)

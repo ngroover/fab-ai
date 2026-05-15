@@ -15,7 +15,7 @@ from card_effects import CardEffect, EffectTrigger, EffectAction
 
 
 class CardType(Enum):
-    ACTION_ATTACK = "Action - Attack"
+    ATTACK = "Attack"
     ACTION = "Action"
     INSTANT = "Instant"
     ATTACK_REACTION = "Attack Reaction"
@@ -59,7 +59,7 @@ class Keyword(Enum):
 @dataclass
 class Card:
     name: str
-    card_type: CardType
+    card_type: List[CardType]
     cost: int = 0
     pitch: int = 0
     power: int = 0
@@ -90,7 +90,8 @@ class Card:
         return " ".join(parts)
 
     def display(self):
-        lines = [f"  [{self.card_type.value}] {self}"]
+        type_str = " / ".join(t.value for t in self.card_type)
+        lines = [f"  [{type_str}] {self}"]
         stats = []
         stats.append(f"Cost:{self.cost}")
         stats.append(f"Pitch:{self.pitch}")
@@ -109,7 +110,7 @@ class Card:
 
 QUICKEN_TOKEN_CARD = Card(
     name="Quicken",
-    card_type=CardType.TOKEN,
+    card_type=[CardType.TOKEN],
     text="When you play an attack action card or attack with a weapon, destroy Quicken and the attack gains go again.",
 )
 

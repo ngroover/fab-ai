@@ -72,7 +72,7 @@ class TestSharpenSteelCardDefinition(unittest.TestCase):
 
     def test_card_properties(self):
         card = next(c for c in self.dorinthea.hand if c.name == "Sharpen Steel")
-        self.assertEqual(card.card_type, CardType.ACTION)
+        self.assertEqual(card.card_type, [CardType.ACTION])
         self.assertEqual(card.cost, 0)
         self.assertEqual(card.pitch, 1)
         self.assertEqual(card.defense, 3)

@@ -246,11 +246,8 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
         return [Action(ActionType.PASS)]
 
     # ── Arsenal card ──
-    if player.arsenal and player.arsenal.card_type in (
-        __import__('cards').CardType.ACTION_ATTACK,
-        __import__('cards').CardType.INSTANT,
-        __import__('cards').CardType.ACTION,
-    ):
+    _playable_types = (CardType.ATTACK, CardType.INSTANT, CardType.ACTION)
+    if player.arsenal and any(t in player.arsenal.card_type for t in _playable_types):
         card = player.arsenal
         needed = max(0, card.cost - player.resource_points)
         if _card_has_discard_cost(card):
@@ -269,7 +266,8 @@ def legal_attack_actions(player: 'Player') -> List[Action]:
     # ── Hand cards ──
     seen_play_names: set = set()
     for i, card in enumerate(player.hand):
-        if card.card_type in (CardType.DEFENSE_REACTION, CardType.ATTACK_REACTION, CardType.MENTOR, CardType.RESOURCE):
+        _unplayable = (CardType.DEFENSE_REACTION, CardType.ATTACK_REACTION, CardType.MENTOR, CardType.RESOURCE)
+        if any(t in card.card_type for t in _unplayable):
             continue  # reactions are played in the reaction step, not freely; mentors/resources are not playable
         if card.name in seen_play_names:
             continue  # duplicate card — same choice regardless of which copy is picked
@@ -484,9 +482,9 @@ def legal_reaction_actions(player: 'Player', attacker_idx: int,
         if card.name in seen:
             continue
 
-        if card.card_type == CardType.INSTANT:
+        if CardType.INSTANT in card.card_type:
             pass  # either player may play instants
-        elif card.card_type == CardType.ATTACK_REACTION and is_attacker:
+        elif CardType.ATTACK_REACTION in card.card_type and is_attacker:
             ctx = {"weapon_attack_count": player.weapon_attack_count,
                    "is_weapon_attack": pending_is_weapon_attack}
             if card.play_condition is not None and not card.play_condition(ctx):
@@ -498,7 +496,7 @@ def legal_reaction_actions(player: 'Player', attacker_idx: int,
             )
             if requires_sword and not pending_is_sword_attack:
                 continue
-        elif card.card_type == CardType.DEFENSE_REACTION and not is_attacker:
+        elif CardType.DEFENSE_REACTION in card.card_type and not is_attacker:
             pass
         else:
             continue
@@ -565,7 +563,7 @@ def legal_instant_actions(player: 'Player') -> List[Action]:
 
     seen: set = set()
     for card in player.hand:
-        if card.card_type != CardType.INSTANT:
+        if CardType.INSTANT not in card.card_type:
             continue
         if card.name in seen:
             continue

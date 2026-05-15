@@ -119,7 +119,7 @@ class TestInTheSwingCardDefinition(unittest.TestCase):
     def test_card_properties(self):
         from cards import CardType, Color
         card = next(c for c in self.dorinthea.hand if c.name == "In the Swing")
-        self.assertEqual(card.card_type, CardType.ATTACK_REACTION)
+        self.assertEqual(card.card_type, [CardType.ATTACK_REACTION])
         self.assertEqual(card.cost, 0)
         self.assertEqual(card.pitch, 1)
         self.assertEqual(card.defense, 3)

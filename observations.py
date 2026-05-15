@@ -99,7 +99,7 @@ def encode_player(player: 'Player') -> List[float]:
 
     # Arsenal card
     from cards import CardType
-    if player.arsenal and player.arsenal.card_type != CardType.MENTOR:
+    if player.arsenal and CardType.MENTOR not in player.arsenal.card_type:
         obs += _encode_card(player.arsenal)
     else:
         obs += _encode_card(None)

@@ -49,7 +49,7 @@ class TestWreckerRompCardDefinition(unittest.TestCase):
         self.assertIn("Wrecker Romp", names)
 
     def test_card_type(self):
-        self.assertEqual(self.card.card_type, CardType.ACTION_ATTACK)
+        self.assertEqual(self.card.card_type, [CardType.ATTACK, CardType.ACTION])
 
     def test_card_stats(self):
         self.assertEqual(self.card.cost, 2)

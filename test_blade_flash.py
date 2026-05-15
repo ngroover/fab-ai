@@ -104,7 +104,7 @@ class TestBladeFlashCardDefinition(unittest.TestCase):
 
     def test_card_properties(self):
         card = next(c for c in self.dorinthea.hand if c.name == "Blade Flash")
-        self.assertEqual(card.card_type, CardType.ATTACK_REACTION)
+        self.assertEqual(card.card_type, [CardType.ATTACK_REACTION])
         self.assertEqual(card.cost, 1)
         self.assertEqual(card.defense, 2)
         self.assertEqual(card.color, Color.BLUE)

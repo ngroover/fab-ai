@@ -122,7 +122,7 @@ class TestBarragingBeatdownCardDefinition(unittest.TestCase):
 
     def test_card_properties(self):
         card = next(c for c in self.rhinar.hand if c.name == "Barraging Beatdown")
-        self.assertEqual(card.card_type, CardType.ACTION)
+        self.assertEqual(card.card_type, [CardType.ACTION])
         self.assertEqual(card.cost, 0)
         self.assertEqual(card.pitch, 2)
         self.assertEqual(card.power, 0)
