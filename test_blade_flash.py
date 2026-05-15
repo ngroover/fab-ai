@@ -108,7 +108,7 @@ class TestBladeFlashCardDefinition(unittest.TestCase):
         self.assertEqual(card.cost, 1)
         self.assertEqual(card.defense, 2)
         self.assertEqual(card.color, Color.BLUE)
-        self.assertEqual(card.card_class, CardClass.WARRIOR)
+        self.assertEqual(card.card_class, CardClass.GENERIC)
 
     def test_has_sword_attack_go_again_effect(self):
         card = next(c for c in self.dorinthea.hand if c.name == "Blade Flash")
