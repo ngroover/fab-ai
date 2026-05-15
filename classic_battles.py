@@ -179,11 +179,17 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "ironhide_gauntlet": Card("Ironhide Gauntlet", CardType.EQUIPMENT, defense=0, equip_slot=EquipSlot.ARMS,
                               card_class=CardClass.GENERIC,
-                              text="When you defend with Ironhide Gauntlet you may pay 1 resource.  If you do, it gains +2 block and 'When the combat chain closes, destroy Ironhide Gauntlets'"),
+                              text="When you defend with Ironhide Gauntlet you may pay 1 resource.  If you do, it gains +2 block and 'When the combat chain closes, destroy Ironhide Gauntlets'",
+                              effects=[
+                                  CardEffect(trigger=EffectTrigger.ON_DEFEND, action=EffectAction.PAY_FOR_BLOCK_BONUS, magnitude=2, cost=1),
+                              ]),
 
     "ironhide_legs": Card("Ironhide Legs", CardType.EQUIPMENT, defense=0, equip_slot=EquipSlot.LEGS,
                           card_class=CardClass.GENERIC,
-                          text="When you defend with Ironhide Legs you may pay 1 resource.  If you do, it gains +2 block and 'When the combat chain closes, destroy Ironhide Legs'"),
+                          text="When you defend with Ironhide Legs you may pay 1 resource.  If you do, it gains +2 block and 'When the combat chain closes, destroy Ironhide Legs'",
+                          effects=[
+                              CardEffect(trigger=EffectTrigger.ON_DEFEND, action=EffectAction.PAY_FOR_BLOCK_BONUS, magnitude=2, cost=1),
+                          ]),
 
     # ── DORINTHEA — RED ─────────────────────────────────────────────────────
 

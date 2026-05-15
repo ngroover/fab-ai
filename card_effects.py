@@ -65,6 +65,7 @@ class EffectAction(Enum):
     NEXT_WEAPON_POWER_BONUS            = auto()   # next weapon attack this turn gains +magnitude power
     NEXT_ATTACK_POWER_BONUS            = auto()   # next attack (weapon or action) this turn gains +magnitude power
     WEAPON_ATTACKS_POWER_BONUS_ALL_TURN = auto()  # all weapon attacks this turn gain +magnitude power
+    PAY_FOR_BLOCK_BONUS                = auto()   # equipment: pay `cost` resource(s) while defending → +magnitude block; destroy on chain close
 
 
 @dataclass
@@ -88,6 +89,7 @@ class CardEffect:
     trigger: EffectTrigger
     action: EffectAction
     magnitude: int = 0
+    cost: int = 0
     swing_index: Optional[int] = None
     condition: Optional[Callable[[Dict[str, Any]], bool]] = field(
         default=None, compare=False

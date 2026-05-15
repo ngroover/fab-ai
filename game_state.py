@@ -16,6 +16,10 @@ class Equipment:
         self.destroyed = False
         self.used_this_turn = False
         self.block_counters = 0        # accumulated -1 block counters (Battleworn)
+        # Marked True by PAY_FOR_BLOCK_BONUS-style effects; equipment is sent to
+        # the graveyard when the current combat chain closes instead of returning
+        # to the equipment zone.
+        self.destroy_on_chain_close = False
 
     def reset_turn(self):
         self.used_this_turn = False

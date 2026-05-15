@@ -1680,6 +1680,9 @@ class _WebHumanAgent:
             if action.hand_index is not None and 0 <= action.hand_index < len(player.hand):
                 card = player.hand[action.hand_index]
                 return f"REVEAL — {self._fmt_card(card)} (cost:{card.cost})"
+        if action.action_type == ActionType.PAY_FOR_BLOCK_BONUS:
+            card_name = action.card.name if action.card else "equipment"
+            return f"PAY 1 — {card_name} gains +2 block (destroyed on chain close)"
         return str(action)
 
     def _pend(self, legal, player, phase, attack_power=0):
