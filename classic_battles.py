@@ -85,7 +85,7 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "muscle_mutt_yellow": Card("Muscle Mutt", CardType.ACTION_ATTACK, cost=3, pitch=2,
                                power=6, defense=2, color=Color.YELLOW,
-                               card_class=CardClass.BRUTE,
+                               card_class=CardClass.GENERIC,
                                text=""),
 
     "pack_call_yellow": Card("Pack Call", CardType.ACTION_ATTACK, cost=3, pitch=2,
@@ -97,10 +97,7 @@ CARD_CATALOG: Dict[str, Card] = {
     "raging_onslaught_yellow": Card("Raging Onslaught", CardType.ACTION_ATTACK, cost=3, pitch=2,
                                     power=6, defense=3, color=Color.YELLOW,
                                     card_class=CardClass.GENERIC,
-                                    text="",
-                                    effects=[
-                                        CardEffect(trigger=EffectTrigger.ON_HIT, action=EffectAction.DRAW_CARD, magnitude=1),
-                                    ]),
+                                    text=""),
 
     "smash_instinct_yellow": Card("Smash Instinct", CardType.ACTION_ATTACK, cost=3, pitch=2,
                                   power=6, defense=3, color=Color.YELLOW,
@@ -115,7 +112,7 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "wounded_bull_yellow": Card("Wounded Bull", CardType.ACTION_ATTACK, cost=3, pitch=2,
                                 power=6, defense=2, color=Color.YELLOW,
-                                card_class=CardClass.BRUTE,
+                                card_class=CardClass.GENERIC,
                                 text="When you play Wounded Bull, if you have less health than an opposing hero, it gains +1 power."),
 
     # ── RHINAR — BLUE ───────────────────────────────────────────────────────
@@ -128,6 +125,8 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "come_to_fight_blue": Card("Come to Fight", CardType.ACTION, cost=1, pitch=3,
                                power=0, defense=3, color=Color.BLUE,
+                               card_class=CardClass.GENERIC,
+                               keywords=[Keyword.GO_AGAIN],
                                text="Your next attack action card you play this turn gains +1 power. Go again.",
                                effects=[
                                    CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_ATTACK_GO_AGAIN),
@@ -144,6 +143,7 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "titanium_bauble_blue": Card("Titanium Bauble", CardType.RESOURCE, cost=0, pitch=3,
                                  power=0, defense=3, color=Color.BLUE,
+                                 card_class=CardClass.GENERIC,
                                  text=""),
 
     "wrecker_romp_blue": Card("Wrecker Romp", CardType.ACTION_ATTACK, cost=2, pitch=3,
@@ -257,7 +257,7 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "thrust_red": Card("Thrust", CardType.ATTACK_REACTION, cost=1, pitch=1,
                        power=0, defense=2, color=Color.RED,
-                       card_class=CardClass.WARRIOR,
+                       card_class=CardClass.GENERIC,
                        text="Target sword attack gains +3 power.",
                        effects=[CardEffect(
                            trigger=EffectTrigger.ON_ATTACK_REACTION,
@@ -297,7 +297,7 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "on_a_knife_edge_yellow": Card("On a Knife Edge", CardType.ACTION, cost=0, pitch=2,
                                    power=0, defense=2, color=Color.YELLOW, keywords=[Keyword.GO_AGAIN],
-                                   card_class=CardClass.WARRIOR,
+                                   card_class=CardClass.GENERIC,
                                    text="Your next sword attack this turn gains go again. Go again.",
                                    effects=[
                                        CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_WEAPON_GO_AGAIN),
@@ -340,7 +340,7 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "blade_flash_blue": Card("Blade Flash", CardType.ATTACK_REACTION, cost=1, pitch=3,
                              power=0, defense=2, color=Color.BLUE,
-                             card_class=CardClass.WARRIOR,
+                             card_class=CardClass.GENERIC,
                              text="Target sword attack gains go again.",
                              effects=[CardEffect(EffectTrigger.ON_ATTACK_REACTION,
                                                  EffectAction.SWORD_ATTACK_GO_AGAIN)]),
@@ -371,7 +371,7 @@ CARD_CATALOG: Dict[str, Card] = {
 
     "visit_the_blacksmith_blue": Card("Visit the Blacksmith", CardType.ACTION, cost=0, pitch=3,
                                       power=0, defense=2, color=Color.BLUE, keywords=[Keyword.GO_AGAIN],
-                                      card_class=CardClass.WARRIOR,
+                                      card_class=CardClass.GENERIC,
                                       text="Your next sword attack this turn gains +1 power.",
                                       effects=[
                                           CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.WEAPON_ATTACK_POWER_BONUS, magnitude=1),
@@ -400,8 +400,10 @@ CARD_CATALOG: Dict[str, Card] = {
                            ]),
 
     "ironrot_helm": Card("Ironrot Helm", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.HEAD,
+                         card_class=CardClass.GENERIC,
                          text="Blade Break.", keywords=[Keyword.BLADE_BREAK]),
 
     "ironrot_legs": Card("Ironrot Legs", CardType.EQUIPMENT, defense=1, equip_slot=EquipSlot.LEGS,
+                         card_class=CardClass.GENERIC,
                          text="Blade Break.", keywords=[Keyword.BLADE_BREAK]),
 }
