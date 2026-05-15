@@ -66,6 +66,7 @@ class EffectAction(Enum):
     NEXT_ATTACK_POWER_BONUS            = auto()   # next attack (weapon or action) this turn gains +magnitude power
     WEAPON_ATTACKS_POWER_BONUS_ALL_TURN = auto()  # all weapon attacks this turn gain +magnitude power
     PAY_FOR_BLOCK_BONUS                = auto()   # equipment: pay `cost` resource(s) while defending → +magnitude block; destroy on chain close
+    IF_INTIMIDATED_POWER_BONUS        = auto()   # this attack gains +magnitude power if attacker has intimidated this turn
 
 
 @dataclass
