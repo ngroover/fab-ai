@@ -113,7 +113,14 @@ CARD_CATALOG: Dict[str, Card] = {
     "wounded_bull_yellow": Card("Wounded Bull", [CardType.ATTACK, CardType.ACTION], cost=3, pitch=2,
                                 power=6, defense=2, color=Color.YELLOW,
                                 card_class=CardClass.GENERIC,
-                                text="When you play Wounded Bull, if you have less health than an opposing hero, it gains +1 power."),
+                                text="When you play Wounded Bull, if you have less health than an opposing hero, it gains +1 power.",
+                                effects=[
+                                    CardEffect(
+                                        trigger=EffectTrigger.ON_ATTACK,
+                                        action=EffectAction.ATTACK_POWER_BOOST_IF_LOWER_LIFE,
+                                        magnitude=1,
+                                    )
+                                ]),
 
     # ── RHINAR — BLUE ───────────────────────────────────────────────────────
 

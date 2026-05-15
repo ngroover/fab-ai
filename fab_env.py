@@ -1547,6 +1547,19 @@ class FaBEnv:
             elif effect.action == EffectAction.WEAPON_ATTACKS_POWER_BONUS_ALL_TURN:
                 active.weapon_attacks_power_bonus_all_turn += effect.magnitude
                 self._log(f"    ⚡ {card.name} — all weapon attacks this turn gain +{effect.magnitude} power.")
+            elif effect.action == EffectAction.ATTACK_POWER_BOOST_IF_LOWER_LIFE:
+                if active.life < opponent.life:
+                    self._pending_attack_power += effect.magnitude
+                    self._log(
+                        f"    ⚡ {card.name} — attacker has lower life "
+                        f"({active.life} vs {opponent.life}), +{effect.magnitude} power! "
+                        f"({self._pending_attack_power} total)"
+                    )
+                else:
+                    self._log(
+                        f"    ─ {card.name} — attacker life ({active.life}) not lower than "
+                        f"opponent's ({opponent.life}), no bonus."
+                    )
             elif effect.action == EffectAction.REVEAL_TOP_DECK_POWER_CHECK:
                 if active.deck:
                     top = active.deck[0]
