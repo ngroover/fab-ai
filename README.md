@@ -8,8 +8,8 @@ openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -node
 FAB_PASSWORD=<password_here> python3 web_viewer.py --ssl-cert cert.pem --ssl-key key.pem --port=8080
 
 # Generate card embeddings
-python3 card_embeddings.py --embed-dim 32 --out-dir embeddings
+python3 card_embeddings.py --embed-dim 32
 
 # Look at similiar cards embeddings
-python3 card_embeddings.py --similar "alpha-rampage-red" --out-dir embeddings
+python3 card_embeddings.py --similar "alpha-rampage-red"
 
