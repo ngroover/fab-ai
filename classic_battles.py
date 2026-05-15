@@ -161,7 +161,7 @@ CARD_CATALOG: Dict[str, Card] = {
 
     # ── RHINAR — EQUIPMENT ──────────────────────────────────────────────────
 
-    "bone_basher": Card("Bone Basher", [CardType.WEAPON], cost=2, power=4, equip_slot=EquipSlot.WEAPON,
+    "bone_basher": Card("Bone Basher", [CardType.WEAPON, CardType.CLUB_2H], cost=2, power=4, equip_slot=EquipSlot.WEAPON,
                         card_class=CardClass.BRUTE,
                         text="Once per Turn Action — 2: Attack."),
 
@@ -386,7 +386,7 @@ CARD_CATALOG: Dict[str, Card] = {
 
     # ── DORINTHEA — EQUIPMENT ───────────────────────────────────────────────
 
-    "dawnblade_resplendent": Card("Dawnblade, Resplendent", [CardType.WEAPON], cost=1, power=2,
+    "dawnblade_resplendent": Card("Dawnblade, Resplendent", [CardType.WEAPON, CardType.SWORD_2H], cost=1, power=2,
                                   equip_slot=EquipSlot.WEAPON,
                                   card_class=CardClass.WARRIOR,
                                   text="Once per Turn Action — 1: Attack. The second time you attack with Dawnblade each turn, it gains +1 power until the end of turn."),

@@ -1663,7 +1663,7 @@ class FaBEnv:
     @staticmethod
     def _is_sword_attack(card: Card, is_weapon: bool) -> bool:
         """Return True when the attack qualifies as a 'sword attack' for Hala Goldenhelm."""
-        return is_weapon and card.card_class.value == "Warrior" and CardType.WEAPON in card.card_type
+        return is_weapon and CardType.SWORD_2H in card.card_type
 
     def _on_hit(self, card: Card, attacker: Player, defender: Player, is_weapon: bool):
         if self._is_sword_attack(card, is_weapon) and attacker.mentor_face_up:

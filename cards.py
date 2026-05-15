@@ -22,6 +22,8 @@ class CardType(Enum):
     DEFENSE_REACTION = "Defense Reaction"
     EQUIPMENT = "Equipment"
     WEAPON = "Weapon"
+    SWORD_2H = "2H Sword"
+    CLUB_2H = "2H Club"
     HERO = "Hero"
     MENTOR = "Mentor"
     RESOURCE = "Resource"
