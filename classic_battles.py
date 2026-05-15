@@ -129,7 +129,7 @@ CARD_CATALOG: Dict[str, Card] = {
                                keywords=[Keyword.GO_AGAIN],
                                text="Your next attack action card you play this turn gains +1 power. Go again.",
                                effects=[
-                                   CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_ATTACK_GO_AGAIN),
+                                   CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.NEXT_ATTACK_POWER_BONUS, magnitude=1),
                                ]),
 
     "dodge_blue": Card("Dodge", [CardType.DEFENSE_REACTION], cost=0, pitch=3,
