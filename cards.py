@@ -56,6 +56,8 @@ class Keyword(Enum):
     BLADE_BREAK = "Blade Break"
     BATTLEWORN = "Battleworn"
     REPRISE = "Reprise"
+    RHINAR_SPECIALIZATION = "Rhinar Specialization"
+    DORINTHEA_SPECIALIZATION = "Dorinthea Specialization"
 
 
 @dataclass

@@ -28,7 +28,7 @@ CARD_CATALOG: Dict[str, Card] = {
     "alpha_rampage_red": Card("Alpha Rampage", [CardType.ATTACK, CardType.ACTION], cost=3, pitch=1,
                               power=9, defense=3, color=Color.RED,
                               card_class=CardClass.BRUTE,
-                              keywords=[Keyword.INTIMIDATE],
+                              keywords=[Keyword.RHINAR_SPECIALIZATION, Keyword.INTIMIDATE],
                               text="Rhinar Specialization. As an additional cost to play Alpha Rampage, discard a random card. Intimidate.",
                               effects=[
                                   CardEffect(trigger=EffectTrigger.ON_ATTACK_PLAY, action=EffectAction.DISCARD_CARD_COST),
@@ -287,7 +287,7 @@ CARD_CATALOG: Dict[str, Card] = {
                                  ]),
 
     "glistening_steelblade_yellow": Card("Glistening Steelblade", [CardType.ACTION], cost=1, pitch=2,
-                                         power=0, defense=3, color=Color.YELLOW, keywords=[Keyword.GO_AGAIN],
+                                         power=0, defense=3, color=Color.YELLOW, keywords=[Keyword.DORINTHEA_SPECIALIZATION, Keyword.GO_AGAIN],
                                          card_class=CardClass.WARRIOR,
                                          text="Dorinthea Specialization. Your next Dawnblade attack this turn has go again.  Whenever Dawnblade hits a hero this turn, put a +1 counter on it. Go again.",
                                          effects=[
