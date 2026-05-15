@@ -11,5 +11,5 @@ FAB_PASSWORD=<password_here> python3 web_viewer.py --ssl-cert cert.pem --ssl-key
 python3 card_embeddings.py --embed-dim 32 --out-dir embeddings
 
 # Look at similiar cards embeddings
-python3 card_embeddings.py --similar "Alpha Rampage" --out-dir embeddings
+python3 card_embeddings.py --similar "alpha-rampage-red" --out-dir embeddings
 
