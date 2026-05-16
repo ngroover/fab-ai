@@ -2077,6 +2077,7 @@ class _TrainingSession:
         self.grad_steps = 0
         self.start_time = None
         self.latest_checkpoint = None
+        self.latest_hash = None
         self.log_lines: list = []
         self.run_name = None
         # Sparkline history (capped at _SPARK_LEN per series)
@@ -2161,6 +2162,7 @@ class _TrainingSession:
                 "elapsed_seconds": elapsed,
                 "run_name": self.run_name,
                 "latest_checkpoint": self.latest_checkpoint,
+                "latest_hash": self.latest_hash,
                 "log": list(self.log_lines[-150:]),
                 "sparks": {k: list(v) for k, v in self.sparks.items()},
             }
@@ -2211,6 +2213,15 @@ class _TrainingSession:
     def _on_checkpoint(self, meta: dict) -> None:
         with self._lock:
             self.latest_checkpoint = meta.get("name")
+            if meta.get("hash"):
+                self.latest_hash = meta["hash"]
+
+    def _on_progress(self, p: dict) -> None:
+        with self._lock:
+            if "games" in p:
+                self.games_done = p["games"]
+            if "grad_steps" in p:
+                self.grad_steps = p["grad_steps"]
 
     def _should_stop(self) -> bool:
         return self._stop_flag.is_set()
@@ -2296,6 +2307,7 @@ class _TrainingSession:
                     "on_metrics": self._on_metrics,
                     "on_status": self._on_status,
                     "on_checkpoint": self._on_checkpoint,
+                    "on_progress": self._on_progress,
                     "should_stop": self._should_stop,
                     "wait_if_paused": self._wait_if_paused,
                 },
@@ -3753,9 +3765,7 @@ TRAIN_TEMPLATE = """
         </div>
 
         <div class="panel">
-          <h2>Training log
-            <button class="tbtn tbtn-ghost" id="btn-watch" style="float:right;font-size:0.72rem;padding:3px 10px;">👁 Watch self-play game</button>
-          </h2>
+          <h2>Training log</h2>
           <div class="log-tail" id="log-tail"></div>
         </div>
       </div>
@@ -4127,7 +4137,7 @@ TRAIN_TEMPLATE = """
         ? state.grad_steps.toLocaleString() : state.grad_steps;
       document.getElementById('m-wall').textContent  = wall;
       document.getElementById('m-ckpt').textContent  = state.latest_checkpoint || '—';
-      document.getElementById('m-hash').textContent  = state.run_name || '—';
+      document.getElementById('m-hash').textContent  = state.latest_hash || '—';
 
       const s = state.sparks || {};
       drawSpark('sl-ploss', s.policy_loss || []);
