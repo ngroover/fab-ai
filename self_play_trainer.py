@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 import random
@@ -212,6 +213,8 @@ class SelfPlayTrainer:
             "on_status", lambda s: None)
         self._on_checkpoint: Callable[[dict], None] = callbacks.get(
             "on_checkpoint", lambda c: None)
+        self._on_progress: Callable[[dict], None] = callbacks.get(
+            "on_progress", lambda p: None)
         self._should_stop: Callable[[], bool] = callbacks.get(
             "should_stop", lambda: False)
         self._wait_if_paused: Callable[[], None] = callbacks.get(
@@ -332,6 +335,7 @@ class SelfPlayTrainer:
             val_reals.append(outcome)
             self.buffer.push_many(transitions)
             self._games_done += 1
+            self._on_progress({"games": self._games_done})
             self._log(
                 f"  ⚔  game {game_i+1}/{self.config.games_per_iter} "
                 f"(opp={opp_kind}) length={length} "
@@ -480,6 +484,7 @@ class SelfPlayTrainer:
             total_v += v_loss
             steps += 1
             self._grad_steps += 1
+            self._on_progress({"grad_steps": self._grad_steps})
         self.net.eval()
 
         avg_p = total_p / steps if steps else 0.0
@@ -596,12 +601,14 @@ class SelfPlayTrainer:
         os.makedirs(CHECKPOINT_DIR, exist_ok=True)
         name = f"{self.config.run_name}-iter-{iter_:04d}"
         path = os.path.join(CHECKPOINT_DIR, f"{name}.pt")
+        state_dict = self.net.state_dict()
         torch.save({
-            "state_dict": self.net.state_dict(),
+            "state_dict": state_dict,
             "iter": iter_,
             "config": asdict(self.config),
         }, path)
         size = os.path.getsize(path)
+        weight_hash = _hash_state_dict(state_dict)
         meta = {
             "name": name,
             "iter": iter_,
@@ -609,6 +616,7 @@ class SelfPlayTrainer:
             "size_bytes": size,
             "metrics": dict(eval_wr),
             "run_name": self.config.run_name,
+            "hash": weight_hash,
         }
         self._append_to_index(meta)
         self._log(
@@ -638,6 +646,18 @@ class SelfPlayTrainer:
 
     def _log(self, msg: str) -> None:
         self._on_log(msg)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Weight-hash helper (short content hash of the model parameters)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _hash_state_dict(state_dict: Dict[str, torch.Tensor]) -> str:
+    h = hashlib.sha1()
+    for k in sorted(state_dict.keys()):
+        h.update(k.encode("utf-8"))
+        h.update(state_dict[k].detach().cpu().contiguous().numpy().tobytes())
+    return h.hexdigest()[:12]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
