@@ -1381,20 +1381,10 @@ class FaBEnv:
             attacker.next_sword_attack_power_bonus = 0  # consumed by this attack declaration
         else:
             power = self._pending_attack.power + attacker.next_brute_attack_bonus
-<<<<<<< HEAD
-            if self._pending_attack.name == "Beast Mode" and attacker.intimidated_this_turn:
-                power += 2
-                self._log(f"    ⚡ Beast Mode — intimidated this turn, +2 power!")
             if attacker.next_attack_power_bonus:
                 power += attacker.next_attack_power_bonus
                 self._log(f"    ⚡ next attack action power bonus +{attacker.next_attack_power_bonus} applied.")
                 attacker.next_attack_power_bonus = 0
-=======
-        if attacker.next_attack_power_bonus:
-            power += attacker.next_attack_power_bonus
-            self._log(f"    ⚡ next attack power bonus +{attacker.next_attack_power_bonus} applied.")
-            attacker.next_attack_power_bonus = 0
->>>>>>> origin/claude/beast-mode-card-effect-M0ZGp
 
         # Baseline power; ON_ATTACK effects fired at window close may further
         # modify _pending_attack_power (e.g., DRAW_DISCARD_POWER_BONUS adds +2).
