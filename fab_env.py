@@ -563,13 +563,7 @@ class FaBEnv:
             # Pay any additional play costs before declaring the attack
             from card_effects import EffectAction, EffectTrigger
             for effect in card.effects:
-                if effect.action == EffectAction.DISCARD_CARD_COST and active.hand:
-                    discarded = self._rng.choice(active.hand)
-                    active.hand.remove(discarded)
-                    active.graveyard.append(discarded)
-                    self._log(f"    🎲 Additional cost — {active.name} discards {discarded.name}.")
-                    self._fire_effects(EffectTrigger.ON_DISCARD, {"card": discarded}, active, opponent)
-                elif effect.action == EffectAction.REVEAL_CARD_COST:
+                if effect.action == EffectAction.REVEAL_CARD_COST:
                     if any(c.cost <= 1 for c in active.hand):
                         # Transition to REVEAL phase so the player chooses which card to reveal
                         self._pending_play_card = card
