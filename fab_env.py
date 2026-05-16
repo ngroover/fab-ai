@@ -1381,6 +1381,7 @@ class FaBEnv:
             attacker.next_sword_attack_power_bonus = 0  # consumed by this attack declaration
         else:
             power = self._pending_attack.power + attacker.next_brute_attack_bonus
+<<<<<<< HEAD
             if self._pending_attack.name == "Beast Mode" and attacker.intimidated_this_turn:
                 power += 2
                 self._log(f"    ⚡ Beast Mode — intimidated this turn, +2 power!")
@@ -1388,6 +1389,12 @@ class FaBEnv:
                 power += attacker.next_attack_power_bonus
                 self._log(f"    ⚡ next attack action power bonus +{attacker.next_attack_power_bonus} applied.")
                 attacker.next_attack_power_bonus = 0
+=======
+        if attacker.next_attack_power_bonus:
+            power += attacker.next_attack_power_bonus
+            self._log(f"    ⚡ next attack power bonus +{attacker.next_attack_power_bonus} applied.")
+            attacker.next_attack_power_bonus = 0
+>>>>>>> origin/claude/beast-mode-card-effect-M0ZGp
 
         # Baseline power; ON_ATTACK effects fired at window close may further
         # modify _pending_attack_power (e.g., DRAW_DISCARD_POWER_BONUS adds +2).
@@ -1573,6 +1580,11 @@ class FaBEnv:
                         self._log(f"    ⬇  {top.name} has less than 6 power — moved to bottom of deck.")
                 else:
                     self._log(f"    🃏 {card.name} — deck is empty, no card to reveal.")
+            elif effect.action == EffectAction.IF_INTIMIDATED_POWER_BONUS:
+                if active.intimidated_this_turn:
+                    self._pending_attack_power += effect.magnitude
+                    self._log(f"    ⚡ {card.name} — intimidated this turn, +{effect.magnitude} power! "
+                              f"({self._pending_attack_power} total)")
 
     def _move_equipment_to_graveyard(self, player: Player, eq) -> None:
         """Remove a destroyed equipment from the equipment zone and put its card in the graveyard."""

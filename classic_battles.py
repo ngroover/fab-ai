@@ -52,7 +52,8 @@ CARD_CATALOG: Dict[str, Card] = {
     "beast_mode_red": Card("Beast Mode", [CardType.ATTACK, CardType.ACTION], cost=3, pitch=1,
                            power=6, defense=3, color=Color.RED,
                            card_class=CardClass.BRUTE,
-                           text="If you have intimidated this turn, Beast Mode gains +2 power."),
+                           text="If you have intimidated this turn, Beast Mode gains +2 power.",
+                           effects=[CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.IF_INTIMIDATED_POWER_BONUS, magnitude=2)]),
 
     "pack_hunt_red": Card("Pack Hunt", [CardType.ATTACK, CardType.ACTION], cost=2, pitch=1,
                           power=6, defense=3, color=Color.RED,
