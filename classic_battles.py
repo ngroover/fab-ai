@@ -31,7 +31,7 @@ CARD_CATALOG: Dict[str, Card] = {
                               keywords=[Keyword.RHINAR_SPECIALIZATION, Keyword.INTIMIDATE],
                               text="Rhinar Specialization. As an additional cost to play Alpha Rampage, discard a random card. Intimidate.",
                               effects=[
-                                  CardEffect(trigger=EffectTrigger.ON_ATTACK_PLAY, action=EffectAction.DISCARD_CARD_COST),
+                                  CardEffect(trigger=EffectTrigger.ADDITIONAL_COST, action=EffectAction.DISCARD_CARD_COST),
                               ]),
 
     "awakening_bellow_red": Card("Awakening Bellow", [CardType.ACTION], cost=1, pitch=1,
@@ -158,7 +158,7 @@ CARD_CATALOG: Dict[str, Card] = {
                               power=6, defense=3, color=Color.BLUE,
                               card_class=CardClass.BRUTE,
                               text="As an additional cost to play Wrecker Romp, discard a card.",
-                              effects=[CardEffect(trigger=EffectTrigger.ON_PLAY, action=EffectAction.DISCARD_CARD_COST)]),
+                              effects=[CardEffect(trigger=EffectTrigger.ADDITIONAL_COST, action=EffectAction.DISCARD_CARD_COST)]),
 
     # ── RHINAR — MENTOR ─────────────────────────────────────────────────────
 
@@ -215,7 +215,7 @@ CARD_CATALOG: Dict[str, Card] = {
         card_class=CardClass.GENERIC,
         text="As an additional cost to play Flock of the Feather Walkers, reveal a card in your hand with cost 1 or less.  When you attack with Flock of the Feather Walkers, create a Quicken token.",
         effects=[
-            CardEffect(trigger=EffectTrigger.ON_ATTACK_PLAY, action=EffectAction.REVEAL_CARD_COST),
+            CardEffect(trigger=EffectTrigger.ADDITIONAL_COST, action=EffectAction.REVEAL_CARD_COST),
             CardEffect(trigger=EffectTrigger.ON_ATTACK, action=EffectAction.QUICKEN_TOKEN),
         ]),
 

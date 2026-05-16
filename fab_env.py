@@ -596,9 +596,9 @@ class FaBEnv:
             self._end_attack_phase(active, opponent)
 
     def _launch_action_attack(self, card: Card, active: Player, opponent: Player):
-        """Apply ON_ATTACK_PLAY effects and enter the defend phase for an action-attack card."""
+        """Apply ADDITIONAL_COST effects and enter the defend phase for an action-attack card."""
         from card_effects import EffectTrigger
-        self._apply_card_effects(card, EffectTrigger.ON_ATTACK_PLAY, {}, active, opponent)
+        self._apply_card_effects(card, EffectTrigger.ADDITIONAL_COST, {}, active, opponent)
         self._pending_attack = card
         self._pending_is_weapon = False
         self._pending_attack_intimidate = card.power >= 6 and active.mentor_face_up
