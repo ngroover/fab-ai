@@ -560,8 +560,10 @@ class FaBEnv:
         if CardType.INSTANT in card.card_type:
             self._resolve_instant(card, active, opponent)
         elif CardType.ATTACK in card.card_type:
-            # Pay any additional play costs before declaring the attack
-            from card_effects import EffectAction, EffectTrigger
+            # REVEAL_CARD_COST needs a phase transition before launching the attack;
+            # other ADDITIONAL_COST effects (e.g. DISCARD_CARD_COST) are handled
+            # generically by _apply_card_effects inside _launch_action_attack.
+            from card_effects import EffectAction
             for effect in card.effects:
                 if effect.action == EffectAction.REVEAL_CARD_COST:
                     if any(c.cost <= 1 for c in active.hand):
