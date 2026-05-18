@@ -70,6 +70,9 @@ card_embeddings_out/
 # Self-play trainer checkpoints
 checkpoints/
 
+# cProfile output
+*.prof
+
 # Flask stuff:
 instance/
 .webassets-cache
