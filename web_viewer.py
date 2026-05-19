@@ -2178,7 +2178,7 @@ class _TrainingSession:
 
     @staticmethod
     def _build_config(raw: dict):
-        from self_play_trainer import TrainerConfig
+        from self_play_trainer import DECK_BUILDERS, TrainerConfig
 
         def _get_int(key, default):
             try:
@@ -2203,6 +2203,14 @@ class _TrainingSession:
         opp_pool = raw.get("opponent_pool") or ["self"]
         if isinstance(opp_pool, str):
             opp_pool = [o.strip() for o in opp_pool.split(",") if o.strip()]
+
+        deck_pool_raw = raw.get("deck_pool")
+        if isinstance(deck_pool_raw, str):
+            deck_pool_raw = [d.strip() for d in deck_pool_raw.split(",")
+                             if d.strip()]
+        deck_pool = [d for d in (deck_pool_raw or []) if d in DECK_BUILDERS]
+        if not deck_pool:
+            deck_pool = list(DECK_BUILDERS.keys())
 
         seed_raw = raw.get("seed")
         seed = None
@@ -2229,6 +2237,7 @@ class _TrainingSession:
             eval_games=_get_int("eval_games", 4),
             eval_every=_get_int("eval_every", 1),
             opponent_pool=tuple(opp_pool),
+            deck_pool=tuple(deck_pool),
             run_name=str(raw.get("run_name") or ""),
             base_checkpoint=base_ckpt,
             seed=seed,
@@ -3549,6 +3558,15 @@ TRAIN_TEMPLATE = """
       </div>
 
       <div class="panel">
+        <h2>Deck pool</h2>
+        <div class="chip-row" id="deck-chips">
+          <button class="chip active" data-deck="rhinar">Rhinar</button>
+          <button class="chip active" data-deck="dorinthea">Dorinthea</button>
+        </div>
+        <span class="help">Each side's deck is sampled independently per game; mirror matchups can occur.</span>
+      </div>
+
+      <div class="panel">
         <h2>Loop sizes</h2>
         <div class="field-grid">
           <div class="field">
@@ -3796,6 +3814,10 @@ TRAIN_TEMPLATE = """
     document.querySelectorAll('#opp-chips .chip').forEach(c =>
       c.addEventListener('click', () => c.classList.toggle('active')));
 
+    // ── Deck chip toggling ───────────────────────────
+    document.querySelectorAll('#deck-chips .chip').forEach(c =>
+      c.addEventListener('click', () => c.classList.toggle('active')));
+
     // ── Buttons + backend wiring ──────────────────────────────
     const btnStart  = document.getElementById('btn-start');
     const btnPause  = document.getElementById('btn-pause');
@@ -3821,6 +3843,8 @@ TRAIN_TEMPLATE = """
       // Opponent pool from the active chips
       const opps = Array.from(document.querySelectorAll('#opp-chips .chip.active'))
         .map(c => c.dataset.opp);
+      const decks = Array.from(document.querySelectorAll('#deck-chips .chip.active'))
+        .map(c => c.dataset.deck);
       const baseRaw = document.getElementById('cfg-base').value;
       return {
         games_per_iter: document.getElementById('cfg-games').value,
@@ -3833,6 +3857,7 @@ TRAIN_TEMPLATE = """
         determinize:    document.getElementById('cfg-pimc').value === 'on',
         n_simulations:  32,
         opponent_pool:  opps.length ? opps : ['self'],
+        deck_pool:      decks.length ? decks : ['rhinar', 'dorinthea'],
         run_name:       document.getElementById('cfg-name').value || '',
         base_checkpoint: (baseRaw && baseRaw !== 'random') ? baseRaw : null,
       };

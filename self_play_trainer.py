@@ -59,6 +59,18 @@ from alpha_zero_mcts import PUCTSearch, sample_action_index
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Deck pool
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Map of pool name → zero-arg builder. Each game samples one entry per side
+# independently, so mirror matchups (e.g. rhinar vs rhinar) can occur.
+DECK_BUILDERS: Dict[str, Callable[[], list]] = {
+    "rhinar": build_rhinar_deck,
+    "dorinthea": build_dorinthea_deck,
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -100,6 +112,10 @@ class TrainerConfig:
 
     # Bookkeeping
     opponent_pool: Tuple[str, ...] = ("self",)
+    # Pool of decks to draw from per side, per game. Each agent's deck is
+    # sampled independently, so e.g. rhinar-vs-rhinar mirrors can occur.
+    # Names must be keys in DECK_BUILDERS.
+    deck_pool: Tuple[str, ...] = ("rhinar", "dorinthea")
     run_name: str = ""               # auto-set if blank
     base_checkpoint: Optional[str] = None  # name in ./checkpoints/, or None
     seed: Optional[int] = None
@@ -297,8 +313,9 @@ class SelfPlayTrainer:
                 break
             self._wait_if_paused()
             opp_kind = self._rng.choice(self.config.opponent_pool or ("self",))
+            deck0_name, deck1_name = self._sample_deck_pair()
             transitions, outcome, length, pred_avg = \
-                self._play_one_self_play_game(opp_kind)
+                self._play_one_self_play_game(opp_kind, deck0_name, deck1_name)
             ep_lens.append(length)
             val_preds.append(pred_avg)
             val_reals.append(outcome)
@@ -307,7 +324,8 @@ class SelfPlayTrainer:
             self._on_progress({"games": self._games_done})
             self._log(
                 f"  ⚔  game {game_i+1}/{self.config.games_per_iter} "
-                f"(opp={opp_kind}) length={length} "
+                f"(opp={opp_kind}, decks={deck0_name} vs {deck1_name}) "
+                f"length={length} "
                 f"outcome(p0)={outcome:+.0f} "
                 f"v̂(p0)={pred_avg:+.3f} "
                 f"buffer={len(self.buffer)}"
@@ -317,13 +335,13 @@ class SelfPlayTrainer:
         return ep_lens, avg_pred, avg_real
 
     def _play_one_self_play_game(
-        self, opp_kind: str
+        self, opp_kind: str, deck0_name: str, deck1_name: str,
     ) -> Tuple[List[Transition], float, int, float]:
         """Play one game and return (transitions, p0_outcome, length, avg_pred_v_p0)."""
         env = FaBEnv(verbose=False)
         env.reset(
-            build_rhinar_deck(),
-            build_dorinthea_deck(),
+            _build_deck(deck0_name),
+            _build_deck(deck1_name),
             seed=self._rng.randrange(2**31),
         )
 
@@ -414,6 +432,13 @@ class SelfPlayTrainer:
         if decision_idx < cfg.temp_drop_step:
             return cfg.temp_start
         return cfg.temp_end
+
+    def _sample_deck_pair(self) -> Tuple[str, str]:
+        """Pick a deck name for each side independently from `deck_pool`."""
+        pool = [d for d in (self.config.deck_pool or ()) if d in DECK_BUILDERS]
+        if not pool:
+            pool = list(DECK_BUILDERS.keys())
+        return self._rng.choice(pool), self._rng.choice(pool)
 
     def _make_opponent(self, kind: str):
         if kind in ("self",):
@@ -513,7 +538,10 @@ class SelfPlayTrainer:
                 if self._should_stop():
                     break
                 net_seat = self._rng.choice((0, 1))
-                outcome = self._play_one_eval_game(opp_name, net_seat)
+                deck0_name, deck1_name = self._sample_deck_pair()
+                outcome = self._play_one_eval_game(
+                    opp_name, net_seat, deck0_name, deck1_name
+                )
                 total += 1
                 if outcome > 0:
                     wins += 1
@@ -522,12 +550,15 @@ class SelfPlayTrainer:
             self._log(f"  🎯  vs {opp_name}: {wins}/{total} = {wr*100:.0f}%")
         return results
 
-    def _play_one_eval_game(self, opp_name: str, net_seat: int) -> float:
+    def _play_one_eval_game(
+        self, opp_name: str, net_seat: int,
+        deck0_name: str, deck1_name: str,
+    ) -> float:
         """Return +1/0/-1 from the *network's* perspective."""
         env = FaBEnv(verbose=False)
         env.reset(
-            build_rhinar_deck(),
-            build_dorinthea_deck(),
+            _build_deck(deck0_name),
+            _build_deck(deck1_name),
             seed=self._rng.randrange(2**31),
         )
         net_agent = NeuralAgent(model=self.net)
@@ -611,6 +642,19 @@ class SelfPlayTrainer:
 
     def _log(self, msg: str) -> None:
         self._on_log(msg)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Deck builder dispatch
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_deck(name: str) -> list:
+    builder = DECK_BUILDERS.get(name)
+    if builder is None:
+        raise KeyError(
+            f"Unknown deck {name!r}; known: {sorted(DECK_BUILDERS)}"
+        )
+    return builder()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -702,11 +746,30 @@ def _build_cli() -> argparse.ArgumentParser:
                    help="Base checkpoint name (under ./checkpoints/)")
     p.add_argument("--no-pimc", action="store_true",
                    help="Disable PIMC determinization")
+    p.add_argument(
+        "--deck-pool", type=str, default="",
+        help=(
+            "Comma-separated deck pool for both sides "
+            f"(choices: {','.join(sorted(DECK_BUILDERS))}). "
+            "Each side's deck is sampled independently per game."
+        ),
+    )
     return p
 
 
 def main() -> None:
     args = _build_cli().parse_args()
+    deck_pool: Tuple[str, ...] = TrainerConfig.deck_pool
+    if args.deck_pool:
+        names = [n.strip() for n in args.deck_pool.split(",") if n.strip()]
+        unknown = [n for n in names if n not in DECK_BUILDERS]
+        if unknown:
+            raise SystemExit(
+                f"Unknown deck(s) in --deck-pool: {unknown}; "
+                f"choices: {sorted(DECK_BUILDERS)}"
+            )
+        if names:
+            deck_pool = tuple(names)
     cfg = TrainerConfig(
         games_per_iter=args.games,
         steps_per_iter=args.steps,
@@ -720,6 +783,7 @@ def main() -> None:
         seed=args.seed,
         run_name=args.run_name,
         base_checkpoint=args.base,
+        deck_pool=deck_pool,
     )
     SelfPlayTrainer(cfg).run()
 
