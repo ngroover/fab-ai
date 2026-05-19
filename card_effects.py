@@ -104,3 +104,11 @@ class CardEffect:
         if self.condition is not None:
             return self.condition(context)
         return True
+
+    # CardEffect instances live on Card templates and are never mutated at
+    # runtime, so deepcopy/copy can safely share the original.
+    def __deepcopy__(self, memo):
+        return self
+
+    def __copy__(self):
+        return self
