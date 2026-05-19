@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Optional
 
 from fab_env import FaBEnv, Phase
-from agents import RhinarAgent, DorintheiAgent, HumanAgent, RandomAgent
+from agents import HumanAgent, RandomAgent
 from neural_agent import NeuralAgent
 from actions import ActionType
 from cards import build_rhinar_deck, build_dorinthea_deck
@@ -33,10 +33,6 @@ _AGENT_CHOICES = ("rhinar", "dorinthea", "random", "human", "neural")
 def _make_agent(name: str):
     """Return an agent instance for the given name string."""
     name = name.lower().strip()
-    if name == "rhinar":
-        return RhinarAgent()
-    if name == "dorinthea":
-        return DorintheiAgent()
     if name == "random":
         return RandomAgent()
     if name == "human":
@@ -89,9 +85,8 @@ def run_game(
     """
     Run one complete game. Returns the winning agent id, or None for draw.
 
-    agent0 / agent1 accept any agent instance (RhinarAgent, DorintheiAgent,
-    RandomAgent, HumanAgent, or custom).  When provided they take precedence
-    over rhinar_is_human / dorinthea_is_human.
+    agent0 / agent1 accept any agent instance (RandomAgent, HumanAgent, or custom). 
+    When provided they take precedence over rhinar_is_human / dorinthea_is_human.
     """
     log_file = _new_log_path(seed) if save_log else None
     env = FaBEnv(verbose=verbose, log_file=log_file)
@@ -100,7 +95,7 @@ def run_game(
                            seed=seed)
 
     if agent0 is None:
-        agent0 = HumanAgent() if rhinar_is_human else RhinarAgent()
+        agent0 = HumanAgent() if rhinar_is_human else RandomAgent()
     if agent1 is None:
         agent1 = HumanAgent() if dorinthea_is_human else DorintheiAgent()
 

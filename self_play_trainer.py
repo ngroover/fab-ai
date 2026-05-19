@@ -15,7 +15,7 @@ A single iteration is:
        where z is the game outcome from each transition's `to_play` view.
 
     3. EVAL (every `eval_every` iters): play `eval_games` games against each
-       fixed opponent (RhinarAgent, DorintheiAgent, RandomAgent) with greedy
+       fixed opponent (RandomAgent) with greedy
        net inference (no MCTS) and record win rates.
 
     4. CHECKPOINT: write `state_dict` to `./checkpoints/<name>.pt` and update
@@ -46,7 +46,7 @@ import torch
 import torch.nn.functional as F
 
 from actions import Action
-from agents import DorintheiAgent, RandomAgent, RhinarAgent
+from agents import RandomAgent
 from cards import build_dorinthea_deck, build_rhinar_deck
 from fab_env import FaBEnv, Phase
 from neural_agent import (
@@ -449,10 +449,6 @@ class SelfPlayTrainer:
     def _make_opponent(self, kind: str):
         if kind in ("self",):
             return None  # PUCTSearch handles both sides
-        if kind == "rhinar":
-            return RhinarAgent()
-        if kind == "dorinthea":
-            return DorintheiAgent()
         if kind == "random":
             return RandomAgent(seed=self._rng.randrange(2**31))
         # Unknown → self

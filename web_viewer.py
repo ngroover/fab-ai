@@ -1931,7 +1931,7 @@ class _GameSession:
     def _run_inner(self, p0_agent: str, p1_agent: str, seed,
                    deck0_id=None, deck1_id=None):
         from fab_env import FaBEnv, Phase
-        from agents import RhinarAgent, DorintheiAgent, RandomAgent
+        from agents import  RandomAgent
         from mcts_agent import MCTSAgent
         from actions import ActionType
 
@@ -1952,7 +1952,7 @@ class _GameSession:
                 if neural is not None:
                     return neural
                 self.append_log(f"  ⚠  Model {ckpt_name!r} not found; falling back to rule-based agent.")
-            return RhinarAgent() if player_idx == 0 else DorintheiAgent()
+            return RandomAgent()
 
         agent_0 = _make_agent(p0_agent, 0)
         agent_1 = _make_agent(p1_agent, 1)
@@ -2696,7 +2696,6 @@ PLAY_TEMPLATE = """
             </select>
             <div class="slot-label">Agent</div>
             <select name="player0" class="agent-select">
-              <option value="ai">🤖 AI</option>
               <option value="mcts">🌲 MCTS</option>
               <option value="random">🎲 Random</option>
               <option value="human">👤 Human</option>
@@ -3603,8 +3602,6 @@ TRAIN_TEMPLATE = """
         <div class="chip-row" id="opp-chips">
           <button class="chip active" data-opp="self">Self (current)</button>
           <button class="chip" data-opp="past">Past checkpoint</button>
-          <button class="chip" data-opp="rhinar">RhinarAgent</button>
-          <button class="chip" data-opp="dorinthea">DorintheiAgent</button>
           <button class="chip" data-opp="random">RandomAgent</button>
           <button class="chip" data-opp="mcts">MCTSAgent (200 sims)</button>
         </div>
@@ -3728,14 +3725,6 @@ TRAIN_TEMPLATE = """
         <div class="panel">
           <h2>Win rate vs opponents</h2>
           <div class="sparks">
-            <div class="spark">
-              <div class="spark-title"><span class="t">vs RhinarAgent</span><span class="v" id="sv-wr-rhinar">—</span></div>
-              <svg viewBox="0 0 200 60" preserveAspectRatio="none"><polyline class="line win" id="sl-wr-rhinar" points=""/></svg>
-            </div>
-            <div class="spark">
-              <div class="spark-title"><span class="t">vs DorintheiAgent</span><span class="v" id="sv-wr-dor">—</span></div>
-              <svg viewBox="0 0 200 60" preserveAspectRatio="none"><polyline class="line win" id="sl-wr-dor" points=""/></svg>
-            </div>
             <div class="spark">
               <div class="spark-title"><span class="t">vs RandomAgent</span><span class="v" id="sv-wr-rand">—</span></div>
               <svg viewBox="0 0 200 60" preserveAspectRatio="none"><polyline class="line win" id="sl-wr-rand" points=""/></svg>
