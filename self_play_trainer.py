@@ -48,7 +48,7 @@ import torch.nn.functional as F
 from actions import Action
 from agents import RandomAgent
 from cards import build_dorinthea_deck, build_rhinar_deck
-from fab_env import FaBEnv, Phase
+from fab_env import FaBEnv
 from neural_agent import (
     NeuralAgent,
     PolicyValueNetwork,
@@ -139,51 +139,20 @@ class ReplayBuffer:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase-aware action dispatch (mirrors run_env.run_game)
+# Agent action dispatch
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _dispatch_agent_action(env: FaBEnv, agent, obs: dict) -> Action:
-    """Ask `agent` for an action in the env's current phase. Mirrors the
-    dispatch block in run_env.run_game so any rule-based agent slots in."""
+    """Ask `agent` for an action in the env's current phase."""
     agent_id = env.agent_selection
     player_idx = int(agent_id[-1])
     player = env._game.players[player_idx]
     opponent = env._game.players[1 - player_idx]
     legal = env.legal_actions()
     agent_obs = obs.get(agent_id) if isinstance(obs, dict) else None
-
-    phase = env._phase
-    if phase == Phase.ATTACK:
-        return agent.select_action(agent_obs, legal, player, opponent)
-    if phase == Phase.DEFEND:
-        return agent.select_defend(
-            agent_obs, legal, player,
-            env._pending_attack_power, env._pending_defend_total,
-        )
-    if phase == Phase.PITCH:
-        return agent.select_pitch(
-            agent_obs, legal, player, env._pending_play_card
-        )
-    if phase == Phase.REACTION:
-        ap = env._pending_attack_power
-        is_attacker = player_idx == env._reaction_attacker_idx
-        return agent.select_reaction(agent_obs, legal, player, ap, is_attacker)
-    if phase == Phase.INSTANT:
-        ap = env._pending_attack_power if env._pending_attack is not None else 0
-        return agent.select_instant(agent_obs, legal, player, ap)
-    if phase == Phase.ARSENAL:
-        return agent.select_arsenal(agent_obs, legal, player)
-    if phase == Phase.PITCH_ORDER:
-        return agent.select_pitch_order(agent_obs, legal, player)
-    if phase == Phase.CHOOSE_FIRST:
-        return agent.select_choose_first(legal, player)
-    if phase == Phase.MENTOR_FLIP:
-        if hasattr(agent, "select_mentor_flip"):
-            return agent.select_mentor_flip(agent_obs, legal, player)
-    if phase == Phase.REVEAL:
-        if hasattr(agent, "select_reveal"):
-            return agent.select_reveal(agent_obs, legal, player)
-    return legal[0]
+    return agent.select_action(
+        agent_obs, legal, player, opponent, env.build_action_context()
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

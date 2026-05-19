@@ -24,7 +24,7 @@ from collections import Counter
 from typing import Dict, List, Optional
 
 from cards import build_rhinar_deck, build_dorinthea_deck, CardType
-from fab_env import FaBEnv, Phase
+from fab_env import FaBEnv
 from actions import Action
 from agents import RandomAgent
 
@@ -125,46 +125,17 @@ def _determinize(sim_env: FaBEnv, my_player_idx: int, rng: random.Random) -> Non
 
 
 def _dispatch_action(env: FaBEnv, agent, agent_id: str) -> None:
-    """Ask *agent* for a decision and step *env* with it.
-
-    Mirrors the dispatch logic in run_env.run_game() so that RandomAgent
-    can drive the sim correctly through all phases.
-    """
+    """Ask *agent* for a decision and step *env* with it."""
     player_idx = int(agent_id[-1])
     player = env._game.players[player_idx]
     opponent = env._game.players[1 - player_idx]
-    obs = env._get_obs()
     legal = env.legal_actions()
     if not legal:
         return
-
-    phase = env._phase
-    if phase == Phase.ATTACK:
-        action = agent.select_action(obs[agent_id], legal, player, opponent)
-    elif phase == Phase.DEFEND:
-        action = agent.select_defend(
-            obs[agent_id], legal, player,
-            env._pending_attack_power,
-            env._pending_defend_total,
-        )
-    elif phase == Phase.PITCH:
-        action = agent.select_pitch(
-            obs[agent_id], legal, player, env._pending_play_card
-        )
-    elif phase == Phase.REACTION:
-        is_attacker = player_idx == env._reaction_attacker_idx
-        action = agent.select_reaction(
-            obs[agent_id], legal, player,
-            env._pending_attack_power, is_attacker,
-        )
-    elif phase == Phase.INSTANT:
-        ap = env._pending_attack_power if env._pending_attack is not None else 0
-        action = agent.select_instant(obs[agent_id], legal, player, ap)
-    elif phase == Phase.ARSENAL:
-        action = agent.select_arsenal(obs[agent_id], legal, player)
-    else:
-        action = legal[0]
-
+    agent_obs = env._get_obs().get(agent_id)
+    action = agent.select_action(
+        agent_obs, legal, player, opponent, env.build_action_context()
+    )
     env.step(action)
 
 
@@ -315,34 +286,9 @@ class MCTSAgent:
         return None, None
 
     # ------------------------------------------------------------------
-    # Agent interface — all delegate to _mcts_select
+    # Agent interface
     # ------------------------------------------------------------------
 
-    def select_action(self, obs, legal, player, opponent) -> Action:
-        return self._mcts_select(legal)
-
-    def select_defend(self, obs, legal, player, attack_power,
-                      already_defense=0) -> Action:
-        return self._mcts_select(legal)
-
-    def select_pitch(self, obs, legal, player, pending_card=None) -> Action:
-        return self._mcts_select(legal)
-
-    def select_arsenal(self, obs, legal, player) -> Action:
-        return self._mcts_select(legal)
-
-    def select_pitch_order(self, obs, legal, player) -> Action:
-        return self._mcts_select(legal)
-
-    def select_instant(self, obs, legal, player, attack_power=0) -> Action:
-        return self._mcts_select(legal)
-
-    def select_reaction(self, obs, legal, player,
-                        attack_power=0, is_attacker=False) -> Action:
-        return self._mcts_select(legal)
-
-    def select_choose_first(self, legal, player) -> Action:
-        return self._mcts_select(legal)
-
-    def select_pitch_order(self, obs, legal, player) -> Action:
+    def select_action(self, obs, legal, player, opponent=None,
+                      context=None) -> Action:
         return self._mcts_select(legal)

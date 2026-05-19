@@ -15,7 +15,7 @@ Blitz format, **Rhinar vs Dorinthea**, 20 life / intellect 4 each.
 | `observations.py` | `CARD_VOCAB`, `CARD_IDX`, `PLAYER_OBS_SIZE`; `encode_player()`, `encode_opponent_public()`, `build_observation()` |
 | `spaces.py` | Lightweight gymnasium-compatible `Discrete`, `Box`, `Dict` spaces (no gymnasium dependency) |
 | `fab_env.py` | `FaBEnv` — main gym-style environment; `Phase` enum; `_make_rhinar()` / `_make_dorinthea()` factories |
-| `agents.py` | Rule-based agents: `RhinarAgent`, `DorintheiAgent`, `HumanAgent`; each has `select_action`, `select_defend`, `select_arsenal`, `select_pitch` |
+| `agents.py` | Agents: `RandomAgent`, `HumanAgent`. Each implements `select_action(obs, legal, player, opponent, context=None)` — `context` is the dict from `FaBEnv.build_action_context()` and carries phase-specific info (e.g. `attack_power`, `pending_card`, `is_attacker`) |
 | `seed_decks.py` | Deterministic deck seeds for reproducible tests |
 | `deck_db.py` | Card lookup / deck database helpers |
 | `run_env.py` | CLI entry point to run games or RL training loops |

@@ -1694,41 +1694,15 @@ class _WebHumanAgent:
             return f"PAY 1 — {card_name} gains +2 block (destroyed on chain close)"
         return str(action)
 
-    def _pend(self, legal, player, phase, attack_power=0):
+    def select_action(self, obs, legal, player, opponent=None, context=None):
+        phase = context.get("phase") if context else None
+        phase_name = phase.name if phase is not None else "ATTACK"
+        attack_power = context.get("attack_power", 0) if context else 0
+
         labels = [self._fmt_action(a, player) for a in legal]
-        self.session.set_pending(legal, labels, phase, self.agent_id, attack_power)
+        self.session.set_pending(legal, labels, phase_name, self.agent_id, attack_power)
         self.session.wait_for_choice()
         return self.session.take_choice()
-
-    def select_action(self, obs, legal, player, opponent):
-        return self._pend(legal, player, "ATTACK")
-
-    def select_defend(self, obs, legal, player, attack_power):
-        return self._pend(legal, player, "DEFEND", attack_power)
-
-    def select_arsenal(self, obs, legal, player):
-        return self._pend(legal, player, "ARSENAL")
-
-    def select_pitch(self, obs, legal, player, pending_card=None):
-        return self._pend(legal, player, "PITCH")
-
-    def select_instant(self, obs, legal, player, attack_power=0):
-        return self._pend(legal, player, "INSTANT", attack_power)
-
-    def select_reaction(self, obs, legal, player, attack_power=0):
-        return self._pend(legal, player, "REACTION", attack_power)
-
-    def select_pitch_order(self, obs, legal, player):
-        return self._pend(legal, player, "PITCH_ORDER")
-
-    def select_mentor_flip(self, obs, legal, player):
-        return self._pend(legal, player, "MENTOR_FLIP")
-
-    def select_reveal(self, obs, legal, player):
-        return self._pend(legal, player, "REVEAL")
-
-    def select_choose_first(self, legal, player):
-        return self._pend(legal, player, "CHOOSE_FIRST")
 
 
 def _load_neural_agent(ckpt_name: str):
@@ -1930,10 +1904,9 @@ class _GameSession:
 
     def _run_inner(self, p0_agent: str, p1_agent: str, seed,
                    deck0_id=None, deck1_id=None):
-        from fab_env import FaBEnv, Phase
-        from agents import  RandomAgent
+        from fab_env import FaBEnv
+        from agents import RandomAgent
         from mcts_agent import MCTSAgent
-        from actions import ActionType
 
         env = FaBEnv(verbose=False, log_callback=self.append_log,
                      log_callback_p0=self.append_log_p0,
@@ -1991,43 +1964,10 @@ class _GameSession:
                 self.current_agent = agent_id
                 self.phase = env._phase.name
 
-            if env._phase == Phase.CHOOSE_FIRST:
-                action = agent.select_choose_first(legal, player)
-            elif env._phase == Phase.ATTACK:
-                action = agent.select_action(obs[agent_id], legal, player, opponent)
-            elif env._phase == Phase.DEFEND:
-                action = agent.select_defend(obs[agent_id], legal, player,
-                                             env._pending_attack_power)
-            elif env._phase == Phase.INSTANT:
-                # Only expose attack_power when the window is an attack
-                # reaction (pending attack set); end-of-combat / end-of-turn
-                # windows should show no incoming-power badge.
-                ap = (env._pending_attack_power
-                      if env._pending_attack is not None else 0)
-                action = agent.select_instant(obs[agent_id], legal, player, ap)
-            elif env._phase == Phase.REACTION:
-                action = agent.select_reaction(obs[agent_id], legal, player,
-                                               env._pending_attack_power)
-            elif env._phase == Phase.ARSENAL:
-                action = agent.select_arsenal(obs[agent_id], legal, player)
-            elif env._phase == Phase.PITCH:
-                action = agent.select_pitch(obs[agent_id], legal, player,
-                                            env._pending_play_card)
-            elif env._phase == Phase.PITCH_ORDER:
-                action = agent.select_pitch_order(obs[agent_id], legal, player)
-            elif env._phase == Phase.MENTOR_FLIP:
-                if hasattr(agent, 'select_mentor_flip'):
-                    action = agent.select_mentor_flip(obs[agent_id], legal, player)
-                else:
-                    action = next(a for a in legal if a.action_type == ActionType.MENTOR_FLIP and a.flip)
-            elif env._phase == Phase.REVEAL:
-                if hasattr(agent, 'select_reveal'):
-                    action = agent.select_reveal(obs[agent_id], legal, player)
-                else:
-                    action = legal[0]
-            else:
-                action = legal[0]
-
+            action = agent.select_action(
+                obs[agent_id], legal, player, opponent,
+                env.build_action_context(),
+            )
             obs, _, _, _, _ = env.step(action)
             self._update_stats(env)
 

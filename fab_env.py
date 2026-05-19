@@ -364,6 +364,28 @@ class FaBEnv:
             return legal_mentor_flip_actions()
         return []
 
+    def build_action_context(self) -> dict:
+        """Phase-specific info an agent may need when choosing an action.
+
+        Always contains "phase"; other keys are populated only for the phases
+        that need them. Lets callers invoke `agent.select_action(...)` once
+        instead of dispatching to a separate selector per phase.
+        """
+        ctx: dict = {"phase": self._phase}
+        if self._phase == Phase.DEFEND:
+            ctx["attack_power"] = self._pending_attack_power
+            ctx["already_defense"] = self._pending_defend_total
+        elif self._phase == Phase.REACTION:
+            ctx["attack_power"] = self._pending_attack_power
+            player_idx = int(self.agent_selection[-1])
+            ctx["is_attacker"] = player_idx == self._reaction_attacker_idx
+        elif self._phase == Phase.INSTANT:
+            ctx["attack_power"] = (self._pending_attack_power
+                                   if self._pending_attack is not None else 0)
+        elif self._phase == Phase.PITCH:
+            ctx["pending_card"] = self._pending_play_card
+        return ctx
+
     # ──────────────────────────────────────────────────────────
     # Internal: action handlers
     # ──────────────────────────────────────────────────────────
