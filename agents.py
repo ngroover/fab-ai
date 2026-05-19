@@ -2,10 +2,12 @@
 Rule-based agents for FaBEnv.
 
 Each agent implements:
-    select_action(obs, legal_actions, player, opponent) -> Action
+    select_action(obs, legal, player, opponent, context=None) -> Action
 
-These are the same heuristics from ai.py, now decoupled from the engine.
-They can be used as baselines or opponents during RL training.
+`context` is the dict returned by `FaBEnv.build_action_context()`; it
+always carries a `"phase"` key (a `Phase` enum value) and may carry
+phase-specific extras like `attack_power`, `pending_card`, or
+`is_attacker`. Agents that don't care about phase ignore it.
 
 HumanAgent prompts a human player via stdin for each decision.
 """
@@ -89,34 +91,9 @@ class RandomAgent:
     def __init__(self, seed: Optional[int] = None):
         self._rng = _random_module.Random(seed)
 
-    def select_action(self, obs: dict, legal: List[Action], player: 'Player',
-                      opponent: 'Player') -> Action:
-        return self._rng.choice(legal)
-
-    def select_defend(self, obs: dict, legal: List[Action], player: 'Player',
-                      attack_power: int, already_defense: int = 0) -> Action:
-        return self._rng.choice(legal)
-
-    def select_arsenal(self, obs: dict, legal: List[Action],
-                       player: 'Player') -> Action:
-        return self._rng.choice(legal)
-
-    def select_pitch(self, obs: dict, legal: List[Action], player: 'Player',
-                     pending_card=None) -> Action:
-        return self._rng.choice(legal)
-
-    def select_pitch_order(self, obs: dict, legal: List[Action], player: 'Player') -> Action:
-        return self._rng.choice(legal)
-
-    def select_instant(self, obs: dict, legal: List[Action], player: 'Player',
-                       attack_power: int = 0) -> Action:
-        return self._rng.choice(legal)
-
-    def select_reaction(self, obs: dict, legal: List[Action], player: 'Player',
-                        attack_power: int = 0, is_attacker: bool = False) -> Action:
-        return self._rng.choice(legal)
-
-    def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
+    def select_action(self, obs: Optional[dict], legal: List[Action],
+                      player: 'Player', opponent: Optional['Player'] = None,
+                      context: Optional[dict] = None) -> Action:
         return self._rng.choice(legal)
 
 
@@ -128,10 +105,9 @@ class HumanAgent:
     """
     Interactive agent that prompts the human player via stdin.
 
-    Supports all three decision phases:
-        select_action  — attack phase
-        select_defend  — defend phase
-        select_arsenal — end-of-turn arsenal storage
+    Implements the unified `select_action(obs, legal, player, opponent,
+    context)` interface and dispatches on `context["phase"]` to show the
+    right prompt for each game phase.
     """
 
     # ── Display helpers ──────────────────────────────────────
@@ -257,20 +233,32 @@ class HumanAgent:
             except (ValueError, KeyboardInterrupt):
                 print("  Invalid input — enter the number of your chosen action.")
 
-    # ── Decision methods ─────────────────────────────────────
+    # ── Decision dispatch ────────────────────────────────────
 
-    def select_action(self, obs: dict, legal: List[Action], player: 'Player',
-                      opponent: 'Player') -> Action:
+    def select_action(self, obs: Optional[dict], legal: List[Action],
+                      player: 'Player', opponent: Optional['Player'] = None,
+                      context: Optional[dict] = None) -> Action:
+        phase = context.get("phase") if context else None
+        phase_name = phase.name if phase is not None else "ATTACK"
+
         print(f"\n{'═' * 60}")
-        print(f"  ATTACK PHASE — your turn")
-        self._show_stats(player, opponent)
+        handler = self._PHASE_HANDLERS.get(phase_name, HumanAgent._render_attack)
+        prompt = handler(self, player, opponent, context or {})
+        return self._choose(legal, player, prompt)
+
+    # ── Per-phase renderers (called by select_action) ─────────
+
+    def _render_attack(self, player, opponent, context):
+        print("  ATTACK PHASE — your turn")
+        if opponent is not None:
+            self._show_stats(player, opponent)
         self._show_hand(player)
         self._show_equipment(player)
-        return self._choose(legal, player, "Choose an action:")
+        return "Choose an action:"
 
-    def select_defend(self, obs: dict, legal: List[Action], player: 'Player',
-                      attack_power: int, already_defense: int = 0) -> Action:
-        print(f"\n{'═' * 60}")
+    def _render_defend(self, player, opponent, context):
+        attack_power = context.get("attack_power", 0)
+        already_defense = context.get("already_defense", 0)
         print(f"  DEFEND PHASE — incoming attack power: {attack_power}")
         if already_defense > 0:
             remaining = max(0, attack_power - already_defense)
@@ -279,66 +267,72 @@ class HumanAgent:
             print(f"  Your life: {player.life}  (damage if unblocked: {max(0, attack_power)})")
         self._show_hand(player)
         self._show_equipment(player)
-        return self._choose(legal, player, "Add a card to your defense (or choose done):")
+        return "Add a card to your defense (or choose done):"
 
-    def select_arsenal(self, obs: dict, legal: List[Action], player: 'Player') -> Action:
-        print(f"\n{'═' * 60}")
-        print(f"  ARSENAL PHASE — end of your turn")
+    def _render_arsenal(self, player, opponent, context):
+        print("  ARSENAL PHASE — end of your turn")
         print(f"  Your life: {player.life}")
         self._show_hand(player)
-        return self._choose(legal, player, "Store a card in arsenal?")
+        return "Store a card in arsenal?"
 
-    def select_pitch(self, obs: dict, legal: List[Action], player: 'Player',
-                     pending_card=None) -> Action:
-        print(f"\n{'═' * 60}")
+    def _render_pitch(self, player, opponent, context):
+        pending_card = context.get("pending_card")
         card_str = f" for {pending_card.name}" if pending_card else ""
         needed = max(0, pending_card.cost - player.resource_points) if pending_card else "?"
         print(f"  PITCH PHASE — choose cards to pitch{card_str}")
         print(f"  Resources still needed: {needed}")
         print(f"  Current resources: {player.resource_points}")
         self._show_hand(player)
-        return self._choose(legal, player, "Choose cards to pitch:")
+        return "Choose cards to pitch:"
 
-    def select_pitch_order(self, obs: dict, legal: List[Action], player: 'Player') -> Action:
-        print(f"\n{'═' * 60}")
-        print(f"  PITCH ORDER — choose the order to place pitched cards at deck bottom")
-        print(f"  The first card you choose will be deepest in the deck.")
+    def _render_pitch_order(self, player, opponent, context):
+        print("  PITCH ORDER — choose the order to place pitched cards at deck bottom")
+        print("  The first card you choose will be deepest in the deck.")
         print(f"  Pitch zone ({len(player.pitch_zone)} card(s)):")
         for i, c in enumerate(player.pitch_zone):
             print(f"    [{i}] {self._fmt_card(c)}")
-        return self._choose(legal, player, "Which card goes to deck bottom next?")
+        return "Which card goes to deck bottom next?"
 
-    def select_instant(self, obs: dict, legal: List[Action], player: 'Player',
-                        attack_power: int = 0) -> Action:
-        print(f"\n{'═' * 60}")
+    def _render_instant(self, player, opponent, context):
+        attack_power = context.get("attack_power", 0)
         print(f"  INSTANT WINDOW — {player.name}")
         if attack_power > 0:
             print(f"  ⚔ Incoming attack: {attack_power} power")
         print(f"  Your life: {player.life} | resources: {player.resource_points}")
         self._show_hand(player)
-        return self._choose(legal, player, "Play an instant or pass priority:")
+        return "Play an instant or pass priority:"
 
-    def select_reaction(self, obs: dict, legal: List[Action], player: 'Player',
-                        attack_power: int = 0, is_attacker: bool = False) -> Action:
-        print(f"\n{'═' * 60}")
+    def _render_reaction(self, player, opponent, context):
+        attack_power = context.get("attack_power", 0)
+        is_attacker = context.get("is_attacker", False)
         role = "ATTACKER" if is_attacker else "DEFENDER"
         print(f"  REACTION PHASE — {player.name} ({role})")
         print(f"  ⚔ Attack power: {attack_power}")
         print(f"  Your life: {player.life} | resources: {player.resource_points}")
         if is_attacker:
-            print(f"  You may play attack reactions or instants.")
+            print("  You may play attack reactions or instants.")
         else:
-            print(f"  You may play defense reactions or instants.")
+            print("  You may play defense reactions or instants.")
         self._show_hand(player)
-        return self._choose(legal, player, "Play a reaction card or pass priority:")
+        return "Play a reaction card or pass priority:"
 
-    def select_mentor_flip(self, obs: dict, legal: List[Action], player: 'Player') -> Action:
-        print(f"\n{'═' * 60}")
+    def _render_mentor_flip(self, player, opponent, context):
         arsenal_name = player.arsenal.name if player.arsenal else "mentor"
         print(f"  START OF TURN — {arsenal_name} is face-down in your arsenal.")
-        return self._choose(legal, player, "Flip mentor face-up?")
+        return "Flip mentor face-up?"
 
-    def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
-        print(f"\n{'═' * 60}")
-        print(f"  CHOOSE FIRST — you won the coin flip!")
-        return self._choose(legal, player, "Go first or second?")
+    def _render_choose_first(self, player, opponent, context):
+        print("  CHOOSE FIRST — you won the coin flip!")
+        return "Go first or second?"
+
+    _PHASE_HANDLERS = {
+        "ATTACK":       _render_attack,
+        "DEFEND":       _render_defend,
+        "ARSENAL":      _render_arsenal,
+        "PITCH":        _render_pitch,
+        "PITCH_ORDER":  _render_pitch_order,
+        "INSTANT":      _render_instant,
+        "REACTION":     _render_reaction,
+        "MENTOR_FLIP":  _render_mentor_flip,
+        "CHOOSE_FIRST": _render_choose_first,
+    }

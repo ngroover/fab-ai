@@ -47,8 +47,8 @@ LATENT_DIM = 64
 def flatten_obs(obs: dict) -> torch.Tensor:
     """Concatenate the observation dict into a single flat float tensor.
 
-    Tolerates missing keys (e.g. when called from `select_choose_first`,
-    where the env hasn't built an obs dict yet) by zero-padding.
+    Tolerates missing keys (e.g. when called during CHOOSE_FIRST, where the
+    env hasn't built an obs dict yet) by zero-padding.
     """
     agent = obs.get("agent") or [0.0] * PLAYER_OBS_SIZE
     opponent = obs.get("opponent") or [0.0] * PLAYER_OBS_SIZE
@@ -136,7 +136,7 @@ class NeuralAgent:
     """Agent that picks the argmax action from a policy/value model.
 
     Mirrors the interface of `RandomAgent` (agents.py) so it slots into
-    `run_env.py` and `FaBEnv`'s phase-dispatch loop unchanged.
+    `run_env.py` and `FaBEnv`'s dispatch loop unchanged.
     """
 
     def __init__(
@@ -146,7 +146,9 @@ class NeuralAgent:
     ):
         self.model = model if model is not None else PolicyValueNetwork(seed=seed)
 
-    def _choose(self, obs: Optional[dict], legal: List[Action]) -> Action:
+    def select_action(self, obs: Optional[dict], legal: List[Action],
+                      player: 'Player', opponent: Optional['Player'] = None,
+                      context: Optional[dict] = None) -> Action:
         if len(legal) == 1:
             return legal[0]
         probs, _ = self.model.predict(obs or {}, legal)
@@ -157,34 +159,3 @@ class NeuralAgent:
                 best_p = probs[i]
                 best = i
         return legal[best]
-
-    # ── Selector methods (signatures match RandomAgent in agents.py) ─────
-    def select_action(self, obs: dict, legal: List[Action], player: 'Player',
-                      opponent: 'Player') -> Action:
-        return self._choose(obs, legal)
-
-    def select_defend(self, obs: dict, legal: List[Action], player: 'Player',
-                      attack_power: int, already_defense: int = 0) -> Action:
-        return self._choose(obs, legal)
-
-    def select_arsenal(self, obs: dict, legal: List[Action],
-                       player: 'Player') -> Action:
-        return self._choose(obs, legal)
-
-    def select_pitch(self, obs: dict, legal: List[Action], player: 'Player',
-                     pending_card=None) -> Action:
-        return self._choose(obs, legal)
-
-    def select_pitch_order(self, obs: dict, legal: List[Action], player: 'Player') -> Action:
-        return self._choose(obs, legal)
-
-    def select_instant(self, obs: dict, legal: List[Action], player: 'Player',
-                       attack_power: int = 0) -> Action:
-        return self._choose(obs, legal)
-
-    def select_reaction(self, obs: dict, legal: List[Action], player: 'Player',
-                        attack_power: int = 0, is_attacker: bool = False) -> Action:
-        return self._choose(obs, legal)
-
-    def select_choose_first(self, legal: List[Action], player: 'Player') -> Action:
-        return self._choose(None, legal)

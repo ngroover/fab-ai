@@ -21,10 +21,9 @@ import random
 from datetime import datetime
 from typing import Optional
 
-from fab_env import FaBEnv, Phase
+from fab_env import FaBEnv
 from agents import HumanAgent, RandomAgent
 from neural_agent import NeuralAgent
-from actions import ActionType
 from cards import build_rhinar_deck, build_dorinthea_deck
 
 _AGENT_CHOICES = ("rhinar", "dorinthea", "random", "human", "neural")
@@ -97,7 +96,7 @@ def run_game(
     if agent0 is None:
         agent0 = HumanAgent() if rhinar_is_human else RandomAgent()
     if agent1 is None:
-        agent1 = HumanAgent() if dorinthea_is_human else DorintheiAgent()
+        agent1 = HumanAgent() if dorinthea_is_human else RandomAgent()
 
     rhinar_agent = agent0
     dorinthea_agent = agent1
@@ -122,41 +121,10 @@ def run_game(
         if not legal:
             break
 
-        # Dispatch to correct decision method based on current phase
-        if env._phase == Phase.ATTACK:
-            action = agent.select_action(obs[agent_id], legal, player, opponent)
-        elif env._phase == Phase.DEFEND:
-            attack_power = env._pending_attack_power
-            already_defense = env._pending_defend_total
-            action = agent.select_defend(obs[agent_id], legal, player, attack_power, already_defense)
-        elif env._phase == Phase.REACTION:
-            ap = env._pending_attack_power
-            is_attacker = player_idx == env._reaction_attacker_idx
-            action = agent.select_reaction(obs[agent_id], legal, player, ap, is_attacker)
-        elif env._phase == Phase.INSTANT:
-            ap = (env._pending_attack_power
-                  if env._pending_attack is not None else 0)
-            action = agent.select_instant(obs[agent_id], legal, player, ap)
-        elif env._phase == Phase.ARSENAL:
-            action = agent.select_arsenal(obs[agent_id], legal, player)
-        elif env._phase == Phase.PITCH:
-            action = agent.select_pitch(obs[agent_id], legal, player,
-                                        env._pending_play_card)
-        elif env._phase == Phase.PITCH_ORDER:
-            action = agent.select_pitch_order(obs[agent_id], legal, player)
-        elif env._phase == Phase.MENTOR_FLIP:
-            if hasattr(agent, 'select_mentor_flip'):
-                action = agent.select_mentor_flip(obs[agent_id], legal, player)
-            else:
-                action = next(a for a in legal if a.action_type == ActionType.MENTOR_FLIP and a.flip)
-        elif env._phase == Phase.REVEAL:
-            if hasattr(agent, 'select_reveal'):
-                action = agent.select_reveal(obs[agent_id], legal, player)
-            else:
-                action = legal[0]
-        else:
-            action = legal[0]
-
+        action = agent.select_action(
+            obs[agent_id], legal, player, opponent,
+            env.build_action_context(),
+        )
         obs, rewards, terminations, truncations, infos = env.step(action)
 
     winner_agent = None
