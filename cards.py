@@ -87,6 +87,16 @@ class Card:
         color_suffix = f"-{self.color.name.lower()}" if self.color else ""
         return f"{name_slug}{color_suffix}"
 
+    # Card instances are static template data shared by every game; no code
+    # path mutates them after construction. Treating them as atomic for
+    # copy/deepcopy lets MCTS env clones share the catalog instead of
+    # duplicating ~120 objects (Card + CardEffect + EffectAction) per copy.
+    def __deepcopy__(self, memo):
+        return self
+
+    def __copy__(self):
+        return self
+
     def __str__(self):
         parts = [self.name]
         if self.color:
