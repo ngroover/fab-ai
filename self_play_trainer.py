@@ -117,6 +117,17 @@ class TrainerConfig:
     # Names must be keys in DECK_BUILDERS.
     deck_pool: Tuple[str, ...] = ("rhinar", "dorinthea")
     run_name: str = ""               # auto-set if blank
+
+    # Distributed self-play (workers stream transitions; coordinator trains).
+    # When False the standard single-process SelfPlayTrainer is used.
+    distributed: bool = False
+    dist_bind_host: str = "0.0.0.0"
+    dist_pull_port: int = 5556
+    dist_pub_port: int = 5557
+    dist_rep_port: int = 5558
+    dist_broadcast_secs: float = 5.0
+    dist_max_staleness: int = 10
+    dist_min_buffer: int = 64
     base_checkpoint: Optional[str] = None  # name in ./checkpoints/, or None
     seed: Optional[int] = None
 
