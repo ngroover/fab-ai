@@ -2024,8 +2024,6 @@ class _TrainingSession:
         self.sparks = {
             "policy_loss": [],
             "value_loss": [],
-            "wr_rhinar": [],
-            "wr_dorinthea": [],
             "wr_random": [],
             "mean_len": [],
             "value_pred": [],
@@ -2127,8 +2125,6 @@ class _TrainingSession:
             mapping = {
                 "policy_loss": "policy_loss",
                 "value_loss": "value_loss",
-                "wr_rhinar": "wr_rhinar",
-                "wr_dorinthea": "wr_dorinthea",
                 "wr_random": "wr_random",
                 "mean_len": "mean_len",
                 "value_pred": "value_pred",
@@ -3510,7 +3506,6 @@ TRAIN_TEMPLATE = """
         Wall <strong id="status-wall">—</strong>
       </span>
       <span style="flex:1"></span>
-      <button class="tbtn tbtn-ghost" id="demo-btn" title="Populate the monitor with fake data so you can preview the live UI">▶ Demo data</button>
     </div>
 
     <!-- ── Tab nav ───────────────────────────── -->
@@ -3532,9 +3527,6 @@ TRAIN_TEMPLATE = """
             <label>Initialize from</label>
             <select id="cfg-base">
               <option value="random">Random init</option>
-              <option value="ckpt-iter-0042">ckpt-iter-0042 · 2.1 MB</option>
-              <option value="ckpt-iter-0030">ckpt-iter-0030 · 2.1 MB</option>
-              <option value="ckpt-iter-0010">ckpt-iter-0010 · 2.1 MB</option>
             </select>
             <span class="help">Pick a saved checkpoint or start from scratch.</span>
           </div>
@@ -3647,8 +3639,7 @@ TRAIN_TEMPLATE = """
           <div class="big">📈</div>
           <p>No active run.</p>
           <p style="margin-top:6px;font-size:0.85rem;">
-            Start a run from the <strong>Run</strong> tab,
-            or click <strong>▶ Demo data</strong> above to preview live UI.
+            Start a run from the <strong>Run</strong> tab to see live metrics here.
           </p>
         </div>
       </div>
@@ -3681,7 +3672,7 @@ TRAIN_TEMPLATE = """
         </div>
 
         <div class="panel">
-          <h2>Win rate vs opponents</h2>
+          <h2>Win rate vs RandomAgent (overall)</h2>
           <div class="sparks">
             <div class="spark">
               <div class="spark-title"><span class="t">vs RandomAgent</span><span class="v" id="sv-wr-rand">—</span></div>
@@ -3724,77 +3715,20 @@ TRAIN_TEMPLATE = """
     <div class="tab-panel" id="tab-models">
       <div class="panel">
         <h2>Saved checkpoints</h2>
-        <table class="models">
-          <thead>
+        <table class="models" id="models-table">
+          <thead id="models-thead">
             <tr>
               <th>Name</th>
               <th>Iter</th>
               <th>Created</th>
               <th>Size</th>
-              <th>vs Rhinar</th>
-              <th>vs Dorinthea</th>
-              <th>vs Random</th>
-              <th>vs MCTS</th>
+              <!-- win-rate columns inserted dynamically by refreshModels -->
               <th></th>
             </tr>
           </thead>
           <tbody id="models-body">
-            <!-- demo rows; replaced by /train/models when wired -->
-            <tr>
-              <td><strong>ckpt-iter-0042</strong><span class="pill-promoted">★ active</span></td>
-              <td class="num">42</td>
-              <td class="num">2026-05-06 09:14</td>
-              <td class="num">2.1 MB</td>
-              <td class="num">68%</td>
-              <td class="num">61%</td>
-              <td class="num">94%</td>
-              <td class="num">52%</td>
-              <td class="actions">
-                <button class="tbtn tbtn-primary">Evaluate</button>
-                <button class="tbtn tbtn-ghost">Rename</button>
-                <button class="tbtn tbtn-ghost">Download</button>
-                <button class="tbtn tbtn-danger">Delete</button>
-              </td>
-            </tr>
-            <tr>
-              <td><strong>ckpt-iter-0030</strong></td>
-              <td class="num">30</td>
-              <td class="num">2026-05-06 08:02</td>
-              <td class="num">2.1 MB</td>
-              <td class="num">59%</td>
-              <td class="num">54%</td>
-              <td class="num">88%</td>
-              <td class="em-dash">—</td>
-              <td class="actions">
-                <button class="tbtn tbtn-primary">Evaluate</button>
-                <button class="tbtn tbtn-success">Promote</button>
-                <button class="tbtn tbtn-ghost">Rename</button>
-                <button class="tbtn tbtn-ghost">Download</button>
-                <button class="tbtn tbtn-danger">Delete</button>
-              </td>
-            </tr>
-            <tr>
-              <td><strong>ckpt-iter-0010</strong></td>
-              <td class="num">10</td>
-              <td class="num">2026-05-06 06:48</td>
-              <td class="num">2.1 MB</td>
-              <td class="num">42%</td>
-              <td class="num">38%</td>
-              <td class="num">71%</td>
-              <td class="em-dash">—</td>
-              <td class="actions">
-                <button class="tbtn tbtn-primary">Evaluate</button>
-                <button class="tbtn tbtn-success">Promote</button>
-                <button class="tbtn tbtn-ghost">Rename</button>
-                <button class="tbtn tbtn-ghost">Download</button>
-                <button class="tbtn tbtn-danger">Delete</button>
-              </td>
-            </tr>
           </tbody>
         </table>
-        <p class="help" style="margin-top:10px;">
-          Backend not wired yet — these rows are placeholders to show the layout.
-        </p>
       </div>
     </div>
   </div>
@@ -3929,134 +3863,6 @@ TRAIN_TEMPLATE = """
       return (Number(v)*100).toFixed(1) + '%';
     }
 
-    // ── Demo data generator (preview only) ───────────
-    let demoTimer = null;
-    let demo = null;
-    function startDemo() {
-      // initial pre-baked points
-      demo = {
-        ploss: [], vloss: [],
-        wrR: [], wrD: [], wrRand: [],
-        len: [], vpred: [], vreal: [],
-        log: [],
-        startTs: Date.now(),
-        iter: 0, games: 0, steps: 0,
-      };
-      // seed with some history
-      let p = 1.4, v = 1.1, wR = 0.20, wD = 0.18, wN = 0.45, ln = 28, vp = 0.0, vr = 0.0;
-      for (let i = 0; i < 30; i++) {
-        p  = Math.max(0.05, p  - 0.025 + (Math.random()-0.5)*0.05);
-        v  = Math.max(0.05, v  - 0.018 + (Math.random()-0.5)*0.04);
-        wR = Math.min(0.95, wR + 0.012 + (Math.random()-0.5)*0.04);
-        wD = Math.min(0.95, wD + 0.010 + (Math.random()-0.5)*0.04);
-        wN = Math.min(0.99, wN + 0.018 + (Math.random()-0.5)*0.03);
-        ln = Math.max(8,    ln + (Math.random()-0.5)*1.5);
-        vp = vp + (Math.random()-0.5)*0.05;
-        vr = vp + (Math.random()-0.5)*0.10;
-        demo.ploss.push(p); demo.vloss.push(v);
-        demo.wrR.push(wR);  demo.wrD.push(wD);  demo.wrRand.push(wN);
-        demo.len.push(ln);  demo.vpred.push(vp); demo.vreal.push(vr);
-      }
-      demo.iter = 30; demo.games = 30 * 200; demo.steps = 30 * 1000;
-      demo.log = [
-        '[09:14:02] ▶ Run started: rhinar-vs-dorinthea-run-1',
-        '[09:14:02]   base=random_init opponents=[self, RhinarAgent, RandomAgent]',
-        '[09:14:02]   games/iter=200 steps/iter=1000 total_iters=50',
-        '[09:14:03] iter 1/50 · self-play 200 games · mean_len=27.4',
-        '[09:14:09] iter 1/50 · grad steps 1000 · ploss=1.412 vloss=1.103',
-        '[09:14:09] iter 1/50 · eval vs RhinarAgent: 21% vs DorintheiAgent: 19% vs Random: 47%',
-        '[09:14:14] iter 2/50 · self-play 200 games · mean_len=26.9',
-        '[09:14:18] iter 2/50 · grad steps 1000 · ploss=1.253 vloss=0.984',
-        '[09:14:19] ✓ checkpoint saved: ckpt-iter-0002 (2.1 MB)',
-        '[09:14:24] iter 3/50 · self-play 200 games · mean_len=26.3',
-        '... (truncated)',
-        '[09:18:51] iter 30/50 · grad steps 1000 · ploss=0.683 vloss=0.342',
-        '[09:18:52] iter 30/50 · eval vs RhinarAgent: 68% vs DorintheiAgent: 61% vs Random: 94%',
-      ];
-
-      document.getElementById('monitor-empty').style.display = 'none';
-      document.getElementById('monitor-live').style.display  = 'block';
-      // jump to monitor tab
-      document.querySelector('.tab-btn[data-tab="monitor"]').click();
-      renderDemo();
-
-      // tick: generate a new datapoint every 1s
-      demoTimer = setInterval(() => {
-        const last = arr => arr[arr.length-1];
-        demo.ploss.push(Math.max(0.05, last(demo.ploss) - 0.005 + (Math.random()-0.5)*0.04));
-        demo.vloss.push(Math.max(0.05, last(demo.vloss) - 0.004 + (Math.random()-0.5)*0.03));
-        demo.wrR.push(Math.min(0.95, last(demo.wrR) + 0.002 + (Math.random()-0.5)*0.03));
-        demo.wrD.push(Math.min(0.95, last(demo.wrD) + 0.002 + (Math.random()-0.5)*0.03));
-        demo.wrRand.push(Math.min(0.99, last(demo.wrRand) + 0.001 + (Math.random()-0.5)*0.02));
-        demo.len.push(Math.max(8, last(demo.len) + (Math.random()-0.5)*1.0));
-        const nvp = last(demo.vpred) + (Math.random()-0.5)*0.05;
-        demo.vpred.push(nvp);
-        demo.vreal.push(nvp + (Math.random()-0.5)*0.10);
-        // cap length
-        for (const k of ['ploss','vloss','wrR','wrD','wrRand','len','vpred','vreal']) {
-          if (demo[k].length > 200) demo[k].shift();
-        }
-        demo.iter  += 1;
-        demo.games += 200;
-        demo.steps += 1000;
-        const ts = new Date().toTimeString().slice(0,8);
-        demo.log.push(`[${ts}] iter ${demo.iter}/50 · grad steps 1000 · ploss=${last(demo.ploss).toFixed(3)} vloss=${last(demo.vloss).toFixed(3)}`);
-        if (demo.log.length > 200) demo.log.shift();
-        renderDemo();
-      }, 1000);
-    }
-
-    function renderDemo() {
-      const last = a => a[a.length-1];
-      const elapsed = Math.floor((Date.now() - demo.startTs) / 1000);
-      const wall = `${Math.floor(elapsed/60)}m ${elapsed%60}s`;
-      setStatus('training', { iter: demo.iter, games: demo.games, steps: demo.steps, wall });
-
-      document.getElementById('m-iter').textContent  = demo.iter;
-      document.getElementById('m-games').textContent = demo.games.toLocaleString();
-      document.getElementById('m-steps').textContent = demo.steps.toLocaleString();
-      document.getElementById('m-wall').textContent  = wall;
-      document.getElementById('m-ckpt').textContent  = `ckpt-iter-${String(demo.iter).padStart(4,'0')}`;
-      document.getElementById('m-hash').textContent  = 'a1f3…d7e2';
-
-      drawSpark('sl-ploss', demo.ploss);
-      drawSpark('sl-vloss', demo.vloss);
-      drawSpark('sl-wr-rhinar', demo.wrR, {min:0, max:1});
-      drawSpark('sl-wr-dor',    demo.wrD, {min:0, max:1});
-      drawSpark('sl-wr-rand',   demo.wrRand, {min:0, max:1});
-      drawSpark('sl-len',   demo.len);
-      // share scale across vpred/vreal
-      const vCombined = demo.vpred.concat(demo.vreal);
-      const vMin = Math.min(...vCombined), vMax = Math.max(...vCombined);
-      drawSpark('sl-vpred', demo.vpred, {min:vMin, max:vMax});
-      drawSpark('sl-vreal', demo.vreal, {min:vMin, max:vMax});
-
-      document.getElementById('sv-ploss').textContent = fmt(last(demo.ploss));
-      document.getElementById('sv-vloss').textContent = fmt(last(demo.vloss));
-      document.getElementById('sv-wr-rhinar').textContent = fmtPct(last(demo.wrR));
-      document.getElementById('sv-wr-dor').textContent    = fmtPct(last(demo.wrD));
-      document.getElementById('sv-wr-rand').textContent   = fmtPct(last(demo.wrRand));
-      document.getElementById('sv-len').textContent  = fmt(last(demo.len), 1);
-      document.getElementById('sv-val').textContent  = `${fmt(last(demo.vpred),2)} / ${fmt(last(demo.vreal),2)}`;
-
-      document.getElementById('log-tail').textContent = demo.log.join('\\n');
-      const lt = document.getElementById('log-tail');
-      lt.scrollTop = lt.scrollHeight;
-    }
-
-    function stopDemo() {
-      if (demoTimer) clearInterval(demoTimer);
-      demoTimer = null;
-      setStatus('idle', { iter: '—', games: '—', steps: '—', wall: '—' });
-      document.getElementById('monitor-empty').style.display = 'block';
-      document.getElementById('monitor-live').style.display  = 'none';
-    }
-
-    document.getElementById('demo-btn').addEventListener('click', () => {
-      if (demoTimer) { stopDemo(); document.getElementById('demo-btn').textContent = '▶ Demo data'; }
-      else            { startDemo(); document.getElementById('demo-btn').textContent = '⏹ Stop demo'; }
-    });
-
     // ── Live training state polling ────────────────────
     function fmtElapsed(secs) {
       secs = Math.max(0, Math.floor(secs));
@@ -4096,8 +3902,6 @@ TRAIN_TEMPLATE = """
       const s = state.sparks || {};
       drawSpark('sl-ploss', s.policy_loss || []);
       drawSpark('sl-vloss', s.value_loss || []);
-      drawSpark('sl-wr-rhinar', s.wr_rhinar || [], {min:0, max:1});
-      drawSpark('sl-wr-dor',    s.wr_dorinthea || [], {min:0, max:1});
       drawSpark('sl-wr-rand',   s.wr_random || [], {min:0, max:1});
       drawSpark('sl-len',       s.mean_len || []);
       const vp = s.value_pred || [], vr = s.value_real || [];
@@ -4111,8 +3915,6 @@ TRAIN_TEMPLATE = """
       const last = a => (a && a.length) ? a[a.length - 1] : null;
       document.getElementById('sv-ploss').textContent    = fmt(last(s.policy_loss));
       document.getElementById('sv-vloss').textContent    = fmt(last(s.value_loss));
-      document.getElementById('sv-wr-rhinar').textContent= fmtPct(last(s.wr_rhinar));
-      document.getElementById('sv-wr-dor').textContent   = fmtPct(last(s.wr_dorinthea));
       document.getElementById('sv-wr-rand').textContent  = fmtPct(last(s.wr_random));
       document.getElementById('sv-len').textContent      = fmt(last(s.mean_len), 1);
       const lp = last(s.value_pred), lr = last(s.value_real);
@@ -4128,7 +3930,6 @@ TRAIN_TEMPLATE = """
     async function pollOnce() {
       try {
         const state = await getJSON('/train/state');
-        if (demoTimer) return;          // don't fight the demo simulator
         renderLive(state);
         if (['stopped', 'done', 'error'].includes(state.status)) {
           // refresh models tab once on completion
@@ -4150,19 +3951,43 @@ TRAIN_TEMPLATE = """
       if (!iso) return '—';
       return iso.replace('T', ' ').slice(0, 16);
     }
-    function rowFor(ckpt) {
+    // ── Models tab helpers ──────────────────────────────
+    function _capFirst(s) {
+      return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+    }
+    // Parse compound metric key "{opp}:{net}_vs_{opp_deck}" or plain "{opp}".
+    function _parseKey(k) {
+      const idx = k.indexOf(':');
+      if (idx < 0) return {opp: k, net: null, vs: null};
+      const opp = k.slice(0, idx);
+      const parts = k.slice(idx + 1).split('_vs_');
+      return {opp, net: parts[0] || null, vs: parts[1] || null};
+    }
+    // Short column header: "Rhi→Dor (rand)"
+    function _metricColLabel(k) {
+      const {opp, net, vs} = _parseKey(k);
+      if (!net) return _capFirst(opp);
+      const shorten = s => _capFirst(s).slice(0, 3);
+      return `${shorten(net)}→${shorten(vs)} (${opp})`;
+    }
+    // Tooltip / title text: "as Rhinar / opp Dorinthea vs random"
+    function _metricColTitle(k) {
+      const {opp, net, vs} = _parseKey(k);
+      if (!net) return `Overall vs ${opp}`;
+      return `Net plays as ${_capFirst(net)}, opponent plays ${_capFirst(vs)}, vs ${opp}`;
+    }
+
+    function rowFor(ckpt, matchupKeys) {
       const m = ckpt.metrics || {};
-      const wr = k => (m[k] === undefined || m[k] === null) ? '—' : (m[k]*100).toFixed(0) + '%';
+      const wr = k => (m[k] !== undefined && m[k] !== null) ? (m[k]*100).toFixed(0)+'%' : '—';
       const tr = document.createElement('tr');
+      const wrCells = matchupKeys.map(k => `<td class="num">${wr(k)}</td>`).join('');
       tr.innerHTML = `
         <td><strong>${ckpt.name}</strong></td>
         <td class="num">${ckpt.iter ?? '—'}</td>
         <td class="num">${fmtTs(ckpt.created)}</td>
         <td class="num">${fmtBytes(ckpt.size_bytes)}</td>
-        <td class="num">${wr('rhinar')}</td>
-        <td class="num">${wr('dorinthea')}</td>
-        <td class="num">${wr('random')}</td>
-        <td class="em-dash">—</td>
+        ${wrCells}
         <td class="actions">
           <button class="tbtn tbtn-ghost" data-action="rename" data-name="${ckpt.name}">Rename</button>
           <a class="tbtn tbtn-ghost" href="/train/models/${ckpt.name}/download">Download</a>
@@ -4170,20 +3995,44 @@ TRAIN_TEMPLATE = """
         </td>`;
       return tr;
     }
+
     async function refreshModels() {
       try {
         const res = await getJSON('/train/models');
+        const list = (res.checkpoints || []).slice().reverse();
+
+        // Collect all per-matchup metric keys (compound keys containing ":")
+        // across every checkpoint, sort for a stable column order.
+        const keySet = new Set();
+        for (const c of list) {
+          for (const k of Object.keys(c.metrics || {})) {
+            if (k.includes(':')) keySet.add(k);
+          }
+        }
+        const matchupKeys = [...keySet].sort();
+
+        // Rebuild thead with dynamic win-rate columns.
+        const theadRow = document.querySelector('#models-thead tr');
+        theadRow.innerHTML =
+          '<th>Name</th><th>Iter</th><th>Created</th><th>Size</th>' +
+          matchupKeys.map(k =>
+            `<th title="${_metricColTitle(k)}">${_metricColLabel(k)}</th>`
+          ).join('') +
+          '<th></th>';
+
+        // Rebuild tbody.
         const tbody = document.getElementById('models-body');
         tbody.innerHTML = '';
-        const list = (res.checkpoints || []).slice().reverse();
         if (!list.length) {
           const tr = document.createElement('tr');
-          tr.innerHTML = '<td colspan="9" class="em-dash" style="text-align:center;padding:20px;">No checkpoints saved yet.</td>';
+          tr.innerHTML = `<td colspan="${4 + matchupKeys.length + 1}" class="em-dash" `+
+            `style="text-align:center;padding:20px;">No checkpoints saved yet.</td>`;
           tbody.appendChild(tr);
         } else {
-          for (const c of list) tbody.appendChild(rowFor(c));
+          for (const c of list) tbody.appendChild(rowFor(c, matchupKeys));
         }
-        // Also refresh the "Initialize from" dropdown.
+
+        // Refresh the "Initialize from" dropdown.
         const sel = document.getElementById('cfg-base');
         const keep = sel.value;
         sel.innerHTML = '<option value="random">Random init</option>';
