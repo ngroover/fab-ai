@@ -13,3 +13,8 @@ python3 card_embeddings.py --embed-dim 32
 # Look at similiar cards embeddings
 python3 card_embeddings.py --similar "alpha-rampage-red"
 
+# Seed decks
+python3 seed_decks.py
+
+# install dependencies
+sudo apt install python3-torch
