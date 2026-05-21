@@ -108,7 +108,7 @@ class TrainerConfig:
     # Evaluation
     eval_games: int = 4
     eval_every: int = 1              # evaluate after every N iterations
-    eval_opponents: Tuple[str, ...] = ("rhinar", "dorinthea", "random")
+    eval_opponents: Tuple[str, ...] = ("random",)
 
     # Bookkeeping
     opponent_pool: Tuple[str, ...] = ("self",)
@@ -282,8 +282,6 @@ class SelfPlayTrainer:
                     "grad_steps": self._grad_steps,
                     "policy_loss": ploss,
                     "value_loss": vloss,
-                    "wr_rhinar": eval_wr.get("rhinar"),
-                    "wr_dorinthea": eval_wr.get("dorinthea"),
                     "wr_random": eval_wr.get("random"),
                     "mean_len": (sum(ep_lens) / len(ep_lens)) if ep_lens else 0.0,
                     "value_pred": value_pred_avg,
@@ -526,28 +524,55 @@ class SelfPlayTrainer:
     # ──────────────────────────────────────────────────────────
 
     def _run_eval_phase(self) -> Dict[str, float]:
-        """Play `eval_games` games against each opponent. Greedy net, no MCTS."""
+        """Play eval_games per (net_deck, opp_deck) pair for each eval opponent.
+
+        Returns a flat dict with keys:
+          - "{opp_type}" → overall win rate
+          - "{opp_type}:{net_deck}_vs_{opp_deck}" → per-matchup win rate
+        where net_deck is the deck the neural net played and opp_deck is the
+        deck the opponent played.
+        """
         results: Dict[str, float] = {}
         self.net.eval()
+        pool = [d for d in (self.config.deck_pool or ()) if d in DECK_BUILDERS]
+        if not pool:
+            pool = list(DECK_BUILDERS.keys())
+
         for opp_name in self.config.eval_opponents:
             if self._should_stop():
                 break
-            wins = 0
-            total = 0
-            for g in range(self.config.eval_games):
-                if self._should_stop():
-                    break
-                net_seat = self._rng.choice((0, 1))
-                deck0_name, deck1_name = self._sample_deck_pair()
-                outcome = self._play_one_eval_game(
-                    opp_name, net_seat, deck0_name, deck1_name
-                )
-                total += 1
-                if outcome > 0:
-                    wins += 1
-            wr = (wins / total) if total else 0.0
-            results[opp_name] = wr
-            self._log(f"  🎯  vs {opp_name}: {wins}/{total} = {wr*100:.0f}%")
+            all_wins = 0
+            all_total = 0
+            for net_deck in pool:
+                for opp_deck in pool:
+                    wins = 0
+                    total = 0
+                    for _ in range(self.config.eval_games):
+                        if self._should_stop():
+                            break
+                        # Randomly assign net to a seat so first-player advantage
+                        # is averaged out, but always use the intended decks.
+                        net_seat = self._rng.choice((0, 1))
+                        deck0 = net_deck if net_seat == 0 else opp_deck
+                        deck1 = opp_deck if net_seat == 0 else net_deck
+                        outcome = self._play_one_eval_game(opp_name, net_seat, deck0, deck1)
+                        total += 1
+                        all_total += 1
+                        if outcome > 0:
+                            wins += 1
+                            all_wins += 1
+                    if total:
+                        wr = wins / total
+                        results[f"{opp_name}:{net_deck}_vs_{opp_deck}"] = wr
+                        self._log(
+                            f"    as {net_deck} / opp {opp_deck} vs {opp_name}: "
+                            f"{wins}/{total} = {wr*100:.0f}%"
+                        )
+            if all_total:
+                overall = all_wins / all_total
+                results[opp_name] = overall
+                self._log(f"  🎯  vs {opp_name} overall: {all_wins}/{all_total} = {overall*100:.0f}%")
+
         return results
 
     def _play_one_eval_game(

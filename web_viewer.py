@@ -2024,8 +2024,6 @@ class _TrainingSession:
         self.sparks = {
             "policy_loss": [],
             "value_loss": [],
-            "wr_rhinar": [],
-            "wr_dorinthea": [],
             "wr_random": [],
             "mean_len": [],
             "value_pred": [],
@@ -2127,8 +2125,6 @@ class _TrainingSession:
             mapping = {
                 "policy_loss": "policy_loss",
                 "value_loss": "value_loss",
-                "wr_rhinar": "wr_rhinar",
-                "wr_dorinthea": "wr_dorinthea",
                 "wr_random": "wr_random",
                 "mean_len": "mean_len",
                 "value_pred": "value_pred",
@@ -3676,16 +3672,8 @@ TRAIN_TEMPLATE = """
         </div>
 
         <div class="panel">
-          <h2>Win rate vs opponents</h2>
+          <h2>Win rate vs RandomAgent (overall)</h2>
           <div class="sparks">
-            <div class="spark">
-              <div class="spark-title"><span class="t">vs Rhinar (self-play)</span><span class="v" id="sv-wr-rhinar">—</span></div>
-              <svg viewBox="0 0 200 60" preserveAspectRatio="none"><polyline class="line win" id="sl-wr-rhinar" points=""/></svg>
-            </div>
-            <div class="spark">
-              <div class="spark-title"><span class="t">vs Dorinthea (self-play)</span><span class="v" id="sv-wr-dor">—</span></div>
-              <svg viewBox="0 0 200 60" preserveAspectRatio="none"><polyline class="line win" id="sl-wr-dor" points=""/></svg>
-            </div>
             <div class="spark">
               <div class="spark-title"><span class="t">vs RandomAgent</span><span class="v" id="sv-wr-rand">—</span></div>
               <svg viewBox="0 0 200 60" preserveAspectRatio="none"><polyline class="line win" id="sl-wr-rand" points=""/></svg>
@@ -3727,17 +3715,14 @@ TRAIN_TEMPLATE = """
     <div class="tab-panel" id="tab-models">
       <div class="panel">
         <h2>Saved checkpoints</h2>
-        <table class="models">
-          <thead>
+        <table class="models" id="models-table">
+          <thead id="models-thead">
             <tr>
               <th>Name</th>
               <th>Iter</th>
               <th>Created</th>
               <th>Size</th>
-              <th>vs Rhinar</th>
-              <th>vs Dorinthea</th>
-              <th>vs Random</th>
-              <th>vs MCTS</th>
+              <!-- win-rate columns inserted dynamically by refreshModels -->
               <th></th>
             </tr>
           </thead>
@@ -3917,8 +3902,6 @@ TRAIN_TEMPLATE = """
       const s = state.sparks || {};
       drawSpark('sl-ploss', s.policy_loss || []);
       drawSpark('sl-vloss', s.value_loss || []);
-      drawSpark('sl-wr-rhinar', s.wr_rhinar || [], {min:0, max:1});
-      drawSpark('sl-wr-dor',    s.wr_dorinthea || [], {min:0, max:1});
       drawSpark('sl-wr-rand',   s.wr_random || [], {min:0, max:1});
       drawSpark('sl-len',       s.mean_len || []);
       const vp = s.value_pred || [], vr = s.value_real || [];
@@ -3932,8 +3915,6 @@ TRAIN_TEMPLATE = """
       const last = a => (a && a.length) ? a[a.length - 1] : null;
       document.getElementById('sv-ploss').textContent    = fmt(last(s.policy_loss));
       document.getElementById('sv-vloss').textContent    = fmt(last(s.value_loss));
-      document.getElementById('sv-wr-rhinar').textContent= fmtPct(last(s.wr_rhinar));
-      document.getElementById('sv-wr-dor').textContent   = fmtPct(last(s.wr_dorinthea));
       document.getElementById('sv-wr-rand').textContent  = fmtPct(last(s.wr_random));
       document.getElementById('sv-len').textContent      = fmt(last(s.mean_len), 1);
       const lp = last(s.value_pred), lr = last(s.value_real);
@@ -3970,19 +3951,43 @@ TRAIN_TEMPLATE = """
       if (!iso) return '—';
       return iso.replace('T', ' ').slice(0, 16);
     }
-    function rowFor(ckpt) {
+    // ── Models tab helpers ──────────────────────────────
+    function _capFirst(s) {
+      return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+    }
+    // Parse compound metric key "{opp}:{net}_vs_{opp_deck}" or plain "{opp}".
+    function _parseKey(k) {
+      const idx = k.indexOf(':');
+      if (idx < 0) return {opp: k, net: null, vs: null};
+      const opp = k.slice(0, idx);
+      const parts = k.slice(idx + 1).split('_vs_');
+      return {opp, net: parts[0] || null, vs: parts[1] || null};
+    }
+    // Short column header: "Rhi→Dor (rand)"
+    function _metricColLabel(k) {
+      const {opp, net, vs} = _parseKey(k);
+      if (!net) return _capFirst(opp);
+      const shorten = s => _capFirst(s).slice(0, 3);
+      return `${shorten(net)}→${shorten(vs)} (${opp})`;
+    }
+    // Tooltip / title text: "as Rhinar / opp Dorinthea vs random"
+    function _metricColTitle(k) {
+      const {opp, net, vs} = _parseKey(k);
+      if (!net) return `Overall vs ${opp}`;
+      return `Net plays as ${_capFirst(net)}, opponent plays ${_capFirst(vs)}, vs ${opp}`;
+    }
+
+    function rowFor(ckpt, matchupKeys) {
       const m = ckpt.metrics || {};
-      const wr = k => (m[k] === undefined || m[k] === null) ? '—' : (m[k]*100).toFixed(0) + '%';
+      const wr = k => (m[k] !== undefined && m[k] !== null) ? (m[k]*100).toFixed(0)+'%' : '—';
       const tr = document.createElement('tr');
+      const wrCells = matchupKeys.map(k => `<td class="num">${wr(k)}</td>`).join('');
       tr.innerHTML = `
         <td><strong>${ckpt.name}</strong></td>
         <td class="num">${ckpt.iter ?? '—'}</td>
         <td class="num">${fmtTs(ckpt.created)}</td>
         <td class="num">${fmtBytes(ckpt.size_bytes)}</td>
-        <td class="num">${wr('rhinar')}</td>
-        <td class="num">${wr('dorinthea')}</td>
-        <td class="num">${wr('random')}</td>
-        <td class="em-dash">—</td>
+        ${wrCells}
         <td class="actions">
           <button class="tbtn tbtn-ghost" data-action="rename" data-name="${ckpt.name}">Rename</button>
           <a class="tbtn tbtn-ghost" href="/train/models/${ckpt.name}/download">Download</a>
@@ -3990,20 +3995,44 @@ TRAIN_TEMPLATE = """
         </td>`;
       return tr;
     }
+
     async function refreshModels() {
       try {
         const res = await getJSON('/train/models');
+        const list = (res.checkpoints || []).slice().reverse();
+
+        // Collect all per-matchup metric keys (compound keys containing ":")
+        // across every checkpoint, sort for a stable column order.
+        const keySet = new Set();
+        for (const c of list) {
+          for (const k of Object.keys(c.metrics || {})) {
+            if (k.includes(':')) keySet.add(k);
+          }
+        }
+        const matchupKeys = [...keySet].sort();
+
+        // Rebuild thead with dynamic win-rate columns.
+        const theadRow = document.querySelector('#models-thead tr');
+        theadRow.innerHTML =
+          '<th>Name</th><th>Iter</th><th>Created</th><th>Size</th>' +
+          matchupKeys.map(k =>
+            `<th title="${_metricColTitle(k)}">${_metricColLabel(k)}</th>`
+          ).join('') +
+          '<th></th>';
+
+        // Rebuild tbody.
         const tbody = document.getElementById('models-body');
         tbody.innerHTML = '';
-        const list = (res.checkpoints || []).slice().reverse();
         if (!list.length) {
           const tr = document.createElement('tr');
-          tr.innerHTML = '<td colspan="9" class="em-dash" style="text-align:center;padding:20px;">No checkpoints saved yet.</td>';
+          tr.innerHTML = `<td colspan="${4 + matchupKeys.length + 1}" class="em-dash" `+
+            `style="text-align:center;padding:20px;">No checkpoints saved yet.</td>`;
           tbody.appendChild(tr);
         } else {
-          for (const c of list) tbody.appendChild(rowFor(c));
+          for (const c of list) tbody.appendChild(rowFor(c, matchupKeys));
         }
-        // Also refresh the "Initialize from" dropdown.
+
+        // Refresh the "Initialize from" dropdown.
         const sel = document.getElementById('cfg-base');
         const keep = sel.value;
         sel.innerHTML = '<option value="random">Random init</option>';
