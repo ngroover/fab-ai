@@ -127,11 +127,21 @@ class TrainerConfig:
 
 @dataclass
 class Transition:
-    obs: dict                       # observation dict at decision time
-    legal_actions: List[Action]
-    pi: List[float]                  # MCTS visit distribution
-    to_play: int                     # 0 or 1
-    z: float = 0.0                   # game outcome (filled after game ends)
+    """A decision sample ready for gradient updates.
+
+    Stores already-flattened features (`obs_vec`, `action_feats`) so the
+    training loop never has to re-walk `Action`/`Card` objects. This makes
+    transitions safely transportable across machines (no lambdas in the
+    graph) and avoids re-running `flatten_obs`/`stack_action_features` on
+    every grad step.
+    """
+
+    obs_vec: List[float]              # length OBS_FLAT_SIZE
+    action_feats: List[List[float]]   # (N_legal, ACTION_FEAT_SIZE)
+    pi: List[float]                   # MCTS visit distribution (length N_legal)
+    to_play: int                      # 0 or 1
+    z: float = 0.0                    # game outcome (filled after game ends)
+    weight_version: int = 0           # net version that produced this sample
 
 
 class ReplayBuffer:
@@ -169,6 +179,136 @@ def _dispatch_agent_action(env: FaBEnv, agent, obs: dict) -> Action:
     return agent.select_action(
         agent_obs, legal, player, opponent, env.build_action_context()
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Module-level helpers (also used by the distributed worker)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def temperature_for(cfg: "TrainerConfig", decision_idx: int) -> float:
+    if decision_idx < cfg.temp_drop_step:
+        return cfg.temp_start
+    return cfg.temp_end
+
+
+def sample_deck_pair(cfg: "TrainerConfig", rng: random.Random) -> Tuple[str, str]:
+    """Pick a deck name for each side independently from `cfg.deck_pool`."""
+    pool = [d for d in (cfg.deck_pool or ()) if d in DECK_BUILDERS]
+    if not pool:
+        pool = list(DECK_BUILDERS.keys())
+    return rng.choice(pool), rng.choice(pool)
+
+
+def make_opponent(kind: str, rng: random.Random):
+    if kind in ("self",):
+        return None  # PUCTSearch handles both sides
+    if kind == "random":
+        return RandomAgent(seed=rng.randrange(2**31))
+    return None
+
+
+def play_one_self_play_game(
+    net: PolicyValueNetwork,
+    cfg: "TrainerConfig",
+    rng: random.Random,
+    opp_kind: str,
+    deck0_name: str,
+    deck1_name: str,
+    weight_version: int = 0,
+    should_stop: Optional[Callable[[], bool]] = None,
+) -> Tuple[List[Transition], float, int, float]:
+    """Play one self-play game and return (transitions, p0_outcome, length, avg_pred_v_p0).
+
+    Pure function — does NOT touch any `SelfPlayTrainer` state. The worker
+    process and the single-machine trainer both call this.
+    """
+    env = FaBEnv(verbose=False)
+    env.reset(
+        _build_deck(deck0_name),
+        _build_deck(deck1_name),
+        seed=rng.randrange(2**31),
+    )
+
+    opp_agent = make_opponent(opp_kind, rng)
+    # If the opponent is fixed, randomize side per game so the net learns both heroes.
+    learning_idx = rng.choice((0, 1)) if opp_kind != "self" else None
+
+    search = PUCTSearch(
+        net,
+        n_simulations=cfg.n_simulations,
+        c_puct=cfg.c_puct,
+        determinize=cfg.determinize,
+        dirichlet_alpha=cfg.dirichlet_alpha,
+        dirichlet_frac=cfg.dirichlet_frac,
+        seed=rng.randrange(2**31),
+    )
+
+    _should_stop = should_stop or (lambda: False)
+    decisions: List[Transition] = []
+    per_side = [0, 0]
+    net_root_values: List[float] = []
+    length = 0
+
+    while not env.done:
+        length += 1
+        if _should_stop():
+            break
+        agent_id = env.agent_selection
+        to_play = int(agent_id[-1])
+
+        legal = env.legal_actions()
+        if not legal:
+            break
+
+        if len(legal) == 1:
+            env.step(legal[0])
+            continue
+
+        mcts_owns_this_decision = (
+            opp_kind == "self" or to_play == learning_idx
+        )
+
+        if mcts_owns_this_decision:
+            obs_dict = env._get_obs()[agent_id]
+            root_legal, pi, root_q = search.run(env)
+            if not root_legal:
+                break
+            net_root_values.append(root_q if to_play == 0 else -root_q)
+            tau = temperature_for(cfg, per_side[to_play])
+            idx = sample_action_index(pi, tau, rng)
+            action = root_legal[idx]
+            # Pre-flatten so the transition no longer carries Action/Card
+            # references — safe to ship over the wire and faster to train on.
+            obs_vec = flatten_obs(obs_dict).tolist()
+            action_feats = stack_action_features(root_legal).tolist()
+            decisions.append(Transition(
+                obs_vec=obs_vec,
+                action_feats=action_feats,
+                pi=list(pi),
+                to_play=to_play,
+                weight_version=weight_version,
+            ))
+            per_side[to_play] += 1
+            env.step(action)
+        else:
+            obs_full = env._get_obs()
+            action = _dispatch_agent_action(env, opp_agent, obs_full)
+            env.step(action)
+
+    r0 = env._rewards.get("agent_0", 0.0)
+    if r0 > 0.5:
+        z0, z1 = 1.0, -1.0
+    elif r0 < -0.5:
+        z0, z1 = -1.0, 1.0
+    else:
+        z0, z1 = 0.0, 0.0
+
+    for t in decisions:
+        t.z = z0 if t.to_play == 0 else z1
+
+    avg_root_v = (sum(net_root_values) / len(net_root_values)
+                  if net_root_values else 0.0)
+    return decisions, z0, length, avg_root_v
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -337,116 +477,21 @@ class SelfPlayTrainer:
     def _play_one_self_play_game(
         self, opp_kind: str, deck0_name: str, deck1_name: str,
     ) -> Tuple[List[Transition], float, int, float]:
-        """Play one game and return (transitions, p0_outcome, length, avg_pred_v_p0)."""
-        env = FaBEnv(verbose=False)
-        env.reset(
-            _build_deck(deck0_name),
-            _build_deck(deck1_name),
-            seed=self._rng.randrange(2**31),
+        return play_one_self_play_game(
+            self.net, self.config, self._rng,
+            opp_kind, deck0_name, deck1_name,
+            weight_version=0,
+            should_stop=self._should_stop,
         )
-
-        # The "self" opponent uses the same net; otherwise it's a fixed agent.
-        opp_agent = self._make_opponent(opp_kind)
-        # If the opponent is fixed, "self" plays as player 0 by default;
-        # randomize side per game so the net learns both heroes.
-        learning_idx = self._rng.choice((0, 1)) if opp_kind != "self" else None
-
-        search = PUCTSearch(
-            self.net,
-            n_simulations=self.config.n_simulations,
-            c_puct=self.config.c_puct,
-            determinize=self.config.determinize,
-            dirichlet_alpha=self.config.dirichlet_alpha,
-            dirichlet_frac=self.config.dirichlet_frac,
-            seed=self._rng.randrange(2**31),
-        )
-
-        decisions: List[Transition] = []
-        # Per-side decision count for the temperature schedule.
-        per_side = [0, 0]
-        net_root_values: List[float] = []
-        length = 0
-
-        while not env.done:
-            length += 1
-            if self._should_stop():
-                break
-            agent_id = env.agent_selection
-            to_play = int(agent_id[-1])
-
-            legal = env.legal_actions()
-            if not legal:
-                break
-
-            # Forced action — env auto-executes in step(), but defensively
-            # handle here in case the loop encounters one.
-            if len(legal) == 1:
-                env.step(legal[0])
-                continue
-
-            mcts_owns_this_decision = (
-                opp_kind == "self" or to_play == learning_idx
-            )
-
-            if mcts_owns_this_decision:
-                obs_dict = env._get_obs()[agent_id]
-                root_legal, pi, root_q = search.run(env)
-                if not root_legal:
-                    break
-                net_root_values.append(root_q if to_play == 0 else -root_q)
-                tau = self._temperature_for(per_side[to_play])
-                idx = sample_action_index(pi, tau, self._rng)
-                action = root_legal[idx]
-                decisions.append(Transition(
-                    obs=obs_dict,
-                    legal_actions=list(root_legal),
-                    pi=list(pi),
-                    to_play=to_play,
-                ))
-                per_side[to_play] += 1
-                env.step(action)
-            else:
-                # Opponent (fixed rule-based agent) moves.
-                obs_full = env._get_obs()
-                action = _dispatch_agent_action(env, opp_agent, obs_full)
-                env.step(action)
-
-        # Outcome from agent_0's view, clipped to {-1, 0, +1}.
-        r0 = env._rewards.get("agent_0", 0.0)
-        if r0 > 0.5:
-            z0, z1 = 1.0, -1.0
-        elif r0 < -0.5:
-            z0, z1 = -1.0, 1.0
-        else:
-            z0, z1 = 0.0, 0.0
-
-        for t in decisions:
-            t.z = z0 if t.to_play == 0 else z1
-
-        avg_root_v = (sum(net_root_values) / len(net_root_values)
-                      if net_root_values else 0.0)
-        return decisions, z0, length, avg_root_v
 
     def _temperature_for(self, decision_idx: int) -> float:
-        cfg = self.config
-        if decision_idx < cfg.temp_drop_step:
-            return cfg.temp_start
-        return cfg.temp_end
+        return temperature_for(self.config, decision_idx)
 
     def _sample_deck_pair(self) -> Tuple[str, str]:
-        """Pick a deck name for each side independently from `deck_pool`."""
-        pool = [d for d in (self.config.deck_pool or ()) if d in DECK_BUILDERS]
-        if not pool:
-            pool = list(DECK_BUILDERS.keys())
-        return self._rng.choice(pool), self._rng.choice(pool)
+        return sample_deck_pair(self.config, self._rng)
 
     def _make_opponent(self, kind: str):
-        if kind in ("self",):
-            return None  # PUCTSearch handles both sides
-        if kind == "random":
-            return RandomAgent(seed=self._rng.randrange(2**31))
-        # Unknown → self
-        return None
+        return make_opponent(kind, self._rng)
 
     # ──────────────────────────────────────────────────────────
     # Training phase
@@ -499,14 +544,12 @@ class SelfPlayTrainer:
         value_loss = torch.zeros((), dtype=torch.float32)
 
         for t in batch:
-            obs_vec = flatten_obs(t.obs)
-            action_feats = stack_action_features(t.legal_actions)
+            obs_vec = torch.tensor(t.obs_vec, dtype=torch.float32)
+            action_feats = torch.tensor(t.action_feats, dtype=torch.float32)
             logits, value = self.net.forward(obs_vec, action_feats)
-            # Policy target: π. Cross entropy = -Σ π * log_softmax(logits).
             log_probs = F.log_softmax(logits, dim=-1)
             pi = torch.tensor(t.pi, dtype=torch.float32)
             policy_loss = policy_loss + (-(pi * log_probs).sum())
-            # Value target: z.
             z = torch.tensor(t.z, dtype=torch.float32)
             value_loss = value_loss + (value - z) ** 2
 
