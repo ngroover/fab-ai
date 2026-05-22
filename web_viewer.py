@@ -2232,6 +2232,7 @@ class _TrainingSession:
             c_value=_get_float("c_value", 0.5),
             eval_games=_get_int("eval_games", 4),
             eval_every=_get_int("eval_every", 1),
+            eval_vs_checkpoints=_get_bool("eval_vs_checkpoints", False),
             opponent_pool=tuple(opp_pool),
             deck_pool=tuple(deck_pool),
             run_name=str(raw.get("run_name") or ""),
@@ -3549,6 +3550,7 @@ TRAIN_TEMPLATE = """
       <button class="tab-btn active" data-tab="run">⚙️ Run</button>
       <button class="tab-btn" data-tab="monitor">📈 Monitor</button>
       <button class="tab-btn" data-tab="models">💾 Models</button>
+      <button class="tab-btn" data-tab="matchups">⚔️ Matchups</button>
     </div>
 
     <!-- ────────────────────────────────────────
@@ -3650,6 +3652,14 @@ TRAIN_TEMPLATE = """
                 <option value="off">Off</option>
               </select>
               <span class="help">Sample opponent's hidden hand for self-play rollouts.</span>
+            </div>
+            <div class="field">
+              <label>Record matchup grid</label>
+              <select id="cfg-matchups">
+                <option value="off">Off</option>
+                <option value="on">On</option>
+              </select>
+              <span class="help">During eval, also play eval_games per deck pair against every saved checkpoint. Populates the <strong>Matchups</strong> tab. Slows training when many checkpoints exist.</span>
             </div>
           </div>
         </details>
@@ -3814,6 +3824,47 @@ TRAIN_TEMPLATE = """
         </table>
       </div>
     </div>
+
+    <!-- ────────────────────────────────────────
+         MATCHUPS TAB
+         ──────────────────────────────────────── -->
+    <div class="tab-panel" id="tab-matchups">
+      <div class="panel">
+        <h2>Pick two models</h2>
+        <div class="field-grid">
+          <div class="field">
+            <label>Model A (rows)</label>
+            <select id="match-a"></select>
+          </div>
+          <div class="field">
+            <label>Model B (cols)</label>
+            <select id="match-b"></select>
+          </div>
+        </div>
+        <span class="help">
+          Win rates are A's wins, drawn from the eval games recorded during
+          training. Enable <strong>Record matchup grid</strong> in the Run tab
+          (under Hyperparameters) for new runs to populate this data. Each
+          cell may combine A's recorded games vs B with the inverse of B's
+          recorded games vs A.
+        </span>
+      </div>
+
+      <div class="panel">
+        <h2>Matchup grid (A's win rate)</h2>
+        <div id="matchup-empty" class="empty-monitor" style="display:none;">
+          <div class="big">⚔️</div>
+          <p>No matchup data recorded between these two models.</p>
+          <p style="margin-top:6px;font-size:0.85rem;">
+            Re-run training with <strong>Record matchup grid</strong> enabled.
+          </p>
+        </div>
+        <table class="models" id="matchup-table" style="display:none;">
+          <thead id="matchup-thead"></thead>
+          <tbody id="matchup-body"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -3873,6 +3924,7 @@ TRAIN_TEMPLATE = """
         batch_size:     document.getElementById('cfg-batch').value,
         c_value:        document.getElementById('cfg-vloss').value,
         determinize:    document.getElementById('cfg-pimc').value === 'on',
+        eval_vs_checkpoints: (document.getElementById('cfg-matchups')||{}).value === 'on',
         n_simulations:  32,
         opponent_pool:  opps.length ? opps : ['self'],
         deck_pool:      decks.length ? decks : ['rhinar', 'dorinthea'],
@@ -4155,6 +4207,121 @@ TRAIN_TEMPLATE = """
     // Refresh models when the user clicks the Models tab.
     document.querySelector('.tab-btn[data-tab="models"]').addEventListener('click', refreshModels);
     refreshModels();
+
+    // ── Matchups tab ───────────────────────────────────
+    let _matchupCheckpoints = [];
+
+    async function refreshMatchupModels() {
+      try {
+        const res = await getJSON('/train/models');
+        _matchupCheckpoints = (res.checkpoints || []).slice().reverse();
+        const selA = document.getElementById('match-a');
+        const selB = document.getElementById('match-b');
+        const prevA = selA.value, prevB = selB.value;
+        const opts = _matchupCheckpoints.map(c =>
+          `<option value="${c.name}">${c.name}</option>`).join('');
+        selA.innerHTML = opts;
+        selB.innerHTML = opts;
+        if (_matchupCheckpoints.some(c => c.name === prevA)) selA.value = prevA;
+        if (_matchupCheckpoints.some(c => c.name === prevB)) selB.value = prevB;
+        renderMatchupGrid();
+      } catch (err) { /* ignore */ }
+    }
+
+    function _matchupsFor(name) {
+      const c = _matchupCheckpoints.find(x => x.name === name);
+      return (c && c.matchups) || {};
+    }
+
+    // Collect all decks that appear in either side's matchup data.
+    function _decksFromMatchups(aName, bName) {
+      const set = new Set();
+      const collect = (mu) => {
+        for (const key of Object.keys(mu || {})) {
+          const parts = key.split('_vs_');
+          if (parts.length === 2) { set.add(parts[0]); set.add(parts[1]); }
+        }
+      };
+      collect((_matchupsFor(aName) || {})[bName]);
+      collect((_matchupsFor(bName) || {})[aName]);
+      return [...set].sort();
+    }
+
+    // Cell value: combine A's recorded wins vs B with the inverse of B's
+    // recorded wins vs A. Returns {wr, sources} or null when no data exists.
+    function _cellWinRate(aName, bName, aDeck, bDeck) {
+      const muA = (_matchupsFor(aName) || {})[bName] || {};
+      const muB = (_matchupsFor(bName) || {})[aName] || {};
+      const fromA = muA[aDeck + '_vs_' + bDeck];
+      const fromB = muB[bDeck + '_vs_' + aDeck];
+      const samples = [];
+      if (fromA !== undefined && fromA !== null) samples.push(Number(fromA));
+      if (fromB !== undefined && fromB !== null) samples.push(1 - Number(fromB));
+      if (!samples.length) return null;
+      const wr = samples.reduce((a, b) => a + b, 0) / samples.length;
+      return {wr, sources: samples.length};
+    }
+
+    function renderMatchupGrid() {
+      const aName = document.getElementById('match-a').value;
+      const bName = document.getElementById('match-b').value;
+      const table = document.getElementById('matchup-table');
+      const empty = document.getElementById('matchup-empty');
+      const thead = document.getElementById('matchup-thead');
+      const tbody = document.getElementById('matchup-body');
+
+      if (!aName || !bName) {
+        table.style.display = 'none';
+        empty.style.display = '';
+        return;
+      }
+
+      const decks = _decksFromMatchups(aName, bName);
+      if (!decks.length) {
+        table.style.display = 'none';
+        empty.style.display = '';
+        return;
+      }
+
+      const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+
+      // Header: top-left corner cell, then one column per B deck.
+      thead.innerHTML = '<tr>' +
+        `<th>A \\\\ B</th>` +
+        decks.map(d => `<th>B: ${cap(d)}</th>`).join('') +
+        '</tr>';
+
+      let allEmpty = true;
+      const rows = decks.map(aDeck => {
+        const cells = decks.map(bDeck => {
+          const c = _cellWinRate(aName, bName, aDeck, bDeck);
+          if (c === null) {
+            return `<td class="num em-dash" title="No data">—</td>`;
+          }
+          allEmpty = false;
+          const pct = (c.wr * 100).toFixed(0) + '%';
+          const title = `${c.sources} source${c.sources>1?'s':''} (A ${cap(aDeck)} vs B ${cap(bDeck)})`;
+          return `<td class="num" title="${title}">${pct}</td>`;
+        }).join('');
+        return `<tr><th style="text-align:left;">A: ${cap(aDeck)}</th>${cells}</tr>`;
+      }).join('');
+
+      if (allEmpty) {
+        table.style.display = 'none';
+        empty.style.display = '';
+        return;
+      }
+
+      tbody.innerHTML = rows;
+      table.style.display = '';
+      empty.style.display = 'none';
+    }
+
+    document.getElementById('match-a').addEventListener('change', renderMatchupGrid);
+    document.getElementById('match-b').addEventListener('change', renderMatchupGrid);
+    document.querySelector('.tab-btn[data-tab="matchups"]')
+      .addEventListener('click', refreshMatchupModels);
+    refreshMatchupModels();
   </script>
 </body>
 </html>

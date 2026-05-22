@@ -109,6 +109,10 @@ class TrainerConfig:
     eval_games: int = 4
     eval_every: int = 1              # evaluate after every N iterations
     eval_opponents: Tuple[str, ...] = ("random",)
+    # When True, also play eval_games per (net_deck, opp_deck) pair against
+    # every saved checkpoint and record the matchup win rates. This populates
+    # the "Matchups" tab in the web viewer.
+    eval_vs_checkpoints: bool = False
 
     # Bookkeeping
     opponent_pool: Tuple[str, ...] = ("self",)
@@ -416,15 +420,19 @@ class SelfPlayTrainer:
 
                 # ── 3. Eval ────────────────────────────────────
                 eval_wr: Dict[str, float] = {}
+                matchups: Dict[str, Dict[str, float]] = {}
                 if (self.config.eval_every > 0
                         and self._iter % self.config.eval_every == 0):
                     self._on_status("evaluating")
                     eval_wr = self._run_eval_phase()
                     if self._should_stop():
                         break
+                    matchups = self._run_checkpoint_matchups()
+                    if self._should_stop():
+                        break
 
                 # ── 4. Checkpoint ──────────────────────────────
-                ckpt = self._save_checkpoint(self._iter, eval_wr)
+                ckpt = self._save_checkpoint(self._iter, eval_wr, matchups)
 
                 # ── 5. Publish metrics ─────────────────────────
                 self._on_metrics({
@@ -632,8 +640,13 @@ class SelfPlayTrainer:
     def _play_one_eval_game(
         self, opp_name: str, net_seat: int,
         deck0_name: str, deck1_name: str,
+        opp_agent_override=None,
     ) -> float:
-        """Return +1/0/-1 from the *network's* perspective."""
+        """Return +1/0/-1 from the *network's* perspective.
+
+        If `opp_agent_override` is provided it is used directly; otherwise the
+        opponent is built from `opp_name` via `_make_opponent`.
+        """
         env = FaBEnv(verbose=False)
         env.reset(
             _build_deck(deck0_name),
@@ -641,7 +654,10 @@ class SelfPlayTrainer:
             seed=self._rng.randrange(2**31),
         )
         net_agent = NeuralAgent(model=self.net)
-        opp_agent = self._make_opponent(opp_name) or RandomAgent()
+        if opp_agent_override is not None:
+            opp_agent = opp_agent_override
+        else:
+            opp_agent = self._make_opponent(opp_name) or RandomAgent()
 
         while not env.done:
             if self._should_stop():
@@ -666,12 +682,73 @@ class SelfPlayTrainer:
             return -1.0
         return 0.0
 
+    def _run_checkpoint_matchups(self) -> Dict[str, Dict[str, float]]:
+        """Play eval_games per (net_deck, opp_deck) pair against every saved
+        checkpoint. Returns a nested dict:
+
+            {opp_ckpt_name: {f"{net_deck}_vs_{opp_deck}": win_rate}}
+
+        Only runs when `config.eval_vs_checkpoints` is True. Skips checkpoints
+        whose `.pt` file is missing.
+        """
+        out: Dict[str, Dict[str, float]] = {}
+        if not self.config.eval_vs_checkpoints:
+            return out
+
+        pool = [d for d in (self.config.deck_pool or ()) if d in DECK_BUILDERS]
+        if not pool:
+            pool = list(DECK_BUILDERS.keys())
+
+        index = _load_index()
+        names = [c["name"] for c in index.get("checkpoints", [])]
+        if not names:
+            return out
+
+        self.net.eval()
+        for ckpt_name in names:
+            if self._should_stop():
+                break
+            opp_net = _load_network_from_checkpoint(ckpt_name)
+            if opp_net is None:
+                self._log(f"    skip matchup vs {ckpt_name}: weights missing")
+                continue
+            opp_agent = NeuralAgent(model=opp_net)
+            pair_results: Dict[str, float] = {}
+            for net_deck in pool:
+                for opp_deck in pool:
+                    wins = 0
+                    total = 0
+                    for _ in range(self.config.eval_games):
+                        if self._should_stop():
+                            break
+                        net_seat = self._rng.choice((0, 1))
+                        deck0 = net_deck if net_seat == 0 else opp_deck
+                        deck1 = opp_deck if net_seat == 0 else net_deck
+                        outcome = self._play_one_eval_game(
+                            "", net_seat, deck0, deck1,
+                            opp_agent_override=opp_agent,
+                        )
+                        total += 1
+                        if outcome > 0:
+                            wins += 1
+                    if total:
+                        pair_results[f"{net_deck}_vs_{opp_deck}"] = wins / total
+            if pair_results:
+                out[ckpt_name] = pair_results
+                summary = ", ".join(
+                    f"{k}={v*100:.0f}%" for k, v in pair_results.items()
+                )
+                self._log(f"  ⚔  matchup vs {ckpt_name}: {summary}")
+
+        return out
+
     # ──────────────────────────────────────────────────────────
     # Checkpoint I/O
     # ──────────────────────────────────────────────────────────
 
     def _save_checkpoint(
-        self, iter_: int, eval_wr: Dict[str, float]
+        self, iter_: int, eval_wr: Dict[str, float],
+        matchups: Optional[Dict[str, Dict[str, float]]] = None,
     ) -> Optional[dict]:
         os.makedirs(CHECKPOINT_DIR, exist_ok=True)
         name = f"{self.config.run_name}-iter-{iter_:04d}"
@@ -690,6 +767,7 @@ class SelfPlayTrainer:
             "created": datetime.now().isoformat(timespec="seconds"),
             "size_bytes": size,
             "metrics": dict(eval_wr),
+            "matchups": {k: dict(v) for k, v in (matchups or {}).items()},
             "run_name": self.config.run_name,
             "hash": weight_hash,
         }
@@ -734,6 +812,21 @@ def _build_deck(name: str) -> list:
             f"Unknown deck {name!r}; known: {sorted(DECK_BUILDERS)}"
         )
     return builder()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Load a checkpoint's weights into a fresh PolicyValueNetwork
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _load_network_from_checkpoint(name: str) -> Optional[PolicyValueNetwork]:
+    path = os.path.join(CHECKPOINT_DIR, f"{name}.pt")
+    if not os.path.isfile(path):
+        return None
+    data = torch.load(path, map_location="cpu", weights_only=False)
+    net = PolicyValueNetwork()
+    net.load_state_dict(data["state_dict"])
+    net.eval()
+    return net
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -825,6 +918,9 @@ def _build_cli() -> argparse.ArgumentParser:
                    help="Base checkpoint name (under ./checkpoints/)")
     p.add_argument("--no-pimc", action="store_true",
                    help="Disable PIMC determinization")
+    p.add_argument("--eval-vs-checkpoints", action="store_true",
+                   help="Also play eval games against every saved checkpoint "
+                        "and record matchup win rates per deck pair.")
     p.add_argument(
         "--deck-pool", type=str, default="",
         help=(
@@ -863,6 +959,7 @@ def main() -> None:
         run_name=args.run_name,
         base_checkpoint=args.base,
         deck_pool=deck_pool,
+        eval_vs_checkpoints=args.eval_vs_checkpoints,
     )
     SelfPlayTrainer(cfg).run()
 
