@@ -2237,26 +2237,62 @@ class _TrainingSession:
             run_name=str(raw.get("run_name") or ""),
             base_checkpoint=base_ckpt,
             seed=seed,
+            distributed=_get_bool("distributed", False),
+            dist_bind_host=str(raw.get("dist_bind_host") or "0.0.0.0"),
+            dist_pull_port=_get_int("dist_pull_port", 5556),
+            dist_pub_port=_get_int("dist_pub_port", 5557),
+            dist_rep_port=_get_int("dist_rep_port", 5558),
+            dist_broadcast_secs=_get_float("dist_broadcast_secs", 5.0),
+            dist_max_staleness=_get_int("dist_max_staleness", 10),
+            dist_min_buffer=_get_int("dist_min_buffer", 64),
         )
 
     def _run_thread(self, cfg) -> None:
         from self_play_trainer import SelfPlayTrainer
 
+        callbacks = {
+            "on_log": self._on_log,
+            "on_metrics": self._on_metrics,
+            "on_status": self._on_status,
+            "on_checkpoint": self._on_checkpoint,
+            "on_progress": self._on_progress,
+            "should_stop": self._should_stop,
+            "wait_if_paused": self._wait_if_paused,
+        }
+
         with self._lock:
             self.status = "self-play"
         try:
-            trainer = SelfPlayTrainer(
-                cfg,
-                callbacks={
-                    "on_log": self._on_log,
-                    "on_metrics": self._on_metrics,
-                    "on_status": self._on_status,
-                    "on_checkpoint": self._on_checkpoint,
-                    "on_progress": self._on_progress,
-                    "should_stop": self._should_stop,
-                    "wait_if_paused": self._wait_if_paused,
-                },
-            )
+            if getattr(cfg, "distributed", False):
+                import os
+                from dist_coordinator import CoordinatorServer
+
+                token = os.environ.get("FAB_DIST_TOKEN", "")
+                if not token:
+                    raise RuntimeError(
+                        "FAB_DIST_TOKEN env var must be set for distributed mode."
+                    )
+                trainer = CoordinatorServer(
+                    config=cfg,
+                    token=token,
+                    callbacks=callbacks,
+                    bind_host=cfg.dist_bind_host,
+                    pull_port=cfg.dist_pull_port,
+                    pub_port=cfg.dist_pub_port,
+                    rep_port=cfg.dist_rep_port,
+                    broadcast_every_sec=cfg.dist_broadcast_secs,
+                    max_staleness=cfg.dist_max_staleness,
+                    min_buffer_to_train=cfg.dist_min_buffer,
+                )
+                self._on_log(
+                    f"  📡  Distributed mode: workers connect with "
+                    f"`--coord tcp://<this-host>` "
+                    f"(rep={cfg.dist_rep_port}, pull={cfg.dist_pull_port}, "
+                    f"pub={cfg.dist_pub_port}).  "
+                    f"Each worker needs FAB_DIST_TOKEN set to the same value."
+                )
+            else:
+                trainer = SelfPlayTrainer(cfg, callbacks=callbacks)
             trainer.run()
             with self._lock:
                 if self._stop_flag.is_set():
@@ -3618,6 +3654,53 @@ TRAIN_TEMPLATE = """
           </div>
         </details>
 
+        <details class="advanced">
+          <summary>Distributed self-play</summary>
+          <div class="field-grid">
+            <div class="field">
+              <label>Mode</label>
+              <select id="cfg-distributed">
+                <option value="off">Single-process</option>
+                <option value="on">Distributed (this UI is the coordinator)</option>
+              </select>
+              <span class="help">
+                When on, workers connect to this process. Each worker process
+                runs <code>python dist_worker.py --coord tcp://&lt;this-host&gt;</code>
+                with <code>FAB_DIST_TOKEN</code> set to the same value as this
+                server. Check the log after Start for the exact bind ports.
+              </span>
+            </div>
+            <div class="field">
+              <label>Bind host</label>
+              <input type="text" id="cfg-dist-host" value="0.0.0.0">
+            </div>
+            <div class="field">
+              <label>PULL port (transitions)</label>
+              <input type="number" id="cfg-dist-pull" value="5556" min="1">
+            </div>
+            <div class="field">
+              <label>PUB port (weights)</label>
+              <input type="number" id="cfg-dist-pub" value="5557" min="1">
+            </div>
+            <div class="field">
+              <label>REP port (handshake)</label>
+              <input type="number" id="cfg-dist-rep" value="5558" min="1">
+            </div>
+            <div class="field">
+              <label>Weight broadcast (s)</label>
+              <input type="number" id="cfg-dist-broadcast" value="5" step="0.5" min="0.5">
+            </div>
+            <div class="field">
+              <label>Max staleness (versions)</label>
+              <input type="number" id="cfg-dist-stale" value="10" min="0">
+            </div>
+            <div class="field">
+              <label>Min buffer before training</label>
+              <input type="number" id="cfg-dist-minbuf" value="64" min="1">
+            </div>
+          </div>
+        </details>
+
         <div class="btn-row">
           <button class="tbtn tbtn-primary" id="btn-start">▶ Start</button>
           <button class="tbtn tbtn-warn"    id="btn-pause"  disabled>⏸ Pause</button>
@@ -3780,6 +3863,7 @@ TRAIN_TEMPLATE = """
       const decks = Array.from(document.querySelectorAll('#deck-chips .chip.active'))
         .map(c => c.dataset.deck);
       const baseRaw = document.getElementById('cfg-base').value;
+      const distEl = document.getElementById('cfg-distributed');
       return {
         games_per_iter: document.getElementById('cfg-games').value,
         steps_per_iter: document.getElementById('cfg-steps').value,
@@ -3794,6 +3878,14 @@ TRAIN_TEMPLATE = """
         deck_pool:      decks.length ? decks : ['rhinar', 'dorinthea'],
         run_name:       document.getElementById('cfg-name').value || '',
         base_checkpoint: (baseRaw && baseRaw !== 'random') ? baseRaw : null,
+        distributed:    distEl ? distEl.value === 'on' : false,
+        dist_bind_host: (document.getElementById('cfg-dist-host')||{}).value || '0.0.0.0',
+        dist_pull_port: (document.getElementById('cfg-dist-pull')||{}).value || 5556,
+        dist_pub_port:  (document.getElementById('cfg-dist-pub')||{}).value || 5557,
+        dist_rep_port:  (document.getElementById('cfg-dist-rep')||{}).value || 5558,
+        dist_broadcast_secs: (document.getElementById('cfg-dist-broadcast')||{}).value || 5,
+        dist_max_staleness:  (document.getElementById('cfg-dist-stale')||{}).value || 10,
+        dist_min_buffer:     (document.getElementById('cfg-dist-minbuf')||{}).value || 64,
       };
     }
 
