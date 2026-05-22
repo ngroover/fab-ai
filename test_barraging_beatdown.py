@@ -330,5 +330,133 @@ class TestBarragingBeatdownStacking(unittest.TestCase):
                          "Conditional bonus must be cleared after attack resolves")
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Brute-class targeting: the conditional bonus must apply only to Brute
+# attacks. Generic action cards (e.g. Raging Onslaught) must not benefit
+# and must not consume the bonus. Brute weapons (Bone Basher) DO benefit.
+# ─────────────────────────────────────────────────────────────────────────
+
+SEED_BB_RO = 21
+# Seed 21: Rhinar wins coin flip; hand:
+#   ['Smash Instinct', 'Barraging Beatdown', 'Bare Fangs', 'Raging Onslaught']
+
+
+class TestBarragingBeatdownDoesNotApplyToGenericAttack(unittest.TestCase):
+    """BB conditional bonus must NOT apply to (or be consumed by) a Generic
+    attack action card (Raging Onslaught)."""
+
+    def setUp(self):
+        self.env = FaBEnv(verbose=False)
+        self.env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED_BB_RO)
+        self.rhinar = self.env._game.players[0]
+        self.dorinthea = self.env._game.players[1]
+
+        self.env.step(next(a for a in self.env.legal_actions()
+                           if a.action_type == ActionType.GO_FIRST))
+
+        # Play BB (cost 0).
+        bb = next(a for a in self.env.legal_actions()
+                  if a.action_type == ActionType.PLAY_CARD
+                  and a.card is not None
+                  and a.card.name == "Barraging Beatdown")
+        self.env.step(bb)
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
+
+        # Play Raging Onslaught (Generic 6/3, cost 3). Pitch Smash Instinct (2)
+        # then Bare Fangs (1) to cover.
+        ro = next(a for a in self.env.legal_actions()
+                  if a.action_type == ActionType.PLAY_CARD
+                  and a.card is not None
+                  and a.card.name == "Raging Onslaught")
+        self.env.step(ro)
+
+        for name in ("Smash Instinct", "Bare Fangs"):
+            if self.env._phase != Phase.PITCH:
+                break
+            pitch_a = next(a for a in self.env.legal_actions()
+                           if a.action_type == ActionType.PITCH
+                           and a.pitch_index is not None
+                           and self.rhinar.hand[a.pitch_index].name == name)
+            self.env.step(pitch_a)
+
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
+
+        self.life_before = self.dorinthea.life
+
+    def test_pending_attack_is_raging_onslaught(self):
+        self.assertEqual(self.env._pending_attack.name, "Raging Onslaught")
+        self.assertEqual(self.env._pending_attack.card_class, CardClass.GENERIC)
+
+    def test_generic_takes_no_bonus_no_block(self):
+        _commit_no_block(self.env)
+        _pass_reactions(self.env)
+        # Raging Onslaught 6 power, no block, no bonus → 6 damage.
+        self.assertEqual(self.dorinthea.life, self.life_before - 6,
+                         "Generic attack must NOT get BB's +3 conditional bonus")
+
+    def test_bonus_not_consumed_by_generic_attack(self):
+        _commit_no_block(self.env)
+        _pass_reactions(self.env)
+        self.assertEqual(self.rhinar.next_brute_attack_conditional_bonus, 3,
+                         "Conditional bonus must NOT be consumed by a non-Brute attack")
+
+
+class TestBarragingBeatdownAppliesToBruteWeapon(unittest.TestCase):
+    """Unlike Awakening Bellow, Barraging Beatdown's wording 'next Brute attack'
+    DOES include weapon attacks. Bone Basher is a Brute weapon, so the
+    conditional bonus must apply and be consumed."""
+
+    def setUp(self):
+        self.env = FaBEnv(verbose=False)
+        self.env.reset(build_rhinar_deck(), build_dorinthea_deck(), seed=SEED_BB_RO)
+        self.rhinar = self.env._game.players[0]
+        self.dorinthea = self.env._game.players[1]
+
+        self.env.step(next(a for a in self.env.legal_actions()
+                           if a.action_type == ActionType.GO_FIRST))
+
+        # Play BB (cost 0).
+        bb = next(a for a in self.env.legal_actions()
+                  if a.action_type == ActionType.PLAY_CARD
+                  and a.card is not None
+                  and a.card.name == "Barraging Beatdown")
+        self.env.step(bb)
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
+
+        # WEAPON (Bone Basher cost 2). Pitch Smash Instinct (2).
+        w = next(a for a in self.env.legal_actions()
+                 if a.action_type == ActionType.WEAPON)
+        self.env.step(w)
+        pitch_a = next(a for a in self.env.legal_actions()
+                       if a.action_type == ActionType.PITCH
+                       and a.pitch_index is not None
+                       and self.rhinar.hand[a.pitch_index].name == "Smash Instinct")
+        self.env.step(pitch_a)
+        while self.env._phase == Phase.INSTANT:
+            self.env.step(self.env.legal_actions()[0])
+
+        self.life_before = self.dorinthea.life
+
+    def test_pending_attack_is_bone_basher(self):
+        self.assertEqual(self.env._pending_attack.name, "Bone Basher")
+        self.assertEqual(self.env._pending_attack.card_class, CardClass.BRUTE)
+
+    def test_brute_weapon_gets_bonus_no_block(self):
+        _commit_no_block(self.env)
+        _pass_reactions(self.env)
+        # Bone Basher base 4 + BB conditional +3 (no block, <2 blockers) = 7 damage.
+        self.assertEqual(self.dorinthea.life, self.life_before - 7,
+                         "Brute weapon attack must get BB's +3 conditional bonus")
+
+    def test_bonus_consumed_by_brute_weapon(self):
+        _commit_no_block(self.env)
+        _pass_reactions(self.env)
+        self.assertEqual(self.rhinar.next_brute_attack_conditional_bonus, 0,
+                         "Conditional bonus must be consumed by a Brute weapon attack")
+
+
 if __name__ == "__main__":
     unittest.main()

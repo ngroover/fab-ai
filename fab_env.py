@@ -30,7 +30,7 @@ import random
 from enum import Enum, auto
 from typing import Dict, List, Optional, Set, Tuple, Any
 
-from cards import Card, CardType, Color, Keyword, QUICKEN_TOKEN_CARD
+from cards import Card, CardType, Color, Keyword, CardClass, QUICKEN_TOKEN_CARD
 from card_effects import EffectTrigger, EffectAction
 from game_state import Player, GameState, Equipment
 from actions import (
@@ -706,19 +706,35 @@ class FaBEnv:
         # weapon bonuses (set by _trigger_defend_phase) and any modifications from
         # reaction cards (e.g. Thrust +3, Out for Blood +2).
         power = self._pending_attack_power
+        is_brute_attack_action = (
+            not is_weapon
+            and card.card_class == CardClass.BRUTE
+            and CardType.ATTACK in card.card_type
+            and CardType.ACTION in card.card_type
+        )
+        # Barraging Beatdown applies to any Brute attack (action card or weapon).
+        is_brute_attack = card.card_class == CardClass.BRUTE and (
+            is_weapon or (CardType.ATTACK in card.card_type)
+        )
         if is_weapon:
             attacker.next_weapon_power_bonus = 0
         else:
-            attacker.next_brute_attack_bonus = 0
-            if attacker.next_brute_attack_conditional_bonus > 0:
-                if len(def_cards) < 2:
-                    power += attacker.next_brute_attack_conditional_bonus
-                    self._log(f"    ⚡ Conditional bonus +{attacker.next_brute_attack_conditional_bonus} power "
-                              f"({len(def_cards)} non-equipment blocker(s)).")
-                else:
-                    self._log(f"    ❌ Conditional bonus nullified "
-                              f"({len(def_cards)} non-equipment blockers).")
-                attacker.next_brute_attack_conditional_bonus = 0
+            # Awakening Bellow's bonus is only consumed by a matching Brute
+            # attack action card; otherwise it waits for the next one.
+            if is_brute_attack_action:
+                attacker.next_brute_attack_bonus = 0
+
+        # Barraging Beatdown's conditional bonus applies (and is consumed) on
+        # the next Brute attack — including Brute weapon attacks.
+        if attacker.next_brute_attack_conditional_bonus > 0 and is_brute_attack:
+            if len(def_cards) < 2:
+                power += attacker.next_brute_attack_conditional_bonus
+                self._log(f"    ⚡ Conditional bonus +{attacker.next_brute_attack_conditional_bonus} power "
+                          f"({len(def_cards)} non-equipment blocker(s)).")
+            else:
+                self._log(f"    ❌ Conditional bonus nullified "
+                          f"({len(def_cards)} non-equipment blockers).")
+            attacker.next_brute_attack_conditional_bonus = 0
 
         total_def = (sum(c.defense for c in def_cards) + sum(e.defense for e in def_equip)
                      + reaction_defense_bonus)
@@ -1398,7 +1414,15 @@ class FaBEnv:
             power = attacker.get_effective_weapon_power()
             attacker.next_sword_attack_power_bonus = 0  # consumed by this attack declaration
         else:
-            power = self._pending_attack.power + attacker.next_brute_attack_bonus
+            power = self._pending_attack.power
+            # Awakening Bellow: +N power to next *Brute attack action card* only.
+            # Does NOT apply to Generic attack actions or to weapons.
+            if (attacker.next_brute_attack_bonus > 0
+                    and self._pending_attack.card_class == CardClass.BRUTE
+                    and CardType.ATTACK in self._pending_attack.card_type
+                    and CardType.ACTION in self._pending_attack.card_type):
+                power += attacker.next_brute_attack_bonus
+                self._log(f"    ⚡ Brute attack power bonus +{attacker.next_brute_attack_bonus} applied.")
             if attacker.next_attack_power_bonus:
                 power += attacker.next_attack_power_bonus
                 self._log(f"    ⚡ next attack action power bonus +{attacker.next_attack_power_bonus} applied.")
