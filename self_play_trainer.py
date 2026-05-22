@@ -214,12 +214,49 @@ def sample_deck_pair(cfg: "TrainerConfig", rng: random.Random) -> Tuple[str, str
     return rng.choice(pool), rng.choice(pool)
 
 
-def make_opponent(kind: str, rng: random.Random):
-    if kind in ("self",):
+def make_opponent(
+    kind: str,
+    rng: random.Random,
+    opponent_idx: Optional[int] = None,
+):
+    if kind == "self":
         return None  # PUCTSearch handles both sides
     if kind == "random":
         return RandomAgent(seed=rng.randrange(2**31))
-    return None
+    if kind == "mcts":
+        from mcts_agent import MCTSAgent
+        # MCTSAgent's player_idx must match the seat it will play. Caller
+        # passes `opponent_idx`; default to seat 1 if it wasn't threaded.
+        return MCTSAgent(
+            player_idx=opponent_idx if opponent_idx is not None else 1,
+            n_simulations=200,
+            seed=rng.randrange(2**31),
+        )
+    if kind == "past":
+        index = _load_index()
+        names = [c["name"] for c in index.get("checkpoints", [])]
+        if names:
+            ckpt_name = rng.choice(names)
+            opp_net = _load_network_from_checkpoint(ckpt_name)
+            if opp_net is not None:
+                return NeuralAgent(model=opp_net)
+        # No checkpoints available — fall through to RandomAgent so the
+        # worker still produces useful samples instead of crashing.
+        print(
+            f"[make_opponent] 'past' requested but no checkpoints available; "
+            f"using RandomAgent",
+            flush=True,
+        )
+        return RandomAgent(seed=rng.randrange(2**31))
+    # Unknown kind: never return None — callers will try `agent.select_action`
+    # and hit AttributeError. Fall back to RandomAgent and log so config
+    # mistakes are noisy.
+    print(
+        f"[make_opponent] unsupported opponent kind {kind!r}; "
+        f"falling back to RandomAgent",
+        flush=True,
+    )
+    return RandomAgent(seed=rng.randrange(2**31))
 
 
 def play_one_self_play_game(
@@ -244,9 +281,12 @@ def play_one_self_play_game(
         seed=rng.randrange(2**31),
     )
 
-    opp_agent = make_opponent(opp_kind, rng)
     # If the opponent is fixed, randomize side per game so the net learns both heroes.
     learning_idx = rng.choice((0, 1)) if opp_kind != "self" else None
+    opponent_idx = 1 - learning_idx if learning_idx is not None else None
+    opp_agent = make_opponent(opp_kind, rng, opponent_idx=opponent_idx)
+    if opp_agent is not None and hasattr(opp_agent, "set_env"):
+        opp_agent.set_env(env)
 
     search = PUCTSearch(
         net,
@@ -657,7 +697,13 @@ class SelfPlayTrainer:
         if opp_agent_override is not None:
             opp_agent = opp_agent_override
         else:
-            opp_agent = self._make_opponent(opp_name) or RandomAgent()
+            opponent_idx = 1 - net_seat
+            opp_agent = (
+                make_opponent(opp_name, self._rng, opponent_idx=opponent_idx)
+                or RandomAgent()
+            )
+        if hasattr(opp_agent, "set_env"):
+            opp_agent.set_env(env)
 
         while not env.done:
             if self._should_stop():
