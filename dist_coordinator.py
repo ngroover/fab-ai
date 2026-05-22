@@ -92,6 +92,9 @@ class CoordinatorServer:
 
         # Lock guards trainer.buffer and the model state_dict during pub/copy.
         self._lock = threading.Lock()
+        # ZMQ sockets are not thread-safe; the PUB socket is touched by the
+        # broadcast thread and the training thread, so guard its sends.
+        self._pub_lock = threading.Lock()
         self._weight_version = 0
         self._stop_flag = threading.Event()
         self._stats = {
@@ -133,7 +136,12 @@ class CoordinatorServer:
         try:
             self._training_loop()
         finally:
+            # Joining the helper threads BEFORE closing sockets is required:
+            # ZMQ asserts (signaler.cpp POLLIN) if a socket is closed while
+            # another thread is mid-recv/send on it.
             self._stop_flag.set()
+            for t in threads:
+                t.join(timeout=5.0)
             self._trainer._on_status("idle")
             self._close_sockets()
 
@@ -275,7 +283,8 @@ class CoordinatorServer:
 
     def _broadcast_loop(self) -> None:
         while not self._stop_flag.is_set():
-            time.sleep(self.broadcast_every_sec)
+            if self._stop_flag.wait(self.broadcast_every_sec):
+                return
             self._broadcast_weights()
 
     def _broadcast_weights(self) -> None:
@@ -286,11 +295,12 @@ class CoordinatorServer:
                 self._trainer.config.run_name,
             )
             version = self._weight_version
-        try:
-            self._pub_sock.send_multipart([proto.TOPIC_WEIGHTS, blob])
-            self._stats["last_broadcast_at"] = time.time()
-        except zmq.ZMQError:
-            pass
+        with self._pub_lock:
+            try:
+                self._pub_sock.send_multipart([proto.TOPIC_WEIGHTS, blob])
+                self._stats["last_broadcast_at"] = time.time()
+            except zmq.ZMQError:
+                pass
 
     # ──────────────────────────────────────────────────────────
     # Training thread (main)
