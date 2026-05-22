@@ -22,10 +22,11 @@ Use as a library:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import warnings
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from card_effects import EffectAction, EffectTrigger
 from cards import Card, CardClass, CardType, Color, EquipSlot, Keyword
@@ -372,6 +373,36 @@ def ensure_embeddings(
         print(f"[card_embeddings] Generated {len(card_ids)} embeddings "
               f"(dim={embed_dim}, final loss={losses[-1]:.6f}).")
     return load_embeddings(out_dir)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Content hash (for distributed-worker compatibility checks)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def embeddings_hash(embeddings: Optional[Dict[str, List[float]]] = None) -> str:
+    """Stable 16-char content hash of an embedding table.
+
+    Independent of file format and float repr (values rounded to 8 decimals).
+    Distributed workers compare this against the coordinator's hash during
+    the handshake — a mismatch means the workers and coordinator are encoding
+    cards into different vector spaces, which silently corrupts training.
+
+    Loads the default artifacts via `ensure_embeddings()` when `embeddings`
+    is omitted.
+    """
+    if embeddings is None:
+        embeddings = ensure_embeddings()
+    dim = len(next(iter(embeddings.values()))) if embeddings else 0
+    h = hashlib.sha256()
+    h.update(f"dim={dim}\n".encode("ascii"))
+    for cid in sorted(embeddings.keys()):
+        h.update(cid.encode("utf-8"))
+        h.update(b"|")
+        for v in embeddings[cid]:
+            h.update(f"{v:.8f}".encode("ascii"))
+            h.update(b",")
+        h.update(b"\n")
+    return h.hexdigest()[:16]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
