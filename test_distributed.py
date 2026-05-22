@@ -119,6 +119,27 @@ class DistributedSmokeTest(unittest.TestCase):
         self.assertEqual(payload.get("reason"), "bad_token")
         sock.close(linger=0)
 
+    def test_bad_embeddings_hash_is_rejected(self):
+        ctx = zmq.Context.instance()
+        sock = ctx.socket(zmq.REQ)
+        sock.RCVTIMEO = 3000
+        sock.SNDTIMEO = 3000
+        sock.connect(f"tcp://127.0.0.1:{self.rep_port}")
+
+        envelope = proto.make_envelope(
+            {"worker_id": "drift", "embeddings_hash": "deadbeefdeadbeef"},
+            self.token,
+            proto.KIND_HANDSHAKE_HELLO,
+        )
+        sock.send(envelope)
+        reply = sock.recv()
+        kind, _tok, payload = proto.decode_envelope(reply)
+        self.assertEqual(kind, proto.KIND_HANDSHAKE_FAIL)
+        self.assertEqual(payload.get("reason"), "bad_embeddings_hash")
+        self.assertEqual(payload.get("expected"), self.coord._embeddings_hash)
+        self.assertEqual(payload.get("got"), "deadbeefdeadbeef")
+        sock.close(linger=0)
+
     def test_workers_stream_transitions_and_weight_version_advances(self):
         env = os.environ.copy()
         env["FAB_DIST_TOKEN"] = self.token

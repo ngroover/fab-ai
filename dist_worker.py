@@ -34,6 +34,7 @@ import torch
 import zmq
 
 import dist_protocol as proto
+from card_embeddings import embeddings_hash
 from neural_agent import PolicyValueNetwork
 from self_play_trainer import (
     TrainerConfig,
@@ -144,8 +145,14 @@ class Worker:
         self._req.SNDTIMEO = 10000
 
         # Handshake.
+        local_hash = embeddings_hash()
+        self._log(f"local card embeddings hash: {local_hash}")
         envelope = proto.make_envelope(
-            {"worker_id": self.worker_id, "host": socket.gethostname()},
+            {
+                "worker_id": self.worker_id,
+                "host": socket.gethostname(),
+                "embeddings_hash": local_hash,
+            },
             self.token,
             proto.KIND_HANDSHAKE_HELLO,
         )
@@ -153,7 +160,24 @@ class Worker:
         reply = self._req.recv()
         kind, _tok, payload = proto.decode_envelope(reply)
         if kind != proto.KIND_HANDSHAKE_OK or not isinstance(payload, dict):
+            reason = (payload or {}).get("reason") if isinstance(payload, dict) else None
+            if reason == "bad_embeddings_hash":
+                raise RuntimeError(
+                    f"handshake rejected: card embeddings hash mismatch — "
+                    f"coordinator expects {payload.get('expected')!r}, "
+                    f"this worker has {payload.get('got')!r}. "
+                    f"Sync `card_embeddings_out/` from the coordinator (or "
+                    f"re-run `python card_embeddings.py` on both with the "
+                    f"same git checkout)."
+                )
             raise RuntimeError(f"handshake failed: kind={kind} payload={payload}")
+
+        coord_hash = str(payload.get("embeddings_hash", ""))
+        if coord_hash and coord_hash != local_hash:
+            raise RuntimeError(
+                f"handshake card embeddings hash mismatch: coordinator "
+                f"{coord_hash!r} != worker {local_hash!r}"
+            )
 
         self.cfg = proto.wire_to_config(payload["config"])
         self._apply_weights_blob(payload["weights"])

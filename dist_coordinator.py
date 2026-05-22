@@ -40,6 +40,7 @@ from self_play_trainer import (
     _hash_state_dict,
 )
 import dist_protocol as proto
+from card_embeddings import embeddings_hash
 
 
 DEFAULT_PULL_PORT = 5556
@@ -90,6 +91,11 @@ class CoordinatorServer:
         # Internal trainer carries all model + buffer state.
         self._trainer = SelfPlayTrainer(config, callbacks=callbacks)
 
+        # Fingerprint of the local card-embedding table. Workers must match
+        # this exactly or their observations encode cards into a different
+        # vector space than the network was trained against.
+        self._embeddings_hash = embeddings_hash()
+
         # Lock guards trainer.buffer and the model state_dict during pub/copy.
         self._lock = threading.Lock()
         self._weight_version = 0
@@ -121,6 +127,7 @@ class CoordinatorServer:
             f"  ▶  Coordinator listening on PULL :{self.pull_port}  "
             f"PUB :{self.pub_port}  REP :{self.rep_port}"
         )
+        self._trainer._log(f"  🔑  card embeddings hash: {self._embeddings_hash}")
 
         threads = [
             threading.Thread(target=self._pull_loop, name="pull", daemon=True),
@@ -233,6 +240,27 @@ class CoordinatorServer:
 
             if kind == proto.KIND_HANDSHAKE_HELLO:
                 worker_id = str((payload or {}).get("worker_id", "?"))
+                worker_hash = str((payload or {}).get("embeddings_hash", ""))
+                if worker_hash != self._embeddings_hash:
+                    self._trainer._log(
+                        f"  ⛔  worker {worker_id} rejected: embeddings hash "
+                        f"{worker_hash!r} != coordinator {self._embeddings_hash!r}"
+                    )
+                    reply = proto.make_envelope(
+                        {
+                            "reason": "bad_embeddings_hash",
+                            "expected": self._embeddings_hash,
+                            "got": worker_hash,
+                        },
+                        self.token,
+                        proto.KIND_HANDSHAKE_FAIL,
+                    )
+                    try:
+                        self._rep_sock.send(reply)
+                    except zmq.ZMQError:
+                        pass
+                    continue
+
                 self._workers_last_seen[worker_id] = time.time()
                 self._stats["workers_seen"].add(worker_id)
                 with self._lock:
@@ -248,6 +276,7 @@ class CoordinatorServer:
                     "weights": weights_blob,
                     "weight_version": version,
                     "run_name": self._trainer.config.run_name,
+                    "embeddings_hash": self._embeddings_hash,
                 }
                 reply = proto.make_envelope(reply_payload, self.token, proto.KIND_HANDSHAKE_OK)
                 self._trainer._log(f"  🤝  worker {worker_id} handshake (v={version})")
