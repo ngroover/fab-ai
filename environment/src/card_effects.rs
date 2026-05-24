@@ -33,9 +33,9 @@ pub enum OnPlayEffectType {
 }
 
 pub struct OnPlayEffect {
-    pub condition :OnPlayConditionType;
-    pub effectType : OnPlayEffectType;
-    pub magnitude : u8;
+    pub condition :OnPlayConditionType,
+    pub effectType : OnPlayEffectType,
+    pub magnitude : u8,
 }
 
 #[repr(u8)]
@@ -63,8 +63,8 @@ pub enum NextAttackEffectType {
 }
 
 pub struct NextAttackEffect {
-    pub attackType : NextAttackType;
-    pub effectType : NextAttackEffectType;
+    pub attackType : NextAttackType,
+    pub effectType : NextAttackEffectType,
 }
 
 #[repr(u8)]
@@ -75,7 +75,7 @@ pub enum TurnEffectType {
 
 #[repr(u8)]
 pub enum AdditionalCostType {
-    RevealCost1OrLess
+    RevealCost1OrLess,
     DiscardCard,
 }
 
@@ -98,7 +98,7 @@ pub enum TargetEffectType {
 }
 
 pub struct TargetEffect {
-    pub TargetType targetTyp;
-    pub TargetEffect effectTyp
+    pub targetType : TargetType,
+    pub effectType : TargetEffectType,
 }
 

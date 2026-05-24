@@ -2,6 +2,7 @@ mod cards;
 use cards::CardType;
 mod classic_battles;
 use classic_battles::get_card_catalog;
+mod card_effects;
 
 fn main() {
     let c = get_card_catalog();

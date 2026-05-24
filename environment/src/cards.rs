@@ -1,5 +1,7 @@
 use bitflags::bitflags;
-use card_effects::ConstantEffects::{ConstantEffects};
+use crate::card_effects::{ConstantEffect,Ability,DefendEffect,
+    NextAttackEffect,AdditionalCostType,OnPlayEffect,TargetEffect,
+    PlayCondition};
 
 #[repr(u8)]
 pub enum CardType {
@@ -68,11 +70,12 @@ pub struct CardData {
     pub hero_intellect: u8,
     pub constant_effect : Option<ConstantEffect>,
     pub ability : Option<Ability>,
-    pub defend_effect : Option<Ability>,
+    pub defend_effect : Option<DefendEffect>,
     pub next_attack_effect : Option<NextAttackEffect>,
     pub additional_cost : Option<AdditionalCostType>,
     pub target_effect : Option<TargetEffect>,
-    pub play_condition : Option<PLayCondition>,
+    pub play_condition : Option<PlayCondition>,
+    pub play_effect : Option<OnPlayEffect>
 }
 
 #[repr(u8)]
@@ -114,7 +117,7 @@ pub enum Card {
     ThrustR,
     WarriorsValorR,
     DrivingBladeY,
-    GlisteningSteelblade_Y,
+    GlisteningSteelbladeY,
     OnAKnifeEdgeY,
     OutForBloodY,
     RunThroughY,
