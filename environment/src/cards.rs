@@ -53,19 +53,19 @@ bitflags! {
 }
 
 pub struct CardData {
-    typ : CardType,
-    cost: u8,
-    pitch: u8,
-    power: u8,
-    defense: u8,
-    color: Color,
-    no_block: bool,
-    slot: EquipmentSlot,
-    card_class: CardClass,
-    keyword: Keyword,
-    hero_life: u8,
-    hero_intellect: u8
-   //effects 
+    pub typ: CardType,
+    pub cost: u8,
+    pub pitch: u8,
+    pub power: u8,
+    pub defense: u8,
+    pub color: Option<Color>,
+    pub no_block: bool,
+    pub slot: Option<EquipmentSlot>,
+    pub card_class: CardClass,
+    pub keyword: Keyword,
+    pub hero_life: u8,
+    pub hero_intellect: u8,
+   //effects
    //conditions
 }
 
