@@ -21,6 +21,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 20,
             hero_intellect: 4,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Dorinthea, Quicksilver Prodigy
         CardData {
@@ -36,6 +44,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 20,
             hero_intellect: 4,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // ── RHINAR — RED ────────────────────────────────────────────────
         // Alpha Rampage
@@ -52,6 +68,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::RhinarSpecialization | Keyword::Intimidate,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Awakening Bellow
         CardData {
@@ -67,6 +91,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::GoAgain | Keyword::Intimidate,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Bare Fangs
         CardData {
@@ -82,6 +114,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Beast Mode
         CardData {
@@ -97,6 +137,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Pack Hunt
         CardData {
@@ -112,6 +160,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::Intimidate,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Wild Ride
         CardData {
@@ -127,6 +183,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Wrecking Ball
         CardData {
@@ -142,6 +206,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // ── RHINAR — YELLOW ─────────────────────────────────────────────
         // Barraging Beatdown
@@ -158,6 +230,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::GoAgain | Keyword::Intimidate,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Muscle Mutt
         CardData {
@@ -173,6 +253,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Pack Call
         CardData {
@@ -188,6 +276,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Raging Onslaught
         CardData {
@@ -203,6 +299,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Smash Instinct
         CardData {
@@ -218,6 +322,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::Intimidate,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Smash with Big Tree
         CardData {
@@ -233,6 +345,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Wounded Bull
         CardData {
@@ -248,6 +368,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // ── RHINAR — BLUE ───────────────────────────────────────────────
         // Clearing Bellow
@@ -264,6 +392,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::GoAgain | Keyword::Intimidate,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Come to Fight
         CardData {
@@ -279,6 +415,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::GoAgain,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Dodge
         CardData {
@@ -294,6 +438,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Rally the Rearguard
         CardData {
@@ -309,6 +461,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Titanium Bauble
         CardData {
@@ -324,6 +484,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Wrecker Romp
         CardData {
@@ -339,6 +507,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // ── RHINAR — MENTOR ─────────────────────────────────────────────
         // Chief Ruk'utan
@@ -355,6 +531,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // ── RHINAR — EQUIPMENT ──────────────────────────────────────────
         // Bone Basher
@@ -371,6 +555,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Blossom of Spring
         CardData {
@@ -386,6 +578,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Bone Vizier
         CardData {
@@ -401,6 +601,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::BladeBreak,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Ironhide Gauntlet
         CardData {
@@ -416,6 +624,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Ironhide Legs
         CardData {
@@ -431,6 +647,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // ── DORINTHEA — RED ─────────────────────────────────────────────
         // En Garde
@@ -447,6 +671,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::GoAgain,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Flock of the Feather Walkers
         CardData {
@@ -462,6 +694,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // In the Swing
         CardData {
@@ -477,6 +717,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Ironsong Response
         CardData {
@@ -492,6 +740,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::Reprise,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Second Swing
         CardData {
@@ -507,6 +763,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::GoAgain,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Sharpen Steel
         CardData {
@@ -522,6 +786,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::GoAgain,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Thrust
         CardData {
@@ -537,6 +809,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Warrior's Valor
         CardData {
@@ -552,6 +832,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::GoAgain,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // ── DORINTHEA — YELLOW ──────────────────────────────────────────
         // Driving Blade
@@ -568,6 +856,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::GoAgain,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Glistening Steelblade
         CardData {
@@ -583,6 +879,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::DorintheaSpecialization | Keyword::GoAgain,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // On a Knife Edge
         CardData {
@@ -598,6 +902,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::GoAgain,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Out for Blood
         CardData {
@@ -613,6 +925,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Run Through
         CardData {
@@ -628,6 +948,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Slice and Dice
         CardData {
@@ -643,6 +971,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::GoAgain,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // ── DORINTHEA — BLUE ────────────────────────────────────────────
         // Blade Flash
@@ -659,6 +995,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Hit and Run
         CardData {
@@ -674,6 +1018,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::GoAgain,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Sigil of Solace
         CardData {
@@ -689,6 +1041,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Toughen Up
         CardData {
@@ -704,6 +1064,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Visit the Blacksmith
         CardData {
@@ -719,6 +1087,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::GoAgain,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // ── DORINTHEA — MENTOR ──────────────────────────────────────────
         // Hala Goldenhelm
@@ -735,6 +1111,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // ── DORINTHEA — EQUIPMENT ───────────────────────────────────────
         // Dawnblade, Resplendent
@@ -751,6 +1135,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Gallantry Gold
         CardData {
@@ -766,6 +1158,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::Battleworn,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Ironrot Helm
         CardData {
@@ -781,6 +1181,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::BladeBreak,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
         // Ironrot Legs
         CardData {
@@ -796,6 +1204,14 @@ pub fn get_card_catalog() -> [CardData; 52] {
             keyword: Keyword::BladeBreak,
             hero_life: 0,
             hero_intellect: 0,
+            constant_effect: None,
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
         },
     ]
 }
