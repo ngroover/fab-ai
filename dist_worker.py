@@ -21,6 +21,7 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
 import signal
@@ -37,9 +38,12 @@ import dist_protocol as proto
 from card_embeddings import embeddings_hash
 from neural_agent import PolicyValueNetwork
 from self_play_trainer import (
+    CHECKPOINT_DIR,
+    INDEX_PATH,
     TrainerConfig,
     play_one_self_play_game,
     sample_deck_pair,
+    set_checkpoint_provider,
 )
 
 from dist_coordinator import (
@@ -94,6 +98,12 @@ class Worker:
         self.weight_version = 0
         self._last_heartbeat = 0.0
 
+        # Checkpoint sync: only needed when the opponent pool draws 'past'
+        # models, which live as .pt files on the coordinator.
+        self._wants_checkpoints = False
+        self._last_ckpt_index_sync = 0.0
+        self._ckpt_index_sync_every_sec = 60.0
+
     # ──────────────────────────────────────────────────────────
     # Public API
     # ──────────────────────────────────────────────────────────
@@ -107,6 +117,7 @@ class Worker:
             try:
                 self._maybe_consume_weight_updates()
                 self._maybe_heartbeat()
+                self._maybe_sync_checkpoint_index()
                 self._play_and_send_one()
                 played += 1
                 if max_games > 0 and played >= max_games:
@@ -183,7 +194,17 @@ class Worker:
         self._apply_weights_blob(payload["weights"])
         self._last_heartbeat = time.time()
 
+        # If this run uses 'past' opponents, register the on-demand fetcher and
+        # pull the coordinator's checkpoint index so games can reference them.
+        self._wants_checkpoints = "past" in (self.cfg.opponent_pool or ())
+        if self._wants_checkpoints:
+            set_checkpoint_provider(self._ensure_checkpoint_file)
+            self._sync_checkpoint_index()
+            self._last_ckpt_index_sync = time.time()
+
     def _close(self) -> None:
+        if self._wants_checkpoints:
+            set_checkpoint_provider(None)
         for s in (self._req, self._push, self._sub):
             if s is not None:
                 try:
@@ -233,6 +254,79 @@ class Worker:
                 # Coordinator has a newer version; we'll catch the next broadcast.
                 pass
         self._last_heartbeat = time.time()
+
+    # ──────────────────────────────────────────────────────────
+    # Checkpoint sync ('past' opponents)
+    # ──────────────────────────────────────────────────────────
+
+    def _request(self, kind: str, payload: dict):
+        """Send one REQ envelope and return the decoded (kind, payload).
+
+        The worker is single-threaded and the REQ socket is strictly
+        alternating send→recv, so callers must not interleave requests.
+        """
+        envelope = proto.make_envelope(payload, self.token, kind)
+        self._req.send(envelope)
+        reply = self._req.recv()
+        rkind, _tok, rpayload = proto.decode_envelope(reply)
+        return rkind, rpayload
+
+    def _maybe_sync_checkpoint_index(self) -> None:
+        if not self._wants_checkpoints:
+            return
+        if time.time() - self._last_ckpt_index_sync < self._ckpt_index_sync_every_sec:
+            return
+        self._sync_checkpoint_index()
+        self._last_ckpt_index_sync = time.time()
+
+    def _sync_checkpoint_index(self) -> None:
+        """Mirror the coordinator's checkpoint index locally.
+
+        The worker produces no checkpoints of its own, so it simply overwrites
+        its index with the coordinator's. The .pt payloads stay remote until a
+        game actually references one (see `_ensure_checkpoint_file`).
+        """
+        try:
+            kind, payload = self._request(
+                proto.KIND_CHECKPOINT_LIST, {"worker_id": self.worker_id}
+            )
+        except zmq.ZMQError as exc:
+            self._log(f"checkpoint index sync failed: {exc!r}")
+            return
+        if kind != proto.KIND_CHECKPOINT_LIST_OK or not isinstance(payload, dict):
+            return
+        ckpts = payload.get("checkpoints") or []
+        os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+        with open(INDEX_PATH, "w") as f:
+            json.dump({"checkpoints": ckpts}, f, indent=2)
+        self._log(f"synced checkpoint index: {len(ckpts)} entries")
+
+    def _ensure_checkpoint_file(self, name: str) -> bool:
+        """Provider hook: download `<name>.pt` from the coordinator if missing."""
+        path = os.path.join(CHECKPOINT_DIR, f"{name}.pt")
+        if os.path.isfile(path):
+            return True
+        try:
+            kind, payload = self._request(
+                proto.KIND_CHECKPOINT_FETCH,
+                {"worker_id": self.worker_id, "name": name},
+            )
+        except zmq.ZMQError as exc:
+            self._log(f"checkpoint fetch {name!r} failed: {exc!r}")
+            return False
+        if kind != proto.KIND_CHECKPOINT_FETCH_OK or not isinstance(payload, dict):
+            self._log(f"checkpoint {name!r} unavailable from coordinator")
+            return False
+        data = payload.get("data")
+        if not isinstance(data, (bytes, bytearray)):
+            return False
+        os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)  # atomic: a partial file is never observed as ready
+        self._log(f"downloaded checkpoint {name} ({len(data)/1024:.1f} KB)")
+        return True
 
     # ──────────────────────────────────────────────────────────
     # Game generation

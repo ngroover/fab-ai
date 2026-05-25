@@ -10,6 +10,7 @@ clients are rejected.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import shutil
 import socket
@@ -139,6 +140,91 @@ class DistributedSmokeTest(unittest.TestCase):
         self.assertEqual(payload.get("expected"), self.coord._embeddings_hash)
         self.assertEqual(payload.get("got"), "deadbeefdeadbeef")
         sock.close(linger=0)
+
+    def _req_socket(self):
+        ctx = zmq.Context.instance()
+        sock = ctx.socket(zmq.REQ)
+        sock.RCVTIMEO = 5000
+        sock.SNDTIMEO = 5000
+        sock.connect(f"tcp://127.0.0.1:{self.rep_port}")
+        return sock
+
+    def test_checkpoint_list_and_fetch_over_rep(self):
+        meta = self.coord._trainer._save_checkpoint(1, {})
+        name = meta["name"]
+        sock = self._req_socket()
+        try:
+            sock.send(proto.make_envelope(
+                {"worker_id": "w"}, self.token, proto.KIND_CHECKPOINT_LIST))
+            kind, _tok, payload = proto.decode_envelope(sock.recv())
+            self.assertEqual(kind, proto.KIND_CHECKPOINT_LIST_OK)
+            self.assertIn(name, [c["name"] for c in payload["checkpoints"]])
+
+            sock.send(proto.make_envelope(
+                {"name": name}, self.token, proto.KIND_CHECKPOINT_FETCH))
+            kind, _tok, payload = proto.decode_envelope(sock.recv())
+            self.assertEqual(kind, proto.KIND_CHECKPOINT_FETCH_OK)
+            blob = payload["data"]
+            self.assertIsInstance(blob, (bytes, bytearray))
+            with open(os.path.join(spt.CHECKPOINT_DIR, f"{name}.pt"), "rb") as f:
+                self.assertEqual(bytes(blob), f.read())
+
+            sock.send(proto.make_envelope(
+                {"name": "does-not-exist"}, self.token, proto.KIND_CHECKPOINT_FETCH))
+            kind, _tok, payload = proto.decode_envelope(sock.recv())
+            self.assertEqual(kind, proto.KIND_CHECKPOINT_FAIL)
+
+            # Path traversal must be refused even with a valid token.
+            sock.send(proto.make_envelope(
+                {"name": "../secret"}, self.token, proto.KIND_CHECKPOINT_FETCH))
+            kind, _tok, payload = proto.decode_envelope(sock.recv())
+            self.assertEqual(kind, proto.KIND_CHECKPOINT_FAIL)
+        finally:
+            sock.close(linger=0)
+
+    def test_worker_downloads_missing_checkpoint(self):
+        import dist_worker
+
+        meta = self.coord._trainer._save_checkpoint(2, {})
+        name = meta["name"]
+
+        worker_tmp = tempfile.mkdtemp(prefix="fab-dist-worker-")
+        orig_dir, orig_index = dist_worker.CHECKPOINT_DIR, dist_worker.INDEX_PATH
+        dist_worker.CHECKPOINT_DIR = worker_tmp
+        dist_worker.INDEX_PATH = os.path.join(worker_tmp, "index.json")
+
+        w = dist_worker.Worker(
+            coord_url="tcp://127.0.0.1",
+            token=self.token,
+            worker_id="ckpt-w",
+            pull_port=self.pull_port,
+            pub_port=self.pub_port,
+            rep_port=self.rep_port,
+        )
+        try:
+            w._connect()
+
+            w._sync_checkpoint_index()
+            with open(dist_worker.INDEX_PATH) as f:
+                local_names = [c["name"] for c in json.load(f)["checkpoints"]]
+            self.assertIn(name, local_names)
+
+            path = os.path.join(worker_tmp, f"{name}.pt")
+            self.assertFalse(os.path.isfile(path))  # not pulled until referenced
+
+            self.assertTrue(w._ensure_checkpoint_file(name))
+            self.assertTrue(os.path.isfile(path))
+            with open(path, "rb") as f1, \
+                    open(os.path.join(spt.CHECKPOINT_DIR, f"{name}.pt"), "rb") as f2:
+                self.assertEqual(f1.read(), f2.read())
+
+            self.assertTrue(w._ensure_checkpoint_file(name))   # idempotent
+            self.assertFalse(w._ensure_checkpoint_file("nope-not-real"))
+        finally:
+            w._close()
+            dist_worker.CHECKPOINT_DIR = orig_dir
+            dist_worker.INDEX_PATH = orig_index
+            shutil.rmtree(worker_tmp, ignore_errors=True)
 
     def test_workers_stream_transitions_and_weight_version_advances(self):
         env = os.environ.copy()

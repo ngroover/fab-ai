@@ -36,6 +36,11 @@ KIND_HANDSHAKE_FAIL  = "fail"
 KIND_HEARTBEAT       = "heartbeat"
 KIND_HEARTBEAT_OK    = "heartbeat_ok"
 KIND_TRANSITIONS     = "transitions"
+KIND_CHECKPOINT_LIST     = "ckpt_list"      # worker → coordinator: list available
+KIND_CHECKPOINT_LIST_OK  = "ckpt_list_ok"   # coordinator → worker: index metadata
+KIND_CHECKPOINT_FETCH    = "ckpt_fetch"     # worker → coordinator: get one .pt
+KIND_CHECKPOINT_FETCH_OK = "ckpt_fetch_ok"  # coordinator → worker: .pt bytes
+KIND_CHECKPOINT_FAIL     = "ckpt_fail"      # coordinator → worker: not found
 
 
 # ── Envelope ─────────────────────────────────────────────────────────────
