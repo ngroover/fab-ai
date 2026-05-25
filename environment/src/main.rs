@@ -1,6 +1,7 @@
 mod cards;
 mod classic_battles;
 mod card_effects;
+mod decks;
 mod game_state;
 use cards::CardType;
 use classic_battles::get_card_catalog;
