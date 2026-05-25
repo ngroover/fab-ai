@@ -32,10 +32,11 @@ pub struct CardState {
     pub prev_card : u8,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Phase {
     Start,
+    ChooseFirst,
 }
 
 pub struct Player {

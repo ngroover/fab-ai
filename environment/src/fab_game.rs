@@ -1,3 +1,4 @@
+use crate::action::Action;
 use crate::cards::{Card, CardType};
 use crate::classic_battles::get_card_catalog;
 use crate::game_state::{CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase};
@@ -77,7 +78,11 @@ fn player_from_decklist(deck: [Card; 46]) -> Player {
     }
 }
 
-pub legal_actions(gs : Gamestate) -> Vec<Action> {
-    if (gs.phase == Phase::ChooseFirst ) {
+pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
+    let mut actions = Vec::new();
+    if gs.phase == Phase::ChooseFirst {
+        actions.push(Action::CHOOSE_FIRST);
+        actions.push(Action::CHOOSE_SECOND);
     }
+    actions
 }
