@@ -3,11 +3,16 @@ use crate::cards::{Card, CardType};
 use crate::classic_battles::get_card_catalog;
 use crate::game_state::{CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase};
 use rand::RngExt;
+use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
 /// Build a `Gamestate` from two decklists.
-pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46]) -> Gamestate {
-    let mut rng: SmallRng = rand::make_rng();
+/// Pass `Some(seed)` for a reproducible game, or `None` for a random seed.
+pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: Option<u64>) -> Gamestate {
+    let mut rng: SmallRng = match seed {
+        Some(s) => SmallRng::seed_from_u64(s),
+        None => rand::make_rng(),
+    };
     let active_player = rng.random_range(0u8..2);
     Gamestate {
         p1: player_from_decklist(p1_deck),
