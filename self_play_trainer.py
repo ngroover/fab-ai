@@ -864,11 +864,38 @@ def _build_deck(name: str) -> list:
 # Load a checkpoint's weights into a fresh PolicyValueNetwork
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Optional hook for distributed workers: a callable that ensures a checkpoint
+# file exists locally, downloading it from the coordinator if missing. Single-
+# machine training leaves this as None, so behavior is unchanged there.
+_checkpoint_provider: Optional[Callable[[str], bool]] = None
+
+
+def set_checkpoint_provider(fn: Optional[Callable[[str], bool]]) -> None:
+    """Register (or clear) the on-demand checkpoint fetcher used by 'past'."""
+    global _checkpoint_provider
+    _checkpoint_provider = fn
+
+
 def _load_network_from_checkpoint(name: str) -> Optional[PolicyValueNetwork]:
     path = os.path.join(CHECKPOINT_DIR, f"{name}.pt")
+    if not os.path.isfile(path) and _checkpoint_provider is not None:
+        try:
+            _checkpoint_provider(name)
+        except Exception as exc:
+            print(f"[checkpoint] provider failed for {name!r}: {exc!r}", flush=True)
     if not os.path.isfile(path):
         return None
-    data = torch.load(path, map_location="cpu", weights_only=False)
+    try:
+        data = torch.load(path, map_location="cpu", weights_only=False)
+    except Exception as exc:
+        # A truncated/corrupt download must not poison the cache: drop it so a
+        # later game re-fetches instead of failing forever.
+        print(f"[checkpoint] failed to load {name!r}: {exc!r}", flush=True)
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return None
     net = PolicyValueNetwork()
     net.load_state_dict(data["state_dict"])
     net.eval()
