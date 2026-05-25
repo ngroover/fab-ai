@@ -13,7 +13,7 @@ use rand::rngs::SmallRng;
 use legal_actions::legal_actions;
 
 fn main() {
-    let game = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck());
+    let game = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), None);
     println!(
         "P1 (Rhinar)    — life: {}, intellect: {}",
         game.p1.life, game.p1.intellect
