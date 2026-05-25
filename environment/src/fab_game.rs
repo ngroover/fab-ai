@@ -1,16 +1,19 @@
 use crate::cards::{Card, CardType};
 use crate::classic_battles::get_card_catalog;
 use crate::game_state::{CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase};
-use rand;
+use rand::RngExt;
+use rand::rngs::SmallRng;
 
 /// Build a `Gamestate` from two decklists.
 pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46]) -> Gamestate {
+    let mut rng: SmallRng = rand::make_rng();
+    let active_player = rng.random_range(0u8..2);
     Gamestate {
         p1: player_from_decklist(p1_deck),
         p2: player_from_decklist(p2_deck),
-        active_player: 0,
+        active_player,
         phase: Phase::Start,
-        rng : rand::make_rng()
+        rng,
     }
 }
 
