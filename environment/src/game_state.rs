@@ -1,5 +1,35 @@
 use crate::cards::Card;
 
+
+#[repr(u8)]
+pub enum CardVisibleState {
+    HIDDEN,
+    SELF_KNOWS,
+    OPPONENT_KNOWS,
+    BOTH_KNOW,
+}
+
+#[repr(u8)]
+pub enum CardLocation {
+    HAND,
+    DECK,
+    PITCH,
+    GRAVEYARD,
+    ARSENAL,
+    BANISHZONE,
+    EQUIPMENT_ZONE,
+    WEAPON,
+    COMBAT_CHAIN,
+}
+
+pub struct CardState {
+    pub visible :CardVisibleState,
+    pub location: CardLocation,
+    pub card : Card,
+    pub next_card : u8,
+    pub prev_card : u8,
+}
+
 pub struct CardArea {
     cards : [Option<Card>; 40],
     first : u8,
@@ -20,7 +50,13 @@ pub struct Player {
     pub life: u8,
     pub intellect: u8,
     pub hero : Card,
-    pub deck : CardArea,
-//
-    //deck : Card
+    pub cards : [CardState; 45],
+    pub resources: u8,
+    pub action_points: u8,
+}
+
+pub struct Gamestate {
+    pub p1 : Player,
+    pub p2 : Player,
+    pub active_player : u8,
 }
