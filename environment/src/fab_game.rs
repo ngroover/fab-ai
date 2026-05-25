@@ -90,10 +90,32 @@ pub fn place_equipment(gs: &mut Gamestate) {
     for player in [&mut gs.p1, &mut gs.p2] {
         for card in player.cards.iter_mut() {
             let data = &catalog[card.card as usize];
-            if let CardType::Equipment = data.typ {
-                card.location = CardLocation::EquipmentZone;
-                card.visible = CardVisibleState::BothKnow;
+            match data.typ {
+                CardType::Equipment => {
+                    card.location = CardLocation::EquipmentZone;
+                    card.visible = CardVisibleState::BothKnow;
+                }
+                CardType::Club2h | CardType::Sword2h => {
+                    card.location = CardLocation::Weapon;
+                    card.visible = CardVisibleState::BothKnow;
+                }
+                _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
+    use crate::fab_game::{gamestate_from_decklists,reset};
+
+    #[test]
+    fn legal_actions_in_choose_first_phase() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck());
+        reset(&mut gs);
+
+        // TODO: find the equipment in the cards and check if it's in the right zones
     }
 }
