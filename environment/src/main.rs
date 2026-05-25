@@ -1,25 +1,23 @@
 mod cards;
-mod classic_battles;
 mod card_effects;
+mod classic_battles;
 mod decks;
+mod fab_game;
 mod game_state;
-use cards::CardType;
-use classic_battles::get_card_catalog;
-use cards::Card;
-use game_state::{Player,CardArea};
+
+use decks::{build_dorinthea_deck, build_rhinar_deck};
+use fab_game::gamestate_from_decklists;
 
 fn main() {
-    let c = get_card_catalog();
-    let x = CardType::AttackAction;
-    let r = Card::Rhinar;
-    let rhin = &c[r as usize];
-    let p = Player{ life: 20,
-                intellect: 4,
-                hero: Card::Rhinar,
-                deck: CardArea::default()};
+    let game = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck());
 
-    println!("Hello, world! {}", x as u8);
-    println!("cards len {}", c.len());
-    println!("rhinar hp is {}", rhin.hero_life);
-    println!("player life is {}", p.life);
+    println!(
+        "P1 (Rhinar)    — life: {}, intellect: {}",
+        game.p1.life, game.p1.intellect
+    );
+    println!(
+        "P2 (Dorinthea) — life: {}, intellect: {}",
+        game.p2.life, game.p2.intellect
+    );
+    println!("Active player: {}", game.active_player);
 }

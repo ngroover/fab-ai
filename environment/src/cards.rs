@@ -78,6 +78,7 @@ pub struct CardData {
     pub play_effect : Option<OnPlayEffect>
 }
 
+#[derive(Clone, Copy)]
 #[repr(u8)]
 pub enum Card {
     Rhinar,

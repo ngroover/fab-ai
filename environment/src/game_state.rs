@@ -1,6 +1,7 @@
 use crate::cards::Card;
 
 
+#[derive(Clone, Copy)]
 #[repr(u8)]
 pub enum CardVisibleState {
     HIDDEN,
@@ -9,6 +10,7 @@ pub enum CardVisibleState {
     BOTH_KNOW,
 }
 
+#[derive(Clone, Copy)]
 #[repr(u8)]
 pub enum CardLocation {
     HAND,
