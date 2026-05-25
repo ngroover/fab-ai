@@ -87,11 +87,14 @@ fn player_from_decklist(deck: [Card; 46]) -> Player {
 pub fn reset(gs: &mut Gamestate) {
     gs.phase = Phase::ChooseFirst;
 
-    place_equipment(gs);
-    shuffle_decks(gs);
+    place_cards(gs);
+    //shuffle_decks(gs);
 }
 
-pub fn place_equipment(gs: &mut Gamestate) {
+pub fn shuffle_decks(gs: &mut Gamestate) {
+}
+
+pub fn place_cards(gs: &mut Gamestate) {
     let catalog = get_card_catalog();
     for player in [&mut gs.p1, &mut gs.p2] {
         for card in player.cards.iter_mut() {
@@ -105,17 +108,33 @@ pub fn place_equipment(gs: &mut Gamestate) {
                     card.location = CardLocation::Weapon;
                     card.visible = CardVisibleState::BothKnow;
                 }
-                _ => {}
+                CardType::Hero => {
+                    // do nothing
+                }
+                _ => {
+                    // everything else
+                }
             }
         }
     }
 }
 
 // helper function to get the CardStates
-pub fn get_card_states(p: &Player, card: Card) -> Vec<CardState> {
+pub fn get_card_states_from_card(p: &Player, card: Card) -> Vec<CardState> {
     let mut vec = Vec::<CardState>::new();
     for cardstate in p.cards.iter() {
         if cardstate.card == card {
+            vec.push(*cardstate);
+        }
+    }
+    vec
+}
+
+// helper function to get the CardStates
+pub fn get_card_states_from_location(p: &Player, location: CardLocation) -> Vec<CardState> {
+    let mut vec = Vec::<CardState>::new();
+    for cardstate in p.cards.iter() {
+        if cardstate.location == location {
             vec.push(*cardstate);
         }
     }
@@ -129,36 +148,46 @@ mod tests {
     use crate::fab_game::{gamestate_from_decklists,reset};
 
     #[test]
-    fn test_reset_equipment() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck());
+    fn test_reset_cards() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), None);
         reset(&mut gs);
 
         // check bonebasher on p1
-        let bb = get_card_states(&gs.p1, Card::BoneBasher);
+        let bb = get_card_states_from_card(&gs.p1, Card::BoneBasher);
 
         assert_eq!(bb.len(), 1);
         assert_eq!(bb[0].location, CardLocation::Weapon);
         assert_eq!(bb[0].visible, CardVisibleState::BothKnow);
 
         // check dawnblade on p2
-        let db = get_card_states(&gs.p2, Card::Dawnblade);
+        let db = get_card_states_from_card(&gs.p2, Card::Dawnblade);
 
         assert_eq!(db.len(), 1);
         assert_eq!(db[0].location, CardLocation::Weapon);
         assert_eq!(db[0].visible, CardVisibleState::BothKnow);
 
         // check one piece of equipment from rhinar
-        let ih = get_card_states(&gs.p1, Card::IronhideLegs);
+        let ih = get_card_states_from_card(&gs.p1, Card::IronhideLegs);
 
         assert_eq!(ih.len(), 1);
         assert_eq!(ih[0].location, CardLocation::EquipmentZone);
         assert_eq!(ih[0].visible, CardVisibleState::BothKnow);
 
         // check one piece of equipment from dorinthea
-        let ih = get_card_states(&gs.p2, Card::IronrotLegs);
+        let ih = get_card_states_from_card(&gs.p2, Card::IronrotLegs);
 
         assert_eq!(ih.len(), 1);
         assert_eq!(ih[0].location, CardLocation::EquipmentZone);
         assert_eq!(ih[0].visible, CardVisibleState::BothKnow);
+
+        // check deck from rhinar 
+        let rhinardeck = get_card_states_from_location(&gs.p1, CardLocation::Deck);
+
+        assert_eq!(rhinardeck.len(), 40);
+
+        // check deck from dorinthea
+        let dorintheadeck = get_card_states_from_location(&gs.p2, CardLocation::Deck);
+
+        assert_eq!(dorintheadeck.len(), 40);
     }
 }

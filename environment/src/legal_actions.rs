@@ -18,7 +18,7 @@ mod tests {
 
     #[test]
     fn legal_actions_in_choose_first_phase() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck());
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), None);
         reset(&mut gs);
 
         let actions = legal_actions(&gs);
