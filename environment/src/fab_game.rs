@@ -116,6 +116,29 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck());
         reset(&mut gs);
 
-        // TODO: find the equipment in the cards and check if it's in the right zones
+        assert_eq!(gs.phase as u8, Phase::ChooseFirst as u8);
+
+        let catalog = get_card_catalog();
+        for player in [&gs.p1, &gs.p2] {
+            let mut equipment_count = 0;
+            let mut weapon_count = 0;
+            for card in player.cards.iter() {
+                match catalog[card.card as usize].typ {
+                    CardType::Equipment => {
+                        assert_eq!(card.location as u8, CardLocation::EquipmentZone as u8);
+                        assert_eq!(card.visible as u8, CardVisibleState::BothKnow as u8);
+                        equipment_count += 1;
+                    }
+                    CardType::Club2h | CardType::Sword2h => {
+                        assert_eq!(card.location as u8, CardLocation::Weapon as u8);
+                        assert_eq!(card.visible as u8, CardVisibleState::BothKnow as u8);
+                        weapon_count += 1;
+                    }
+                    _ => {}
+                }
+            }
+            assert!(equipment_count > 0, "expected equipment to be placed in the equipment zone");
+            assert!(weapon_count > 0, "expected a two-handed weapon to be placed in the weapon zone");
+        }
     }
 }
