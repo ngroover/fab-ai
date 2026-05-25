@@ -81,4 +81,19 @@ fn player_from_decklist(deck: [Card; 46]) -> Player {
 
 pub fn reset(gs: &mut Gamestate) {
     gs.phase = Phase::ChooseFirst;
+
+    place_equipment(&mut gs);
+}
+
+pub fn place_equipment(gs: &mut Gamestate) {
+    let catalog = get_card_catalog();
+    for card in gs.p1.cards {
+        let data = &catalog[card as usize];
+        match data.typ {
+            CardType::Equipment => {
+                card.location = CardLocation::EquipmentZone;
+                card.visible = CardVisibleState::BothKnow;
+            }
+        }
+    }
 }
