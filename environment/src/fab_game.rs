@@ -83,6 +83,7 @@ pub fn reset(gs: &mut Gamestate) {
     gs.phase = Phase::ChooseFirst;
 
     place_equipment(gs);
+    shuffle_decks(gs);
 }
 
 pub fn place_equipment(gs: &mut Gamestate) {
@@ -105,6 +106,17 @@ pub fn place_equipment(gs: &mut Gamestate) {
     }
 }
 
+// helper function to get the CardStates
+pub fn get_card_states(p: &Player, card: Card) -> Vec<CardState> {
+    let mut vec = Vec::<CardState>::new();
+    for cardstate in p.cards.iter() {
+        if cardstate.card == card {
+            vec.push(*cardstate);
+        }
+    }
+    vec
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,33 +124,36 @@ mod tests {
     use crate::fab_game::{gamestate_from_decklists,reset};
 
     #[test]
-    fn legal_actions_in_choose_first_phase() {
+    fn test_reset_equipment() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck());
         reset(&mut gs);
 
-        assert_eq!(gs.phase as u8, Phase::ChooseFirst as u8);
+        // check bonebasher on p1
+        let bb = get_card_states(&gs.p1, Card::BoneBasher);
 
-        let catalog = get_card_catalog();
-        for player in [&gs.p1, &gs.p2] {
-            let mut equipment_count = 0;
-            let mut weapon_count = 0;
-            for card in player.cards.iter() {
-                match catalog[card.card as usize].typ {
-                    CardType::Equipment => {
-                        assert_eq!(card.location as u8, CardLocation::EquipmentZone as u8);
-                        assert_eq!(card.visible as u8, CardVisibleState::BothKnow as u8);
-                        equipment_count += 1;
-                    }
-                    CardType::Club2h | CardType::Sword2h => {
-                        assert_eq!(card.location as u8, CardLocation::Weapon as u8);
-                        assert_eq!(card.visible as u8, CardVisibleState::BothKnow as u8);
-                        weapon_count += 1;
-                    }
-                    _ => {}
-                }
-            }
-            assert!(equipment_count > 0, "expected equipment to be placed in the equipment zone");
-            assert!(weapon_count > 0, "expected a two-handed weapon to be placed in the weapon zone");
-        }
+        assert_eq!(bb.len(), 1);
+        assert_eq!(bb[0].location, CardLocation::Weapon);
+        assert_eq!(bb[0].visible, CardVisibleState::BothKnow);
+
+        // check dawnblade on p2
+        let db = get_card_states(&gs.p2, Card::Dawnblade);
+
+        assert_eq!(db.len(), 1);
+        assert_eq!(db[0].location, CardLocation::Weapon);
+        assert_eq!(db[0].visible, CardVisibleState::BothKnow);
+
+        // check one piece of equipment from rhinar
+        let ih = get_card_states(&gs.p1, Card::IronhideLegs);
+
+        assert_eq!(ih.len(), 1);
+        assert_eq!(ih[0].location, CardLocation::EquipmentZone);
+        assert_eq!(ih[0].visible, CardVisibleState::BothKnow);
+
+        // check one piece of equipment from dorinthea
+        let ih = get_card_states(&gs.p2, Card::IronrotLegs);
+
+        assert_eq!(ih.len(), 1);
+        assert_eq!(ih[0].location, CardLocation::EquipmentZone);
+        assert_eq!(ih[0].visible, CardVisibleState::BothKnow);
     }
 }

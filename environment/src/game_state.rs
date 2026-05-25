@@ -1,7 +1,7 @@
 use crate::cards::Card;
 use rand::rngs::SmallRng;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
 pub enum CardVisibleState {
     Hidden,
@@ -10,7 +10,7 @@ pub enum CardVisibleState {
     BothKnow,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
 pub enum CardLocation {
     Hand,
@@ -24,6 +24,7 @@ pub enum CardLocation {
     CombatChain,
 }
 
+#[derive(Clone, Copy)]
 pub struct CardState {
     pub visible :CardVisibleState,
     pub location: CardLocation,
@@ -32,7 +33,7 @@ pub struct CardState {
     pub prev_card : u8,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum Phase {
     Start,
