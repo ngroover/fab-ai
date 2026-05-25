@@ -1,27 +1,27 @@
 use crate::cards::Card;
-
+use rand::rngs::SmallRng;
 
 #[derive(Clone, Copy)]
 #[repr(u8)]
 pub enum CardVisibleState {
-    HIDDEN,
-    SELF_KNOWS,
-    OPPONENT_KNOWS,
-    BOTH_KNOW,
+    Hidden,
+    SelfKnows,
+    OpponentKnows,
+    BothKnow,
 }
 
 #[derive(Clone, Copy)]
 #[repr(u8)]
 pub enum CardLocation {
-    HAND,
-    DECK,
-    PITCH,
-    GRAVEYARD,
-    ARSENAL,
-    BANISHZONE,
-    EQUIPMENT_ZONE,
-    WEAPON,
-    COMBAT_CHAIN,
+    Hand,
+    Deck,
+    Pitch,
+    Graveyard,
+    Arsenal,
+    BanishZone,
+    EquipmentZone,
+    Weapon,
+    CombatChain,
 }
 
 pub struct CardState {
@@ -32,20 +32,10 @@ pub struct CardState {
     pub prev_card : u8,
 }
 
-pub struct CardArea {
-    cards : [Option<Card>; 40],
-    first : u8,
-    last: u8,
-}
-
-impl Default for CardArea {
-    fn default() -> Self {
-        Self {
-            cards: std::array::from_fn(|_| None),
-            first: 0,
-            last: 0,
-        }
-    }
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum Phase {
+    Start,
 }
 
 pub struct Player {
@@ -61,4 +51,6 @@ pub struct Gamestate {
     pub p1 : Player,
     pub p2 : Player,
     pub active_player : u8,
+    pub phase : Phase,
+    pub rng : SmallRng,
 }

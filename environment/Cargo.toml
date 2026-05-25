@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 bitflags = "2.8"
+rand = "0.10.1"

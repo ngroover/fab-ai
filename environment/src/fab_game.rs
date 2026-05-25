@@ -1,6 +1,7 @@
 use crate::cards::{Card, CardType};
 use crate::classic_battles::get_card_catalog;
-use crate::game_state::{CardLocation, CardState, CardVisibleState, Gamestate, Player};
+use crate::game_state::{CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase};
+use rand;
 
 /// Build a `Gamestate` from two decklists.
 pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46]) -> Gamestate {
@@ -8,6 +9,8 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46]) -> Gam
         p1: player_from_decklist(p1_deck),
         p2: player_from_decklist(p2_deck),
         active_player: 0,
+        phase: Phase::Start,
+        rng : rand::make_rng()
     }
 }
 
@@ -28,8 +31,8 @@ fn player_from_decklist(deck: [Card; 46]) -> Player {
             }
             CardType::Weapon | CardType::Sword2h | CardType::Club2h => {
                 card_states.push(CardState {
-                    visible: CardVisibleState::HIDDEN,
-                    location: CardLocation::WEAPON,
+                    visible: CardVisibleState::Hidden,
+                    location: CardLocation::Weapon,
                     card,
                     next_card: 0,
                     prev_card: 0,
@@ -37,8 +40,8 @@ fn player_from_decklist(deck: [Card; 46]) -> Player {
             }
             CardType::Equipment => {
                 card_states.push(CardState {
-                    visible: CardVisibleState::HIDDEN,
-                    location: CardLocation::EQUIPMENT_ZONE,
+                    visible: CardVisibleState::Hidden,
+                    location: CardLocation::EquipmentZone,
                     card,
                     next_card: 0,
                     prev_card: 0,
@@ -46,8 +49,8 @@ fn player_from_decklist(deck: [Card; 46]) -> Player {
             }
             _ => {
                 card_states.push(CardState {
-                    visible: CardVisibleState::HIDDEN,
-                    location: CardLocation::DECK,
+                    visible: CardVisibleState::Hidden,
+                    location: CardLocation::Deck,
                     card,
                     next_card: 0,
                     prev_card: 0,
