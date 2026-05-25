@@ -86,3 +86,6 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
     }
     actions
 }
+
+pub fn reset(gs : &Gamestate) ->Vec<Action> {
+}
