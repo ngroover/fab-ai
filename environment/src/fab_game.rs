@@ -87,5 +87,25 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
     actions
 }
 
-pub fn reset(gs : &Gamestate) ->Vec<Action> {
+pub fn reset(gs: &mut Gamestate) -> Vec<Action> {
+    gs.phase = Phase::ChooseFirst;
+    legal_actions(gs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
+
+    #[test]
+    fn legal_actions_in_choose_first_phase() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck());
+        gs.phase = Phase::ChooseFirst;
+
+        let actions = legal_actions(&gs);
+
+        assert_eq!(actions.len(), 2);
+        assert!(actions.contains(&Action::CHOOSE_FIRST));
+        assert!(actions.contains(&Action::CHOOSE_SECOND));
+    }
 }
