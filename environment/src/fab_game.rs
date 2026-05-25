@@ -76,3 +76,8 @@ fn player_from_decklist(deck: [Card; 46]) -> Player {
         action_points: 0,
     }
 }
+
+pub legal_actions(gs : Gamestate) -> Vec<Action> {
+    if (gs.phase == Phase::ChooseFirst ) {
+    }
+}
