@@ -1,13 +1,8 @@
-use crate::cards::Card;
+use crate::cards::{Card, CardType};
 use crate::classic_battles::get_card_catalog;
 use crate::game_state::{CardLocation, CardState, CardVisibleState, Gamestate, Player};
 
 /// Build a `Gamestate` from two decklists.
-///
-/// Decklist layout (46 entries each):
-///   [0]      hero card
-///   [1..=5]  weapon + equipment
-///   [6..=45] the 40 playable deck cards
 pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46]) -> Gamestate {
     Gamestate {
         p1: player_from_decklist(p1_deck),
@@ -18,21 +13,57 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46]) -> Gam
 
 fn player_from_decklist(deck: [Card; 46]) -> Player {
     let catalog = get_card_catalog();
-    let hero = deck[0];
-    let hero_data = &catalog[hero as usize];
+    let mut hero_opt: Option<Card> = None;
+    let mut life = 0u8;
+    let mut intellect = 0u8;
+    let mut card_states: Vec<CardState> = Vec::with_capacity(45);
 
-    // Slots 1..=45 (weapon, equipment, playable cards) fill Player.cards.
-    let cards = std::array::from_fn(|i| CardState {
-        visible: CardVisibleState::HIDDEN,
-        location: CardLocation::DECK,
-        card: deck[i + 1],
-        next_card: 0,
-        prev_card: 0,
-    });
+    for card in deck {
+        let data = &catalog[card as usize];
+        match data.typ {
+            CardType::Hero => {
+                hero_opt = Some(card);
+                life = data.hero_life;
+                intellect = data.hero_intellect;
+            }
+            CardType::Weapon | CardType::Sword2h | CardType::Club2h => {
+                card_states.push(CardState {
+                    visible: CardVisibleState::HIDDEN,
+                    location: CardLocation::WEAPON,
+                    card,
+                    next_card: 0,
+                    prev_card: 0,
+                });
+            }
+            CardType::Equipment => {
+                card_states.push(CardState {
+                    visible: CardVisibleState::HIDDEN,
+                    location: CardLocation::EQUIPMENT_ZONE,
+                    card,
+                    next_card: 0,
+                    prev_card: 0,
+                });
+            }
+            _ => {
+                card_states.push(CardState {
+                    visible: CardVisibleState::HIDDEN,
+                    location: CardLocation::DECK,
+                    card,
+                    next_card: 0,
+                    prev_card: 0,
+                });
+            }
+        }
+    }
+
+    let hero = hero_opt.expect("no hero in decklist");
+    let cards: [CardState; 45] = card_states
+        .try_into()
+        .unwrap_or_else(|_| panic!("expected exactly 45 non-hero cards"));
 
     Player {
-        life: hero_data.hero_life,
-        intellect: hero_data.hero_intellect,
+        life,
+        intellect,
         hero,
         cards,
         resources: 0,
