@@ -47,6 +47,17 @@ pub struct Player {
     pub cards : [CardState; 45],
     pub resources: u8,
     pub action_points: u8,
+    pub top_deck_idx: Option<u8>,
+    pub bottom_deck_idx: Option<u8>,
+    pub pitch_idx : Option<u8>,
+    pub arsenal_idx : Option<u8>,
+    pub hand_idx : Option<u8>,
+    pub banish_idx : Option<u8>,
+    pub weapon_idx : Option<u8>,
+    pub head_idx : Option<u8>,
+    pub chest_idx : Option<u8>,
+    pub arms_idx : Option<u8>,
+    pub legs_idx : Option<u8>
 }
 
 pub struct Gamestate {

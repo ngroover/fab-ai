@@ -8,12 +8,13 @@ mod game_state;
 mod legal_actions;
 
 use decks::{build_dorinthea_deck, build_rhinar_deck};
-use fab_game::gamestate_from_decklists;
+use fab_game::{gamestate_from_decklists,reset};
 use rand::rngs::SmallRng;
 use legal_actions::legal_actions;
 
 fn main() {
-    let game = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), None);
+    let mut game = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), None);
+    reset(&mut game);
     println!(
         "P1 (Rhinar)    — life: {}, intellect: {}",
         game.p1.life, game.p1.intellect

@@ -5,6 +5,7 @@ use crate::game_state::{CardLocation, CardState, CardVisibleState, Gamestate, Pl
 use rand::RngExt;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
+use rand::seq::SliceRandom;
 
 /// Build a `Gamestate` from two decklists.
 /// Pass `Some(seed)` for a reproducible game, or `None` for a random seed.
@@ -13,11 +14,10 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: 
         Some(s) => SmallRng::seed_from_u64(s),
         None => rand::make_rng(),
     };
-    let active_player = rng.random_range(0u8..2);
     Gamestate {
         p1: player_from_decklist(p1_deck),
         p2: player_from_decklist(p2_deck),
-        active_player,
+        active_player: 0,
         phase: Phase::Start,
         rng,
     }
@@ -80,6 +80,17 @@ fn player_from_decklist(deck: [Card; 46]) -> Player {
         cards,
         resources: 0,
         action_points: 0,
+        top_deck_idx: None,
+        bottom_deck_idx: None,
+        pitch_idx: None,
+        arsenal_idx: None,
+        hand_idx: None,
+        banish_idx : None,
+        weapon_idx : None,
+        head_idx : None,
+        chest_idx : None,
+        arms_idx : None,
+        legs_idx : None
     }
 }
 
@@ -88,10 +99,41 @@ pub fn reset(gs: &mut Gamestate) {
     gs.phase = Phase::ChooseFirst;
 
     place_cards(gs);
-    //shuffle_decks(gs);
+    shuffle_decks(gs);
+    set_life_and_intellect(gs);
+
+    gs.active_player = gs.rng.random_range(0u8..2);
+}
+
+
+pub fn set_life_and_intellect(gs: &mut Gamestate) {
+    let catalog = get_card_catalog();
+    for player in [&mut gs.p1, &mut gs.p2] {
+        player.life = catalog[player.hero as usize].hero_life;
+        player.intellect = catalog[player.hero as usize].hero_intellect;
+    }
 }
 
 pub fn shuffle_decks(gs: &mut Gamestate) {
+    for player in [&mut gs.p1, &mut gs.p2] {
+        let mut cards_in_deck : Vec<usize> = player.cards.iter().
+                            enumerate().
+                            filter(|(_,p)| p.location == CardLocation::Deck).
+                            map(|(i,_)| i).
+                            collect();
+        cards_in_deck.shuffle(&mut gs.rng);
+
+        if cards_in_deck.len() > 0 {
+            player.top_deck_idx = cards_in_deck.first().copied().map(|x| x as u8);
+            player.bottom_deck_idx = cards_in_deck.last().copied().map(|x| x as u8);
+            for (i,c) in cards_in_deck.iter().enumerate() {
+                let prev = if i > 0 { cards_in_deck[i-1] } else { *c } ;
+                let next = if i < cards_in_deck.len()-1 { cards_in_deck[i+1] } else { *c };
+                player.cards[i].prev_card = prev as u8;
+                player.cards[i].next_card = next as u8;
+            }
+        }
+    }
 }
 
 pub fn place_cards(gs: &mut Gamestate) {
