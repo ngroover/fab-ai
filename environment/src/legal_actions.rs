@@ -1,11 +1,15 @@
 use crate::game_state::{Gamestate, Phase};
-use crate::action::Action;
+use crate::action::{Action,ActionType};
 
 pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
     let mut actions = Vec::new();
     if gs.phase == Phase::ChooseFirst {
-        actions.push(Action::ChooseFirst);
-        actions.push(Action::ChooseSecond);
+        actions.push(Action{
+                    typ : ActionType::ChooseFirst,
+                    index: 0});
+        actions.push(Action{
+                    typ : ActionType::ChooseSecond,
+                    index: 0});
     }
     actions
 }
@@ -24,7 +28,8 @@ mod tests {
         let actions = legal_actions(&gs);
 
         assert_eq!(actions.len(), 2);
-        assert!(actions.contains(&Action::ChooseFirst));
-        assert!(actions.contains(&Action::ChooseSecond));
+        let types : Vec<ActionType> = actions.iter().map(|x| x.typ).collect();
+        assert!(types.contains(&ActionType::ChooseFirst));
+        assert!(types.contains(&ActionType::ChooseSecond));
     }
 }

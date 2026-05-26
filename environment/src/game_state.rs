@@ -38,6 +38,7 @@ pub struct CardState {
 pub enum Phase {
     Start,
     ChooseFirst,
+    Action,
 }
 
 pub struct Player {
@@ -57,7 +58,9 @@ pub struct Player {
     pub head_idx : Option<u8>,
     pub chest_idx : Option<u8>,
     pub arms_idx : Option<u8>,
-    pub legs_idx : Option<u8>
+    pub legs_idx : Option<u8>,
+    pub hand_size : u8,
+    pub deck_size : u8,
 }
 
 pub struct Gamestate {

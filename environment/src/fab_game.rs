@@ -90,7 +90,9 @@ fn player_from_decklist(deck: [Card; 46]) -> Player {
         head_idx : None,
         chest_idx : None,
         arms_idx : None,
-        legs_idx : None
+        legs_idx : None,
+        hand_size : 0,
+        deck_size : 0,
     }
 }
 
@@ -126,11 +128,12 @@ pub fn shuffle_decks(gs: &mut Gamestate) {
         if cards_in_deck.len() > 0 {
             player.top_deck_idx = cards_in_deck.first().copied().map(|x| x as u8);
             player.bottom_deck_idx = cards_in_deck.last().copied().map(|x| x as u8);
-            for (i,c) in cards_in_deck.iter().enumerate() {
-                let prev = if i > 0 { cards_in_deck[i-1] } else { *c } ;
-                let next = if i < cards_in_deck.len()-1 { cards_in_deck[i+1] } else { *c };
-                player.cards[i].prev_card = prev as u8;
-                player.cards[i].next_card = next as u8;
+            for (i,c) in cards_in_deck.iter().copied().enumerate() {
+                let prev = if i > 0 { cards_in_deck[i-1] } else { c } ;
+                let next = if i < cards_in_deck.len()-1 { cards_in_deck[i+1] } else { c };
+                println!("(i, c) ({}, {}) has next {}, prev {}", i, c, next, prev);
+                player.cards[c].prev_card = prev as u8;
+                player.cards[c].next_card = next as u8;
             }
         }
     }
@@ -139,6 +142,8 @@ pub fn shuffle_decks(gs: &mut Gamestate) {
 pub fn place_cards(gs: &mut Gamestate) {
     let catalog = get_card_catalog();
     for player in [&mut gs.p1, &mut gs.p2] {
+        player.hand_size = 0;
+        player.deck_size = 0;
         for card in player.cards.iter_mut() {
             let data = &catalog[card.card as usize];
             match data.typ {
@@ -154,6 +159,9 @@ pub fn place_cards(gs: &mut Gamestate) {
                     // do nothing
                 }
                 _ => {
+                    card.location = CardLocation::Deck;
+                    card.visible = CardVisibleState::Hidden;
+                    player.deck_size += 1;
                     // everything else
                 }
             }
@@ -226,10 +234,12 @@ mod tests {
         let rhinardeck = get_card_states_from_location(&gs.p1, CardLocation::Deck);
 
         assert_eq!(rhinardeck.len(), 40);
+        assert_eq!(gs.p1.deck_size, 40);
 
         // check deck from dorinthea
         let dorintheadeck = get_card_states_from_location(&gs.p2, CardLocation::Deck);
 
         assert_eq!(dorintheadeck.len(), 40);
+        assert_eq!(gs.p2.deck_size, 40);
     }
 }
