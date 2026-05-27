@@ -38,8 +38,7 @@ fn draw_cards(player: &mut Player, num: usize) {
                 drawn == num {
                 break;
             }
-            let current_card = &player.cards[current_idx];
-            insert_to_hand(player, current_idx);
+            move_from_deck_to_hand(player, current_idx);
 
             current_idx = next;
             drawn += 1;
@@ -47,12 +46,16 @@ fn draw_cards(player: &mut Player, num: usize) {
     }
 }
 
-fn insert_to_hand(player: &mut Player, card_idx : usize) {
-    let current_card = &player.cards[card_idx];
+fn move_from_deck_to_hand(player: &mut Player, card_idx : usize) {
+    let next_card_on_deck = player.cards[card_idx].next_card;
+    if next_card_on_deck == card_idx as u8 {
+        player.top_deck_idx = None;
+    }
+    else {
+        player.top_deck_idx = Some(next_card_on_deck);
+        player.cards[next_card_on_deck as usize].prev_card = next_card_on_deck
+    }
     if let Some(hand_idx) = player.hand_idx {
-        //let mut current_hand = &mut player.cards[hand_idx as usize];
-        //current_hand.next_card = card_idx as u8;
-        //current_card.prev_card = hand_idx as u8;
         player.cards[hand_idx as usize].next_card = card_idx as u8;
         player.cards[hand_idx as usize].prev_card = hand_idx as u8;
     }
@@ -60,8 +63,8 @@ fn insert_to_hand(player: &mut Player, card_idx : usize) {
         player.hand_idx = Some(card_idx as u8);
     }
 
-    current_card.location = CardLocation::Hand;
-    current_card.visible = CardVisibleState::SelfKnows;
+    player.cards[card_idx].location = CardLocation::Hand;
+    player.cards[card_idx].visible = CardVisibleState::SelfKnows;
 }
 
 #[cfg(test)]
