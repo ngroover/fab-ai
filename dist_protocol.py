@@ -29,6 +29,7 @@ import torch
 
 # ── Topic / message kinds ────────────────────────────────────────────────
 TOPIC_WEIGHTS = b"weights"
+TOPIC_MONITOR = b"monitor"   # PUB → SUB: read-only training events for dashboards
 
 KIND_HANDSHAKE_HELLO = "hello"
 KIND_HANDSHAKE_OK    = "ok"
@@ -36,6 +37,8 @@ KIND_HANDSHAKE_FAIL  = "fail"
 KIND_HEARTBEAT       = "heartbeat"
 KIND_HEARTBEAT_OK    = "heartbeat_ok"
 KIND_TRANSITIONS     = "transitions"
+KIND_MONITOR_HELLO   = "monitor_hello"  # REQ → REP: monitor asks for a snapshot
+KIND_MONITOR_OK      = "monitor_ok"     # REP → REQ: current training snapshot
 
 
 # ── Envelope ─────────────────────────────────────────────────────────────
@@ -84,6 +87,32 @@ def unpack_weights(blob: bytes) -> Tuple[Dict[str, torch.Tensor], int, str]:
     buf = io.BytesIO(payload["state_dict"])
     state_dict = torch.load(buf, map_location="cpu", weights_only=True)
     return state_dict, int(payload["version"]), str(payload.get("run_name") or "")
+
+
+# ── Monitor event (de)serialization ──────────────────────────────────────
+# A monitor event mirrors one trainer callback: ("log", str), ("metrics",
+# dict), ("status", str), ("progress", dict), ("checkpoint", dict). Payloads
+# are already primitive (the trainer builds them for the web UI), so msgpack
+# packs them directly.
+
+def pack_monitor_event(event: str, data: Any, version: int = 0, run_name: str = "") -> bytes:
+    payload = {
+        "event": str(event),
+        "data": data,
+        "version": int(version),
+        "run_name": str(run_name or ""),
+    }
+    return msgpack.packb(payload, use_bin_type=True)
+
+
+def unpack_monitor_event(blob: bytes) -> Tuple[Optional[str], Any, int, str]:
+    payload = msgpack.unpackb(blob, raw=False)
+    return (
+        payload.get("event"),
+        payload.get("data"),
+        int(payload.get("version", 0)),
+        str(payload.get("run_name") or ""),
+    )
 
 
 # ── Transition (de)serialization ─────────────────────────────────────────

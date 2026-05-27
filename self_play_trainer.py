@@ -132,6 +132,11 @@ class TrainerConfig:
     dist_broadcast_secs: float = 5.0
     dist_max_staleness: int = 10
     dist_min_buffer: int = 64
+    # Monitor mode: don't train locally; attach read-only to a coordinator
+    # running elsewhere and replay its events. Used by the web viewer to watch
+    # a separate training process. Ignored by the trainer itself.
+    dist_monitor: bool = False
+    dist_monitor_url: str = "tcp://127.0.0.1"
     base_checkpoint: Optional[str] = None  # name in ./checkpoints/, or None
     seed: Optional[int] = None
 

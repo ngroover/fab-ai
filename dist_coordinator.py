@@ -88,8 +88,16 @@ class CoordinatorServer:
             checkpoint_every_grad_steps or self.eval_every_grad_steps
         )
 
-        # Internal trainer carries all model + buffer state.
-        self._trainer = SelfPlayTrainer(config, callbacks=callbacks)
+        # Last status string emitted by the trainer, kept so monitor clients
+        # that connect mid-run get a meaningful snapshot.
+        self._last_status = "idle"
+
+        # Internal trainer carries all model + buffer state. Callbacks are
+        # augmented so every event the local UI sees is ALSO broadcast to
+        # remote monitor clients over the PUB socket (TOPIC_MONITOR).
+        self._trainer = SelfPlayTrainer(
+            config, callbacks=self._wrap_callbacks(callbacks)
+        )
 
         # Fingerprint of the local card-embedding table. Workers must match
         # this exactly or their observations encode cards into a different
@@ -118,6 +126,74 @@ class CoordinatorServer:
         self._pull_sock: Optional[zmq.Socket] = None
         self._pub_sock: Optional[zmq.Socket] = None
         self._rep_sock: Optional[zmq.Socket] = None
+
+    # ──────────────────────────────────────────────────────────
+    # Monitor broadcasting
+    # ──────────────────────────────────────────────────────────
+
+    _MONITOR_EVENTS = {
+        "on_log": "log",
+        "on_metrics": "metrics",
+        "on_status": "status",
+        "on_progress": "progress",
+        "on_checkpoint": "checkpoint",
+    }
+
+    def _wrap_callbacks(
+        self, callbacks: Optional[Dict[str, Callable]]
+    ) -> Dict[str, Callable]:
+        """Return callbacks that fire the original AND publish to monitors.
+
+        Control callbacks (`should_stop`, `wait_if_paused`) pass through
+        untouched. When no local `on_log` is supplied (headless coordinator),
+        the trainer's default print-to-console behaviour is preserved.
+        """
+        cb = dict(callbacks or {})
+        for cb_name, event in self._MONITOR_EVENTS.items():
+            default = (lambda msg: print(msg)) if cb_name == "on_log" else None
+            cb[cb_name] = self._make_monitor_cb(cb_name, event, cb.get(cb_name, default))
+        return cb
+
+    def _make_monitor_cb(
+        self, cb_name: str, event: str, orig: Optional[Callable]
+    ) -> Callable:
+        def wrapped(payload):
+            if orig is not None:
+                orig(payload)
+            if cb_name == "on_status":
+                self._last_status = str(payload)
+            self._publish_monitor(event, payload)
+        return wrapped
+
+    def _publish_monitor(self, event: str, data) -> None:
+        sock = self._pub_sock
+        if sock is None:
+            return
+        try:
+            blob = proto.pack_monitor_event(
+                event, data, self._weight_version, self._trainer.config.run_name
+            )
+        except Exception:
+            # Non-serializable payload — skip rather than crash the trainer.
+            return
+        with self._pub_lock:
+            try:
+                sock.send_multipart([proto.TOPIC_MONITOR, blob])
+            except zmq.ZMQError:
+                pass
+
+    def _monitor_snapshot(self) -> Dict[str, object]:
+        with self._lock:
+            return {
+                "run_name": self._trainer.config.run_name,
+                "weight_version": self._weight_version,
+                "grad_steps": self._trainer._grad_steps,
+                "games": self._trainer._games_done,
+                "buffer_size": len(self._trainer.buffer),
+                "workers": len(self._stats["workers_seen"]),
+                "status": self._last_status,
+                "embeddings_hash": self._embeddings_hash,
+            }
 
     # ──────────────────────────────────────────────────────────
     # Public API
@@ -288,6 +364,15 @@ class CoordinatorServer:
                 }
                 reply = proto.make_envelope(reply_payload, self.token, proto.KIND_HANDSHAKE_OK)
                 self._trainer._log(f"  🤝  worker {worker_id} handshake (v={version})")
+            elif kind == proto.KIND_MONITOR_HELLO:
+                snapshot = self._monitor_snapshot()
+                reply = proto.make_envelope(
+                    snapshot, self.token, proto.KIND_MONITOR_OK
+                )
+                self._trainer._log(
+                    f"  👁  monitor attached "
+                    f"(v={snapshot['weight_version']} step={snapshot['grad_steps']})"
+                )
             elif kind == proto.KIND_HEARTBEAT:
                 worker_id = str((payload or {}).get("worker_id", "?"))
                 self._workers_last_seen[worker_id] = time.time()

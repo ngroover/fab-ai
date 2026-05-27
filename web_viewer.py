@@ -2015,6 +2015,10 @@ class _TrainingSession:
         self.iteration = 0
         self.games_done = 0
         self.grad_steps = 0
+        # Monitor mode: read-only attachment to a remote coordinator. When set,
+        # pause/resume/save are disabled (this viewer doesn't drive training).
+        self._is_monitor = False
+        self._monitor = None
         self.start_time = None
         self.latest_checkpoint = None
         self.latest_hash = None
@@ -2046,6 +2050,7 @@ class _TrainingSession:
         cfg = self._build_config(config_dict)
         with self._lock:
             self.run_name = cfg.run_name
+            self._is_monitor = bool(getattr(cfg, "dist_monitor", False))
 
         t = threading.Thread(
             target=self._run_thread,
@@ -2057,6 +2062,9 @@ class _TrainingSession:
 
     def pause(self) -> bool:
         with self._lock:
+            # Monitor mode is read-only — there's no local loop to pause.
+            if self._is_monitor:
+                return False
             if self.status in ("idle", "stopped", "error", "done"):
                 return False
             self._paused_event.clear()
@@ -2065,6 +2073,8 @@ class _TrainingSession:
 
     def resume(self) -> bool:
         with self._lock:
+            if self._is_monitor:
+                return False
             if self.status != "paused":
                 return False
             self.status = "self-play"
@@ -2075,12 +2085,20 @@ class _TrainingSession:
         with self._lock:
             if self.status in ("idle", "stopped"):
                 return False
+            monitor = self._monitor
         self._stop_flag.set()
         self._paused_event.set()  # unblock any paused wait
+        # In monitor mode "stop" just detaches the viewer; the remote
+        # coordinator keeps training.
+        if monitor is not None:
+            monitor.stop()
         return True
 
     def request_save(self) -> bool:
         with self._lock:
+            # Checkpointing happens on the coordinator, not the monitor.
+            if self._is_monitor:
+                return False
             if self.status in ("idle", "stopped", "error", "done"):
                 return False
         self._save_flag.set()
@@ -2246,6 +2264,8 @@ class _TrainingSession:
             dist_broadcast_secs=_get_float("dist_broadcast_secs", 5.0),
             dist_max_staleness=_get_int("dist_max_staleness", 10),
             dist_min_buffer=_get_int("dist_min_buffer", 64),
+            dist_monitor=_get_bool("dist_monitor", False),
+            dist_monitor_url=str(raw.get("dist_monitor_url") or "tcp://127.0.0.1"),
         )
 
     def _run_thread(self, cfg) -> None:
@@ -2264,7 +2284,31 @@ class _TrainingSession:
         with self._lock:
             self.status = "self-play"
         try:
-            if getattr(cfg, "distributed", False):
+            if getattr(cfg, "dist_monitor", False):
+                import os
+                from dist_monitor import MonitorClient
+
+                token = os.environ.get("FAB_DIST_TOKEN", "")
+                if not token:
+                    raise RuntimeError(
+                        "FAB_DIST_TOKEN env var must be set for monitor mode."
+                    )
+                self._monitor = MonitorClient(
+                    coord_url=cfg.dist_monitor_url,
+                    token=token,
+                    pub_port=cfg.dist_pub_port,
+                    rep_port=cfg.dist_rep_port,
+                    callbacks=callbacks,
+                    log=self._on_log,
+                )
+                self._on_log(
+                    f"  📡  Monitor mode: attaching read-only to "
+                    f"{cfg.dist_monitor_url} (pub={cfg.dist_pub_port}, "
+                    f"rep={cfg.dist_rep_port}). Training runs in that process; "
+                    f"this viewer only watches."
+                )
+                trainer = self._monitor
+            elif getattr(cfg, "distributed", False):
                 import os
                 from dist_coordinator import CoordinatorServer
 
@@ -3672,13 +3716,24 @@ TRAIN_TEMPLATE = """
               <select id="cfg-distributed">
                 <option value="off">Single-process</option>
                 <option value="on">Distributed (this UI is the coordinator)</option>
+                <option value="monitor">Monitor remote coordinator (read-only)</option>
               </select>
               <span class="help">
-                When on, workers connect to this process. Each worker process
-                runs <code>python dist_worker.py --coord tcp://&lt;this-host&gt;</code>
-                with <code>FAB_DIST_TOKEN</code> set to the same value as this
-                server. Check the log after Start for the exact bind ports.
+                <strong>Distributed:</strong> workers connect to this process;
+                gradient steps run here. Each worker runs
+                <code>python dist_worker.py --coord tcp://&lt;this-host&gt;</code>
+                with the same <code>FAB_DIST_TOKEN</code>.<br>
+                <strong>Monitor:</strong> training runs in a separate process
+                (e.g. <code>python run_distributed.py</code> on another machine);
+                this viewer attaches read-only to watch its progress. Set the
+                Coordinator URL below and the matching <code>FAB_DIST_TOKEN</code>.
+                Start/Stop attach/detach the viewer; the remote keeps training.
               </span>
+            </div>
+            <div class="field">
+              <label>Coordinator URL (monitor mode)</label>
+              <input type="text" id="cfg-dist-monitor-url" value="tcp://127.0.0.1"
+                     placeholder="tcp://10.0.0.5">
             </div>
             <div class="field">
               <label>Bind host</label>
@@ -3897,11 +3952,14 @@ TRAIN_TEMPLATE = """
       const running = (state !== 'idle' && state !== 'stopped'
                        && state !== 'error' && state !== 'done');
       const paused = (state === 'paused');
+      const distEl = document.getElementById('cfg-distributed');
+      const monitor = distEl && distEl.value === 'monitor';
       btnStart.disabled  = running;
-      btnPause.disabled  = !running || paused;
+      // Monitor mode is read-only: only Start/Stop apply.
+      btnPause.disabled  = monitor || !running || paused;
       btnStop.disabled   = !running;
-      btnSave.disabled   = !running;
-      btnResume.disabled = !paused;
+      btnSave.disabled   = monitor || !running;
+      btnResume.disabled = monitor || !paused;
       btnPause.style.display  = paused ? 'none' : '';
       btnResume.style.display = paused ? '' : 'none';
     }
@@ -3931,6 +3989,8 @@ TRAIN_TEMPLATE = """
         run_name:       document.getElementById('cfg-name').value || '',
         base_checkpoint: (baseRaw && baseRaw !== 'random') ? baseRaw : null,
         distributed:    distEl ? distEl.value === 'on' : false,
+        dist_monitor:   distEl ? distEl.value === 'monitor' : false,
+        dist_monitor_url: (document.getElementById('cfg-dist-monitor-url')||{}).value || 'tcp://127.0.0.1',
         dist_bind_host: (document.getElementById('cfg-dist-host')||{}).value || '0.0.0.0',
         dist_pull_port: (document.getElementById('cfg-dist-pull')||{}).value || 5556,
         dist_pub_port:  (document.getElementById('cfg-dist-pub')||{}).value || 5557,

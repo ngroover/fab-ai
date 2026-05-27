@@ -7,6 +7,11 @@ Usage:
 
 Then on each compute node:
     FAB_DIST_TOKEN=secret python dist_worker.py --coord tcp://COORD_HOST
+
+To watch progress without joining the training (read-only), either run
+    FAB_DIST_TOKEN=secret python dist_monitor.py --coord tcp://COORD_HOST
+or point the web viewer's Train page at this coordinator using its
+"Monitor remote coordinator" mode.
 """
 
 from __future__ import annotations

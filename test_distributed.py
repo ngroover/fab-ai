@@ -140,6 +140,75 @@ class DistributedSmokeTest(unittest.TestCase):
         self.assertEqual(payload.get("got"), "deadbeefdeadbeef")
         sock.close(linger=0)
 
+    def test_monitor_handshake_returns_snapshot(self):
+        ctx = zmq.Context.instance()
+        sock = ctx.socket(zmq.REQ)
+        sock.RCVTIMEO = 3000
+        sock.SNDTIMEO = 3000
+        sock.connect(f"tcp://127.0.0.1:{self.rep_port}")
+
+        envelope = proto.make_envelope(
+            {"embeddings_hash": self.coord._embeddings_hash},
+            self.token,
+            proto.KIND_MONITOR_HELLO,
+        )
+        sock.send(envelope)
+        kind, _tok, payload = proto.decode_envelope(sock.recv())
+        self.assertEqual(kind, proto.KIND_MONITOR_OK)
+        self.assertEqual(payload.get("run_name"), "dist-smoke")
+        self.assertIn("grad_steps", payload)
+        self.assertIn("weight_version", payload)
+        self.assertEqual(payload.get("embeddings_hash"), self.coord._embeddings_hash)
+        sock.close(linger=0)
+
+    def test_monitor_bad_token_is_rejected(self):
+        ctx = zmq.Context.instance()
+        sock = ctx.socket(zmq.REQ)
+        sock.RCVTIMEO = 3000
+        sock.SNDTIMEO = 3000
+        sock.connect(f"tcp://127.0.0.1:{self.rep_port}")
+        sock.send(proto.make_envelope({}, "WRONG-TOKEN", proto.KIND_MONITOR_HELLO))
+        kind, _tok, payload = proto.decode_envelope(sock.recv())
+        self.assertEqual(kind, proto.KIND_HANDSHAKE_FAIL)
+        self.assertEqual(payload.get("reason"), "bad_token")
+        sock.close(linger=0)
+
+    def test_monitor_client_receives_published_events(self):
+        from dist_monitor import MonitorClient
+
+        received = {"log": [], "status": [], "metrics": []}
+        stop = threading.Event()
+        client = MonitorClient(
+            coord_url="tcp://127.0.0.1",
+            token=self.token,
+            pub_port=self.pub_port,
+            rep_port=self.rep_port,
+            callbacks={
+                "on_log": lambda m: received["log"].append(m),
+                "on_status": lambda s: received["status"].append(s),
+                "on_metrics": lambda m: received["metrics"].append(m),
+                "should_stop": stop.is_set,
+            },
+        )
+        t = threading.Thread(target=client.run, daemon=True)
+        t.start()
+
+        # PUB/SUB has a slow-joiner window; publish repeatedly until the
+        # subscriber has caught at least one event or we time out.
+        deadline = time.time() + 10.0
+        got = False
+        while time.time() < deadline:
+            self.coord._publish_monitor("log", "hello-monitor")
+            if any(m == "hello-monitor" for m in received["log"]):
+                got = True
+                break
+            time.sleep(0.1)
+
+        stop.set()
+        client.stop()
+        t.join(timeout=5.0)
+        self.assertTrue(got, "monitor never received a published log event")
+
     def test_workers_stream_transitions_and_weight_version_advances(self):
         env = os.environ.copy()
         env["FAB_DIST_TOKEN"] = self.token
