@@ -286,6 +286,7 @@ class CoordinatorServer:
                 continue
 
             # Staleness check & buffer push.
+            games_done_snapshot: Optional[int] = None
             with self._lock:
                 cv = self._weight_version
                 kept: List[Transition] = []
@@ -296,9 +297,17 @@ class CoordinatorServer:
                     kept.append(t)
                 if kept:
                     self._trainer.buffer.push_many(kept)
-                    self._trainer._games_done += int(payload.get("games", 0))
+                    games_in_batch = int(payload.get("games", 0))
+                    if games_in_batch > 0:
+                        self._trainer._games_done += games_in_batch
+                        games_done_snapshot = self._trainer._games_done
                     self._stats["transitions_received"] += len(kept)
                     self._stats["batches_received"] += 1
+
+            # Notify the UI / monitor clients that the games counter moved.
+            # Done outside the lock since on_progress publishes over ZMQ.
+            if games_done_snapshot is not None:
+                self._trainer._on_progress({"games": games_done_snapshot})
 
     # ──────────────────────────────────────────────────────────
     # REP loop (handshake + heartbeat)
