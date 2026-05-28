@@ -19,5 +19,8 @@ python3 seed_decks.py
 # install dependencies
 sudo apt install python3-torch
 
-# connect a training machine
-FAB_DIST_TOKEN=<password_here> python3 dist_worker.py
+# connect a self play machine
+FAB_DIST_TOKEN=<password_here> python3 dist_worker.py --coord tcp://<trainer_node>
+
+# run training machine
+FAB_DIST_TOKEN=<password_here> python3 run_distributed.py --steps 10000 --batch 64
