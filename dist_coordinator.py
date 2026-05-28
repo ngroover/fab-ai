@@ -70,6 +70,7 @@ class CoordinatorServer:
         min_buffer_to_train: int = 64,
         eval_every_grad_steps: int = 0,   # 0 = use config.eval_every*steps_per_iter
         checkpoint_every_grad_steps: int = 0,
+        worker_timeout_sec: float = 90.0,
     ) -> None:
         if not token:
             raise ValueError("Coordinator requires a non-empty auth token.")
@@ -81,6 +82,7 @@ class CoordinatorServer:
         self.broadcast_every_sec = float(broadcast_every_sec)
         self.max_staleness = int(max_staleness)
         self.min_buffer_to_train = int(min_buffer_to_train)
+        self.worker_timeout_sec = float(worker_timeout_sec)
         self.eval_every_grad_steps = int(
             eval_every_grad_steps or max(1, config.eval_every) * max(1, config.steps_per_iter)
         )
@@ -116,10 +118,12 @@ class CoordinatorServer:
             "transitions_dropped_token": 0,
             "transitions_dropped_stale": 0,
             "batches_received": 0,
-            "workers_seen": set(),
+            "workers_seen": set(),       # lifetime — every worker_id ever seen
             "last_broadcast_at": 0.0,
         }
         self._workers_last_seen: Dict[str, float] = {}
+        # Workers we last reported as alive. Used to log transitions to dead.
+        self._known_alive_workers: set = set()
 
         # ZMQ
         self._ctx = zmq.Context.instance()
@@ -190,10 +194,32 @@ class CoordinatorServer:
                 "grad_steps": self._trainer._grad_steps,
                 "games": self._trainer._games_done,
                 "buffer_size": len(self._trainer.buffer),
-                "workers": len(self._stats["workers_seen"]),
+                "workers": len(self._active_worker_ids()),
                 "status": self._last_status,
                 "embeddings_hash": self._embeddings_hash,
             }
+
+    # ──────────────────────────────────────────────────────────
+    # Worker liveness
+    # ──────────────────────────────────────────────────────────
+
+    def _active_worker_ids(self) -> set:
+        """Workers that pushed transitions or heartbeated within the timeout."""
+        cutoff = time.time() - self.worker_timeout_sec
+        return {wid for wid, ts in self._workers_last_seen.items() if ts >= cutoff}
+
+    def _check_dead_workers(self) -> None:
+        """Log workers that have gone silent past the timeout, once each."""
+        active = self._active_worker_ids()
+        dropped = self._known_alive_workers - active
+        if dropped:
+            now = time.time()
+            for wid in sorted(dropped):
+                silence = now - self._workers_last_seen.get(wid, now)
+                self._trainer._log(
+                    f"  ⚠  worker {wid} silent for {silence:.0f}s — marking dead"
+                )
+        self._known_alive_workers = active
 
     # ──────────────────────────────────────────────────────────
     # Public API
@@ -286,6 +312,7 @@ class CoordinatorServer:
                 continue
 
             # Staleness check & buffer push.
+            games_done_snapshot: Optional[int] = None
             with self._lock:
                 cv = self._weight_version
                 kept: List[Transition] = []
@@ -296,9 +323,17 @@ class CoordinatorServer:
                     kept.append(t)
                 if kept:
                     self._trainer.buffer.push_many(kept)
-                    self._trainer._games_done += int(payload.get("games", 0))
+                    games_in_batch = int(payload.get("games", 0))
+                    if games_in_batch > 0:
+                        self._trainer._games_done += games_in_batch
+                        games_done_snapshot = self._trainer._games_done
                     self._stats["transitions_received"] += len(kept)
                     self._stats["batches_received"] += 1
+
+            # Notify the UI / monitor clients that the games counter moved.
+            # Done outside the lock since on_progress publishes over ZMQ.
+            if games_done_snapshot is not None:
+                self._trainer._on_progress({"games": games_done_snapshot})
 
     # ──────────────────────────────────────────────────────────
     # REP loop (handshake + heartbeat)
@@ -476,9 +511,10 @@ class CoordinatorServer:
             if len(t.buffer) < self.min_buffer_to_train:
                 time.sleep(0.5)
                 if time.time() - last_metrics > 5.0:
+                    self._check_dead_workers()
                     t._log(
                         f"  ⏳  buffer={len(t.buffer)}/{self.min_buffer_to_train}  "
-                        f"workers={len(self._stats['workers_seen'])}"
+                        f"workers={len(self._known_alive_workers)}"
                     )
                     last_metrics = time.time()
                 continue
@@ -499,10 +535,11 @@ class CoordinatorServer:
 
             # Periodic logging.
             if time.time() - last_metrics > 5.0:
+                self._check_dead_workers()
                 t._log(
                     f"  ∇  step={t._grad_steps}  v={self._weight_version}  "
                     f"buf={len(t.buffer)}  "
-                    f"workers={len(self._stats['workers_seen'])}  "
+                    f"workers={len(self._known_alive_workers)}  "
                     f"recv={self._stats['transitions_received']}  "
                     f"drop_stale={self._stats['transitions_dropped_stale']}  "
                     f"drop_auth={self._stats['transitions_dropped_token']}  "
@@ -546,7 +583,7 @@ class CoordinatorServer:
                     "wr_dorinthea": eval_wr.get("dorinthea"),
                     "wr_random": eval_wr.get("random"),
                     "buffer_size": len(t.buffer),
-                    "workers": len(self._stats["workers_seen"]),
+                    "workers": len(self._active_worker_ids()),
                     "transitions_received": self._stats["transitions_received"],
                     "transitions_dropped_stale": self._stats["transitions_dropped_stale"],
                     "transitions_dropped_token": self._stats["transitions_dropped_token"],

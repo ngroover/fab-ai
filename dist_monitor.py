@@ -8,8 +8,15 @@ transitions, never receives weights, and never influences training: it is a
 pure dashboard feed. This lets the gradient steps run in a separate process
 (e.g. `run_distributed.py` on a beefy host) while the web viewer just watches.
 
+Beyond the read-only stream, the client also mirrors the coordinator's saved
+checkpoints to the local filesystem so the web viewer's Models / Play tabs can
+load them like any locally-trained model. On connect it pulls the full
+index + .pt blobs the coordinator has on disk; afterwards every `checkpoint`
+event triggers a single fresh download in the background.
+
 Wire model:
-  • REQ → REP  : one MONITOR_HELLO at connect → MONITOR_OK snapshot.
+  • REQ → REP  : MONITOR_HELLO at connect → MONITOR_OK snapshot, plus on-
+                 demand CHECKPOINT_LIST / CHECKPOINT_FETCH for sync.
   • SUB ← PUB  : subscribe TOPIC_MONITOR, stream events until stopped.
 
 CLI (tail a coordinator to the console):
@@ -19,17 +26,20 @@ CLI (tail a coordinator to the console):
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import queue
 import signal
 import sys
 import threading
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import zmq
 
 import dist_protocol as proto
 from card_embeddings import embeddings_hash
 from dist_coordinator import DEFAULT_PUB_PORT, DEFAULT_REP_PORT
+from self_play_trainer import CHECKPOINT_DIR, INDEX_PATH
 
 
 class MonitorClient:
@@ -44,6 +54,8 @@ class MonitorClient:
         rep_port: int = DEFAULT_REP_PORT,
         callbacks: Optional[Dict[str, Callable]] = None,
         log: Optional[Callable[[str], None]] = None,
+        checkpoint_dir: Optional[str] = None,
+        index_path: Optional[str] = None,
     ) -> None:
         if not token:
             raise ValueError("MonitorClient requires FAB_DIST_TOKEN to be set.")
@@ -51,6 +63,8 @@ class MonitorClient:
         self.token = token
         self.pub_port = pub_port
         self.rep_port = rep_port
+        self.checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
+        self.index_path = index_path or INDEX_PATH
 
         cb = callbacks or {}
         self._on_log: Callable[[str], None] = cb.get("on_log", lambda m: print(m))
@@ -64,6 +78,14 @@ class MonitorClient:
         self._stop = threading.Event()
         self._ctx = zmq.Context.instance()
         self._sub: Optional[zmq.Socket] = None
+        # Long-lived REQ socket for checkpoint list/fetch. Owned by the
+        # fetcher thread so we don't need a lock for strict REQ alternation.
+        self._req: Optional[zmq.Socket] = None
+        self._fetch_queue: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue()
+        self._fetch_thread: Optional[threading.Thread] = None
+        # Guards index.json writes; readers (list_checkpoints) hit the file
+        # without locking and tolerate concurrent atomic replaces.
+        self._index_lock = threading.Lock()
 
     # ──────────────────────────────────────────────────────────
 
@@ -83,6 +105,14 @@ class MonitorClient:
             "games": snapshot.get("games", 0),
         })
 
+        # Start background fetcher and request an initial full sync so the
+        # local Models tab reflects whatever the coordinator already has.
+        self._fetch_thread = threading.Thread(
+            target=self._fetcher_loop, name="monitor-fetch", daemon=True,
+        )
+        self._fetch_thread.start()
+        self._fetch_queue.put({"kind": "sync_all"})
+
         try:
             while not self._stop.is_set() and not self._should_stop():
                 try:
@@ -100,6 +130,11 @@ class MonitorClient:
                     continue
                 self._dispatch(event, data)
         finally:
+            # Drain the fetcher before tearing down sockets so an in-flight
+            # REQ doesn't race against socket close.
+            self._fetch_queue.put(None)
+            if self._fetch_thread is not None:
+                self._fetch_thread.join(timeout=5.0)
             self._close()
 
     def stop(self) -> None:
@@ -142,11 +177,12 @@ class MonitorClient:
         return payload
 
     def _close(self) -> None:
-        if self._sub is not None:
-            try:
-                self._sub.close(linger=0)
-            except Exception:
-                pass
+        for sock in (self._sub, self._req):
+            if sock is not None:
+                try:
+                    sock.close(linger=0)
+                except Exception:
+                    pass
 
     def _dispatch(self, event: Optional[str], data) -> None:
         if event == "log":
@@ -159,6 +195,153 @@ class MonitorClient:
             self._on_progress(data)
         elif event == "checkpoint" and isinstance(data, dict):
             self._on_checkpoint(data)
+            name = data.get("name")
+            if isinstance(name, str) and name:
+                self._fetch_queue.put({"kind": "fetch_one", "name": name,
+                                       "meta": data})
+
+    # ──────────────────────────────────────────────────────────
+    # Checkpoint mirroring
+    # ──────────────────────────────────────────────────────────
+
+    def _fetcher_loop(self) -> None:
+        # Long-lived REQ socket dedicated to the fetcher thread. Keeping it
+        # separate from the handshake REQ means the SUB loop's lifetime is
+        # decoupled from any in-flight checkpoint fetch.
+        self._req = self._ctx.socket(zmq.REQ)
+        self._req.connect(f"{self.coord_url}:{self.rep_port}")
+        self._req.RCVTIMEO = 30000  # ms — .pt blobs can be a few MB
+        self._req.SNDTIMEO = 10000
+        try:
+            while True:
+                item = self._fetch_queue.get()
+                if item is None:
+                    return
+                if self._stop.is_set():
+                    continue
+                kind = item.get("kind")
+                if kind == "sync_all":
+                    self._sync_all()
+                elif kind == "fetch_one":
+                    self._fetch_one(item["name"], item.get("meta"))
+        finally:
+            if self._req is not None:
+                try:
+                    self._req.close(linger=0)
+                except Exception:
+                    pass
+                self._req = None
+
+    def _request(self, kind: str, payload: dict):
+        envelope = proto.make_envelope(payload, self.token, kind)
+        self._req.send(envelope)
+        reply = self._req.recv()
+        rkind, _tok, rpayload = proto.decode_envelope(reply)
+        return rkind, rpayload
+
+    def _sync_all(self) -> None:
+        try:
+            kind, payload = self._request(proto.KIND_CHECKPOINT_LIST, {})
+        except (zmq.ZMQError, zmq.error.Again) as exc:
+            self._log(f"  ⚠  checkpoint index sync failed: {exc!r}")
+            return
+        if kind != proto.KIND_CHECKPOINT_LIST_OK or not isinstance(payload, dict):
+            self._log(f"  ⚠  checkpoint index sync: unexpected kind={kind!r}")
+            return
+        ckpts = payload.get("checkpoints") or []
+        downloaded = 0
+        for meta in ckpts:
+            if self._stop.is_set():
+                return
+            if not isinstance(meta, dict):
+                continue
+            name = meta.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            self._merge_index_entry(meta)
+            path = os.path.join(self.checkpoint_dir, f"{name}.pt")
+            if not os.path.isfile(path):
+                if self._fetch_blob(name):
+                    downloaded += 1
+        self._log(
+            f"  📥  remote checkpoint sync: {len(ckpts)} known, "
+            f"{downloaded} newly downloaded"
+        )
+
+    def _fetch_one(self, name: str, meta: Optional[dict] = None) -> None:
+        if isinstance(meta, dict):
+            self._merge_index_entry(meta)
+        path = os.path.join(self.checkpoint_dir, f"{name}.pt")
+        if os.path.isfile(path):
+            return
+        self._fetch_blob(name)
+
+    def _fetch_blob(self, name: str) -> bool:
+        if not _is_safe_name(name):
+            self._log(f"  ⚠  refusing to fetch unsafe checkpoint name {name!r}")
+            return False
+        try:
+            kind, payload = self._request(
+                proto.KIND_CHECKPOINT_FETCH, {"name": name}
+            )
+        except (zmq.ZMQError, zmq.error.Again) as exc:
+            self._log(f"  ⚠  checkpoint fetch {name!r} failed: {exc!r}")
+            return False
+        if kind != proto.KIND_CHECKPOINT_FETCH_OK or not isinstance(payload, dict):
+            self._log(f"  ⚠  checkpoint {name!r} unavailable (kind={kind!r})")
+            return False
+        data = payload.get("data")
+        if not isinstance(data, (bytes, bytearray)):
+            self._log(f"  ⚠  checkpoint {name!r}: missing blob")
+            return False
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        path = os.path.join(self.checkpoint_dir, f"{name}.pt")
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+        meta = payload.get("meta")
+        if isinstance(meta, dict):
+            self._merge_index_entry(meta)
+        self._log(
+            f"  ⬇  downloaded checkpoint {name} ({len(data)/1024:.1f} KB)"
+        )
+        return True
+
+    def _merge_index_entry(self, meta: dict) -> None:
+        """Insert/replace one checkpoint entry in index.json atomically."""
+        name = meta.get("name")
+        if not isinstance(name, str) or not name:
+            return
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        with self._index_lock:
+            data = {"checkpoints": []}
+            if os.path.isfile(self.index_path):
+                try:
+                    with open(self.index_path) as f:
+                        loaded = json.load(f)
+                    if isinstance(loaded, dict) and isinstance(
+                        loaded.get("checkpoints"), list
+                    ):
+                        data = loaded
+                except (OSError, json.JSONDecodeError):
+                    pass
+            kept = [c for c in data["checkpoints"]
+                    if isinstance(c, dict) and c.get("name") != name]
+            kept.append(meta)
+            data["checkpoints"] = kept
+            tmp = f"{self.index_path}.{os.getpid()}.tmp"
+            with open(tmp, "w") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp, self.index_path)
+
+
+def _is_safe_name(name: str) -> bool:
+    if not name or not isinstance(name, str):
+        return False
+    if "/" in name or "\\" in name or os.sep in name or ".." in name:
+        return False
+    return True
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────

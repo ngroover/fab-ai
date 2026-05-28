@@ -73,6 +73,8 @@ def _build_cli() -> argparse.ArgumentParser:
                    help="Drop transitions whose weight_version is older than current by more than N")
     p.add_argument("--min-buffer", type=int, default=64,
                    help="Wait until replay buffer has at least this many transitions before training")
+    p.add_argument("--worker-timeout-secs", type=float, default=90.0,
+                   help="Mark a worker dead if it has been silent (no PUSH or heartbeat) for this long")
     return p
 
 
@@ -121,6 +123,7 @@ def main() -> None:
         min_buffer_to_train=args.min_buffer,
         eval_every_grad_steps=args.eval_every_grad_steps,
         checkpoint_every_grad_steps=args.ckpt_every_grad_steps,
+        worker_timeout_sec=args.worker_timeout_secs,
     )
     server.run()
 
