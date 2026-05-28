@@ -33,6 +33,7 @@ import socket
 import sys
 import threading
 import time
+import traceback
 import uuid
 from typing import Optional
 
@@ -118,7 +119,11 @@ class Worker:
     # ──────────────────────────────────────────────────────────
 
     def run(self, max_games: int = 0) -> None:
-        self._connect()
+        try:
+            self._connect()
+        except Exception as exc:
+            self._log(f"startup failed: {exc!r}\n" + traceback.format_exc())
+            raise
         self._log(f"connected to {self.coord_url}  (initial v={self.weight_version})")
 
         played = 0
@@ -135,7 +140,10 @@ class Worker:
                 self._log("interrupted")
                 break
             except Exception as exc:
-                self._log(f"error: {exc!r} — sleeping 1s then retrying")
+                self._log(
+                    f"error: {exc!r} — sleeping 1s then retrying\n"
+                    + traceback.format_exc()
+                )
                 time.sleep(1.0)
 
         self._close()
