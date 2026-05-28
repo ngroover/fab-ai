@@ -381,6 +381,25 @@ class CoordinatorServer:
                 reply = proto.make_envelope(
                     {"weight_version": version}, self.token, proto.KIND_HEARTBEAT_OK
                 )
+            elif kind == proto.KIND_CHECKPOINT_LIST:
+                with self._lock:
+                    ckpts = spt.list_checkpoints()
+                reply = proto.make_envelope(
+                    {"checkpoints": ckpts}, self.token, proto.KIND_CHECKPOINT_LIST_OK
+                )
+            elif kind == proto.KIND_CHECKPOINT_FETCH:
+                name = str((payload or {}).get("name", ""))
+                blob, meta = self._read_checkpoint_file(name)
+                if blob is None:
+                    reply = proto.make_envelope(
+                        {"reason": "not_found", "name": name},
+                        self.token, proto.KIND_CHECKPOINT_FAIL,
+                    )
+                else:
+                    reply = proto.make_envelope(
+                        {"name": name, "data": blob, "meta": meta},
+                        self.token, proto.KIND_CHECKPOINT_FETCH_OK,
+                    )
             else:
                 reply = proto.make_envelope(
                     {"reason": "unknown_kind"}, self.token, proto.KIND_HANDSHAKE_FAIL
@@ -390,6 +409,25 @@ class CoordinatorServer:
                 self._rep_sock.send(reply)
             except zmq.ZMQError:
                 continue
+
+    def _read_checkpoint_file(self, name: str):
+        """Return (bytes, meta) for checkpoint `name`, or (None, None).
+
+        `name` comes from an authenticated worker but is still treated as
+        untrusted input: reject anything that could escape CHECKPOINT_DIR.
+        """
+        if (not name or "/" in name or "\\" in name
+                or os.sep in name or ".." in name):
+            return None, None
+        path = os.path.join(spt.CHECKPOINT_DIR, f"{name}.pt")
+        if not os.path.isfile(path):
+            return None, None
+        with open(path, "rb") as f:
+            blob = f.read()
+        meta = next(
+            (c for c in spt.list_checkpoints() if c.get("name") == name), None
+        )
+        return blob, meta
 
     # ──────────────────────────────────────────────────────────
     # PUB broadcast loop (periodic weight gossip)
