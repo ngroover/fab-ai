@@ -295,6 +295,41 @@ class DistributedSmokeTest(unittest.TestCase):
             dist_worker.INDEX_PATH = orig_index
             shutil.rmtree(worker_tmp, ignore_errors=True)
 
+    def test_worker_heartbeat_thread_keeps_alive_during_long_work(self):
+        """A worker that connects and then stays busy for longer than a few
+        heartbeat intervals (no PUSHes meanwhile) must still be considered
+        alive by the coordinator. Regression test for the trainer marking
+        a still-working worker dead when a single self-play game outlasts
+        worker_timeout_sec."""
+        import dist_worker
+
+        w = dist_worker.Worker(
+            coord_url="tcp://127.0.0.1",
+            token=self.token,
+            worker_id="hb-w",
+            pull_port=self.pull_port,
+            pub_port=self.pub_port,
+            rep_port=self.rep_port,
+            heartbeat_every_sec=0.3,
+        )
+        try:
+            w._connect()
+            handshake_ts = self.coord._workers_last_seen.get("hb-w")
+            self.assertIsNotNone(handshake_ts)
+
+            # Simulate a long-running game: don't touch the worker for
+            # multiple heartbeat intervals. The background thread should
+            # still push last-seen forward on the coordinator.
+            time.sleep(1.5)
+
+            updated_ts = self.coord._workers_last_seen.get("hb-w")
+            self.assertGreater(
+                updated_ts, handshake_ts,
+                "background heartbeat thread never updated last-seen on the coordinator",
+            )
+        finally:
+            w._close()
+
     def test_workers_stream_transitions_and_weight_version_advances(self):
         env = os.environ.copy()
         env["FAB_DIST_TOKEN"] = self.token

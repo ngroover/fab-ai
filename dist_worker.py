@@ -9,6 +9,10 @@ The worker:
   4. Spins in a loop: play one self-play game using the local network copy,
      PUSH the resulting batch of `Transition`s to the coordinator. Between
      decisions, polls the SUB socket for fresher weights.
+  5. A dedicated background thread sends REQ heartbeats on a fixed cadence
+     so the coordinator's liveness check stays satisfied even while a
+     single self-play game is mid-MCTS-search (which can outlast the
+     coordinator's worker_timeout_sec).
 
 Process model: a worker is one Python process. Launch several to parallelize
 on one machine; launch on additional machines to scale out.
@@ -27,6 +31,7 @@ import random
 import signal
 import socket
 import sys
+import threading
 import time
 import uuid
 from typing import Optional
@@ -96,7 +101,11 @@ class Worker:
         self.net = PolicyValueNetwork()
         self.net.eval()
         self.weight_version = 0
-        self._last_heartbeat = 0.0
+
+        # Heartbeats run on a dedicated thread so they fire on schedule
+        # even while the main thread is blocked inside a long MCTS search.
+        self._hb_stop = threading.Event()
+        self._hb_thread: Optional[threading.Thread] = None
 
         # Checkpoint sync: only needed when the opponent pool draws 'past'
         # models, which live as .pt files on the coordinator.
@@ -116,7 +125,6 @@ class Worker:
         while not self._stop:
             try:
                 self._maybe_consume_weight_updates()
-                self._maybe_heartbeat()
                 self._maybe_sync_checkpoint_index()
                 self._play_and_send_one()
                 played += 1
@@ -149,7 +157,8 @@ class Worker:
         self._sub.connect(f"{self.coord_url}:{self.pub_port}")
         self._sub.setsockopt(zmq.SUBSCRIBE, proto.TOPIC_WEIGHTS)
 
-        # REQ for handshake + heartbeat.
+        # REQ for handshake + checkpoint fetches. Heartbeats use their own
+        # socket on the background thread to avoid socket-state contention.
         self._req = self._ctx.socket(zmq.REQ)
         self._req.connect(f"{self.coord_url}:{self.rep_port}")
         self._req.RCVTIMEO = 10000  # 10s
@@ -192,7 +201,6 @@ class Worker:
 
         self.cfg = proto.wire_to_config(payload["config"])
         self._apply_weights_blob(payload["weights"])
-        self._last_heartbeat = time.time()
 
         # If this run uses 'past' opponents, register the on-demand fetcher and
         # pull the coordinator's checkpoint index so games can reference them.
@@ -202,7 +210,13 @@ class Worker:
             self._sync_checkpoint_index()
             self._last_ckpt_index_sync = time.time()
 
+        self._start_heartbeat_thread()
+
     def _close(self) -> None:
+        self._hb_stop.set()
+        if self._hb_thread is not None:
+            self._hb_thread.join(timeout=5.0)
+            self._hb_thread = None
         if self._wants_checkpoints:
             set_checkpoint_provider(None)
         for s in (self._req, self._push, self._sub):
@@ -235,25 +249,56 @@ class Worker:
                 except Exception as exc:
                     self._log(f"failed to apply weights: {exc!r}")
 
-    def _maybe_heartbeat(self) -> None:
-        if time.time() - self._last_heartbeat < self.heartbeat_every_sec:
+    def _start_heartbeat_thread(self) -> None:
+        if self._hb_thread is not None and self._hb_thread.is_alive():
             return
-        envelope = proto.make_envelope(
-            {"worker_id": self.worker_id}, self.token, proto.KIND_HEARTBEAT
+        self._hb_stop.clear()
+        self._hb_thread = threading.Thread(
+            target=self._heartbeat_loop,
+            name=f"hb-{self.worker_id}",
+            daemon=True,
         )
+        self._hb_thread.start()
+
+    def _heartbeat_loop(self) -> None:
+        """Send liveness pings on a fixed schedule from a dedicated REQ socket.
+
+        Lives on its own thread + socket so it keeps firing while the main
+        thread is blocked in `play_one_self_play_game` — without this, a
+        game whose MCTS runs longer than the coordinator's worker timeout
+        causes the worker to be marked dead even though it is still working.
+        """
+        def _make_sock() -> zmq.Socket:
+            s = self._ctx.socket(zmq.REQ)
+            s.RCVTIMEO = 10000
+            s.SNDTIMEO = 10000
+            s.connect(f"{self.coord_url}:{self.rep_port}")
+            return s
+
+        sock = _make_sock()
         try:
-            self._req.send(envelope)
-            reply = self._req.recv()
-        except zmq.ZMQError as exc:
-            self._log(f"heartbeat failed: {exc!r}")
-            return
-        kind, _tok, payload = proto.decode_envelope(reply)
-        if kind == proto.KIND_HEARTBEAT_OK and isinstance(payload, dict):
-            v = int(payload.get("weight_version", self.weight_version))
-            if v > self.weight_version:
-                # Coordinator has a newer version; we'll catch the next broadcast.
+            while not self._hb_stop.wait(self.heartbeat_every_sec):
+                envelope = proto.make_envelope(
+                    {"worker_id": self.worker_id},
+                    self.token,
+                    proto.KIND_HEARTBEAT,
+                )
+                try:
+                    sock.send(envelope)
+                    sock.recv()
+                except zmq.ZMQError as exc:
+                    self._log(f"heartbeat failed: {exc!r}")
+                    # REQ is wedged after a send-or-recv timeout; recreate.
+                    try:
+                        sock.close(linger=0)
+                    except Exception:
+                        pass
+                    sock = _make_sock()
+        finally:
+            try:
+                sock.close(linger=0)
+            except Exception:
                 pass
-        self._last_heartbeat = time.time()
 
     # ──────────────────────────────────────────────────────────
     # Checkpoint sync ('past' opponents)
