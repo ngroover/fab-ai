@@ -75,6 +75,9 @@ def _build_cli() -> argparse.ArgumentParser:
                    help="Wait until replay buffer has at least this many transitions before training")
     p.add_argument("--worker-timeout-secs", type=float, default=90.0,
                    help="Mark a worker dead if it has been silent (no PUSH or heartbeat) for this long")
+    p.add_argument("--rep-workers", type=int, default=8,
+                   help="Thread-pool size for the ROUTER reply socket "
+                        "(handshakes, heartbeats, checkpoint fetches)")
     return p
 
 
@@ -124,6 +127,7 @@ def main() -> None:
         eval_every_grad_steps=args.eval_every_grad_steps,
         checkpoint_every_grad_steps=args.ckpt_every_grad_steps,
         worker_timeout_sec=args.worker_timeout_secs,
+        rep_workers=args.rep_workers,
     )
     server.run()
 

@@ -8,13 +8,16 @@ periodically broadcasts updated weights back to all workers.
 
 Architecture:
 
-  ┌─ PULL :5556 ─────────► ReplayBuffer (lock-protected)
-  │                              │
-  │                              ▼
-  ├─ PUB  :5557 ◄──── training thread: sample → train → bump weight_version
+  ┌─ PULL   :5556 ─────────► ReplayBuffer (lock-protected)
+  │                                │
+  │                                ▼
+  ├─ PUB    :5557 ◄──── training thread: sample → train → bump weight_version
   │
-  └─ REP  :5558  serves handshake (auth → config + initial weights) and
-                  heartbeat pings.
+  └─ ROUTER :5558  serves handshake (auth → config + initial weights),
+                    heartbeat pings, and checkpoint list/fetch. Each request
+                    is handed to a thread-pool worker so a slow request
+                    (e.g. a large checkpoint blob) doesn't block heartbeats
+                    or handshakes from other workers.
 
 Token auth: every PUSH and REQ envelope must carry the shared token. Bad
 envelopes are silently dropped (counter is logged).
@@ -22,6 +25,7 @@ envelopes are silently dropped (counter is logged).
 
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import threading
 import time
@@ -71,6 +75,7 @@ class CoordinatorServer:
         eval_every_grad_steps: int = 0,   # 0 = use config.eval_every*steps_per_iter
         checkpoint_every_grad_steps: int = 0,
         worker_timeout_sec: float = 90.0,
+        rep_workers: int = 8,
     ) -> None:
         if not token:
             raise ValueError("Coordinator requires a non-empty auth token.")
@@ -83,6 +88,7 @@ class CoordinatorServer:
         self.max_staleness = int(max_staleness)
         self.min_buffer_to_train = int(min_buffer_to_train)
         self.worker_timeout_sec = float(worker_timeout_sec)
+        self.rep_workers = max(1, int(rep_workers))
         self.eval_every_grad_steps = int(
             eval_every_grad_steps or max(1, config.eval_every) * max(1, config.steps_per_iter)
         )
@@ -109,8 +115,11 @@ class CoordinatorServer:
         # Lock guards trainer.buffer and the model state_dict during pub/copy.
         self._lock = threading.Lock()
         # ZMQ sockets are not thread-safe; the PUB socket is touched by the
-        # broadcast thread and the training thread, so guard its sends.
+        # broadcast thread and the training thread, so guard its sends. The
+        # ROUTER socket is touched by every pool worker that ships a reply,
+        # so it gets its own lock too.
         self._pub_lock = threading.Lock()
+        self._router_lock = threading.Lock()
         self._weight_version = 0
         self._stop_flag = threading.Event()
         self._stats = {
@@ -129,7 +138,11 @@ class CoordinatorServer:
         self._ctx = zmq.Context.instance()
         self._pull_sock: Optional[zmq.Socket] = None
         self._pub_sock: Optional[zmq.Socket] = None
-        self._rep_sock: Optional[zmq.Socket] = None
+        self._router_sock: Optional[zmq.Socket] = None
+
+        # Pool of threads that build + send REQ replies. Lives only between
+        # run() and its finally block.
+        self._rep_executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
 
     # ──────────────────────────────────────────────────────────
     # Monitor broadcasting
@@ -228,9 +241,13 @@ class CoordinatorServer:
     def run(self) -> None:
         """Block in the training loop until `stop()` is called or total_iters elapse."""
         self._bind_sockets()
+        self._rep_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.rep_workers, thread_name_prefix="rep"
+        )
         self._trainer._log(
             f"  ▶  Coordinator listening on PULL :{self.pull_port}  "
-            f"PUB :{self.pub_port}  REP :{self.rep_port}"
+            f"PUB :{self.pub_port}  ROUTER :{self.rep_port}  "
+            f"(rep_workers={self.rep_workers})"
         )
         self._trainer._log(f"  🔑  card embeddings hash: {self._embeddings_hash}")
 
@@ -247,10 +264,14 @@ class CoordinatorServer:
         finally:
             # Joining the helper threads BEFORE closing sockets is required:
             # ZMQ asserts (signaler.cpp POLLIN) if a socket is closed while
-            # another thread is mid-recv/send on it.
+            # another thread is mid-recv/send on it. The pool drains next so
+            # no worker is still mid-send when the ROUTER socket goes away.
             self._stop_flag.set()
             for t in threads:
                 t.join(timeout=5.0)
+            if self._rep_executor is not None:
+                self._rep_executor.shutdown(wait=True)
+                self._rep_executor = None
             self._trainer._on_status("idle")
             self._close_sockets()
 
@@ -269,12 +290,16 @@ class CoordinatorServer:
         self._pub_sock = self._ctx.socket(zmq.PUB)
         self._pub_sock.bind(f"tcp://{self.bind_host}:{self.pub_port}")
 
-        self._rep_sock = self._ctx.socket(zmq.REP)
-        self._rep_sock.bind(f"tcp://{self.bind_host}:{self.rep_port}")
-        self._rep_sock.RCVTIMEO = 250
+        # ROUTER instead of REP so the recv loop can dispatch each request
+        # to a pool worker and stay responsive while the previous reply is
+        # still being assembled or sent. REQ ↔ ROUTER is wire-compatible,
+        # so clients (workers, monitor) need no changes.
+        self._router_sock = self._ctx.socket(zmq.ROUTER)
+        self._router_sock.bind(f"tcp://{self.bind_host}:{self.rep_port}")
+        self._router_sock.RCVTIMEO = 250
 
     def _close_sockets(self) -> None:
-        for s in (self._pull_sock, self._pub_sock, self._rep_sock):
+        for s in (self._pull_sock, self._pub_sock, self._router_sock):
             if s is not None:
                 try:
                     s.close(linger=0)
@@ -336,114 +361,146 @@ class CoordinatorServer:
                 self._trainer._on_progress({"games": games_done_snapshot})
 
     # ──────────────────────────────────────────────────────────
-    # REP loop (handshake + heartbeat)
+    # ROUTER loop (handshake + heartbeat + checkpoint)
     # ──────────────────────────────────────────────────────────
+    #
+    # The receiver thread does only the recv + dispatch; each request is
+    # handled on a pool thread so a slow handler (e.g. a checkpoint blob
+    # read or a state_dict pack) doesn't block heartbeats from other
+    # workers behind it. ZMQ sockets aren't thread-safe, so the sends back
+    # through the ROUTER socket are serialized with `_router_lock`.
 
     def _rep_loop(self) -> None:
         while not self._stop_flag.is_set():
             try:
-                data = self._rep_sock.recv()
+                frames = self._router_sock.recv_multipart()
             except zmq.error.Again:
                 continue
             except zmq.ZMQError:
                 break
-
-            kind, tok, payload = proto.decode_envelope(data)
-            if not proto.check_token(tok, self.token):
-                reply = proto.make_envelope({"reason": "bad_token"}, "", proto.KIND_HANDSHAKE_FAIL)
-                try:
-                    self._rep_sock.send(reply)
-                except zmq.ZMQError:
-                    pass
+            # REQ → ROUTER framing: [identity, empty_delimiter, payload].
+            # Preserve everything before the payload as the routing prefix
+            # so the reply lands back at the right client.
+            if len(frames) < 2:
                 continue
+            prefix, envelope = frames[:-1], frames[-1]
+            self._rep_executor.submit(self._handle_request, prefix, envelope)
 
-            if kind == proto.KIND_HANDSHAKE_HELLO:
-                worker_id = str((payload or {}).get("worker_id", "?"))
-                worker_hash = str((payload or {}).get("embeddings_hash", ""))
-                if worker_hash != self._embeddings_hash:
-                    self._trainer._log(
-                        f"  ⛔  worker {worker_id} rejected: embeddings hash "
-                        f"{worker_hash!r} != coordinator {self._embeddings_hash!r}"
-                    )
-                    reply = proto.make_envelope(
-                        {
-                            "reason": "bad_embeddings_hash",
-                            "expected": self._embeddings_hash,
-                            "got": worker_hash,
-                        },
-                        self.token,
-                        proto.KIND_HANDSHAKE_FAIL,
-                    )
-                    try:
-                        self._rep_sock.send(reply)
-                    except zmq.ZMQError:
-                        pass
-                    continue
-
-                self._workers_last_seen[worker_id] = time.time()
-                self._stats["workers_seen"].add(worker_id)
-                with self._lock:
-                    weights_blob = proto.pack_weights(
-                        self._trainer.net.state_dict(),
-                        self._weight_version,
-                        self._trainer.config.run_name,
-                    )
-                    cfg_wire = proto.config_to_wire(self._trainer.config)
-                    version = self._weight_version
-                reply_payload = {
-                    "config": cfg_wire,
-                    "weights": weights_blob,
-                    "weight_version": version,
-                    "run_name": self._trainer.config.run_name,
-                    "embeddings_hash": self._embeddings_hash,
-                }
-                reply = proto.make_envelope(reply_payload, self.token, proto.KIND_HANDSHAKE_OK)
-                self._trainer._log(f"  🤝  worker {worker_id} handshake (v={version})")
-            elif kind == proto.KIND_MONITOR_HELLO:
-                snapshot = self._monitor_snapshot()
-                reply = proto.make_envelope(
-                    snapshot, self.token, proto.KIND_MONITOR_OK
-                )
-                self._trainer._log(
-                    f"  👁  monitor attached "
-                    f"(v={snapshot['weight_version']} step={snapshot['grad_steps']})"
-                )
-            elif kind == proto.KIND_HEARTBEAT:
-                worker_id = str((payload or {}).get("worker_id", "?"))
-                self._workers_last_seen[worker_id] = time.time()
-                with self._lock:
-                    version = self._weight_version
-                reply = proto.make_envelope(
-                    {"weight_version": version}, self.token, proto.KIND_HEARTBEAT_OK
-                )
-            elif kind == proto.KIND_CHECKPOINT_LIST:
-                with self._lock:
-                    ckpts = spt.list_checkpoints()
-                reply = proto.make_envelope(
-                    {"checkpoints": ckpts}, self.token, proto.KIND_CHECKPOINT_LIST_OK
-                )
-            elif kind == proto.KIND_CHECKPOINT_FETCH:
-                name = str((payload or {}).get("name", ""))
-                blob, meta = self._read_checkpoint_file(name)
-                if blob is None:
-                    reply = proto.make_envelope(
-                        {"reason": "not_found", "name": name},
-                        self.token, proto.KIND_CHECKPOINT_FAIL,
-                    )
-                else:
-                    reply = proto.make_envelope(
-                        {"name": name, "data": blob, "meta": meta},
-                        self.token, proto.KIND_CHECKPOINT_FETCH_OK,
-                    )
-            else:
-                reply = proto.make_envelope(
-                    {"reason": "unknown_kind"}, self.token, proto.KIND_HANDSHAKE_FAIL
-                )
-
+    def _handle_request(self, prefix: List[bytes], envelope: bytes) -> None:
+        try:
+            reply = self._build_reply(envelope)
+        except Exception as exc:
+            self._trainer._log(f"  ⚠  REP handler error: {exc!r}")
+            return
+        if reply is None:
+            return
+        with self._router_lock:
+            sock = self._router_sock
+            if sock is None:
+                return
             try:
-                self._rep_sock.send(reply)
+                sock.send_multipart(prefix + [reply])
             except zmq.ZMQError:
-                continue
+                pass
+
+    def _build_reply(self, data: bytes) -> Optional[bytes]:
+        kind, tok, payload = proto.decode_envelope(data)
+        if not proto.check_token(tok, self.token):
+            return proto.make_envelope(
+                {"reason": "bad_token"}, "", proto.KIND_HANDSHAKE_FAIL
+            )
+
+        if kind == proto.KIND_HANDSHAKE_HELLO:
+            return self._reply_handshake(payload)
+        if kind == proto.KIND_MONITOR_HELLO:
+            return self._reply_monitor_hello()
+        if kind == proto.KIND_HEARTBEAT:
+            return self._reply_heartbeat(payload)
+        if kind == proto.KIND_CHECKPOINT_LIST:
+            return self._reply_checkpoint_list()
+        if kind == proto.KIND_CHECKPOINT_FETCH:
+            return self._reply_checkpoint_fetch(payload)
+        return proto.make_envelope(
+            {"reason": "unknown_kind"}, self.token, proto.KIND_HANDSHAKE_FAIL
+        )
+
+    def _reply_handshake(self, payload: Optional[dict]) -> bytes:
+        worker_id = str((payload or {}).get("worker_id", "?"))
+        worker_hash = str((payload or {}).get("embeddings_hash", ""))
+        if worker_hash != self._embeddings_hash:
+            self._trainer._log(
+                f"  ⛔  worker {worker_id} rejected: embeddings hash "
+                f"{worker_hash!r} != coordinator {self._embeddings_hash!r}"
+            )
+            return proto.make_envelope(
+                {
+                    "reason": "bad_embeddings_hash",
+                    "expected": self._embeddings_hash,
+                    "got": worker_hash,
+                },
+                self.token,
+                proto.KIND_HANDSHAKE_FAIL,
+            )
+
+        self._workers_last_seen[worker_id] = time.time()
+        self._stats["workers_seen"].add(worker_id)
+        with self._lock:
+            weights_blob = proto.pack_weights(
+                self._trainer.net.state_dict(),
+                self._weight_version,
+                self._trainer.config.run_name,
+            )
+            cfg_wire = proto.config_to_wire(self._trainer.config)
+            version = self._weight_version
+        self._trainer._log(f"  🤝  worker {worker_id} handshake (v={version})")
+        return proto.make_envelope(
+            {
+                "config": cfg_wire,
+                "weights": weights_blob,
+                "weight_version": version,
+                "run_name": self._trainer.config.run_name,
+                "embeddings_hash": self._embeddings_hash,
+            },
+            self.token,
+            proto.KIND_HANDSHAKE_OK,
+        )
+
+    def _reply_monitor_hello(self) -> bytes:
+        snapshot = self._monitor_snapshot()
+        self._trainer._log(
+            f"  👁  monitor attached "
+            f"(v={snapshot['weight_version']} step={snapshot['grad_steps']})"
+        )
+        return proto.make_envelope(snapshot, self.token, proto.KIND_MONITOR_OK)
+
+    def _reply_heartbeat(self, payload: Optional[dict]) -> bytes:
+        worker_id = str((payload or {}).get("worker_id", "?"))
+        self._workers_last_seen[worker_id] = time.time()
+        with self._lock:
+            version = self._weight_version
+        return proto.make_envelope(
+            {"weight_version": version}, self.token, proto.KIND_HEARTBEAT_OK
+        )
+
+    def _reply_checkpoint_list(self) -> bytes:
+        with self._lock:
+            ckpts = spt.list_checkpoints()
+        return proto.make_envelope(
+            {"checkpoints": ckpts}, self.token, proto.KIND_CHECKPOINT_LIST_OK
+        )
+
+    def _reply_checkpoint_fetch(self, payload: Optional[dict]) -> bytes:
+        name = str((payload or {}).get("name", ""))
+        blob, meta = self._read_checkpoint_file(name)
+        if blob is None:
+            return proto.make_envelope(
+                {"reason": "not_found", "name": name},
+                self.token, proto.KIND_CHECKPOINT_FAIL,
+            )
+        return proto.make_envelope(
+            {"name": name, "data": blob, "meta": meta},
+            self.token, proto.KIND_CHECKPOINT_FETCH_OK,
+        )
 
     def _read_checkpoint_file(self, name: str):
         """Return (bytes, meta) for checkpoint `name`, or (None, None).
