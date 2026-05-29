@@ -44,20 +44,29 @@ fn draw_cards(player: &mut Player, num: usize) {
 
 fn move_from_deck_to_hand(player: &mut Player, card_idx : usize) {
     let next_card_on_deck = player.cards[card_idx].next_card;
+    // modify deck
     if next_card_on_deck == card_idx as u8 {
+        // the deck has no more cards
         player.top_deck_idx = None;
+        player.bottom_deck_idx = None;
     }
     else {
+        // assign top_deck_idx to next card
         player.top_deck_idx = Some(next_card_on_deck);
         player.cards[next_card_on_deck as usize].prev_card = next_card_on_deck
     }
+
+    // modify hand
     if let Some(hand_idx) = player.hand_idx {
-        player.cards[hand_idx as usize].next_card = card_idx as u8;
-        player.cards[hand_idx as usize].prev_card = hand_idx as u8;
+        // cards exist in hand; assign current card to point to hand
+        player.cards[card_idx as usize].next_card = hand_idx as u8;
+        // assign hand card to point backwards to current card
+        player.cards[hand_idx as usize].prev_card = card_idx as u8;
     }
     else {
-        player.hand_idx = Some(card_idx as u8);
+        player.cards[card_idx as usize].next_card = card_idx as u8;
     }
+    player.hand_idx = Some(card_idx as u8);
 
     player.cards[card_idx].location = CardLocation::Hand;
     player.cards[card_idx].visible = CardVisibleState::SelfKnows;

@@ -1,10 +1,14 @@
 use crate::cards::{CardClass, CardData, CardType, Color, EquipmentSlot, Keyword};
+use std::sync::LazyLock;
 
 /// Catalog of every card in the Rhinar vs Dorinthea classic battle.
 ///
 /// The array is positional: index `i` corresponds to the `Card` enum variant
 /// with discriminant `i` (see `cards::Card`). Data mirrors `classic_battles.py`.
-pub fn get_card_catalog() -> [CardData; 52] {
+///
+/// Built exactly once on first access and shared thereafter, so hot paths that
+/// look up card data don't re-materialize all 52 entries on every call.
+static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
     [
         // ── HEROES ──────────────────────────────────────────────────────
         // Rhinar
@@ -1214,4 +1218,9 @@ pub fn get_card_catalog() -> [CardData; 52] {
             play_effect: None,
         },
     ]
+});
+
+/// Returns a reference to the shared card catalog, initializing it on first use.
+pub fn get_card_catalog() -> &'static [CardData; 52] {
+    &CARD_CATALOG
 }
