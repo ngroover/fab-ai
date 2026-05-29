@@ -131,7 +131,6 @@ pub fn shuffle_decks(gs: &mut Gamestate) {
             for (i,c) in cards_in_deck.iter().copied().enumerate() {
                 let prev = if i > 0 { cards_in_deck[i-1] } else { c } ;
                 let next = if i < cards_in_deck.len()-1 { cards_in_deck[i+1] } else { c };
-                println!("(i, c) ({}, {}) has next {}, prev {}", i, c, next, prev);
                 player.cards[c].prev_card = prev as u8;
                 player.cards[c].next_card = next as u8;
             }

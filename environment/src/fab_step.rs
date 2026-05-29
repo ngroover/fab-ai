@@ -23,17 +23,13 @@ fn draw_to_intellect(player: &mut Player) {
 }
 
 fn draw_cards(player: &mut Player, num: usize) {
-    println!("drawing {} cards", num);
     let catalog = get_card_catalog();
     if let Some(mut current_idx) = player.top_deck_idx.map(|x| x as usize) {
         let mut drawn = 0;
         loop {
-            println!("current_idx is {}", current_idx);
             let mycard = player.cards[current_idx].card;
-            println!("card is {} {:?}", current_idx, mycard);
 
             let next = player.cards[current_idx].next_card as usize;
-            println!("next is {}", next);
             if next == current_idx ||
                 drawn == num {
                 break;
@@ -65,13 +61,16 @@ fn move_from_deck_to_hand(player: &mut Player, card_idx : usize) {
 
     player.cards[card_idx].location = CardLocation::Hand;
     player.cards[card_idx].visible = CardVisibleState::SelfKnows;
+    player.hand_size += 1;
+    player.deck_size -= 1;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
-    use crate::fab_game::{gamestate_from_decklists,reset};
+    use crate::fab_game::{gamestate_from_decklists,reset,get_card_states_from_location};
+    use crate::cards::Card;
 
     #[test]
     fn test_go_first_step() {
@@ -80,7 +79,7 @@ mod tests {
 
         assert_eq!(gs.active_player, 0);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
         step(&mut gs, go_first);
 
         assert_eq!(gs.active_player, 0);
@@ -94,10 +93,42 @@ mod tests {
 
         assert_eq!(gs.active_player, 0);
 
-        let go_second = Action{ typ: ActionType::ChooseSecond, index : 0};
+        let go_second = Action{ typ: ActionType::ChooseSecond, index : 0, location: None};
         step(&mut gs, go_second);
 
         assert_eq!(gs.active_player, 1);
         assert_eq!(gs.phase, Phase::Action);
+    }
+
+    #[test]
+    fn test_initial_hand() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        step(&mut gs, go_first);
+
+        assert_eq!(gs.p1.hand_size, 4);
+        assert_eq!(gs.p1.deck_size, 36);
+        assert_eq!(gs.p2.hand_size, 4);
+        assert_eq!(gs.p2.deck_size, 36);
+
+        let hand = get_card_states_from_location(&gs.p1, CardLocation::Hand);
+
+        assert_eq!(hand.len(), 4);
+        
+        assert_eq!(hand[0].card, Card::MuscleMuttY);
+        assert_eq!(hand[1].card, Card::PackCallY);
+        assert_eq!(hand[2].card, Card::RagingOnslaughtY);
+        assert_eq!(hand[3].card, Card::ClearingBellowB);
+
+        let hand2 = get_card_states_from_location(&gs.p2, CardLocation::Hand);
+
+        assert_eq!(hand2.len(), 4);
+        
+        assert_eq!(hand2[0].card, Card::InTheSwingR);
+        assert_eq!(hand2[1].card, Card::SecondSwingR);
+        assert_eq!(hand2[2].card, Card::SharpenSteelR);
+        assert_eq!(hand2[3].card, Card::DrivingBladeY);
     }
 }

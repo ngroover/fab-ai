@@ -27,6 +27,6 @@ fn main() {
         game.p2.life, game.p2.intellect
     );
     println!("Active player: {}", game.active_player);
-    step(&mut game, Action{ typ: ActionType::ChooseFirst, index: 0});
+    step(&mut game, Action{ typ: ActionType::ChooseFirst, index: 0, location: None});
 
 }
