@@ -54,13 +54,9 @@ fn get_playable_cards(player: &Player) -> Vec<Action> {
     }
 
     // Collect each hand card's slot index (needed to address the card in an
-    // Action) alongside its card identity, by scanning for cards located in the
-    // hand zone.
+    // Action) alongside its card identity by walking the hand's linked list.
     let hand: Vec<(usize, Card)> = player
-        .cards
-        .iter()
-        .enumerate()
-        .filter(|(_, cs)| cs.location == CardLocation::Hand)
+        .hand_iter()
         .map(|(idx, cs)| (idx, cs.card))
         .collect();
 

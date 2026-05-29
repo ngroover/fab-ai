@@ -76,14 +76,15 @@ pub struct Gamestate {
 /// The hand is stored as a singly-linked list inside `Player::cards`, starting
 /// at `Player::hand_idx`. Following the `next_card` indices, the list terminates
 /// when a node's `next_card` points back to its own index. This iterator yields
-/// each `CardState` in order until (and including) that terminal node.
+/// `(slot_index, CardState)` for each card in order until (and including) that
+/// terminal node, where `slot_index` is the card's position in `Player::cards`.
 pub struct HandIter<'a> {
     cards: &'a [CardState; 45],
     current: Option<usize>,
 }
 
 impl<'a> Iterator for HandIter<'a> {
-    type Item = CardState;
+    type Item = (usize, CardState);
 
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.current?;
@@ -91,14 +92,14 @@ impl<'a> Iterator for HandIter<'a> {
         let next = card.next_card as usize;
         // A node whose `next_card` points at itself marks the end of the list.
         self.current = if next == idx { None } else { Some(next) };
-        Some(card)
+        Some((idx, card))
     }
 }
 
 impl Player {
-    /// Iterate over the `CardState`s in this player's hand, starting at
-    /// `hand_idx` and following `next_card` until a node points to itself.
-    /// Yields nothing if the hand is empty (`hand_idx` is `None`).
+    /// Iterate over this player's hand as `(slot_index, CardState)` pairs,
+    /// starting at `hand_idx` and following `next_card` until a node points to
+    /// itself. Yields nothing if the hand is empty (`hand_idx` is `None`).
     pub fn hand_iter(&self) -> HandIter<'_> {
         HandIter {
             cards: &self.cards,
