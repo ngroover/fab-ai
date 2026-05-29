@@ -167,10 +167,7 @@ class Worker:
 
         # REQ for handshake + checkpoint fetches. Heartbeats use their own
         # socket on the background thread to avoid socket-state contention.
-        self._req = self._ctx.socket(zmq.REQ)
-        self._req.connect(f"{self.coord_url}:{self.rep_port}")
-        self._req.RCVTIMEO = 10000  # 10s
-        self._req.SNDTIMEO = 10000
+        self._req = self._make_req_socket()
 
         # Handshake.
         local_hash = embeddings_hash()
@@ -312,15 +309,45 @@ class Worker:
     # Checkpoint sync ('past' opponents)
     # ──────────────────────────────────────────────────────────
 
+    def _make_req_socket(self) -> "zmq.Socket":
+        s = self._ctx.socket(zmq.REQ)
+        s.connect(f"{self.coord_url}:{self.rep_port}")
+        s.RCVTIMEO = 10000  # 10s
+        s.SNDTIMEO = 10000
+        return s
+
+    def _reset_req_socket(self) -> None:
+        """Rebuild the REQ socket after a send/recv timeout.
+
+        A REQ socket is strictly send→recv; a timed-out recv leaves it wedged
+        in the "must-receive" state, so the next send raises EFSM ("operation
+        cannot be accomplished in current state") and every later request fails
+        forever. Discarding the socket and reconnecting clears the FSM state.
+        """
+        if self._req is not None:
+            try:
+                self._req.close(linger=0)
+            except Exception:
+                pass
+        self._req = self._make_req_socket()
+
     def _request(self, kind: str, payload: dict):
         """Send one REQ envelope and return the decoded (kind, payload).
 
         The worker is single-threaded and the REQ socket is strictly
         alternating send→recv, so callers must not interleave requests.
+
+        On any ZMQ error (most commonly a recv timeout) the socket is left in
+        an unrecoverable state, so we rebuild it before re-raising — otherwise
+        a single slow reply would wedge all future requests.
         """
         envelope = proto.make_envelope(payload, self.token, kind)
-        self._req.send(envelope)
-        reply = self._req.recv()
+        try:
+            self._req.send(envelope)
+            reply = self._req.recv()
+        except zmq.ZMQError:
+            self._reset_req_socket()
+            raise
         rkind, _tok, rpayload = proto.decode_envelope(reply)
         return rkind, rpayload
 
