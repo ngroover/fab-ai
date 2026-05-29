@@ -124,6 +124,10 @@ class Worker:
         except Exception as exc:
             self._log(f"startup failed: {exc!r}\n" + traceback.format_exc())
             raise
+        if self._stop:
+            # Asked to stop while still trying to reach the coordinator.
+            self._close()
+            return
         self._log(f"connected to {self.coord_url}  (initial v={self.weight_version})")
 
         played = 0
@@ -169,40 +173,11 @@ class Worker:
         # socket on the background thread to avoid socket-state contention.
         self._req = self._make_req_socket()
 
-        # Handshake.
-        local_hash = embeddings_hash()
-        self._log(f"local card embeddings hash: {local_hash}")
-        envelope = proto.make_envelope(
-            {
-                "worker_id": self.worker_id,
-                "host": socket.gethostname(),
-                "embeddings_hash": local_hash,
-            },
-            self.token,
-            proto.KIND_HANDSHAKE_HELLO,
-        )
-        self._req.send(envelope)
-        reply = self._req.recv()
-        kind, _tok, payload = proto.decode_envelope(reply)
-        if kind != proto.KIND_HANDSHAKE_OK or not isinstance(payload, dict):
-            reason = (payload or {}).get("reason") if isinstance(payload, dict) else None
-            if reason == "bad_embeddings_hash":
-                raise RuntimeError(
-                    f"handshake rejected: card embeddings hash mismatch — "
-                    f"coordinator expects {payload.get('expected')!r}, "
-                    f"this worker has {payload.get('got')!r}. "
-                    f"Sync `card_embeddings_out/` from the coordinator (or "
-                    f"re-run `python card_embeddings.py` on both with the "
-                    f"same git checkout)."
-                )
-            raise RuntimeError(f"handshake failed: kind={kind} payload={payload}")
-
-        coord_hash = str(payload.get("embeddings_hash", ""))
-        if coord_hash and coord_hash != local_hash:
-            raise RuntimeError(
-                f"handshake card embeddings hash mismatch: coordinator "
-                f"{coord_hash!r} != worker {local_hash!r}"
-            )
+        # Handshake, retrying through transient unreachability instead of
+        # crashing the worker. Returns None if stop was requested mid-retry.
+        payload = self._handshake_with_retry()
+        if payload is None:
+            return
 
         self.cfg = proto.wire_to_config(payload["config"])
         self._apply_weights_blob(payload["weights"])
@@ -216,6 +191,88 @@ class Worker:
             self._last_ckpt_index_sync = time.time()
 
         self._start_heartbeat_thread()
+
+    def _handshake_with_retry(self) -> Optional[dict]:
+        """Perform the auth/config/weights handshake, retrying on timeout.
+
+        The coordinator may not be reachable yet when a worker launches
+        (it isn't up, it's behind a firewall, or the host/port is wrong),
+        in which case the REQ recv times out with zmq.Again ("Resource
+        temporarily unavailable"). Rather than crashing the process, we
+        retry with exponential backoff until the handshake succeeds or the
+        worker is asked to stop.
+
+        A timed-out REQ recv leaves the socket wedged in its must-receive
+        FSM state, so the next send would raise EFSM — we rebuild the
+        socket before each retry to clear it.
+
+        Reply-level rejections (bad token, embeddings-hash mismatch) are
+        configuration errors that retrying can't fix, so those raise.
+        """
+        local_hash = embeddings_hash()
+        self._log(f"local card embeddings hash: {local_hash}")
+        envelope = proto.make_envelope(
+            {
+                "worker_id": self.worker_id,
+                "host": socket.gethostname(),
+                "embeddings_hash": local_hash,
+            },
+            self.token,
+            proto.KIND_HANDSHAKE_HELLO,
+        )
+
+        backoff = 1.0
+        attempt = 0
+        while not self._stop:
+            attempt += 1
+            try:
+                self._req.send(envelope)
+                reply = self._req.recv()
+            except zmq.ZMQError as exc:
+                self._log(
+                    f"handshake attempt {attempt} failed: {exc!r} — "
+                    f"coordinator unreachable at "
+                    f"{self.coord_url}:{self.rep_port}? "
+                    f"retrying in {backoff:.0f}s"
+                )
+                # The REQ socket is now wedged; discard it before retrying.
+                self._reset_req_socket()
+                self._sleep_unless_stopped(backoff)
+                backoff = min(backoff * 2, 30.0)
+                continue
+
+            kind, _tok, payload = proto.decode_envelope(reply)
+            if kind != proto.KIND_HANDSHAKE_OK or not isinstance(payload, dict):
+                reason = (payload or {}).get("reason") if isinstance(payload, dict) else None
+                if reason == "bad_embeddings_hash":
+                    raise RuntimeError(
+                        f"handshake rejected: card embeddings hash mismatch — "
+                        f"coordinator expects {payload.get('expected')!r}, "
+                        f"this worker has {payload.get('got')!r}. "
+                        f"Sync `card_embeddings_out/` from the coordinator (or "
+                        f"re-run `python card_embeddings.py` on both with the "
+                        f"same git checkout)."
+                    )
+                raise RuntimeError(f"handshake failed: kind={kind} payload={payload}")
+
+            coord_hash = str(payload.get("embeddings_hash", ""))
+            if coord_hash and coord_hash != local_hash:
+                raise RuntimeError(
+                    f"handshake card embeddings hash mismatch: coordinator "
+                    f"{coord_hash!r} != worker {local_hash!r}"
+                )
+            if attempt > 1:
+                self._log(f"handshake succeeded on attempt {attempt}")
+            return payload
+
+        # Stop was requested before we ever reached the coordinator.
+        return None
+
+    def _sleep_unless_stopped(self, seconds: float) -> None:
+        """Sleep in small slices so a stop request stays responsive."""
+        deadline = time.time() + seconds
+        while not self._stop and time.time() < deadline:
+            time.sleep(min(0.25, deadline - time.time()))
 
     def _close(self) -> None:
         self._hb_stop.set()
