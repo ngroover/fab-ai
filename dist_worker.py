@@ -230,10 +230,8 @@ class Worker:
                 reply = self._req.recv()
             except zmq.ZMQError as exc:
                 self._log(
-                    f"handshake attempt {attempt} failed: {exc!r} — "
-                    f"coordinator unreachable at "
-                    f"{self.coord_url}:{self.rep_port}? "
-                    f"retrying in {backoff:.0f}s"
+                    f"handshake attempt {attempt} failed ({exc!r}): "
+                    f"{self._diagnose_unreachable()}  retrying in {backoff:.0f}s"
                 )
                 # The REQ socket is now wedged; discard it before retrying.
                 self._reset_req_socket()
@@ -273,6 +271,48 @@ class Worker:
         deadline = time.time() + seconds
         while not self._stop and time.time() < deadline:
             time.sleep(min(0.25, deadline - time.time()))
+
+    def _coord_host(self) -> str:
+        """Host portion of coord_url (e.g. 'tcp://10.0.0.5' → '10.0.0.5')."""
+        hostpart = self.coord_url.split("://", 1)[-1]
+        return hostpart.split(":", 1)[0] or "127.0.0.1"
+
+    def _port_is_open(self, port: int, timeout: float = 2.0) -> bool:
+        """Plain-TCP check that *something* is listening on `port`.
+
+        ZMQ's connect() never refuses a dead endpoint — it queues messages
+        silently — so a REQ recv against a down or misaddressed coordinator
+        just times out forever with no hint why. A direct socket connect
+        tells us whether the port is actually accepting connections.
+        """
+        try:
+            with socket.create_connection((self._coord_host(), port), timeout):
+                return True
+        except OSError:
+            return False
+
+    def _diagnose_unreachable(self) -> str:
+        """Explain *why* the handshake isn't completing, actionably.
+
+        Distinguishes the two failure modes that both surface as a REQ
+        timeout: nothing listening on the ROUTER port (wrong host/port,
+        coordinator not running, firewall) vs. the port being open but no
+        valid handshake reply arriving (token / embeddings-hash mismatch,
+        or an overloaded coordinator).
+        """
+        host = self._coord_host()
+        if self._port_is_open(self.rep_port):
+            return (
+                f"connected to {host}:{self.rep_port} but got no handshake "
+                f"reply in time — verify FAB_DIST_TOKEN matches the "
+                f"coordinator, that its card embeddings hash matches this "
+                f"worker's, and that it isn't overloaded."
+            )
+        return (
+            f"nothing is listening on {host}:{self.rep_port} — is "
+            f"run_distributed.py running on that host with a matching "
+            f"--rep-port, and is the host reachable (DNS/route/firewall)?"
+        )
 
     def _close(self) -> None:
         self._hb_stop.set()
