@@ -70,3 +70,39 @@ pub struct Gamestate {
     pub phase : Phase,
     pub rng : SmallRng,
 }
+
+/// Iterator over the cards in a player's hand.
+///
+/// The hand is stored as a singly-linked list inside `Player::cards`, starting
+/// at `Player::hand_idx`. Following the `next_card` indices, the list terminates
+/// when a node's `next_card` points back to its own index. This iterator yields
+/// each `CardState` in order until (and including) that terminal node.
+pub struct HandIter<'a> {
+    cards: &'a [CardState; 45],
+    current: Option<usize>,
+}
+
+impl<'a> Iterator for HandIter<'a> {
+    type Item = CardState;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let idx = self.current?;
+        let card = self.cards[idx];
+        let next = card.next_card as usize;
+        // A node whose `next_card` points at itself marks the end of the list.
+        self.current = if next == idx { None } else { Some(next) };
+        Some(card)
+    }
+}
+
+impl Player {
+    /// Iterate over the `CardState`s in this player's hand, starting at
+    /// `hand_idx` and following `next_card` until a node points to itself.
+    /// Yields nothing if the hand is empty (`hand_idx` is `None`).
+    pub fn hand_iter(&self) -> HandIter<'_> {
+        HandIter {
+            cards: &self.cards,
+            current: self.hand_idx.map(|i| i as usize),
+        }
+    }
+}
