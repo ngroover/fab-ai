@@ -204,14 +204,34 @@ class MonitorClient:
     # Checkpoint mirroring
     # ──────────────────────────────────────────────────────────
 
+    def _make_req_socket(self) -> "zmq.Socket":
+        s = self._ctx.socket(zmq.REQ)
+        s.connect(f"{self.coord_url}:{self.rep_port}")
+        s.RCVTIMEO = 30000  # ms — .pt blobs can be a few MB
+        s.SNDTIMEO = 10000
+        return s
+
+    def _reset_req_socket(self) -> None:
+        """Rebuild the REQ socket after a send/recv timeout.
+
+        A REQ socket is strictly send→recv; a timed-out recv leaves it wedged
+        in the "must-receive" state, so the next send raises EFSM ("operation
+        cannot be accomplished in current state") and every later checkpoint
+        fetch fails forever. Discarding the socket and reconnecting clears the
+        FSM state. Safe here because the fetcher thread is the sole owner.
+        """
+        if self._req is not None:
+            try:
+                self._req.close(linger=0)
+            except Exception:
+                pass
+        self._req = self._make_req_socket()
+
     def _fetcher_loop(self) -> None:
         # Long-lived REQ socket dedicated to the fetcher thread. Keeping it
         # separate from the handshake REQ means the SUB loop's lifetime is
         # decoupled from any in-flight checkpoint fetch.
-        self._req = self._ctx.socket(zmq.REQ)
-        self._req.connect(f"{self.coord_url}:{self.rep_port}")
-        self._req.RCVTIMEO = 30000  # ms — .pt blobs can be a few MB
-        self._req.SNDTIMEO = 10000
+        self._req = self._make_req_socket()
         try:
             while True:
                 item = self._fetch_queue.get()
@@ -233,9 +253,21 @@ class MonitorClient:
                 self._req = None
 
     def _request(self, kind: str, payload: dict):
+        """Send one REQ envelope and return the decoded (kind, payload).
+
+        The fetcher thread is the REQ socket's sole owner and issues strictly
+        alternating send→recv requests. On any ZMQ error (most commonly a recv
+        timeout while a multi-MB blob is in flight) the socket is left wedged in
+        the must-receive state, so we rebuild it before re-raising — otherwise a
+        single slow reply would wedge every future fetch with EFSM.
+        """
         envelope = proto.make_envelope(payload, self.token, kind)
-        self._req.send(envelope)
-        reply = self._req.recv()
+        try:
+            self._req.send(envelope)
+            reply = self._req.recv()
+        except zmq.ZMQError:
+            self._reset_req_socket()
+            raise
         rkind, _tok, rpayload = proto.decode_envelope(reply)
         return rkind, rpayload
 

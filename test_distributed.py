@@ -330,6 +330,51 @@ class DistributedSmokeTest(unittest.TestCase):
         finally:
             w._close()
 
+    def test_monitor_recovers_from_wedged_req_socket(self):
+        """A timed-out checkpoint fetch must not wedge the monitor's REQ socket.
+
+        A REQ socket left mid-exchange (sent, never received) is stuck in its
+        must-receive FSM state; the next send raises EFSM ("operation cannot be
+        accomplished in current state") and every later fetch fails forever.
+        Regression test for `MonitorClient._request` not rebuilding the socket
+        on error the way the worker already does.
+        """
+        from dist_monitor import MonitorClient
+
+        meta = self.coord._trainer._save_checkpoint(3, {})
+        name = meta["name"]
+
+        mon_tmp = tempfile.mkdtemp(prefix="fab-mon-")
+        client = MonitorClient(
+            coord_url="tcp://127.0.0.1",
+            token=self.token,
+            pub_port=self.pub_port,
+            rep_port=self.rep_port,
+            checkpoint_dir=mon_tmp,
+            index_path=os.path.join(mon_tmp, "index.json"),
+        )
+        client._req = client._make_req_socket()
+        try:
+            # Wedge the socket: send a request but never read the reply, leaving
+            # it in the must-receive state that makes the next send raise EFSM.
+            client._req.send(proto.make_envelope(
+                {"name": name}, self.token, proto.KIND_CHECKPOINT_FETCH))
+            time.sleep(0.2)  # let the coordinator's reply land in the rx buffer
+
+            # First fetch hits the wedge: EFSM is caught, the socket rebuilt.
+            self.assertFalse(client._fetch_blob(name))
+            self.assertFalse(
+                os.path.isfile(os.path.join(mon_tmp, f"{name}.pt")))
+
+            # The rebuilt socket must work — the wedge must not be permanent.
+            self.assertTrue(client._fetch_blob(name))
+            self.assertTrue(
+                os.path.isfile(os.path.join(mon_tmp, f"{name}.pt")))
+        finally:
+            if client._req is not None:
+                client._req.close(linger=0)
+            shutil.rmtree(mon_tmp, ignore_errors=True)
+
     def test_workers_stream_transitions_and_weight_version_advances(self):
         env = os.environ.copy()
         env["FAB_DIST_TOKEN"] = self.token
