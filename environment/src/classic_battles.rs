@@ -1,4 +1,5 @@
 use crate::cards::{CardClass, CardData, CardType, Color, EquipmentSlot, Keyword};
+use crate::card_effects::Ability;
 use std::sync::LazyLock;
 
 /// Catalog of every card in the Rhinar vs Dorinthea classic battle.
@@ -583,7 +584,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             hero_life: 0,
             hero_intellect: 0,
             constant_effect: None,
-            ability: None,
+            ability: Some(Ability::DestroyGain1Resource),
             defend_effect: None,
             next_attack_effect: None,
             additional_cost: None,
@@ -1163,7 +1164,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             hero_life: 0,
             hero_intellect: 0,
             constant_effect: None,
-            ability: None,
+            ability: Some(Ability::WeaponPlus1),
             defend_effect: None,
             next_attack_effect: None,
             additional_cost: None,

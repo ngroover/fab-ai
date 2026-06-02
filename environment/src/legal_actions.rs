@@ -37,7 +37,38 @@ fn legal_action_phase(gs: &Gamestate) -> Vec<Action> {
 }
 
 fn get_equipment_activations(player: &Player) -> Vec<Action> {
-    Vec::new()
+    let catalog = get_card_catalog();
+    let mut actions: Vec<Action> = Vec::new();
+
+    // Worn equipment and the equipped weapon both live in `Player::cards`,
+    // distinguished by their `location` rather than the per-slot index fields.
+    for (idx, cardstate) in player.cards.iter().enumerate() {
+        match cardstate.location {
+            // Armor pieces are only an option if they carry an activated
+            // ability (e.g. Blossom of Spring, Gallantry Gold). Passive
+            // equipment such as Bone Vizier or the Ironhide pieces has none.
+            CardLocation::EquipmentZone => {
+                if catalog[cardstate.card as usize].ability.is_some() {
+                    actions.push(Action {
+                        typ: ActionType::Activate,
+                        index: idx,
+                        location: Some(CardLocation::EquipmentZone),
+                    });
+                }
+            }
+            // Activating the equipped weapon makes a weapon attack.
+            CardLocation::Weapon => {
+                actions.push(Action {
+                    typ: ActionType::Activate,
+                    index: idx,
+                    location: Some(CardLocation::Weapon),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    actions
 }
 
 fn get_playable_cards(player: &Player) -> Vec<Action> {
@@ -137,14 +168,30 @@ mod tests {
         let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
         step(&mut gs, go_first);
 
-        let catalog = get_card_catalog();
-
+        // Active player is Rhinar (p1). Only equipment with an activated
+        // ability should be offered, plus the equipped weapon attack.
         let actions = legal_actions(&gs);
 
-        let cards_in_hand : HashSet<Card> = gs.p1.hand_iter().
-                map( |(_,x)| x.card ).collect();
-        let cards_to_play : HashSet<Card> = actions.iter().
-                map(|x| gs.p1.cards[x.index].card).collect();
+        let activations: Vec<&Action> = actions.iter()
+                .filter(|a| a.typ == ActionType::Activate)
+                .collect();
+
+        // Blossom of Spring (activated chest equipment) + Bone Basher (weapon).
+        // The passive equipment (Bone Vizier, Ironhide Gauntlet/Legs) is not.
+        let activatable: HashSet<Card> = activations.iter()
+                .map(|a| gs.p1.cards[a.index].card)
+                .collect();
+        assert_eq!(activatable, HashSet::from([Card::BlossomOfSpring, Card::BoneBasher]));
+
+        // The weapon activation is tagged with the Weapon location, the
+        // armor activation with the EquipmentZone location.
+        for a in &activations {
+            match gs.p1.cards[a.index].card {
+                Card::BoneBasher => assert_eq!(a.location, Some(CardLocation::Weapon)),
+                Card::BlossomOfSpring => assert_eq!(a.location, Some(CardLocation::EquipmentZone)),
+                other => panic!("unexpected activation for {:?}", other),
+            }
+        }
     }
 
 }
