@@ -1,4 +1,5 @@
 use crate::cards::Card;
+use crate::action::ActionType;
 use rand::rngs::SmallRng;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -83,12 +84,12 @@ pub struct Gamestate {
 
 /// A card the active player has committed to play or activate, pending payment
 /// during the `Pitch` phase. `index` is the slot into the active player's
-/// `cards` array; `location` is the zone it is being played/activated from
-/// (e.g. `Hand`, `Weapon`, or an armor slot).
+/// `cards` array; `typ` is the action that committed it (`PlayCard` or
+/// `Activate`), which determines how the card resolves once paid for.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PendingCard {
     pub index : usize,
-    pub location : CardLocation,
+    pub typ : ActionType,
 }
 
 /// Iterator over the cards in a player's hand.

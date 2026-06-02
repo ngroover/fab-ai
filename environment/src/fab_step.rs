@@ -31,7 +31,7 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
         ActionType::PlayCard | ActionType::Activate => {
             gs.pending_card = Some(PendingCard {
                 index: act.index,
-                location: act.location.expect("play/activate action must carry a location"),
+                typ: act.typ,
             });
             gs.phase = Phase::Pitch;
         }
@@ -153,7 +153,7 @@ mod tests {
         assert_eq!(gs.phase, Phase::Pitch);
         let pending = gs.pending_card.expect("pending card should be set");
         assert_eq!(pending.index, hand_idx);
-        assert_eq!(pending.location, CardLocation::Hand);
+        assert_eq!(pending.typ, ActionType::PlayCard);
     }
 
     #[test]
@@ -172,7 +172,7 @@ mod tests {
         assert_eq!(gs.phase, Phase::Pitch);
         let pending = gs.pending_card.expect("pending card should be set");
         assert_eq!(pending.index, weapon_idx);
-        assert_eq!(pending.location, CardLocation::Weapon);
+        assert_eq!(pending.typ, ActionType::Activate);
     }
 
     #[test]
