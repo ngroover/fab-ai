@@ -1,4 +1,4 @@
-use crate::game_state::{Gamestate, Phase, Player, CardLocation};
+use crate::game_state::{Gamestate, Phase, Player};
 use crate::action::{Action, ActionType};
 use crate::cards::{Card, CardType};
 use crate::classic_battles::get_card_catalog;
@@ -10,12 +10,10 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
             let mut actions = Vec::new();
             actions.push(Action{
                         typ : ActionType::ChooseFirst,
-                        index: 0,
-                        location: None});
+                        index: 0});
             actions.push(Action{
                         typ : ActionType::ChooseSecond,
-                        index: 0,
-                        location: None});
+                        index: 0});
             actions
         },
         Phase::Action => legal_action_phase(gs),
@@ -36,7 +34,6 @@ fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
         .map(|(idx, _)| Action {
             typ: ActionType::Pitch,
             index: idx,
-            location: Some(CardLocation::Hand),
         })
         .collect()
 }
@@ -61,7 +58,6 @@ fn legal_action_phase(gs: &Gamestate) -> Vec<Action> {
     legal_actions.push(Action {
         typ: ActionType::Pass,
         index: 0,
-        location: None,
     });
 
     legal_actions
@@ -75,12 +71,12 @@ fn get_equipment_activations(player: &Player, total_pitch: u8) -> Vec<Action> {
     // (e.g. Blossom of Spring, Gallantry Gold). Passive equipment such as
     // Bone Vizier or the Ironhide pieces has none.
     let armor_slots = [
-        (player.head_idx, CardLocation::Head),
-        (player.chest_idx, CardLocation::Chest),
-        (player.arms_idx, CardLocation::Arms),
-        (player.legs_idx, CardLocation::Legs),
+        player.head_idx,
+        player.chest_idx,
+        player.arms_idx,
+        player.legs_idx,
     ];
-    for (slot, location) in armor_slots {
+    for slot in armor_slots {
         if let Some(idx) = slot {
             let idx = idx as usize;
             let Some(ability) = &catalog[player.cards[idx].card as usize].ability else {
@@ -94,7 +90,6 @@ fn get_equipment_activations(player: &Player, total_pitch: u8) -> Vec<Action> {
                 actions.push(Action {
                     typ: ActionType::Activate,
                     index: idx,
-                    location: Some(location),
                 });
             }
         }
@@ -111,7 +106,6 @@ fn get_equipment_activations(player: &Player, total_pitch: u8) -> Vec<Action> {
             actions.push(Action {
                 typ: ActionType::Activate,
                 index: idx,
-                location: Some(CardLocation::Weapon),
             });
         }
     }
@@ -148,7 +142,6 @@ fn get_playable_cards(player: &Player, total_pitch: u8) -> Vec<Action> {
             actions.push(Action {
                 typ: ActionType::PlayCard,
                 index: idx,
-                location: Some(CardLocation::Hand),
             });
         }
     }
@@ -171,6 +164,7 @@ mod tests {
     use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
     use crate::fab_game::{gamestate_from_decklists,reset};
     use crate::fab_step::step;
+    use crate::game_state::CardLocation;
     use std::collections::HashSet;
 
     #[test]
@@ -191,7 +185,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
         // Active player is Rhinar (p1). Every distinct, affordable attack/action
@@ -216,7 +210,7 @@ mod tests {
 
         // Every play is sourced from the Hand.
         for a in &plays {
-            assert_eq!(a.location, Some(CardLocation::Hand));
+            assert_eq!(gs.p1.cards[a.index].location, CardLocation::Hand);
         }
     }
 
@@ -225,7 +219,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
         // Enter the pitch phase directly to isolate its legal-action generator.
@@ -238,7 +232,7 @@ mod tests {
         // hand is offered as a Pitch action sourced from the Hand.
         for a in &actions {
             assert_eq!(a.typ, ActionType::Pitch);
-            assert_eq!(a.location, Some(CardLocation::Hand));
+            assert_eq!(gs.p1.cards[a.index].location, CardLocation::Hand);
         }
         let pitchable: HashSet<Card> = actions.iter()
                 .map(|a| gs.p1.cards[a.index].card)
@@ -256,7 +250,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
         // Pass is always offered during the action phase, exactly once.
@@ -265,7 +259,7 @@ mod tests {
                 .filter(|a| a.typ == ActionType::Pass)
                 .collect();
         assert_eq!(passes.len(), 1);
-        assert_eq!(passes[0].location, None);
+        assert_eq!(passes[0].index, 0);
     }
 
     #[test]
@@ -273,7 +267,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
         // Active player is Rhinar (p1). Only equipment with an activated
@@ -291,12 +285,14 @@ mod tests {
                 .collect();
         assert_eq!(activatable, HashSet::from([Card::BlossomOfSpring, Card::BoneBasher]));
 
-        // The weapon activation is tagged with the Weapon location, and
-        // Blossom of Spring (chest equipment) with the Chest location.
+        // The activated card sits in its expected zone: Bone Basher as the
+        // weapon, Blossom of Spring as chest equipment. (Location is derived
+        // from the card's slot, not carried on the action.)
         for a in &activations {
-            match gs.p1.cards[a.index].card {
-                Card::BoneBasher => assert_eq!(a.location, Some(CardLocation::Weapon)),
-                Card::BlossomOfSpring => assert_eq!(a.location, Some(CardLocation::Chest)),
+            let cs = gs.p1.cards[a.index];
+            match cs.card {
+                Card::BoneBasher => assert_eq!(cs.location, CardLocation::Weapon),
+                Card::BlossomOfSpring => assert_eq!(cs.location, CardLocation::Chest),
                 other => panic!("unexpected activation for {:?}", other),
             }
         }
@@ -308,7 +304,7 @@ mod tests {
         reset(&mut gs);
 
         // Choosing second flips the active player to Dorinthea (p2).
-        let go_second = Action{ typ: ActionType::ChooseSecond, index : 0, location: None};
+        let go_second = Action{ typ: ActionType::ChooseSecond, index : 0};
         step(&mut gs, go_second);
         assert_eq!(gs.active_player, 1);
 
@@ -329,12 +325,14 @@ mod tests {
             HashSet::from([Card::GallantryGold, Card::BlossomOfSpring, Card::Dawnblade])
         );
 
-        // Each activation is tagged with its slot's location.
+        // Each activated card sits in its expected slot, derived from its
+        // CardState rather than carried on the action.
         for a in &activations {
-            match gs.p2.cards[a.index].card {
-                Card::Dawnblade => assert_eq!(a.location, Some(CardLocation::Weapon)),
-                Card::GallantryGold => assert_eq!(a.location, Some(CardLocation::Arms)),
-                Card::BlossomOfSpring => assert_eq!(a.location, Some(CardLocation::Chest)),
+            let cs = gs.p2.cards[a.index];
+            match cs.card {
+                Card::Dawnblade => assert_eq!(cs.location, CardLocation::Weapon),
+                Card::GallantryGold => assert_eq!(cs.location, CardLocation::Arms),
+                Card::BlossomOfSpring => assert_eq!(cs.location, CardLocation::Chest),
                 other => panic!("unexpected activation for {:?}", other),
             }
         }

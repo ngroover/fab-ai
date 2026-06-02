@@ -115,7 +115,7 @@ mod tests {
 
         assert_eq!(gs.active_player, 0);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
         assert_eq!(gs.active_player, 0);
@@ -129,7 +129,7 @@ mod tests {
 
         assert_eq!(gs.active_player, 0);
 
-        let go_second = Action{ typ: ActionType::ChooseSecond, index : 0, location: None};
+        let go_second = Action{ typ: ActionType::ChooseSecond, index : 0};
         step(&mut gs, go_second);
 
         assert_eq!(gs.active_player, 1);
@@ -141,14 +141,14 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
         assert_eq!(gs.phase, Phase::Action);
 
         // Play the first card in hand. The pending card should be recorded and
         // the phase advanced to Pitch.
         let hand_idx = gs.p1.hand_idx.unwrap() as usize;
-        let play = Action{ typ: ActionType::PlayCard, index: hand_idx, location: Some(CardLocation::Hand)};
+        let play = Action{ typ: ActionType::PlayCard, index: hand_idx};
         step(&mut gs, play);
 
         assert_eq!(gs.phase, Phase::Pitch);
@@ -162,12 +162,12 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
         // Activate the equipped weapon. Same flow: record pending, go to Pitch.
         let weapon_idx = gs.p1.weapon_idx.unwrap() as usize;
-        let activate = Action{ typ: ActionType::Activate, index: weapon_idx, location: Some(CardLocation::Weapon)};
+        let activate = Action{ typ: ActionType::Activate, index: weapon_idx};
         step(&mut gs, activate);
 
         assert_eq!(gs.phase, Phase::Pitch);
@@ -181,7 +181,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
         assert_eq!(gs.phase, Phase::Action);
 
@@ -213,10 +213,10 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
-        let pass = Action{ typ: ActionType::Pass, index: 0, location: None};
+        let pass = Action{ typ: ActionType::Pass, index: 0};
         step(&mut gs, pass);
 
         assert_eq!(gs.pending_card, None);
@@ -227,7 +227,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
         assert_eq!(gs.p1.hand_size, 4);
