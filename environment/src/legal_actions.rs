@@ -40,32 +40,35 @@ fn get_equipment_activations(player: &Player) -> Vec<Action> {
     let catalog = get_card_catalog();
     let mut actions: Vec<Action> = Vec::new();
 
-    // Worn equipment and the equipped weapon both live in `Player::cards`,
-    // distinguished by their `location` rather than the per-slot index fields.
-    for (idx, cardstate) in player.cards.iter().enumerate() {
-        match cardstate.location {
-            // Armor pieces are only an option if they carry an activated
-            // ability (e.g. Blossom of Spring, Gallantry Gold). Passive
-            // equipment such as Bone Vizier or the Ironhide pieces has none.
-            CardLocation::EquipmentZone => {
-                if catalog[cardstate.card as usize].ability.is_some() {
-                    actions.push(Action {
-                        typ: ActionType::Activate,
-                        index: idx,
-                        location: Some(CardLocation::EquipmentZone),
-                    });
-                }
-            }
-            // Activating the equipped weapon makes a weapon attack.
-            CardLocation::Weapon => {
+    // Worn armor pieces are only an option if they carry an activated ability
+    // (e.g. Blossom of Spring, Gallantry Gold). Passive equipment such as
+    // Bone Vizier or the Ironhide pieces has none.
+    let armor_slots = [
+        player.head_idx,
+        player.chest_idx,
+        player.arms_idx,
+        player.legs_idx,
+    ];
+    for slot in armor_slots {
+        if let Some(idx) = slot {
+            let idx = idx as usize;
+            if catalog[player.cards[idx].card as usize].ability.is_some() {
                 actions.push(Action {
                     typ: ActionType::Activate,
                     index: idx,
-                    location: Some(CardLocation::Weapon),
+                    location: Some(CardLocation::EquipmentZone),
                 });
             }
-            _ => {}
         }
+    }
+
+    // Activating the equipped weapon makes a weapon attack.
+    if let Some(idx) = player.weapon_idx {
+        actions.push(Action {
+            typ: ActionType::Activate,
+            index: idx as usize,
+            location: Some(CardLocation::Weapon),
+        });
     }
 
     actions

@@ -1,5 +1,5 @@
 use crate::action::Action;
-use crate::cards::{Card, CardType};
+use crate::cards::{Card, CardType, EquipmentSlot};
 use crate::classic_battles::get_card_catalog;
 use crate::game_state::{CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase};
 use rand::RngExt;
@@ -143,23 +143,39 @@ pub fn place_cards(gs: &mut Gamestate) {
     for player in [&mut gs.p1, &mut gs.p2] {
         player.hand_size = 0;
         player.deck_size = 0;
-        for card in player.cards.iter_mut() {
-            let data = &catalog[card.card as usize];
+        // Reset the worn-equipment / weapon slots; they are repopulated below.
+        player.weapon_idx = None;
+        player.head_idx = None;
+        player.chest_idx = None;
+        player.arms_idx = None;
+        player.legs_idx = None;
+        // Index iteration so we can record each card's slot position alongside
+        // mutating its CardState.
+        for idx in 0..player.cards.len() {
+            let data = &catalog[player.cards[idx].card as usize];
             match data.typ {
                 CardType::Equipment => {
-                    card.location = CardLocation::EquipmentZone;
-                    card.visible = CardVisibleState::BothKnow;
+                    player.cards[idx].location = CardLocation::EquipmentZone;
+                    player.cards[idx].visible = CardVisibleState::BothKnow;
+                    match data.slot {
+                        Some(EquipmentSlot::Head) => player.head_idx = Some(idx as u8),
+                        Some(EquipmentSlot::Chest) => player.chest_idx = Some(idx as u8),
+                        Some(EquipmentSlot::Arms) => player.arms_idx = Some(idx as u8),
+                        Some(EquipmentSlot::Legs) => player.legs_idx = Some(idx as u8),
+                        _ => {}
+                    }
                 }
-                CardType::Club2h | CardType::Sword2h => {
-                    card.location = CardLocation::Weapon;
-                    card.visible = CardVisibleState::BothKnow;
+                CardType::Weapon | CardType::Club2h | CardType::Sword2h => {
+                    player.cards[idx].location = CardLocation::Weapon;
+                    player.cards[idx].visible = CardVisibleState::BothKnow;
+                    player.weapon_idx = Some(idx as u8);
                 }
                 CardType::Hero => {
                     // do nothing
                 }
                 _ => {
-                    card.location = CardLocation::Deck;
-                    card.visible = CardVisibleState::Hidden;
+                    player.cards[idx].location = CardLocation::Deck;
+                    player.cards[idx].visible = CardVisibleState::Hidden;
                     player.deck_size += 1;
                     // everything else
                 }
@@ -229,7 +245,13 @@ mod tests {
         assert_eq!(ih[0].location, CardLocation::EquipmentZone);
         assert_eq!(ih[0].visible, CardVisibleState::BothKnow);
 
-        // check deck from rhinar 
+        // weapon / equipment slot indices point at the right cards
+        assert_eq!(gs.p1.cards[gs.p1.weapon_idx.unwrap() as usize].card, Card::BoneBasher);
+        assert_eq!(gs.p1.cards[gs.p1.legs_idx.unwrap() as usize].card, Card::IronhideLegs);
+        assert_eq!(gs.p2.cards[gs.p2.weapon_idx.unwrap() as usize].card, Card::Dawnblade);
+        assert_eq!(gs.p2.cards[gs.p2.arms_idx.unwrap() as usize].card, Card::GallantryGold);
+
+        // check deck from rhinar
         let rhinardeck = get_card_states_from_location(&gs.p1, CardLocation::Deck);
 
         assert_eq!(rhinardeck.len(), 40);
