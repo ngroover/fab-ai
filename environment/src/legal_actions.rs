@@ -211,4 +211,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn legal_actions_in_action_phase_activate_equipment_dorinthea() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        // Choosing second flips the active player to Dorinthea (p2).
+        let go_second = Action{ typ: ActionType::ChooseSecond, index : 0, location: None};
+        step(&mut gs, go_second);
+        assert_eq!(gs.active_player, 1);
+
+        let actions = legal_actions(&gs);
+
+        let activations: Vec<&Action> = actions.iter()
+                .filter(|a| a.typ == ActionType::Activate)
+                .collect();
+
+        // Gallantry Gold (arms) + Blossom of Spring (chest, a Generic piece in
+        // both decks) + Dawnblade (weapon). The passive equipment (Ironrot
+        // Helm/Legs) is not offered.
+        let activatable: HashSet<Card> = activations.iter()
+                .map(|a| gs.p2.cards[a.index].card)
+                .collect();
+        assert_eq!(
+            activatable,
+            HashSet::from([Card::GallantryGold, Card::BlossomOfSpring, Card::Dawnblade])
+        );
+
+        // Each activation is tagged with its slot's location.
+        for a in &activations {
+            match gs.p2.cards[a.index].card {
+                Card::Dawnblade => assert_eq!(a.location, Some(CardLocation::Weapon)),
+                Card::GallantryGold => assert_eq!(a.location, Some(CardLocation::Arms)),
+                Card::BlossomOfSpring => assert_eq!(a.location, Some(CardLocation::Chest)),
+                other => panic!("unexpected activation for {:?}", other),
+            }
+        }
+    }
+
 }
