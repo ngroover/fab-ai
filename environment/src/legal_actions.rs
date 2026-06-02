@@ -56,14 +56,13 @@ fn get_equipment_activations(player: &Player, total_pitch: u8) -> Vec<Action> {
     for (slot, location) in armor_slots {
         if let Some(idx) = slot {
             let idx = idx as usize;
-            let data = &catalog[player.cards[idx].card as usize];
-            if data.ability.is_none() {
+            let Some(ability) = &catalog[player.cards[idx].card as usize].ability else {
                 continue;
-            }
+            };
 
-            // Activation cost still owed after spending banked resource points;
-            // affordable when the hand can pitch enough to cover the shortfall.
-            let needed = data.cost.saturating_sub(player.resources);
+            // The activation cost is set by the ability; only offer it when the
+            // hand can pitch enough to cover what banked resources don't.
+            let needed = ability.resource_cost().saturating_sub(player.resources);
             if total_pitch >= needed {
                 actions.push(Action {
                     typ: ActionType::Activate,
@@ -74,13 +73,20 @@ fn get_equipment_activations(player: &Player, total_pitch: u8) -> Vec<Action> {
         }
     }
 
-    // Activating the equipped weapon makes a weapon attack.
+    // Activating the equipped weapon makes a weapon attack, which costs the
+    // weapon's resource cost.
     if let Some(idx) = player.weapon_idx {
-        actions.push(Action {
-            typ: ActionType::Activate,
-            index: idx as usize,
-            location: Some(CardLocation::Weapon),
-        });
+        let idx = idx as usize;
+        let needed = catalog[player.cards[idx].card as usize]
+            .cost
+            .saturating_sub(player.resources);
+        if total_pitch >= needed {
+            actions.push(Action {
+                typ: ActionType::Activate,
+                index: idx,
+                location: Some(CardLocation::Weapon),
+            });
+        }
     }
 
     actions

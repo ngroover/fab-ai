@@ -15,6 +15,17 @@ pub enum Ability {
     WeaponPlus1,
 }
 
+impl Ability {
+    /// Resource points required to activate this ability.
+    pub fn resource_cost(&self) -> u8 {
+        match self {
+            Ability::DiscardCardPlusBlock => 0,
+            Ability::DestroyGain1Resource => 0,
+            Ability::WeaponPlus1 => 1,
+        }
+    }
+}
+
 
 #[repr(u8)]
 pub enum OnPlayConditionType {
