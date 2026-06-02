@@ -24,19 +24,23 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
 }
 
 fn legal_action_phase(gs: &Gamestate) -> Vec<Action> {
+    let catalog = get_card_catalog();
     let mut legal_actions = Vec::new();
-    if gs.active_player == 0 {
-        legal_actions.extend(get_playable_cards(&gs.p1));
-        legal_actions.extend(get_equipment_activations(&gs.p1));
-    }
-    else {
-        legal_actions.extend(get_playable_cards(&gs.p2));
-        legal_actions.extend(get_equipment_activations(&gs.p2));
-    }
+    let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
+
+    // Total pitch available across the whole hand. Computed once here and shared
+    // by both the hand-card playability and equipment-activation affordability
+    // checks, since pitching pays for either.
+    let total_pitch: u8 = player.hand_iter()
+        .map(|(_, cs)| catalog[cs.card as usize].pitch)
+        .sum();
+
+    legal_actions.extend(get_playable_cards(player, total_pitch));
+    legal_actions.extend(get_equipment_activations(player, total_pitch));
     legal_actions
 }
 
-fn get_equipment_activations(player: &Player) -> Vec<Action> {
+fn get_equipment_activations(player: &Player, total_pitch: u8) -> Vec<Action> {
     let catalog = get_card_catalog();
     let mut actions: Vec<Action> = Vec::new();
 
@@ -52,7 +56,15 @@ fn get_equipment_activations(player: &Player) -> Vec<Action> {
     for (slot, location) in armor_slots {
         if let Some(idx) = slot {
             let idx = idx as usize;
-            if catalog[player.cards[idx].card as usize].ability.is_some() {
+            let data = &catalog[player.cards[idx].card as usize];
+            if data.ability.is_none() {
+                continue;
+            }
+
+            // Activation cost still owed after spending banked resource points;
+            // affordable when the hand can pitch enough to cover the shortfall.
+            let needed = data.cost.saturating_sub(player.resources);
+            if total_pitch >= needed {
                 actions.push(Action {
                     typ: ActionType::Activate,
                     index: idx,
@@ -74,13 +86,9 @@ fn get_equipment_activations(player: &Player) -> Vec<Action> {
     actions
 }
 
-fn get_playable_cards(player: &Player) -> Vec<Action> {
+fn get_playable_cards(player: &Player, total_pitch: u8) -> Vec<Action> {
     let catalog = get_card_catalog();
     let mut actions: Vec<Action> = Vec::new();
-
-    let total_pitch: u8 = player.hand_iter()
-        .map(|(_, cs)| catalog[cs.card as usize].pitch)
-        .sum();
 
     let mut seen: Vec<Card> = Vec::new();
     for (idx, cardstate) in player.hand_iter() {
