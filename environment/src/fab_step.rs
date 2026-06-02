@@ -1,19 +1,45 @@
 use crate::action::{Action,ActionType};
-use crate::game_state::{Gamestate,Phase,Player,CardLocation,CardVisibleState};
+use crate::game_state::{Gamestate,Phase,Player,PendingCard,CardLocation,CardVisibleState};
 use crate::classic_battles::get_card_catalog;
 
 pub fn step(gs: &mut Gamestate, act: Action) {
-    if gs.phase == Phase::ChooseFirst {
-        // only need to switch the player if they choose go second
-        if act.typ == ActionType::ChooseSecond {
-            // xor to flip the player
-            gs.active_player = gs.active_player ^ 1;
+    match gs.phase {
+        Phase::ChooseFirst => handle_choose_first(gs, act),
+        Phase::Action => handle_action_phase(gs, act),
+        _ => {}
+    }
+}
+
+fn handle_choose_first(gs: &mut Gamestate, act: Action) {
+    // only need to switch the player if they choose go second
+    if act.typ == ActionType::ChooseSecond {
+        // xor to flip the player
+        gs.active_player = gs.active_player ^ 1;
+    }
+    // begin turn logic
+    gs.phase = Phase::Action;
+    for player in [&mut gs.p1, &mut gs.p2] {
+        draw_to_intellect(player);
+    }
+}
+
+fn handle_action_phase(gs: &mut Gamestate, act: Action) {
+    match act.typ {
+        // Playing a card or activating equipment/a weapon both commit a card
+        // that must then be paid for. Record which card is pending and move to
+        // the Pitch phase where the player pitches to cover its cost.
+        ActionType::PlayCard | ActionType::Activate => {
+            gs.pending_card = Some(PendingCard {
+                index: act.index,
+                location: act.location.expect("play/activate action must carry a location"),
+            });
+            gs.phase = Phase::Pitch;
         }
-        // begin turn logic
-        gs.phase = Phase::Action;
-        for player in [&mut gs.p1, &mut gs.p2] {
-            draw_to_intellect(player);
+        // Passing ends the action phase; nothing is pending.
+        ActionType::Pass => {
+            gs.pending_card = None;
         }
+        _ => {}
     }
 }
 
@@ -107,6 +133,60 @@ mod tests {
 
         assert_eq!(gs.active_player, 1);
         assert_eq!(gs.phase, Phase::Action);
+    }
+
+    #[test]
+    fn test_play_card_moves_to_pitch() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        step(&mut gs, go_first);
+        assert_eq!(gs.phase, Phase::Action);
+
+        // Play the first card in hand. The pending card should be recorded and
+        // the phase advanced to Pitch.
+        let hand_idx = gs.p1.hand_idx.unwrap() as usize;
+        let play = Action{ typ: ActionType::PlayCard, index: hand_idx, location: Some(CardLocation::Hand)};
+        step(&mut gs, play);
+
+        assert_eq!(gs.phase, Phase::Pitch);
+        let pending = gs.pending_card.expect("pending card should be set");
+        assert_eq!(pending.index, hand_idx);
+        assert_eq!(pending.location, CardLocation::Hand);
+    }
+
+    #[test]
+    fn test_activate_card_moves_to_pitch() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        step(&mut gs, go_first);
+
+        // Activate the equipped weapon. Same flow: record pending, go to Pitch.
+        let weapon_idx = gs.p1.weapon_idx.unwrap() as usize;
+        let activate = Action{ typ: ActionType::Activate, index: weapon_idx, location: Some(CardLocation::Weapon)};
+        step(&mut gs, activate);
+
+        assert_eq!(gs.phase, Phase::Pitch);
+        let pending = gs.pending_card.expect("pending card should be set");
+        assert_eq!(pending.index, weapon_idx);
+        assert_eq!(pending.location, CardLocation::Weapon);
+    }
+
+    #[test]
+    fn test_pass_clears_pending_card() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        step(&mut gs, go_first);
+
+        let pass = Action{ typ: ActionType::Pass, index: 0, location: None};
+        step(&mut gs, pass);
+
+        assert_eq!(gs.pending_card, None);
     }
 
     #[test]

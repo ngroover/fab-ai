@@ -42,6 +42,7 @@ pub enum Phase {
     Start,
     ChooseFirst,
     Action,
+    Pitch,
 }
 
 pub struct Player {
@@ -72,6 +73,22 @@ pub struct Gamestate {
     pub active_player : u8,
     pub phase : Phase,
     pub rng : SmallRng,
+    /// The card the active player has chosen to play or activate and is now
+    /// paying for. Set when leaving the `Action` phase for the `Pitch` phase;
+    /// holds the slot index into the active player's `cards` array together
+    /// with the location it is being played/activated from. `None` outside the
+    /// pay-for-a-card flow.
+    pub pending_card : Option<PendingCard>,
+}
+
+/// A card the active player has committed to play or activate, pending payment
+/// during the `Pitch` phase. `index` is the slot into the active player's
+/// `cards` array; `location` is the zone it is being played/activated from
+/// (e.g. `Hand`, `Weapon`, or an armor slot).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PendingCard {
+    pub index : usize,
+    pub location : CardLocation,
 }
 
 /// Iterator over the cards in a player's hand.

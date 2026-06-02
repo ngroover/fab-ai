@@ -34,6 +34,7 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: 
         active_player: 0,
         phase: Phase::Start,
         rng,
+        pending_card: None,
     }
 }
 

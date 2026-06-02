@@ -19,7 +19,7 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
             actions
         },
         Phase::Action => legal_action_phase(gs),
-        Phase::Start => Vec::new()
+        Phase::Start | Phase::Pitch => Vec::new()
     }
 }
 
