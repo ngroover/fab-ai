@@ -8,6 +8,7 @@ pub enum ActionType {
     ChooseSecond,
     PlayCard,
     Activate,
+    Pitch,
     Pass
 }
 

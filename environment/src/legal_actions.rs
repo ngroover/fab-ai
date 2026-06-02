@@ -19,8 +19,26 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
             actions
         },
         Phase::Action => legal_action_phase(gs),
-        Phase::Start | Phase::Pitch => Vec::new()
+        Phase::Pitch => legal_pitch_phase(gs),
+        Phase::Start => Vec::new()
     }
+}
+
+fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
+    let catalog = get_card_catalog();
+    let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
+
+    // Every card in hand is a pitch option, as long as it actually pitches for
+    // resources — cards with a pitch value of 0 produce nothing and can't be
+    // pitched.
+    player.hand_iter()
+        .filter(|(_, cs)| catalog[cs.card as usize].pitch > 0)
+        .map(|(idx, _)| Action {
+            typ: ActionType::Pitch,
+            index: idx,
+            location: Some(CardLocation::Hand),
+        })
+        .collect()
 }
 
 fn legal_action_phase(gs: &Gamestate) -> Vec<Action> {
@@ -200,6 +218,37 @@ mod tests {
         for a in &plays {
             assert_eq!(a.location, Some(CardLocation::Hand));
         }
+    }
+
+    #[test]
+    fn legal_actions_in_pitch_phase() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        step(&mut gs, go_first);
+
+        // Enter the pitch phase directly to isolate its legal-action generator.
+        gs.phase = Phase::Pitch;
+
+        let actions = legal_actions(&gs);
+
+        // Rhinar's seed-42 opening hand is three yellow attack actions plus a
+        // blue defense reaction — all pitch for more than 0, so every card in
+        // hand is offered as a Pitch action sourced from the Hand.
+        for a in &actions {
+            assert_eq!(a.typ, ActionType::Pitch);
+            assert_eq!(a.location, Some(CardLocation::Hand));
+        }
+        let pitchable: HashSet<Card> = actions.iter()
+                .map(|a| gs.p1.cards[a.index].card)
+                .collect();
+        assert_eq!(pitchable, HashSet::from([
+            Card::MuscleMuttY,
+            Card::PackCallY,
+            Card::RagingOnslaughtY,
+            Card::ClearingBellowB,
+        ]));
     }
 
     #[test]
