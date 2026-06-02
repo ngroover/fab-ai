@@ -37,6 +37,15 @@ fn legal_action_phase(gs: &Gamestate) -> Vec<Action> {
 
     legal_actions.extend(get_playable_cards(player, total_pitch));
     legal_actions.extend(get_equipment_activations(player, total_pitch));
+
+    // Passing is always available during the action phase; it ends the turn
+    // without playing or activating anything.
+    legal_actions.push(Action {
+        typ: ActionType::Pass,
+        index: 0,
+        location: None,
+    });
+
     legal_actions
 }
 
@@ -191,6 +200,23 @@ mod tests {
         for a in &plays {
             assert_eq!(a.location, Some(CardLocation::Hand));
         }
+    }
+
+    #[test]
+    fn legal_actions_in_action_phase_includes_pass() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        step(&mut gs, go_first);
+
+        // Pass is always offered during the action phase, exactly once.
+        let actions = legal_actions(&gs);
+        let passes: Vec<&Action> = actions.iter()
+                .filter(|a| a.typ == ActionType::Pass)
+                .collect();
+        assert_eq!(passes.len(), 1);
+        assert_eq!(passes[0].location, None);
     }
 
     #[test]
