@@ -106,6 +106,7 @@ mod tests {
     use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
     use crate::fab_game::{gamestate_from_decklists,reset,get_card_states_from_location};
     use crate::cards::Card;
+    use crate::legal_actions::legal_actions;
 
     #[test]
     fn test_go_first_step() {
@@ -173,6 +174,38 @@ mod tests {
         let pending = gs.pending_card.expect("pending card should be set");
         assert_eq!(pending.index, weapon_idx);
         assert_eq!(pending.typ, ActionType::Activate);
+    }
+
+    #[test]
+    fn test_play_packcall() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
+        step(&mut gs, go_first);
+        assert_eq!(gs.phase, Phase::Action);
+
+        // Seed 42 deals Rhinar an opening hand containing Pack Call. Locate its
+        // slot, then find the legal PlayCard action that targets it.
+        let packcall_idx = gs.p1.hand_iter()
+                .find(|(_, cs)| cs.card == Card::PackCallY)
+                .map(|(idx, _)| idx)
+                .expect("Pack Call should be in the opening hand");
+
+        let actions = legal_actions(&gs);
+        let play = actions.into_iter()
+                .find(|a| a.typ == ActionType::PlayCard && a.index == packcall_idx)
+                .expect("playing Pack Call should be a legal action");
+
+        step(&mut gs, play);
+
+        // Pack Call is now the pending card, committed via PlayCard, and the
+        // game has advanced to the Pitch phase to pay for it.
+        assert_eq!(gs.phase, Phase::Pitch);
+        let pending = gs.pending_card.expect("pending card should be set");
+        assert_eq!(pending.index, packcall_idx);
+        assert_eq!(pending.typ, ActionType::PlayCard);
+        assert_eq!(gs.p1.cards[pending.index].card, Card::PackCallY);
     }
 
     #[test]
