@@ -167,14 +167,30 @@ mod tests {
         let go_first = Action{ typ: ActionType::ChooseFirst, index : 0, location: None};
         step(&mut gs, go_first);
 
-        let catalog = get_card_catalog();
-
+        // Active player is Rhinar (p1). Every distinct, affordable attack/action
+        // card in the opening hand should be offered as a PlayCard action.
         let actions = legal_actions(&gs);
 
-        let cards_in_hand : HashSet<Card> = gs.p1.hand_iter().
-                map( |(_,x)| x.card ).collect();
-        let cards_to_play : HashSet<Card> = actions.iter().
-                map(|x| gs.p1.cards[x.index].card).collect();
+        let plays: Vec<&Action> = actions.iter()
+                .filter(|a| a.typ == ActionType::PlayCard)
+                .collect();
+
+        // The opening hand is the three yellow attack actions plus Clearing
+        // Bellow; all are playable and affordable from the rest of the hand.
+        let playable: HashSet<Card> = plays.iter()
+                .map(|a| gs.p1.cards[a.index].card)
+                .collect();
+        assert_eq!(playable, HashSet::from([
+            Card::MuscleMuttY,
+            Card::PackCallY,
+            Card::RagingOnslaughtY,
+            Card::ClearingBellowB,
+        ]));
+
+        // Every play is sourced from the Hand.
+        for a in &plays {
+            assert_eq!(a.location, Some(CardLocation::Hand));
+        }
     }
 
     #[test]
