@@ -19,7 +19,10 @@ pub enum CardLocation {
     Graveyard,
     Arsenal,
     BanishZone,
-    EquipmentZone,
+    Head,
+    Chest,
+    Arms,
+    Legs,
     Weapon,
     CombatChain,
 }

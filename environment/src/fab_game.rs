@@ -7,6 +7,20 @@ use rand::SeedableRng;
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 
+/// The `CardLocation` a piece of worn equipment occupies, derived from its
+/// armor slot. Only called for `CardType::Equipment`, which always carries one
+/// of the four armor slots; weapons are placed in `Weapon` via their card type,
+/// so anything else falls back to `Weapon`.
+fn equipment_zone(slot: &Option<EquipmentSlot>) -> CardLocation {
+    match slot {
+        Some(EquipmentSlot::Head) => CardLocation::Head,
+        Some(EquipmentSlot::Chest) => CardLocation::Chest,
+        Some(EquipmentSlot::Arms) => CardLocation::Arms,
+        Some(EquipmentSlot::Legs) => CardLocation::Legs,
+        Some(EquipmentSlot::Weapon) | None => CardLocation::Weapon,
+    }
+}
+
 /// Build a `Gamestate` from two decklists.
 /// Pass `Some(seed)` for a reproducible game, or `None` for a random seed.
 pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: Option<u64>) -> Gamestate {
@@ -50,7 +64,7 @@ fn player_from_decklist(deck: [Card; 46]) -> Player {
             CardType::Equipment => {
                 card_states.push(CardState {
                     visible: CardVisibleState::Hidden,
-                    location: CardLocation::EquipmentZone,
+                    location: equipment_zone(&data.slot),
                     card,
                     next_card: 0,
                     prev_card: 0,
@@ -155,7 +169,7 @@ pub fn place_cards(gs: &mut Gamestate) {
             let data = &catalog[player.cards[idx].card as usize];
             match data.typ {
                 CardType::Equipment => {
-                    player.cards[idx].location = CardLocation::EquipmentZone;
+                    player.cards[idx].location = equipment_zone(&data.slot);
                     player.cards[idx].visible = CardVisibleState::BothKnow;
                     match data.slot {
                         Some(EquipmentSlot::Head) => player.head_idx = Some(idx as u8),
@@ -235,14 +249,14 @@ mod tests {
         let ih = get_card_states_from_card(&gs.p1, Card::IronhideLegs);
 
         assert_eq!(ih.len(), 1);
-        assert_eq!(ih[0].location, CardLocation::EquipmentZone);
+        assert_eq!(ih[0].location, CardLocation::Legs);
         assert_eq!(ih[0].visible, CardVisibleState::BothKnow);
 
         // check one piece of equipment from dorinthea
         let ih = get_card_states_from_card(&gs.p2, Card::IronrotLegs);
 
         assert_eq!(ih.len(), 1);
-        assert_eq!(ih[0].location, CardLocation::EquipmentZone);
+        assert_eq!(ih[0].location, CardLocation::Legs);
         assert_eq!(ih[0].visible, CardVisibleState::BothKnow);
 
         // weapon / equipment slot indices point at the right cards

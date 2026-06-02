@@ -44,19 +44,19 @@ fn get_equipment_activations(player: &Player) -> Vec<Action> {
     // (e.g. Blossom of Spring, Gallantry Gold). Passive equipment such as
     // Bone Vizier or the Ironhide pieces has none.
     let armor_slots = [
-        player.head_idx,
-        player.chest_idx,
-        player.arms_idx,
-        player.legs_idx,
+        (player.head_idx, CardLocation::Head),
+        (player.chest_idx, CardLocation::Chest),
+        (player.arms_idx, CardLocation::Arms),
+        (player.legs_idx, CardLocation::Legs),
     ];
-    for slot in armor_slots {
+    for (slot, location) in armor_slots {
         if let Some(idx) = slot {
             let idx = idx as usize;
             if catalog[player.cards[idx].card as usize].ability.is_some() {
                 actions.push(Action {
                     typ: ActionType::Activate,
                     index: idx,
-                    location: Some(CardLocation::EquipmentZone),
+                    location: Some(location),
                 });
             }
         }
@@ -186,12 +186,12 @@ mod tests {
                 .collect();
         assert_eq!(activatable, HashSet::from([Card::BlossomOfSpring, Card::BoneBasher]));
 
-        // The weapon activation is tagged with the Weapon location, the
-        // armor activation with the EquipmentZone location.
+        // The weapon activation is tagged with the Weapon location, and
+        // Blossom of Spring (chest equipment) with the Chest location.
         for a in &activations {
             match gs.p1.cards[a.index].card {
                 Card::BoneBasher => assert_eq!(a.location, Some(CardLocation::Weapon)),
-                Card::BlossomOfSpring => assert_eq!(a.location, Some(CardLocation::EquipmentZone)),
+                Card::BlossomOfSpring => assert_eq!(a.location, Some(CardLocation::Chest)),
                 other => panic!("unexpected activation for {:?}", other),
             }
         }
