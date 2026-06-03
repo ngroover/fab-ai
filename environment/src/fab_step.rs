@@ -1,5 +1,7 @@
 use crate::action::{Action,ActionType};
 use crate::game_state::{Gamestate,Phase,Player,PendingCard,CardLocation,CardVisibleState,CardState,TOTAL_CARDS};
+use crate::cards::CardData;
+use crate::classic_battles::get_card_catalog;
 
 pub fn step(gs: &mut Gamestate, act: Action) {
     match gs.phase {
@@ -30,9 +32,20 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
         // stack, then we record it as pending and move to the Pitch phase where
         // the player pitches to cover its cost.
         ActionType::PlayCard | ActionType::Activate => {
+            // Cost of committing this card, read while it still sits in its
+            // source zone (the location distinguishes a weapon attack / played
+            // card from an activated armor ability).
+            let catalog = get_card_catalog();
+            let cs = gs.cards[act.index];
+            let cost = action_cost(cs.location, &catalog[cs.card as usize]);
+
             // Borrow the active player and the shared cards/stack head as
             // disjoint fields so we can move the card onto the stack in one step.
             let player = if gs.active_player == 0 { &mut gs.p1 } else { &mut gs.p2 };
+            // If banked resources already cover the cost there is nothing to
+            // pitch for, so skip straight to the Instant phase; otherwise the
+            // player still has to pitch to pay, in the Pitch phase.
+            let already_paid = player.resources >= cost;
             detach_from_current_zone(player, &mut gs.cards, act.index);
             gs.cards[act.index].location = CardLocation::Stack;
             attach_to_front_of_zone(&mut gs.cards, &mut gs.stack_idx, None, None, act.index);
@@ -40,13 +53,29 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
                 index: act.index,
                 typ: act.typ,
             });
-            gs.phase = Phase::Pitch;
+            gs.phase = if already_paid { Phase::Instant } else { Phase::Pitch };
         }
         // Passing ends the action phase; nothing is pending.
         ActionType::Pass => {
             gs.pending_card = None;
         }
         _ => {}
+    }
+}
+
+/// Resource cost of committing a card from `location`. Activating a worn armor
+/// piece costs its ability's resource cost; everything else (playing a card
+/// from hand, or a weapon attack) costs the card's own `cost`. Mirrors the
+/// affordability checks in `legal_actions`.
+fn action_cost(location: CardLocation, data: &CardData) -> u8 {
+    match location {
+        CardLocation::P1Head | CardLocation::P2Head
+        | CardLocation::P1Chest | CardLocation::P2Chest
+        | CardLocation::P1Arms | CardLocation::P2Arms
+        | CardLocation::P1Legs | CardLocation::P2Legs => {
+            data.ability.as_ref().map_or(0, |a| a.resource_cost())
+        }
+        _ => data.cost,
     }
 }
 
@@ -261,16 +290,52 @@ mod tests {
         step(&mut gs, go_first);
         assert_eq!(gs.phase, Phase::Action);
 
-        // Play the first card in hand. The pending card should be recorded and
-        // the phase advanced to Pitch.
-        let hand_idx = gs.p1.hand_idx.unwrap() as usize;
-        let play = Action{ typ: ActionType::PlayCard, index: hand_idx};
+        // Play Muscle Mutt (cost 3). With no banked resources the player can't
+        // afford it outright, so the pending card is recorded and the phase
+        // advances to Pitch to pay for it.
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        let play = Action{ typ: ActionType::PlayCard, index: mm_idx};
         step(&mut gs, play);
 
         assert_eq!(gs.phase, Phase::Pitch);
         let pending = gs.pending_card.expect("pending card should be set");
-        assert_eq!(pending.index, hand_idx);
+        assert_eq!(pending.index, mm_idx);
         assert_eq!(pending.typ, ActionType::PlayCard);
+    }
+
+    #[test]
+    fn test_play_affordable_card_moves_to_instant() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        step(&mut gs, go_first);
+        assert_eq!(gs.phase, Phase::Action);
+
+        // Clearing Bellow costs 0, so the player already has enough resources
+        // (zero) to pay for it. Committing it should skip pitching and advance
+        // straight to the Instant phase, while still recording it as pending on
+        // the stack.
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+
+        let actions = legal_actions(&gs);
+        let play = actions.into_iter()
+                .find(|a| a.typ == ActionType::PlayCard && a.index == cb_idx)
+                .expect("playing Clearing Bellow should be a legal action");
+
+        step(&mut gs, play);
+
+        assert_eq!(gs.phase, Phase::Instant);
+        let pending = gs.pending_card.expect("pending card should be set");
+        assert_eq!(pending.index, cb_idx);
+        assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
+        assert_eq!(gs.stack_idx, Some(cb_idx as u8));
     }
 
     #[test]
