@@ -31,7 +31,9 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
         // to the Pitch phase where the player pitches to cover its cost.
         ActionType::PlayCard | ActionType::Activate => {
             let player = active_player_mut(gs);
-            move_to_combat_chain(player, act.index, 0);
+            detach_from_current_zone(player, act.index);
+            player.cards[act.index].location = CardLocation::CombatChain;
+            attach_to_front_of_zone(&mut player.cards, &mut player.chain_link[0], act.index);
             gs.pending_card = Some(PendingCard {
                 index: act.index,
                 typ: act.typ,
@@ -51,13 +53,20 @@ fn active_player_mut(gs: &mut Gamestate) -> &mut Player {
     if gs.active_player == 0 { &mut gs.p1 } else { &mut gs.p2 }
 }
 
-/// Move the card at `idx` out of whatever zone it currently occupies and onto
-/// the combat chain at `link`. Used when an attack (a played card or an
-/// activated weapon) is committed during the Action phase.
-fn move_to_combat_chain(player: &mut Player, idx: usize, link: usize) {
-    detach_from_current_zone(player, idx);
-    player.cards[idx].location = CardLocation::CombatChain;
-    player.chain_link[link] = Some(idx as u8);
+/// Prepend the card at `idx` to the front of a linked-list zone, making it the
+/// new `head`. The old head (if any) is linked as `idx`'s successor; an empty
+/// zone makes `idx` its own tail terminator (`next_card` points at itself).
+/// `head` is the zone's head index (e.g. `hand_idx`, `pitch_idx`, or a combat
+/// chain link); the caller is responsible for setting the card's `location`.
+fn attach_to_front_of_zone(cards: &mut [CardState; 45], head: &mut Option<u8>, idx: usize) {
+    if let Some(old_head) = *head {
+        cards[idx].next_card = old_head;
+        cards[old_head as usize].prev_card = idx as u8;
+    } else {
+        // Empty zone: the card becomes the sole node and its own tail.
+        cards[idx].next_card = idx as u8;
+    }
+    *head = Some(idx as u8);
 }
 
 /// Remove the card at `idx` from the bookkeeping of its current location so it
