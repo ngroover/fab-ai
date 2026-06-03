@@ -1,6 +1,5 @@
 use crate::action::{Action,ActionType};
-use crate::game_state::{Gamestate,Phase,Player,PendingCard,CardLocation,CardVisibleState,CardState};
-use crate::classic_battles::get_card_catalog;
+use crate::game_state::{Gamestate,Phase,Player,PendingCard,CardLocation,CardVisibleState,CardState,TOTAL_CARDS};
 
 pub fn step(gs: &mut Gamestate, act: Action) {
     match gs.phase {
@@ -18,9 +17,10 @@ fn handle_choose_first(gs: &mut Gamestate, act: Action) {
     }
     // begin turn logic
     gs.phase = Phase::Action;
-    for player in [&mut gs.p1, &mut gs.p2] {
-        draw_to_intellect(player);
-    }
+    // The cards live in the shared `gs.cards` array; draw each player's opening
+    // hand by passing that array alongside the player and its id.
+    draw_to_intellect(&mut gs.p1, &mut gs.cards, 0);
+    draw_to_intellect(&mut gs.p2, &mut gs.cards, 1);
 }
 
 fn handle_action_phase(gs: &mut Gamestate, act: Action) {
@@ -30,12 +30,12 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
         // stack, then we record it as pending and move to the Pitch phase where
         // the player pitches to cover its cost.
         ActionType::PlayCard | ActionType::Activate => {
-            // Borrow the active player and the game-level stack head as disjoint
-            // fields so we can move the card onto the shared stack in one step.
+            // Borrow the active player and the shared cards/stack head as
+            // disjoint fields so we can move the card onto the stack in one step.
             let player = if gs.active_player == 0 { &mut gs.p1 } else { &mut gs.p2 };
-            detach_from_current_zone(player, act.index);
-            player.cards[act.index].location = CardLocation::Stack;
-            attach_to_front_of_zone(&mut player.cards, &mut gs.stack_idx, None, None, act.index);
+            detach_from_current_zone(player, &mut gs.cards, act.index);
+            gs.cards[act.index].location = CardLocation::Stack;
+            attach_to_front_of_zone(&mut gs.cards, &mut gs.stack_idx, None, None, act.index);
             gs.pending_card = Some(PendingCard {
                 index: act.index,
                 typ: act.typ,
@@ -50,17 +50,18 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
     }
 }
 
-/// Prepend the card at `idx` to the front of a linked-list zone, making it the
-/// new `head`. The old head (if any) is linked as `idx`'s successor; an empty
-/// zone makes `idx` its own tail terminator (`next_card` points at itself).
+/// Prepend the card at global index `idx` to the front of a linked-list zone,
+/// making it the new `head`. The old head (if any) is linked as `idx`'s
+/// successor; an empty zone makes `idx` its own tail terminator (`next_card`
+/// points at itself).
 ///
-/// `head` is the zone's head index (e.g. `hand_idx`, `pitch_idx`, or a combat
-/// chain link). `bottom`, when supplied, is the zone's tail pointer and is set
-/// to `idx` only when the zone was previously empty. `count`, when supplied, is
-/// the zone's size counter and is incremented. The caller is responsible for
-/// setting the card's `location`.
+/// `head` is the zone's head index (e.g. `hand_idx`, `pitch_idx`, or the stack
+/// head). `bottom`, when supplied, is the zone's tail pointer and is set to
+/// `idx` only when the zone was previously empty. `count`, when supplied, is the
+/// zone's size counter and is incremented. The caller is responsible for setting
+/// the card's `location`.
 fn attach_to_front_of_zone(
-    cards: &mut [CardState; 45],
+    cards: &mut [CardState; TOTAL_CARDS],
     head: &mut Option<u8>,
     bottom: Option<&mut Option<u8>>,
     count: Option<&mut u8>,
@@ -83,55 +84,58 @@ fn attach_to_front_of_zone(
     }
 }
 
-/// Remove the card at `idx` from the bookkeeping of its current location so it
-/// can be placed elsewhere. Linked-list zones (hand, pitch) are relinked via
+/// Remove the card at global index `idx` from the bookkeeping of its current
+/// location so it can be placed elsewhere. The card's `location` already encodes
+/// its owner, so the same `player` (its owner) handles both `P1*` and `P2*`
+/// variants. Linked-list zones (hand, deck, pitch) are relinked via
 /// `detach_from_linked_list`; the weapon and equipment slots are single indices
 /// that simply clear.
-fn detach_from_current_zone(player: &mut Player, idx: usize) {
-    match player.cards[idx].location {
-        CardLocation::Hand => {
+fn detach_from_current_zone(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], idx: usize) {
+    let location = cards[idx].location;
+    match location {
+        CardLocation::P1Hand | CardLocation::P2Hand => {
             detach_from_linked_list(
-                &mut player.cards,
+                cards,
                 &mut player.hand_idx,
                 None,
                 Some(&mut player.hand_size),
                 idx,
             );
         }
-        CardLocation::Deck => {
+        CardLocation::P1Deck | CardLocation::P2Deck => {
             // The deck tracks both ends and a count; let the helper fix them all.
             detach_from_linked_list(
-                &mut player.cards,
+                cards,
                 &mut player.top_deck_idx,
                 Some(&mut player.bottom_deck_idx),
                 Some(&mut player.deck_size),
                 idx,
             );
         }
-        CardLocation::Pitch => {
-            detach_from_linked_list(&mut player.cards, &mut player.pitch_idx, None, None, idx);
+        CardLocation::P1Pitch | CardLocation::P2Pitch => {
+            detach_from_linked_list(cards, &mut player.pitch_idx, None, None, idx);
         }
-        CardLocation::Weapon => player.weapon_idx = None,
-        CardLocation::Head => player.head_idx = None,
-        CardLocation::Chest => player.chest_idx = None,
-        CardLocation::Arms => player.arms_idx = None,
-        CardLocation::Legs => player.legs_idx = None,
-        CardLocation::Arsenal => player.arsenal_idx = None,
-        CardLocation::BanishZone => player.banish_idx = None,
+        CardLocation::P1Weapon | CardLocation::P2Weapon => player.weapon_idx = None,
+        CardLocation::P1Head | CardLocation::P2Head => player.head_idx = None,
+        CardLocation::P1Chest | CardLocation::P2Chest => player.chest_idx = None,
+        CardLocation::P1Arms | CardLocation::P2Arms => player.arms_idx = None,
+        CardLocation::P1Legs | CardLocation::P2Legs => player.legs_idx = None,
+        CardLocation::P1Arsenal | CardLocation::P2Arsenal => player.arsenal_idx = None,
+        CardLocation::P1BanishZone | CardLocation::P2BanishZone => player.banish_idx = None,
         _ => {}
     }
 }
 
-/// Unlink the card at `idx` from a doubly-linked list of `CardState`s, fixing up
-/// the `head` pointer, the neighbours' links and the tail terminator (a node
-/// whose `next_card` points at itself).
+/// Unlink the card at global index `idx` from a doubly-linked list of
+/// `CardState`s, fixing up the `head` pointer, the neighbours' links and the
+/// tail terminator (a node whose `next_card` points at itself).
 ///
 /// `head` is the zone's head index (e.g. `hand_idx` or `pitch_idx`). `bottom`,
 /// when supplied, is the zone's tail pointer and is updated when the removed
 /// card was the tail (or the only card). `count`, when supplied, is the zone's
 /// size counter and is decremented.
 fn detach_from_linked_list(
-    cards: &mut [CardState; 45],
+    cards: &mut [CardState; TOTAL_CARDS],
     head: &mut Option<u8>,
     bottom: Option<&mut Option<u8>>,
     count: Option<&mut u8>,
@@ -171,24 +175,21 @@ fn detach_from_linked_list(
     }
 }
 
-fn draw_to_intellect(player: &mut Player) {
+fn draw_to_intellect(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], pid: u8) {
     let need = (player.intellect - player.hand_size).max(0) as usize;
-    draw_cards(player, need);
+    draw_cards(player, cards, pid, need);
 }
 
-fn draw_cards(player: &mut Player, num: usize) {
-    let catalog = get_card_catalog();
+fn draw_cards(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], pid: u8, num: usize) {
     if let Some(mut current_idx) = player.top_deck_idx.map(|x| x as usize) {
         let mut drawn = 0;
         loop {
-            let mycard = player.cards[current_idx].card;
-
-            let next = player.cards[current_idx].next_card as usize;
+            let next = cards[current_idx].next_card as usize;
             if next == current_idx ||
                 drawn == num {
                 break;
             }
-            move_from_deck_to_hand(player, current_idx);
+            move_from_deck_to_hand(player, cards, pid, current_idx);
 
             current_idx = next;
             drawn += 1;
@@ -196,14 +197,18 @@ fn draw_cards(player: &mut Player, num: usize) {
     }
 }
 
-fn move_from_deck_to_hand(player: &mut Player, card_idx : usize) {
+fn move_from_deck_to_hand(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], pid: u8, card_idx : usize) {
     // Pull the card off the deck (updates top/bottom pointers and deck_size),
     // then prepend it to the hand and mark it as known to its owner.
-    detach_from_current_zone(player, card_idx);
-    player.cards[card_idx].location = CardLocation::Hand;
-    player.cards[card_idx].visible = CardVisibleState::SelfKnows;
+    detach_from_current_zone(player, cards, card_idx);
+    cards[card_idx].location = CardLocation::hand(pid);
+    cards[card_idx].visible = if pid == 0 {
+        CardVisibleState::P1Knows
+    } else {
+        CardVisibleState::P2Knows
+    };
     attach_to_front_of_zone(
-        &mut player.cards,
+        cards,
         &mut player.hand_idx,
         None,
         Some(&mut player.hand_size),
@@ -284,10 +289,10 @@ mod tests {
         // The played card sits on top of the stack and has been removed from the
         // hand.
         assert_eq!(gs.stack_idx, Some(hand_idx as u8));
-        assert_eq!(gs.p1.cards[hand_idx].location, CardLocation::Stack);
+        assert_eq!(gs.cards[hand_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.hand_size, hand_size_before - 1);
         // The hand linked list no longer contains the played card.
-        assert!(gs.p1.hand_iter().all(|(idx, _)| idx != hand_idx));
+        assert!(gs.p1.hand_iter(&gs.cards).all(|(idx, _)| idx != hand_idx));
     }
 
     #[test]
@@ -305,7 +310,7 @@ mod tests {
         // The activated weapon is now on top of the stack and the weapon slot has
         // been vacated.
         assert_eq!(gs.stack_idx, Some(weapon_idx as u8));
-        assert_eq!(gs.p1.cards[weapon_idx].location, CardLocation::Stack);
+        assert_eq!(gs.cards[weapon_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.weapon_idx, None);
     }
 
@@ -339,7 +344,7 @@ mod tests {
 
         // Seed 42 deals Rhinar an opening hand containing Pack Call. Locate its
         // slot, then find the legal PlayCard action that targets it.
-        let packcall_idx = gs.p1.hand_iter()
+        let packcall_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::PackCallY)
                 .map(|(idx, _)| idx)
                 .expect("Pack Call should be in the opening hand");
@@ -357,7 +362,7 @@ mod tests {
         let pending = gs.pending_card.expect("pending card should be set");
         assert_eq!(pending.index, packcall_idx);
         assert_eq!(pending.typ, ActionType::PlayCard);
-        assert_eq!(gs.p1.cards[pending.index].card, Card::PackCallY);
+        assert_eq!(gs.cards[pending.index].card, Card::PackCallY);
     }
 
     #[test]
@@ -387,19 +392,19 @@ mod tests {
         assert_eq!(gs.p2.hand_size, 4);
         assert_eq!(gs.p2.deck_size, 36);
 
-        let hand = get_card_states_from_location(&gs.p1, CardLocation::Hand);
+        let hand = get_card_states_from_location(&gs, 0, CardLocation::P1Hand);
 
         assert_eq!(hand.len(), 4);
-        
+
         assert_eq!(hand[0].card, Card::MuscleMuttY);
         assert_eq!(hand[1].card, Card::PackCallY);
         assert_eq!(hand[2].card, Card::RagingOnslaughtY);
         assert_eq!(hand[3].card, Card::ClearingBellowB);
 
-        let hand2 = get_card_states_from_location(&gs.p2, CardLocation::Hand);
+        let hand2 = get_card_states_from_location(&gs, 1, CardLocation::P2Hand);
 
         assert_eq!(hand2.len(), 4);
-        
+
         assert_eq!(hand2[0].card, Card::InTheSwingR);
         assert_eq!(hand2[1].card, Card::SecondSwingR);
         assert_eq!(hand2[2].card, Card::SharpenSteelR);

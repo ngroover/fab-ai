@@ -1,4 +1,4 @@
-use crate::game_state::{Gamestate, Phase, Player};
+use crate::game_state::{Gamestate, Phase, Player, CardState, TOTAL_CARDS};
 use crate::action::{Action, ActionType};
 use crate::cards::{Card, CardType};
 use crate::classic_battles::get_card_catalog;
@@ -29,7 +29,7 @@ fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
     // Every card in hand is a pitch option, as long as it actually pitches for
     // resources — cards with a pitch value of 0 produce nothing and can't be
     // pitched.
-    player.hand_iter()
+    player.hand_iter(&gs.cards)
         .filter(|(_, cs)| catalog[cs.card as usize].pitch > 0)
         .map(|(idx, _)| Action {
             typ: ActionType::Pitch,
@@ -46,12 +46,12 @@ fn legal_action_phase(gs: &Gamestate) -> Vec<Action> {
     // Total pitch available across the whole hand. Computed once here and shared
     // by both the hand-card playability and equipment-activation affordability
     // checks, since pitching pays for either.
-    let total_pitch: u8 = player.hand_iter()
+    let total_pitch: u8 = player.hand_iter(&gs.cards)
         .map(|(_, cs)| catalog[cs.card as usize].pitch)
         .sum();
 
-    legal_actions.extend(get_playable_cards(player, total_pitch));
-    legal_actions.extend(get_equipment_activations(player, total_pitch));
+    legal_actions.extend(get_playable_cards(player, &gs.cards, total_pitch));
+    legal_actions.extend(get_equipment_activations(player, &gs.cards, total_pitch));
 
     // Passing is always available during the action phase; it ends the turn
     // without playing or activating anything.
@@ -63,7 +63,7 @@ fn legal_action_phase(gs: &Gamestate) -> Vec<Action> {
     legal_actions
 }
 
-fn get_equipment_activations(player: &Player, total_pitch: u8) -> Vec<Action> {
+fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8) -> Vec<Action> {
     let catalog = get_card_catalog();
     let mut actions: Vec<Action> = Vec::new();
 
@@ -79,7 +79,7 @@ fn get_equipment_activations(player: &Player, total_pitch: u8) -> Vec<Action> {
     for slot in armor_slots {
         if let Some(idx) = slot {
             let idx = idx as usize;
-            let Some(ability) = &catalog[player.cards[idx].card as usize].ability else {
+            let Some(ability) = &catalog[cards[idx].card as usize].ability else {
                 continue;
             };
 
@@ -99,7 +99,7 @@ fn get_equipment_activations(player: &Player, total_pitch: u8) -> Vec<Action> {
     // weapon's resource cost.
     if let Some(idx) = player.weapon_idx {
         let idx = idx as usize;
-        let needed = catalog[player.cards[idx].card as usize]
+        let needed = catalog[cards[idx].card as usize]
             .cost
             .saturating_sub(player.resources);
         if total_pitch >= needed {
@@ -113,12 +113,12 @@ fn get_equipment_activations(player: &Player, total_pitch: u8) -> Vec<Action> {
     actions
 }
 
-fn get_playable_cards(player: &Player, total_pitch: u8) -> Vec<Action> {
+fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8) -> Vec<Action> {
     let catalog = get_card_catalog();
     let mut actions: Vec<Action> = Vec::new();
 
     let mut seen: Vec<Card> = Vec::new();
-    for (idx, cardstate) in player.hand_iter() {
+    for (idx, cardstate) in player.hand_iter(cards) {
         let card = cardstate.card;
         let data = &catalog[card as usize];
 
@@ -199,7 +199,7 @@ mod tests {
         // The opening hand is the three yellow attack actions plus Clearing
         // Bellow; all are playable and affordable from the rest of the hand.
         let playable: HashSet<Card> = plays.iter()
-                .map(|a| gs.p1.cards[a.index].card)
+                .map(|a| gs.cards[a.index].card)
                 .collect();
         assert_eq!(playable, HashSet::from([
             Card::MuscleMuttY,
@@ -210,7 +210,7 @@ mod tests {
 
         // Every play is sourced from the Hand.
         for a in &plays {
-            assert_eq!(gs.p1.cards[a.index].location, CardLocation::Hand);
+            assert_eq!(gs.cards[a.index].location, CardLocation::P1Hand);
         }
     }
 
@@ -232,10 +232,10 @@ mod tests {
         // hand is offered as a Pitch action sourced from the Hand.
         for a in &actions {
             assert_eq!(a.typ, ActionType::Pitch);
-            assert_eq!(gs.p1.cards[a.index].location, CardLocation::Hand);
+            assert_eq!(gs.cards[a.index].location, CardLocation::P1Hand);
         }
         let pitchable: HashSet<Card> = actions.iter()
-                .map(|a| gs.p1.cards[a.index].card)
+                .map(|a| gs.cards[a.index].card)
                 .collect();
         assert_eq!(pitchable, HashSet::from([
             Card::MuscleMuttY,
@@ -281,7 +281,7 @@ mod tests {
         // Blossom of Spring (activated chest equipment) + Bone Basher (weapon).
         // The passive equipment (Bone Vizier, Ironhide Gauntlet/Legs) is not.
         let activatable: HashSet<Card> = activations.iter()
-                .map(|a| gs.p1.cards[a.index].card)
+                .map(|a| gs.cards[a.index].card)
                 .collect();
         assert_eq!(activatable, HashSet::from([Card::BlossomOfSpring, Card::BoneBasher]));
 
@@ -289,10 +289,10 @@ mod tests {
         // weapon, Blossom of Spring as chest equipment. (Location is derived
         // from the card's slot, not carried on the action.)
         for a in &activations {
-            let cs = gs.p1.cards[a.index];
+            let cs = gs.cards[a.index];
             match cs.card {
-                Card::BoneBasher => assert_eq!(cs.location, CardLocation::Weapon),
-                Card::BlossomOfSpring => assert_eq!(cs.location, CardLocation::Chest),
+                Card::BoneBasher => assert_eq!(cs.location, CardLocation::P1Weapon),
+                Card::BlossomOfSpring => assert_eq!(cs.location, CardLocation::P1Chest),
                 other => panic!("unexpected activation for {:?}", other),
             }
         }
@@ -318,7 +318,7 @@ mod tests {
         // both decks) + Dawnblade (weapon). The passive equipment (Ironrot
         // Helm/Legs) is not offered.
         let activatable: HashSet<Card> = activations.iter()
-                .map(|a| gs.p2.cards[a.index].card)
+                .map(|a| gs.cards[a.index].card)
                 .collect();
         assert_eq!(
             activatable,
@@ -328,11 +328,11 @@ mod tests {
         // Each activated card sits in its expected slot, derived from its
         // CardState rather than carried on the action.
         for a in &activations {
-            let cs = gs.p2.cards[a.index];
+            let cs = gs.cards[a.index];
             match cs.card {
-                Card::Dawnblade => assert_eq!(cs.location, CardLocation::Weapon),
-                Card::GallantryGold => assert_eq!(cs.location, CardLocation::Arms),
-                Card::BlossomOfSpring => assert_eq!(cs.location, CardLocation::Chest),
+                Card::Dawnblade => assert_eq!(cs.location, CardLocation::P2Weapon),
+                Card::GallantryGold => assert_eq!(cs.location, CardLocation::P2Arms),
+                Card::BlossomOfSpring => assert_eq!(cs.location, CardLocation::P2Chest),
                 other => panic!("unexpected activation for {:?}", other),
             }
         }
