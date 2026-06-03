@@ -26,6 +26,7 @@ pub enum CardLocation {
     Legs,
     Weapon,
     CombatChain,
+    Stack,
 }
 
 #[derive(Clone, Copy)]
@@ -79,6 +80,12 @@ pub struct Gamestate {
     pub active_player : u8,
     pub phase : Phase,
     pub rng : SmallRng,
+    /// Head of the stack: the linked list of cards currently on the stack
+    /// waiting to resolve. Holds the slot index (into the owning player's
+    /// `cards` array) of the most recently added card, or `None` when the stack
+    /// is empty. The list is threaded through `CardState::next_card` /
+    /// `prev_card`, newest card at the head.
+    pub stack_idx : Option<u8>,
     /// The card the active player has chosen to play or activate and is now
     /// paying for. Set when leaving the `Action` phase for the `Pitch` phase;
     /// holds the slot index into the active player's `cards` array together

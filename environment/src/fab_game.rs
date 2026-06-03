@@ -34,6 +34,7 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: 
         active_player: 0,
         phase: Phase::Start,
         rng,
+        stack_idx: None,
         pending_card: None,
     }
 }
@@ -115,6 +116,7 @@ fn player_from_decklist(deck: [Card; 46]) -> Player {
 
 pub fn reset(gs: &mut Gamestate) {
     gs.phase = Phase::ChooseFirst;
+    gs.stack_idx = None;
 
     place_cards(gs);
     shuffle_decks(gs);

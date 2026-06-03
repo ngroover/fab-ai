@@ -26,14 +26,16 @@ fn handle_choose_first(gs: &mut Gamestate, act: Action) {
 fn handle_action_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
         // Playing a card or activating equipment/a weapon both commit a card
-        // that must then be paid for. The attacking card/weapon goes onto the
-        // first link of the combat chain, then we record it as pending and move
-        // to the Pitch phase where the player pitches to cover its cost.
+        // that must then be paid for. The played/activated card goes onto the
+        // stack, then we record it as pending and move to the Pitch phase where
+        // the player pitches to cover its cost.
         ActionType::PlayCard | ActionType::Activate => {
-            let player = active_player_mut(gs);
+            // Borrow the active player and the game-level stack head as disjoint
+            // fields so we can move the card onto the shared stack in one step.
+            let player = if gs.active_player == 0 { &mut gs.p1 } else { &mut gs.p2 };
             detach_from_current_zone(player, act.index);
-            player.cards[act.index].location = CardLocation::CombatChain;
-            attach_to_front_of_zone(&mut player.cards, &mut player.chain_link[0], None, None, act.index);
+            player.cards[act.index].location = CardLocation::Stack;
+            attach_to_front_of_zone(&mut player.cards, &mut gs.stack_idx, None, None, act.index);
             gs.pending_card = Some(PendingCard {
                 index: act.index,
                 typ: act.typ,
@@ -46,11 +48,6 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
         }
         _ => {}
     }
-}
-
-/// Mutable reference to the player whose turn it is.
-fn active_player_mut(gs: &mut Gamestate) -> &mut Player {
-    if gs.active_player == 0 { &mut gs.p1 } else { &mut gs.p2 }
 }
 
 /// Prepend the card at `idx` to the front of a linked-list zone, making it the
@@ -272,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn test_play_card_moves_to_combat_chain() {
+    fn test_play_card_moves_to_stack() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
@@ -284,17 +281,17 @@ mod tests {
         let play = Action{ typ: ActionType::PlayCard, index: hand_idx};
         step(&mut gs, play);
 
-        // The played card sits on the first link of the combat chain and has
-        // been removed from the hand.
-        assert_eq!(gs.p1.chain_link[0], Some(hand_idx as u8));
-        assert_eq!(gs.p1.cards[hand_idx].location, CardLocation::CombatChain);
+        // The played card sits on top of the stack and has been removed from the
+        // hand.
+        assert_eq!(gs.stack_idx, Some(hand_idx as u8));
+        assert_eq!(gs.p1.cards[hand_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.hand_size, hand_size_before - 1);
         // The hand linked list no longer contains the played card.
         assert!(gs.p1.hand_iter().all(|(idx, _)| idx != hand_idx));
     }
 
     #[test]
-    fn test_activate_weapon_moves_to_combat_chain() {
+    fn test_activate_weapon_moves_to_stack() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
@@ -305,10 +302,10 @@ mod tests {
         let activate = Action{ typ: ActionType::Activate, index: weapon_idx};
         step(&mut gs, activate);
 
-        // The activated weapon is now the first link of the combat chain and the
-        // weapon slot has been vacated.
-        assert_eq!(gs.p1.chain_link[0], Some(weapon_idx as u8));
-        assert_eq!(gs.p1.cards[weapon_idx].location, CardLocation::CombatChain);
+        // The activated weapon is now on top of the stack and the weapon slot has
+        // been vacated.
+        assert_eq!(gs.stack_idx, Some(weapon_idx as u8));
+        assert_eq!(gs.p1.cards[weapon_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.weapon_idx, None);
     }
 
