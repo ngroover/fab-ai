@@ -33,7 +33,7 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
             let player = active_player_mut(gs);
             detach_from_current_zone(player, act.index);
             player.cards[act.index].location = CardLocation::CombatChain;
-            attach_to_front_of_zone(&mut player.cards, &mut player.chain_link[0], act.index);
+            attach_to_front_of_zone(&mut player.cards, &mut player.chain_link[0], None, None, act.index);
             gs.pending_card = Some(PendingCard {
                 index: act.index,
                 typ: act.typ,
@@ -56,17 +56,34 @@ fn active_player_mut(gs: &mut Gamestate) -> &mut Player {
 /// Prepend the card at `idx` to the front of a linked-list zone, making it the
 /// new `head`. The old head (if any) is linked as `idx`'s successor; an empty
 /// zone makes `idx` its own tail terminator (`next_card` points at itself).
+///
 /// `head` is the zone's head index (e.g. `hand_idx`, `pitch_idx`, or a combat
-/// chain link); the caller is responsible for setting the card's `location`.
-fn attach_to_front_of_zone(cards: &mut [CardState; 45], head: &mut Option<u8>, idx: usize) {
+/// chain link). `bottom`, when supplied, is the zone's tail pointer and is set
+/// to `idx` only when the zone was previously empty. `count`, when supplied, is
+/// the zone's size counter and is incremented. The caller is responsible for
+/// setting the card's `location`.
+fn attach_to_front_of_zone(
+    cards: &mut [CardState; 45],
+    head: &mut Option<u8>,
+    bottom: Option<&mut Option<u8>>,
+    count: Option<&mut u8>,
+    idx: usize,
+) {
     if let Some(old_head) = *head {
         cards[idx].next_card = old_head;
         cards[old_head as usize].prev_card = idx as u8;
     } else {
-        // Empty zone: the card becomes the sole node and its own tail.
+        // Empty zone: the card becomes the sole node, its own tail, and the
+        // zone's bottom.
         cards[idx].next_card = idx as u8;
+        if let Some(bottom) = bottom {
+            *bottom = Some(idx as u8);
+        }
     }
     *head = Some(idx as u8);
+    if let Some(count) = count {
+        *count += 1;
+    }
 }
 
 /// Remove the card at `idx` from the bookkeeping of its current location so it
@@ -76,26 +93,26 @@ fn attach_to_front_of_zone(cards: &mut [CardState; 45], head: &mut Option<u8>, i
 fn detach_from_current_zone(player: &mut Player, idx: usize) {
     match player.cards[idx].location {
         CardLocation::Hand => {
-            detach_from_linked_list(&mut player.cards, &mut player.hand_idx, idx);
-            player.hand_size -= 1;
+            detach_from_linked_list(
+                &mut player.cards,
+                &mut player.hand_idx,
+                None,
+                Some(&mut player.hand_size),
+                idx,
+            );
         }
         CardLocation::Deck => {
-            // The deck tracks both ends; fix up the tail pointer if the removed
-            // card was the bottom, then relink via the head (top) pointer.
-            let was_bottom = player.bottom_deck_idx == Some(idx as u8);
-            let prev = player.cards[idx].prev_card;
-            detach_from_linked_list(&mut player.cards, &mut player.top_deck_idx, idx);
-            if was_bottom {
-                player.bottom_deck_idx = if player.top_deck_idx.is_none() {
-                    None
-                } else {
-                    Some(prev)
-                };
-            }
-            player.deck_size -= 1;
+            // The deck tracks both ends and a count; let the helper fix them all.
+            detach_from_linked_list(
+                &mut player.cards,
+                &mut player.top_deck_idx,
+                Some(&mut player.bottom_deck_idx),
+                Some(&mut player.deck_size),
+                idx,
+            );
         }
         CardLocation::Pitch => {
-            detach_from_linked_list(&mut player.cards, &mut player.pitch_idx, idx);
+            detach_from_linked_list(&mut player.cards, &mut player.pitch_idx, None, None, idx);
         }
         CardLocation::Weapon => player.weapon_idx = None,
         CardLocation::Head => player.head_idx = None,
@@ -110,18 +127,32 @@ fn detach_from_current_zone(player: &mut Player, idx: usize) {
 
 /// Unlink the card at `idx` from a doubly-linked list of `CardState`s, fixing up
 /// the `head` pointer, the neighbours' links and the tail terminator (a node
-/// whose `next_card` points at itself). `head` is the zone's head index (e.g.
-/// `hand_idx` or `pitch_idx`); pass whichever zone the card lives in.
-fn detach_from_linked_list(cards: &mut [CardState; 45], head: &mut Option<u8>, idx: usize) {
+/// whose `next_card` points at itself).
+///
+/// `head` is the zone's head index (e.g. `hand_idx` or `pitch_idx`). `bottom`,
+/// when supplied, is the zone's tail pointer and is updated when the removed
+/// card was the tail (or the only card). `count`, when supplied, is the zone's
+/// size counter and is decremented.
+fn detach_from_linked_list(
+    cards: &mut [CardState; 45],
+    head: &mut Option<u8>,
+    bottom: Option<&mut Option<u8>>,
+    count: Option<&mut u8>,
+    idx: usize,
+) {
     let next = cards[idx].next_card as usize;
     let is_head = *head == Some(idx as u8);
     let is_tail = next == idx;
 
     if is_head && is_tail {
-        // Only card in the list.
+        // Only card in the list; both ends clear.
         *head = None;
+        if let Some(bottom) = bottom {
+            *bottom = None;
+        }
     } else if is_head {
-        // Head of a multi-card list; the next card becomes the new head.
+        // Head of a multi-card list; the next card becomes the new head. The
+        // tail is unchanged.
         *head = Some(next as u8);
     } else {
         // Non-head node always has a valid prev_card.
@@ -129,11 +160,17 @@ fn detach_from_linked_list(cards: &mut [CardState; 45], head: &mut Option<u8>, i
         if is_tail {
             // Removing the tail: prev becomes the new tail (points to itself).
             cards[prev].next_card = prev as u8;
+            if let Some(bottom) = bottom {
+                *bottom = Some(prev as u8);
+            }
         } else {
             // Middle node: splice prev and next together.
             cards[prev].next_card = next as u8;
             cards[next].prev_card = prev as u8;
         }
+    }
+    if let Some(count) = count {
+        *count -= 1;
     }
 }
 
@@ -168,8 +205,13 @@ fn move_from_deck_to_hand(player: &mut Player, card_idx : usize) {
     detach_from_current_zone(player, card_idx);
     player.cards[card_idx].location = CardLocation::Hand;
     player.cards[card_idx].visible = CardVisibleState::SelfKnows;
-    attach_to_front_of_zone(&mut player.cards, &mut player.hand_idx, card_idx);
-    player.hand_size += 1;
+    attach_to_front_of_zone(
+        &mut player.cards,
+        &mut player.hand_idx,
+        None,
+        Some(&mut player.hand_size),
+        card_idx,
+    );
 }
 
 #[cfg(test)]
