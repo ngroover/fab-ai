@@ -64,6 +64,11 @@ pub struct Player {
     pub chest_idx : Option<u8>,
     pub arms_idx : Option<u8>,
     pub legs_idx : Option<u8>,
+    /// The combat chain, link by link. Each slot holds the `cards` index of the
+    /// card occupying that chain link, or `None` if the link is empty. Sized at
+    /// 5 since a single combat chain is very unlikely to grow longer than that;
+    /// the attacking card/weapon is placed at link 0.
+    pub chain_link : [Option<u8>; 5],
     pub hand_size : u8,
     pub deck_size : u8,
 }

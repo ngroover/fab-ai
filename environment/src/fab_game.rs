@@ -106,6 +106,7 @@ fn player_from_decklist(deck: [Card; 46]) -> Player {
         chest_idx : None,
         arms_idx : None,
         legs_idx : None,
+        chain_link : [None; 5],
         hand_size : 0,
         deck_size : 0,
     }
@@ -164,6 +165,7 @@ pub fn place_cards(gs: &mut Gamestate) {
         player.chest_idx = None;
         player.arms_idx = None;
         player.legs_idx = None;
+        player.chain_link = [None; 5];
         // Index iteration so we can record each card's slot position alongside
         // mutating its CardState.
         for idx in 0..player.cards.len() {
