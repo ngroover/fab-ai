@@ -79,6 +79,21 @@ fn detach_from_current_zone(player: &mut Player, idx: usize) {
             detach_from_linked_list(&mut player.cards, &mut player.hand_idx, idx);
             player.hand_size -= 1;
         }
+        CardLocation::Deck => {
+            // The deck tracks both ends; fix up the tail pointer if the removed
+            // card was the bottom, then relink via the head (top) pointer.
+            let was_bottom = player.bottom_deck_idx == Some(idx as u8);
+            let prev = player.cards[idx].prev_card;
+            detach_from_linked_list(&mut player.cards, &mut player.top_deck_idx, idx);
+            if was_bottom {
+                player.bottom_deck_idx = if player.top_deck_idx.is_none() {
+                    None
+                } else {
+                    Some(prev)
+                };
+            }
+            player.deck_size -= 1;
+        }
         CardLocation::Pitch => {
             detach_from_linked_list(&mut player.cards, &mut player.pitch_idx, idx);
         }
@@ -148,35 +163,13 @@ fn draw_cards(player: &mut Player, num: usize) {
 }
 
 fn move_from_deck_to_hand(player: &mut Player, card_idx : usize) {
-    let next_card_on_deck = player.cards[card_idx].next_card;
-    // modify deck
-    if next_card_on_deck == card_idx as u8 {
-        // the deck has no more cards
-        player.top_deck_idx = None;
-        player.bottom_deck_idx = None;
-    }
-    else {
-        // assign top_deck_idx to next card
-        player.top_deck_idx = Some(next_card_on_deck);
-        player.cards[next_card_on_deck as usize].prev_card = next_card_on_deck
-    }
-
-    // modify hand
-    if let Some(hand_idx) = player.hand_idx {
-        // cards exist in hand; assign current card to point to hand
-        player.cards[card_idx as usize].next_card = hand_idx as u8;
-        // assign hand card to point backwards to current card
-        player.cards[hand_idx as usize].prev_card = card_idx as u8;
-    }
-    else {
-        player.cards[card_idx as usize].next_card = card_idx as u8;
-    }
-    player.hand_idx = Some(card_idx as u8);
-
+    // Pull the card off the deck (updates top/bottom pointers and deck_size),
+    // then prepend it to the hand and mark it as known to its owner.
+    detach_from_current_zone(player, card_idx);
     player.cards[card_idx].location = CardLocation::Hand;
     player.cards[card_idx].visible = CardVisibleState::SelfKnows;
+    attach_to_front_of_zone(&mut player.cards, &mut player.hand_idx, card_idx);
     player.hand_size += 1;
-    player.deck_size -= 1;
 }
 
 #[cfg(test)]
