@@ -1,5 +1,5 @@
 use crate::action::{Action,ActionType};
-use crate::game_state::{Gamestate,Phase,Player,PendingCard,CardLocation,CardVisibleState};
+use crate::game_state::{Gamestate,Phase,Player,PendingCard,CardLocation,CardVisibleState,CardState};
 use crate::classic_battles::get_card_catalog;
 
 pub fn step(gs: &mut Gamestate, act: Action) {
@@ -61,50 +61,56 @@ fn move_to_combat_chain(player: &mut Player, idx: usize, link: usize) {
 }
 
 /// Remove the card at `idx` from the bookkeeping of its current location so it
-/// can be placed elsewhere. The hand is a linked list and needs relinking; the
-/// weapon and equipment slots are single indices that simply clear.
+/// can be placed elsewhere. Linked-list zones (hand, pitch) are relinked via
+/// `detach_from_linked_list`; the weapon and equipment slots are single indices
+/// that simply clear.
 fn detach_from_current_zone(player: &mut Player, idx: usize) {
     match player.cards[idx].location {
-        CardLocation::Hand => detach_from_hand(player, idx),
+        CardLocation::Hand => {
+            detach_from_linked_list(&mut player.cards, &mut player.hand_idx, idx);
+            player.hand_size -= 1;
+        }
+        CardLocation::Pitch => {
+            detach_from_linked_list(&mut player.cards, &mut player.pitch_idx, idx);
+        }
         CardLocation::Weapon => player.weapon_idx = None,
         CardLocation::Head => player.head_idx = None,
         CardLocation::Chest => player.chest_idx = None,
         CardLocation::Arms => player.arms_idx = None,
         CardLocation::Legs => player.legs_idx = None,
         CardLocation::Arsenal => player.arsenal_idx = None,
-        CardLocation::Pitch => player.pitch_idx = None,
         CardLocation::BanishZone => player.banish_idx = None,
         _ => {}
     }
 }
 
-/// Unlink the card at `idx` from the hand's doubly-linked list, fixing up the
-/// head pointer (`hand_idx`), the neighbours' links and the tail terminator
-/// (a node whose `next_card` points at itself), and decrement `hand_size`.
-fn detach_from_hand(player: &mut Player, idx: usize) {
-    let next = player.cards[idx].next_card as usize;
-    let is_head = player.hand_idx == Some(idx as u8);
+/// Unlink the card at `idx` from a doubly-linked list of `CardState`s, fixing up
+/// the `head` pointer, the neighbours' links and the tail terminator (a node
+/// whose `next_card` points at itself). `head` is the zone's head index (e.g.
+/// `hand_idx` or `pitch_idx`); pass whichever zone the card lives in.
+fn detach_from_linked_list(cards: &mut [CardState; 45], head: &mut Option<u8>, idx: usize) {
+    let next = cards[idx].next_card as usize;
+    let is_head = *head == Some(idx as u8);
     let is_tail = next == idx;
 
     if is_head && is_tail {
-        // Only card in hand.
-        player.hand_idx = None;
+        // Only card in the list.
+        *head = None;
     } else if is_head {
-        // Head of a multi-card hand; the next card becomes the new head.
-        player.hand_idx = Some(next as u8);
+        // Head of a multi-card list; the next card becomes the new head.
+        *head = Some(next as u8);
     } else {
         // Non-head node always has a valid prev_card.
-        let prev = player.cards[idx].prev_card as usize;
+        let prev = cards[idx].prev_card as usize;
         if is_tail {
             // Removing the tail: prev becomes the new tail (points to itself).
-            player.cards[prev].next_card = prev as u8;
+            cards[prev].next_card = prev as u8;
         } else {
             // Middle node: splice prev and next together.
-            player.cards[prev].next_card = next as u8;
-            player.cards[next].prev_card = prev as u8;
+            cards[prev].next_card = next as u8;
+            cards[next].prev_card = prev as u8;
         }
     }
-    player.hand_size -= 1;
 }
 
 fn draw_to_intellect(player: &mut Player) {
