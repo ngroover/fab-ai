@@ -210,19 +210,15 @@ fn draw_to_intellect(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], 
 }
 
 fn draw_cards(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], pid: u8, num: usize) {
-    if let Some(mut current_idx) = player.top_deck_idx.map(|x| x as usize) {
-        let mut drawn = 0;
-        loop {
-            let next = cards[current_idx].next_card as usize;
-            if next == current_idx ||
-                drawn == num {
-                break;
-            }
-            move_from_deck_to_hand(player, cards, pid, current_idx);
-
-            current_idx = next;
-            drawn += 1;
-        }
+    let mut drawn = 0;
+    while drawn < num {
+        // Re-read the top each iteration: drawing a card updates `top_deck_idx`,
+        // and it becomes `None` once the (formerly last) card is drawn.
+        let Some(current_idx) = player.top_deck_idx.map(|x| x as usize) else {
+            break; // deck is empty
+        };
+        move_from_deck_to_hand(player, cards, pid, current_idx);
+        drawn += 1;
     }
 }
 
@@ -474,5 +470,34 @@ mod tests {
         assert_eq!(hand2[1].card, Card::SecondSwingR);
         assert_eq!(hand2[2].card, Card::SharpenSteelR);
         assert_eq!(hand2[3].card, Card::DrivingBladeY);
+    }
+
+    #[test]
+    fn test_draw_cards_includes_last_card() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        step(&mut gs, go_first);
+
+        // After the opening draw p1 has 36 cards left in the deck.
+        let deck_before = gs.p1.deck_size;
+        assert_eq!(deck_before, 36);
+        let hand_before = gs.p1.hand_size;
+
+        // Draw the entire deck, including the final (tail) card.
+        draw_cards(&mut gs.p1, &mut gs.cards, 0, deck_before as usize);
+
+        // The whole deck moved to hand; nothing is left behind and the head
+        // pointer is cleared.
+        assert_eq!(gs.p1.deck_size, 0);
+        assert_eq!(gs.p1.top_deck_idx, None);
+        assert_eq!(gs.p1.bottom_deck_idx, None);
+        assert_eq!(gs.p1.hand_size, hand_before + deck_before);
+
+        // Drawing further from an empty deck is a safe no-op.
+        draw_cards(&mut gs.p1, &mut gs.cards, 0, 5);
+        assert_eq!(gs.p1.deck_size, 0);
+        assert_eq!(gs.p1.hand_size, hand_before + deck_before);
     }
 }
