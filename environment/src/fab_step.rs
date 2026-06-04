@@ -9,6 +9,7 @@ pub fn step(gs: &mut Gamestate, act: Action) {
         Phase::Action => handle_action_phase(gs, act),
         Phase::Pitch => handle_pitch_phase(gs, act),
         Phase::Instant => handle_instant_phase(gs, act),
+        Phase::Defend => handle_defend_phase(gs, act),
         _ => {}
     }
 }
@@ -114,6 +115,37 @@ fn handle_instant_pass(gs: &mut Gamestate) {
         // First pass: hand priority to the other player, who may now respond.
         gs.active_player ^= 1;
     }
+}
+
+/// Handle an action during the Defend phase. The active player is the defender
+/// (flipped to the opponent of the attacker in `resolve_top_of_stack`). They may
+/// commit blockers one at a time — each chosen card moves out of their hand onto
+/// the next free link of their own combat chain, and the phase stays on Defend so
+/// further blockers can be declared. Passing finishes declaring blockers and
+/// advances to the Reaction phase.
+fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
+    match act.typ {
+        ActionType::Defend => commit_blocker(gs, act.index),
+        ActionType::Pass => gs.phase = Phase::Reaction,
+        _ => {}
+    }
+}
+
+/// Move the defender's chosen blocker out of their hand and onto the next free
+/// link of their combat chain. The defender is the active player; their chain
+/// links fill from link 0 upward (the attacker's card sits on the *attacker's*
+/// chain, a separate array). A full chain leaves the card in hand as a no-op.
+fn commit_blocker(gs: &mut Gamestate, idx: usize) {
+    let pid = gs.active_player;
+    let player = if pid == 0 { &mut gs.p1 } else { &mut gs.p2 };
+
+    let Some(link) = player.chain_link.iter().position(|slot| slot.is_none()) else {
+        return; // chain is full; nothing more can block
+    };
+
+    detach_from_current_zone(player, &mut gs.cards, idx);
+    gs.cards[idx].location = CardLocation::combat_chain(pid);
+    player.chain_link[link] = Some(idx as u8);
 }
 
 /// Resolve the card at the top of the stack (its most recently added card),
@@ -807,6 +839,93 @@ mod tests {
         assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.p1.chain_link[0], Some(weapon_idx as u8));
         assert_eq!(gs.cards[weapon_idx].location, CardLocation::P1CombatChain);
+    }
+
+    /// Drive a game until Dorinthea (p2) is on defense against Rhinar's Muscle
+    /// Mutt. Mirrors `test_attack_action_resolves_to_combat_chain` and leaves the
+    /// gamestate in the Defend phase with p2 as the active (defending) player.
+    fn step_to_dorinthea_defending() -> Gamestate {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, index: 0});
+
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
+
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
+
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.active_player, 1);
+        gs
+    }
+
+    #[test]
+    fn test_defend_moves_card_to_combat_chain() {
+        let mut gs = step_to_dorinthea_defending();
+
+        // The defender commits a blocker from hand. It moves onto link 0 of the
+        // defender's own combat chain (separate from the attacker's chain) and
+        // leaves the hand; the phase stays on Defend so more blockers can follow.
+        let db_idx = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
+                .map(|(idx, _)| idx)
+                .expect("Driving Blade should be in Dorinthea's opening hand");
+        let hand_before = gs.p2.hand_size;
+
+        step(&mut gs, Action{ typ: ActionType::Defend, index: db_idx});
+
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.p2.chain_link[0], Some(db_idx as u8));
+        assert_eq!(gs.cards[db_idx].location, CardLocation::P2CombatChain);
+        assert_eq!(gs.p2.hand_size, hand_before - 1);
+        // The blocker lands on the defender's chain, not the attacker's.
+        assert_eq!(gs.p1.chain_link[0].map(|i| gs.cards[i as usize].card), Some(Card::MuscleMuttY));
+    }
+
+    #[test]
+    fn test_defend_multiple_blockers_fill_chain_links() {
+        let mut gs = step_to_dorinthea_defending();
+
+        // Two blockers committed in succession occupy consecutive chain links.
+        let first = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
+                .map(|(idx, _)| idx)
+                .expect("Driving Blade should be in Dorinthea's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Defend, index: first});
+
+        let second = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::InTheSwingR)
+                .map(|(idx, _)| idx)
+                .expect("In the Swing should be in Dorinthea's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Defend, index: second});
+
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.p2.chain_link[0], Some(first as u8));
+        assert_eq!(gs.p2.chain_link[1], Some(second as u8));
+        assert_eq!(gs.cards[first].location, CardLocation::P2CombatChain);
+        assert_eq!(gs.cards[second].location, CardLocation::P2CombatChain);
+    }
+
+    #[test]
+    fn test_defend_pass_advances_to_reaction() {
+        let mut gs = step_to_dorinthea_defending();
+
+        // Passing during the Defend phase finishes declaring blockers and moves
+        // the game into the Reaction phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+
+        assert_eq!(gs.phase, Phase::Reaction);
     }
 
     #[test]
