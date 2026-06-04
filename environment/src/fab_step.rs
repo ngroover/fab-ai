@@ -120,6 +120,9 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     gs.cards[pending.index].location = CardLocation::Stack;
     attach_to_front_of_zone(&mut gs.cards, &mut gs.stack_idx, None, None, pending.index);
 
+    // The card now lives on the stack, so it is no longer "pending" — clear it
+    // before opening the Instant phase.
+    gs.pending_card = None;
     gs.phase = Phase::Instant;
 }
 
@@ -378,8 +381,8 @@ mod tests {
 
         // Clearing Bellow costs 0, so the player already has enough resources
         // (zero) to pay for it. Committing it should skip pitching and advance
-        // straight to the Instant phase, while still recording it as pending on
-        // the stack.
+        // straight to the Instant phase, moving the card onto the stack and
+        // clearing the pending slot.
         let cb_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::ClearingBellowB)
                 .map(|(idx, _)| idx)
@@ -393,8 +396,8 @@ mod tests {
         step(&mut gs, play);
 
         assert_eq!(gs.phase, Phase::Instant);
-        let pending = gs.pending_card.expect("pending card should be set");
-        assert_eq!(pending.index, cb_idx);
+        // Once the card hits the stack it is no longer pending.
+        assert_eq!(gs.pending_card, None);
         assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
         assert_eq!(gs.stack_idx, Some(cb_idx as u8));
     }
