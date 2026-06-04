@@ -7,6 +7,9 @@ use rand::rngs::SmallRng;
 /// player 1 owns slots `PLAYER_CARDS..2*PLAYER_CARDS`.
 pub const PLAYER_CARDS: usize = 45;
 pub const TOTAL_CARDS: usize = PLAYER_CARDS * 2;
+/// Maximum number of cards the stack can hold at once. Committing a card beyond
+/// this limit panics (see `Gamestate::push_to_stack`).
+pub const STACK_SIZE: usize = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
@@ -152,18 +155,55 @@ pub struct Gamestate {
     pub passes : u8,
     pub phase : Phase,
     pub rng : SmallRng,
-    /// Head of the stack: the linked list of cards currently on the stack
-    /// waiting to resolve. Holds the global slot index of the most recently
-    /// added card, or `None` when the stack is empty. The list is threaded
-    /// through `CardState::next_card` / `prev_card`, newest card at the head.
-    /// Because indices are global, the stack can hold cards owned by either
-    /// player.
-    pub stack_idx : Option<u8>,
+    /// The stack: cards currently waiting to resolve, each paired with the
+    /// `ActionType` that committed it (so we know how to resolve it). Slot 0 is
+    /// the bottom of the stack and slots fill upward; the topmost occupied slot
+    /// is the card that resolves next. Empty slots are `None`. Because the stored
+    /// indices are global, the stack can hold cards owned by either player.
+    /// Committing a card when all `STACK_SIZE` slots are full panics.
+    pub stack : [Option<PendingCard>; STACK_SIZE],
     /// The card the active player has chosen to play or activate and is now
     /// paying for. Set when leaving the `Action` phase for the `Pitch` phase;
     /// holds the global slot index into `cards` together with the location it is
     /// being played/activated from. `None` outside the pay-for-a-card flow.
     pub pending_card : Option<PendingCard>,
+}
+
+impl Gamestate {
+    /// Slot index of the topmost (next-to-resolve) card on the stack, or `None`
+    /// when the stack is empty. The stack fills from slot 0 upward, so this is
+    /// the highest occupied slot.
+    pub fn stack_top_slot(&self) -> Option<usize> {
+        self.stack.iter().rposition(|slot| slot.is_some())
+    }
+
+    /// The `PendingCard` on top of the stack, or `None` when the stack is empty.
+    pub fn stack_top(&self) -> Option<PendingCard> {
+        self.stack_top_slot().and_then(|i| self.stack[i])
+    }
+
+    /// True when no cards are on the stack.
+    pub fn stack_is_empty(&self) -> bool {
+        self.stack.iter().all(|slot| slot.is_none())
+    }
+
+    /// Push a committed card onto the top of the stack. Panics with
+    /// "stack size ran out" if all `STACK_SIZE` slots are already occupied.
+    pub fn push_to_stack(&mut self, pending: PendingCard) {
+        for slot in self.stack.iter_mut() {
+            if slot.is_none() {
+                *slot = Some(pending);
+                return;
+            }
+        }
+        panic!("stack size ran out");
+    }
+
+    /// Remove and return the card on top of the stack, or `None` when empty.
+    pub fn pop_stack(&mut self) -> Option<PendingCard> {
+        let top = self.stack_top_slot()?;
+        self.stack[top].take()
+    }
 }
 
 /// A card the active player has committed to play, activate, or attack with,

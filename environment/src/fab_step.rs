@@ -128,12 +128,11 @@ fn handle_instant_pass(gs: &mut Gamestate) {
 ///   the turn player, who resumes the Action phase once the stack is empty, or
 ///   keeps responding in the Instant phase while cards remain.
 fn resolve_top_of_stack(gs: &mut Gamestate) {
-    let Some(top) = gs.stack_idx else {
+    let Some(pending) = gs.pop_stack() else {
         return;
     };
-    let top = top as usize;
+    let top = pending.index;
     let owner = if top < PLAYER_CARDS { 0 } else { 1 };
-    detach_from_linked_list(&mut gs.cards, &mut gs.stack_idx, None, None, top);
 
     let catalog = get_card_catalog();
     match catalog[gs.cards[top].card as usize].typ {
@@ -149,7 +148,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         _ => {
             gs.cards[top].location = CardLocation::graveyard(owner);
             gs.active_player = gs.turn_player;
-            gs.phase = if gs.stack_idx.is_none() {
+            gs.phase = if gs.stack_is_empty() {
                 Phase::Action
             } else {
                 Phase::Instant
@@ -210,7 +209,7 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     player.resources -= cost;
     detach_from_current_zone(player, &mut gs.cards, pending.index);
     gs.cards[pending.index].location = CardLocation::Stack;
-    attach_to_front_of_zone(&mut gs.cards, &mut gs.stack_idx, None, None, pending.index);
+    gs.push_to_stack(pending);
 
     // The card now lives on the stack, so it is no longer "pending" — clear it
     // before opening the Instant phase. A new layer landing on the stack also
@@ -462,7 +461,7 @@ mod tests {
 
         // The pending card is held off the stack and still sits in the hand
         // until it is actually paid for.
-        assert_eq!(gs.stack_idx, None);
+        assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Hand);
     }
 
@@ -495,7 +494,7 @@ mod tests {
         // Once the card hits the stack it is no longer pending.
         assert_eq!(gs.pending_card, None);
         assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
-        assert_eq!(gs.stack_idx, Some(cb_idx as u8));
+        assert_eq!(gs.stack_top().map(|p| p.index), Some(cb_idx));
     }
 
     #[test]
@@ -514,7 +513,7 @@ mod tests {
                 .expect("Muscle Mutt should be in the opening hand");
         step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
         assert_eq!(gs.phase, Phase::Pitch);
-        assert_eq!(gs.stack_idx, None);
+        assert_eq!(gs.stack_top(), None);
 
         // Pitch Clearing Bellow (pitch 3) — exactly covers the cost. The pending
         // card is committed to the stack, the cost is paid (3 - 3 = 0 resources
@@ -526,7 +525,7 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
 
         assert_eq!(gs.phase, Phase::Instant);
-        assert_eq!(gs.stack_idx, Some(mm_idx as u8));
+        assert_eq!(gs.stack_top().map(|p| p.index), Some(mm_idx));
         assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.resources, 0);
         // The pitched card now lives in the pitch zone, not the hand.
@@ -557,7 +556,7 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pitch, index: pc_idx});
 
         assert_eq!(gs.phase, Phase::Pitch);
-        assert_eq!(gs.stack_idx, None);
+        assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.p1.resources, 2);
         assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Hand);
         assert_eq!(gs.pending_card.expect("still pending").index, mm_idx);
@@ -571,7 +570,7 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pitch, index: ro_idx});
 
         assert_eq!(gs.phase, Phase::Instant);
-        assert_eq!(gs.stack_idx, Some(mm_idx as u8));
+        assert_eq!(gs.stack_top().map(|p| p.index), Some(mm_idx));
         assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.resources, 1);
     }
@@ -588,7 +587,7 @@ mod tests {
         let weapon_idx = gs.p1.weapon_idx.unwrap() as usize;
         step(&mut gs, Action{ typ: ActionType::Attack, index: weapon_idx});
         assert_eq!(gs.phase, Phase::Pitch);
-        assert_eq!(gs.stack_idx, None);
+        assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.p1.weapon_idx, Some(weapon_idx as u8));
 
         // Pitch Clearing Bellow (pitch 3) to cover the cost of 2. The weapon is
@@ -600,7 +599,7 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
 
         assert_eq!(gs.phase, Phase::Instant);
-        assert_eq!(gs.stack_idx, Some(weapon_idx as u8));
+        assert_eq!(gs.stack_top().map(|p| p.index), Some(weapon_idx));
         assert_eq!(gs.cards[weapon_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.weapon_idx, None);
         assert_eq!(gs.p1.resources, 1);
@@ -676,7 +675,7 @@ mod tests {
         assert_eq!(gs.phase, Phase::Instant);
         assert_eq!(gs.turn_player, 0);
         assert_eq!(gs.active_player, 0);
-        assert_eq!(gs.stack_idx, Some(cb_idx as u8));
+        assert_eq!(gs.stack_top().map(|p| p.index), Some(cb_idx));
         (gs, cb_idx)
     }
 
@@ -705,7 +704,7 @@ mod tests {
         assert_eq!(gs.turn_player, 0);
         assert_eq!(gs.active_player, 1);
         assert_eq!(gs.passes, 1);
-        assert_eq!(gs.stack_idx, Some(cb_idx as u8));
+        assert_eq!(gs.stack_top().map(|p| p.index), Some(cb_idx));
         assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
     }
 
@@ -724,7 +723,7 @@ mod tests {
         assert_eq!(gs.active_player, 0);
         assert_eq!(gs.turn_player, 0);
         assert_eq!(gs.passes, 0);
-        assert_eq!(gs.stack_idx, None);
+        assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Graveyard);
     }
 
@@ -749,7 +748,7 @@ mod tests {
                 .expect("Clearing Bellow should be in the opening hand");
         step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
         assert_eq!(gs.phase, Phase::Instant);
-        assert_eq!(gs.stack_idx, Some(mm_idx as u8));
+        assert_eq!(gs.stack_top().map(|p| p.index), Some(mm_idx));
 
         // Both players pass. Because Muscle Mutt is an attack action, resolving it
         // moves it off the stack onto link 0 of Rhinar's combat chain, makes the
@@ -761,7 +760,7 @@ mod tests {
         assert_eq!(gs.active_player, 1);
         assert_eq!(gs.turn_player, 0);
         assert_eq!(gs.passes, 0);
-        assert_eq!(gs.stack_idx, None);
+        assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.p1.chain_link[0], Some(mm_idx as u8));
         assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
     }
@@ -810,7 +809,7 @@ mod tests {
         assert_eq!(gs.active_player, 1);
         assert_eq!(gs.passes, 0);
         // Sigil is now on top of the stack, above Clearing Bellow.
-        assert_eq!(gs.stack_idx, Some(sigil_idx as u8));
+        assert_eq!(gs.stack_top().map(|p| p.index), Some(sigil_idx));
         assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
         assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
 
@@ -822,7 +821,7 @@ mod tests {
         assert_eq!(gs.active_player, 0);
         assert_eq!(gs.passes, 1);
         assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
-        assert_eq!(gs.stack_idx, Some(sigil_idx as u8));
+        assert_eq!(gs.stack_top().map(|p| p.index), Some(sigil_idx));
 
         // The turn player also passes (2 passes in succession): the top card
         // (Sigil) resolves to its owner's graveyard. Clearing Bellow remains on
@@ -832,7 +831,7 @@ mod tests {
         assert_eq!(gs.active_player, 0);
         assert_eq!(gs.passes, 0);
         assert_eq!(gs.cards[sigil_idx].location, CardLocation::P2Graveyard);
-        assert_eq!(gs.stack_idx, Some(cb_idx as u8));
+        assert_eq!(gs.stack_top().map(|p| p.index), Some(cb_idx));
     }
 
     #[test]
