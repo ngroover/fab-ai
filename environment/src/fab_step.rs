@@ -22,8 +22,8 @@ fn handle_choose_first(gs: &mut Gamestate, act: Action) {
     gs.phase = Phase::Action;
     // The cards live in the shared `gs.cards` array; draw each player's opening
     // hand by passing that array alongside the player and its id.
-    draw_to_intellect(&mut gs.p1, &mut gs.cards, 0);
-    draw_to_intellect(&mut gs.p2, &mut gs.cards, 1);
+    draw_to_intellect(&mut gs.p1, &mut gs.cards);
+    draw_to_intellect(&mut gs.p2, &mut gs.cards);
 }
 
 fn handle_action_phase(gs: &mut Gamestate, act: Action) {
@@ -265,12 +265,12 @@ fn detach_from_linked_list(
     }
 }
 
-fn draw_to_intellect(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], pid: u8) {
+fn draw_to_intellect(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
     let need = (player.intellect - player.hand_size).max(0) as usize;
-    draw_cards(player, cards, pid, need);
+    draw_cards(player, cards, need);
 }
 
-fn draw_cards(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], pid: u8, num: usize) {
+fn draw_cards(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], num: usize) {
     let mut drawn = 0;
     while drawn < num {
         // Re-read the top each iteration: drawing a card updates `top_deck_idx`,
@@ -278,14 +278,15 @@ fn draw_cards(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], pid: u8
         let Some(current_idx) = player.top_deck_idx.map(|x| x as usize) else {
             break; // deck is empty
         };
-        move_from_deck_to_hand(player, cards, pid, current_idx);
+        move_from_deck_to_hand(player, cards, current_idx);
         drawn += 1;
     }
 }
 
-fn move_from_deck_to_hand(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], pid: u8, card_idx : usize) {
+fn move_from_deck_to_hand(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], card_idx : usize) {
     // Pull the card off the deck (updates top/bottom pointers and deck_size),
     // then prepend it to the hand and mark it as known to its owner.
+    let pid = player.pid;
     detach_from_current_zone(player, cards, card_idx);
     cards[card_idx].location = CardLocation::hand(pid);
     cards[card_idx].visible = if pid == 0 {
@@ -619,7 +620,7 @@ mod tests {
         let hand_before = gs.p1.hand_size;
 
         // Draw the entire deck, including the final (tail) card.
-        draw_cards(&mut gs.p1, &mut gs.cards, 0, deck_before as usize);
+        draw_cards(&mut gs.p1, &mut gs.cards, deck_before as usize);
 
         // The whole deck moved to hand; nothing is left behind and the head
         // pointer is cleared.
@@ -629,7 +630,7 @@ mod tests {
         assert_eq!(gs.p1.hand_size, hand_before + deck_before);
 
         // Drawing further from an empty deck is a safe no-op.
-        draw_cards(&mut gs.p1, &mut gs.cards, 0, 5);
+        draw_cards(&mut gs.p1, &mut gs.cards, 5);
         assert_eq!(gs.p1.deck_size, 0);
         assert_eq!(gs.p1.hand_size, hand_before + deck_before);
     }

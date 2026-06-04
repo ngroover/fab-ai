@@ -94,6 +94,12 @@ pub enum Phase {
 /// its zones, plus its turn resources. Player 0's cards occupy global slots
 /// `0..PLAYER_CARDS`, player 1's occupy `PLAYER_CARDS..2*PLAYER_CARDS`.
 pub struct Player {
+    /// Which player this is (0 or 1), and equivalently which half of
+    /// `Gamestate::cards` it owns: player 0 owns slots `0..PLAYER_CARDS`,
+    /// player 1 owns `PLAYER_CARDS..2*PLAYER_CARDS`. Stored here so the pid
+    /// travels with the player rather than being passed as a parallel argument
+    /// that could drift out of sync.
+    pub pid: u8,
     pub life: u8,
     pub intellect: u8,
     pub hero : Card,
