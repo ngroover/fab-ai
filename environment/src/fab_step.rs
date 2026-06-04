@@ -1,6 +1,6 @@
 use crate::action::{Action,ActionType};
 use crate::game_state::{Gamestate,Phase,Player,PendingCard,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
-use crate::cards::CardData;
+use crate::cards::{CardData,CardType};
 use crate::classic_battles::get_card_catalog;
 
 pub fn step(gs: &mut Gamestate, act: Action) {
@@ -101,33 +101,32 @@ fn commit_action_card(gs: &mut Gamestate, act: Action) {
 /// count is reset to 0 whenever a card is played onto the stack (see
 /// `commit_pending_to_stack`), so it only reaches 2 when both players pass in
 /// succession with no card played between. On that second pass the top card of
-/// the stack resolves, the count resets, and priority returns to the turn
-/// player. If the stack still holds cards a fresh priority round opens (staying
-/// in the Instant phase); once it empties, control returns to the turn player's
-/// Action phase.
+/// the stack resolves (see `resolve_top_of_stack`) and the count resets.
 fn handle_instant_pass(gs: &mut Gamestate) {
     gs.passes += 1;
     if gs.passes >= 2 {
         // Both players have now passed in succession: resolve the top of the
-        // stack, reset the pass count, and hand priority back to the turn player.
-        resolve_top_of_stack(gs);
+        // stack and reset the pass count. The resolution itself decides where
+        // priority and the phase go next, since that depends on the card type.
         gs.passes = 0;
-        gs.active_player = gs.turn_player;
-        gs.phase = if gs.stack_idx.is_none() {
-            Phase::Action
-        } else {
-            Phase::Instant
-        };
+        resolve_top_of_stack(gs);
     } else {
         // First pass: hand priority to the other player, who may now respond.
         gs.active_player ^= 1;
     }
 }
 
-/// Resolve the card at the top of the stack (its most recently added card). The
-/// card is detached from the stack and moved to its owner's graveyard — the
-/// owner being implied by which half of the shared `cards` array the slot falls
-/// in. A no-op when the stack is empty.
+/// Resolve the card at the top of the stack (its most recently added card),
+/// detaching it from the stack and routing it by card type. The owner is implied
+/// by which half of the shared `cards` array the slot falls in. A no-op when the
+/// stack is empty.
+///
+/// - An **attack action** moves onto its owner's combat chain at link 0, the
+///   opponent becomes the active player to defend, and we enter the Defend
+///   phase.
+/// - Any **other action** resolves to its owner's graveyard. Priority returns to
+///   the turn player, who resumes the Action phase once the stack is empty, or
+///   keeps responding in the Instant phase while cards remain.
 fn resolve_top_of_stack(gs: &mut Gamestate) {
     let Some(top) = gs.stack_idx else {
         return;
@@ -135,7 +134,28 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     let top = top as usize;
     let owner = if top < PLAYER_CARDS { 0 } else { 1 };
     detach_from_linked_list(&mut gs.cards, &mut gs.stack_idx, None, None, top);
-    gs.cards[top].location = CardLocation::graveyard(owner);
+
+    let catalog = get_card_catalog();
+    match catalog[gs.cards[top].card as usize].typ {
+        CardType::AttackAction => {
+            // The attacking card leaves the stack for link 0 of its owner's
+            // combat chain; the opponent must now defend.
+            gs.cards[top].location = CardLocation::combat_chain(owner);
+            let attacker = if owner == 0 { &mut gs.p1 } else { &mut gs.p2 };
+            attacker.chain_link[0] = Some(top as u8);
+            gs.active_player = owner ^ 1;
+            gs.phase = Phase::Defend;
+        }
+        _ => {
+            gs.cards[top].location = CardLocation::graveyard(owner);
+            gs.active_player = gs.turn_player;
+            gs.phase = if gs.stack_idx.is_none() {
+                Phase::Action
+            } else {
+                Phase::Instant
+            };
+        }
+    }
 }
 
 /// Handle a pitch during the Pitch phase. The pitched card is moved from the
@@ -706,6 +726,44 @@ mod tests {
         assert_eq!(gs.passes, 0);
         assert_eq!(gs.stack_idx, None);
         assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Graveyard);
+    }
+
+    #[test]
+    fn test_attack_action_resolves_to_combat_chain() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, index : 0});
+
+        // Rhinar plays Muscle Mutt (an attack action, cost 3) and pitches
+        // Clearing Bellow (pitch 3) to commit it to the stack, landing in the
+        // Instant phase.
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.stack_idx, Some(mm_idx as u8));
+
+        // Both players pass. Because Muscle Mutt is an attack action, resolving it
+        // moves it off the stack onto link 0 of Rhinar's combat chain, makes the
+        // opponent (Dorinthea, p2) the active player, and enters the Defend phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.active_player, 1);
+        assert_eq!(gs.turn_player, 0);
+        assert_eq!(gs.passes, 0);
+        assert_eq!(gs.stack_idx, None);
+        assert_eq!(gs.p1.chain_link[0], Some(mm_idx as u8));
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
     }
 
     #[test]

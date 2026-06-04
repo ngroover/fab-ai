@@ -87,6 +87,7 @@ pub enum Phase {
     Action,
     Pitch,
     Instant,
+    Defend,
 }
 
 /// Per-player state. The cards themselves live in `Gamestate::cards`; a player

@@ -19,6 +19,9 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
         Phase::Action => legal_action_phase(gs),
         Phase::Pitch => legal_pitch_phase(gs),
         Phase::Instant => legal_instant_phase(gs),
+        // The Defend phase's legal actions (blocking, defense reactions) are not
+        // implemented yet; offer nothing for now.
+        Phase::Defend => Vec::new(),
         Phase::Start => Vec::new()
     }
 }
