@@ -18,7 +18,7 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
         },
         Phase::Action => legal_action_phase(gs),
         Phase::Pitch => legal_pitch_phase(gs),
-        Phase::Instant => Vec::new(),
+        Phase::Instant => legal_instant_phase(gs),
         Phase::Start => Vec::new()
     }
 }
@@ -45,6 +45,20 @@ fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
 }
 
 fn legal_action_phase(gs: &Gamestate) -> Vec<Action> {
+    // The action phase offers every card that can be played at action speed.
+    legal_play_phase(gs, is_action_phase_playable)
+}
+
+fn legal_instant_phase(gs: &Gamestate) -> Vec<Action> {
+    // The instant phase shares the action phase's machinery but only ever
+    // offers instants — see `is_instant_phase_playable`.
+    legal_play_phase(gs, is_instant_phase_playable)
+}
+
+/// Shared body for the action and instant phases. They differ only in which
+/// card types may be played, captured by the `is_playable` predicate; the
+/// playable-card, equipment-activation, and pass logic is otherwise identical.
+fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Action> {
     let catalog = get_card_catalog();
     let mut legal_actions = Vec::new();
     let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
@@ -56,11 +70,11 @@ fn legal_action_phase(gs: &Gamestate) -> Vec<Action> {
         .map(|(_, cs)| catalog[cs.card as usize].pitch)
         .sum();
 
-    legal_actions.extend(get_playable_cards(player, &gs.cards, total_pitch));
+    legal_actions.extend(get_playable_cards(player, &gs.cards, total_pitch, is_playable));
     legal_actions.extend(get_equipment_activations(player, &gs.cards, total_pitch));
 
-    // Passing is always available during the action phase; it ends the turn
-    // without playing or activating anything.
+    // Passing is always available; it ends the window without playing or
+    // activating anything.
     legal_actions.push(Action {
         typ: ActionType::Pass,
         index: 0,
@@ -120,7 +134,7 @@ fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], 
     actions
 }
 
-fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8) -> Vec<Action> {
+fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8, is_playable: fn(CardType) -> bool) -> Vec<Action> {
     let catalog = get_card_catalog();
     let mut actions: Vec<Action> = Vec::new();
 
@@ -129,8 +143,8 @@ fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_p
         let card = cardstate.card;
         let data = &catalog[card as usize];
 
-        // Only playable cards
-        if !is_action_phase_playable(data.typ) {
+        // Only cards playable in the current phase
+        if !is_playable(data.typ) {
             continue;
         }
 
@@ -160,9 +174,13 @@ fn is_action_phase_playable(typ: CardType) -> bool {
     matches!(
         typ,
         CardType::AttackAction |
-        CardType::Action | 
+        CardType::Action |
         CardType::Instant
     )
+}
+
+fn is_instant_phase_playable(typ: CardType) -> bool {
+    matches!(typ, CardType::Instant)
 }
 
 #[cfg(test)]
@@ -283,6 +301,65 @@ mod tests {
             Card::RagingOnslaughtY,
             Card::ClearingBellowB,
         ]));
+    }
+
+    #[test]
+    fn is_instant_phase_playable_only_allows_instants() {
+        assert!(is_instant_phase_playable(CardType::Instant));
+        assert!(!is_instant_phase_playable(CardType::AttackAction));
+        assert!(!is_instant_phase_playable(CardType::Action));
+        assert!(!is_instant_phase_playable(CardType::AttackReaction));
+        assert!(!is_instant_phase_playable(CardType::DefenseReaction));
+        assert!(!is_instant_phase_playable(CardType::Equipment));
+        assert!(!is_instant_phase_playable(CardType::Weapon));
+    }
+
+    #[test]
+    fn legal_actions_in_instant_phase_only_offers_instants() {
+        let catalog = get_card_catalog();
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        step(&mut gs, go_first);
+
+        // The action phase offers every playable card type; capture its plays so
+        // we can show the instant phase is a strict, instant-only subset.
+        let action_plays: HashSet<Card> = legal_actions(&gs).iter()
+                .filter(|a| a.typ == ActionType::PlayCard)
+                .map(|a| gs.cards[a.index].card)
+                .collect();
+        // Sanity: the opening hand has non-instant plays, so the filter has
+        // something to remove.
+        assert!(action_plays.iter()
+                .any(|c| !is_instant_phase_playable(catalog[*c as usize].typ)));
+
+        // Switch to the instant phase and re-derive the legal actions. The shared
+        // machinery (affordability, equipment activations, pass) is identical;
+        // only the playable card types differ.
+        gs.phase = Phase::Instant;
+        let actions = legal_actions(&gs);
+
+        // Every offered PlayCard is an Instant, and the instant plays are exactly
+        // the instant-typed subset of the action-phase plays.
+        let instant_plays: HashSet<Card> = actions.iter()
+                .filter(|a| a.typ == ActionType::PlayCard)
+                .map(|a| gs.cards[a.index].card)
+                .collect();
+        for card in &instant_plays {
+            assert!(is_instant_phase_playable(catalog[*card as usize].typ));
+        }
+        let expected: HashSet<Card> = action_plays.iter()
+                .filter(|c| is_instant_phase_playable(catalog[**c as usize].typ))
+                .copied()
+                .collect();
+        assert_eq!(instant_plays, expected);
+
+        // Pass is still always available so the window can be passed.
+        assert_eq!(
+            actions.iter().filter(|a| a.typ == ActionType::Pass).count(),
+            1
+        );
     }
 
     #[test]
