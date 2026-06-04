@@ -19,11 +19,27 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
         Phase::Action => legal_action_phase(gs),
         Phase::Pitch => legal_pitch_phase(gs),
         Phase::Instant => legal_instant_phase(gs),
-        // The Defend phase's legal actions (blocking, defense reactions) are not
-        // implemented yet; offer nothing for now.
-        Phase::Defend => Vec::new(),
+        Phase::Defend => legal_defend_phase(gs),
         Phase::Start => Vec::new()
     }
+}
+
+fn legal_defend_phase(gs: &Gamestate) -> Vec<Action> {
+    let catalog = get_card_catalog();
+    // When we enter the Defend phase the active player is flipped to the
+    // defender (see resolve_top_of_stack), so the usual active-player lookup
+    // gives us the player choosing blockers.
+    let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
+
+    // Every card in hand can be committed as a blocker except those flagged
+    // no_block (e.g. cards with no defense that cannot block normally).
+    player.hand_iter(&gs.cards)
+        .filter(|(_, cs)| !catalog[cs.card as usize].no_block)
+        .map(|(idx, _)| Action {
+            typ: ActionType::Defend,
+            index: idx,
+        })
+        .collect()
 }
 
 fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
@@ -305,6 +321,69 @@ mod tests {
                 .map(|a| gs.cards[a.index].card)
                 .collect();
         assert_eq!(pitchable, HashSet::from([
+            Card::PackCallY,
+            Card::RagingOnslaughtY,
+            Card::ClearingBellowB,
+        ]));
+    }
+
+    #[test]
+    fn legal_actions_in_defend_phase() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        step(&mut gs, go_first);
+
+        // Enter the Defend phase directly to isolate its legal-action generator.
+        // The active player (Rhinar, p1) stands in as the defender here.
+        gs.phase = Phase::Defend;
+
+        let actions = legal_actions(&gs);
+
+        // Rhinar's seed-42 opening hand is three yellow attack actions plus a
+        // blue defense reaction — none are no_block, so every card in hand is
+        // offered as a Defend action sourced from the Hand.
+        for a in &actions {
+            assert_eq!(a.typ, ActionType::Defend);
+            assert_eq!(gs.cards[a.index].location, CardLocation::P1Hand);
+        }
+        let blockable: HashSet<Card> = actions.iter()
+                .map(|a| gs.cards[a.index].card)
+                .collect();
+        assert_eq!(blockable, HashSet::from([
+            Card::MuscleMuttY,
+            Card::PackCallY,
+            Card::RagingOnslaughtY,
+            Card::ClearingBellowB,
+        ]));
+    }
+
+    #[test]
+    fn legal_actions_in_defend_phase_excludes_no_block() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        step(&mut gs, go_first);
+        gs.phase = Phase::Defend;
+
+        // Turn one hand card into a no_block card (Bare Fangs is a 6/0 attack that
+        // cannot block normally). It must drop out of the defend options while the
+        // rest of the hand is still offered.
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        gs.cards[mm_idx].card = Card::BareFangsR;
+
+        let actions = legal_actions(&gs);
+
+        assert!(actions.iter().all(|a| a.index != mm_idx));
+        let blockable: HashSet<Card> = actions.iter()
+                .map(|a| gs.cards[a.index].card)
+                .collect();
+        assert_eq!(blockable, HashSet::from([
             Card::PackCallY,
             Card::RagingOnslaughtY,
             Card::ClearingBellowB,

@@ -8,6 +8,7 @@ pub enum ActionType {
     Activate,
     Attack,
     Pitch,
+    Defend,
     Pass
 }
 
