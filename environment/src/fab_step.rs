@@ -28,19 +28,19 @@ fn handle_choose_first(gs: &mut Gamestate, act: Action) {
 
 fn handle_action_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
-        // Playing a card or activating equipment/a weapon both commit a card
-        // that must then be paid for. The card is recorded as `pending_card`
-        // (still sitting in its source zone, not yet on the stack). If banked
-        // resources already cover its cost it is committed to the stack and the
-        // Instant phase immediately; otherwise it stays pending and we drop into
-        // the Pitch phase to pitch for the rest.
-        ActionType::PlayCard | ActionType::Activate => {
-            // Cost of committing this card, read while it still sits in its
-            // source zone (the location distinguishes a weapon attack / played
-            // card from an activated armor ability).
+        // Playing a card, activating an armor ability, or swinging a weapon all
+        // commit a card that must then be paid for. The card is recorded as
+        // `pending_card` (still sitting in its source zone, not yet on the
+        // stack). If banked resources already cover its cost it is committed to
+        // the stack and the Instant phase immediately; otherwise it stays pending
+        // and we drop into the Pitch phase to pitch for the rest.
+        ActionType::PlayCard | ActionType::Activate | ActionType::Attack => {
+            // Cost of committing this card: an Activate pays its ability's cost,
+            // any other action (a played card or a weapon swing) pays the card's
+            // own catalog cost.
             let catalog = get_card_catalog();
             let cs = gs.cards[act.index];
-            let cost = action_cost(cs.location, &catalog[cs.card as usize]);
+            let cost = action_cost(act.typ, &catalog[cs.card as usize]);
 
             let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
             let already_paid = player.resources >= cost;
@@ -91,7 +91,7 @@ fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
     // Cost still owed on the pending card; once we can cover it, commit it.
     let pending = gs.pending_card.expect("pitch phase requires a pending card");
     let pcs = gs.cards[pending.index];
-    let cost = action_cost(pcs.location, &catalog[pcs.card as usize]);
+    let cost = action_cost(pending.typ, &catalog[pcs.card as usize]);
     if resources >= cost {
         commit_pending_to_stack(gs);
     }
@@ -108,11 +108,11 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
         return;
     };
 
-    // Recompute the cost from the card's still-current source location, mirroring
-    // the affordability check that let us get here.
+    // Recompute the cost from the pending action's type, mirroring the
+    // affordability check that let us get here.
     let catalog = get_card_catalog();
     let cs = gs.cards[pending.index];
-    let cost = action_cost(cs.location, &catalog[cs.card as usize]);
+    let cost = action_cost(pending.typ, &catalog[cs.card as usize]);
 
     let player = if gs.active_player == 0 { &mut gs.p1 } else { &mut gs.p2 };
     player.resources -= cost;
@@ -123,18 +123,19 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     gs.phase = Phase::Instant;
 }
 
-/// Resource cost of committing a card from `location`. Activating a worn armor
-/// piece costs its ability's resource cost; everything else (playing a card
-/// from hand, or a weapon attack) costs the card's own `cost`. Mirrors the
-/// affordability checks in `legal_actions`.
-fn action_cost(location: CardLocation, data: &CardData) -> u8 {
-    match location {
-        CardLocation::P1Head | CardLocation::P2Head
-        | CardLocation::P1Chest | CardLocation::P2Chest
-        | CardLocation::P1Arms | CardLocation::P2Arms
-        | CardLocation::P1Legs | CardLocation::P2Legs => {
-            data.ability.as_ref().map_or(0, |a| a.resource_cost())
-        }
+/// Resource cost of committing a card for the given action. An `Activate` pays
+/// the card's activated ability's resource cost — an Activate is always done on
+/// a card that carries an ability, so the ability is expected to be present.
+/// Every other action (playing a card from hand, or an `Attack` weapon swing)
+/// pays the card's own catalog `cost`. Mirrors the affordability checks in
+/// `legal_actions`.
+fn action_cost(typ: ActionType, data: &CardData) -> u8 {
+    match typ {
+        ActionType::Activate => data
+            .ability
+            .as_ref()
+            .expect("Activate action requires a card with an ability")
+            .resource_cost(),
         _ => data.cost,
     }
 }
@@ -478,16 +479,16 @@ mod tests {
     }
 
     #[test]
-    fn test_pitch_commits_activated_weapon_to_stack() {
+    fn test_pitch_commits_weapon_attack_to_stack() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
-        // Activate Bone Basher (cost 2): pending, off the stack, Pitch phase.
+        // Attack with Bone Basher (cost 2): pending, off the stack, Pitch phase.
         let weapon_idx = gs.p1.weapon_idx.unwrap() as usize;
-        step(&mut gs, Action{ typ: ActionType::Activate, index: weapon_idx});
+        step(&mut gs, Action{ typ: ActionType::Attack, index: weapon_idx});
         assert_eq!(gs.phase, Phase::Pitch);
         assert_eq!(gs.stack_idx, None);
         assert_eq!(gs.p1.weapon_idx, Some(weapon_idx as u8));
@@ -508,22 +509,22 @@ mod tests {
     }
 
     #[test]
-    fn test_activate_card_moves_to_pitch() {
+    fn test_attack_card_moves_to_pitch() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
-        // Activate the equipped weapon. Same flow: record pending, go to Pitch.
+        // Swing the equipped weapon. Same flow: record pending, go to Pitch.
         let weapon_idx = gs.p1.weapon_idx.unwrap() as usize;
-        let activate = Action{ typ: ActionType::Activate, index: weapon_idx};
-        step(&mut gs, activate);
+        let attack = Action{ typ: ActionType::Attack, index: weapon_idx};
+        step(&mut gs, attack);
 
         assert_eq!(gs.phase, Phase::Pitch);
         let pending = gs.pending_card.expect("pending card should be set");
         assert_eq!(pending.index, weapon_idx);
-        assert_eq!(pending.typ, ActionType::Activate);
+        assert_eq!(pending.typ, ActionType::Attack);
     }
 
     #[test]

@@ -145,10 +145,11 @@ pub struct Gamestate {
     pub pending_card : Option<PendingCard>,
 }
 
-/// A card the active player has committed to play or activate, pending payment
-/// during the `Pitch` phase. `index` is the global slot into `Gamestate::cards`;
-/// `typ` is the action that committed it (`PlayCard` or `Activate`), which
-/// determines how the card resolves once paid for.
+/// A card the active player has committed to play, activate, or attack with,
+/// pending payment during the `Pitch` phase. `index` is the global slot into
+/// `Gamestate::cards`; `typ` is the action that committed it (`PlayCard`,
+/// `Activate`, or `Attack`), which determines how the card resolves once paid
+/// for.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PendingCard {
     pub index : usize,
