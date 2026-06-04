@@ -116,6 +116,7 @@ fn player_from_decklist(deck: [Card; 46], pid: u8) -> (Player, [CardState; PLAYE
         .unwrap_or_else(|_| panic!("expected exactly {} non-hero cards", PLAYER_CARDS));
 
     let player = Player {
+        pid,
         life,
         intellect,
         hero,
@@ -164,18 +165,17 @@ pub fn set_life_and_intellect(gs: &mut Gamestate) {
 pub fn shuffle_decks(gs: &mut Gamestate) {
     // p1, p2, and the shared cards array are disjoint fields, so each call can
     // borrow the relevant player, the cards array, and the rng together.
-    shuffle_deck_for(&mut gs.p1, &mut gs.cards, 0, &mut gs.rng);
-    shuffle_deck_for(&mut gs.p2, &mut gs.cards, 1, &mut gs.rng);
+    shuffle_deck_for(&mut gs.p1, &mut gs.cards, &mut gs.rng);
+    shuffle_deck_for(&mut gs.p2, &mut gs.cards, &mut gs.rng);
 }
 
 fn shuffle_deck_for(
     player: &mut Player,
     cards: &mut [CardState; TOTAL_CARDS],
-    pid: u8,
     rng: &mut SmallRng,
 ) {
-    let base = player_base(pid);
-    let deck_loc = CardLocation::deck(pid);
+    let base = player_base(player.pid);
+    let deck_loc = CardLocation::deck(player.pid);
     let mut cards_in_deck: Vec<usize> = (base..base + PLAYER_CARDS)
         .filter(|&i| cards[i].location == deck_loc)
         .collect();
@@ -194,12 +194,13 @@ fn shuffle_deck_for(
 }
 
 pub fn place_cards(gs: &mut Gamestate) {
-    place_cards_for(&mut gs.p1, &mut gs.cards, 0);
-    place_cards_for(&mut gs.p2, &mut gs.cards, 1);
+    place_cards_for(&mut gs.p1, &mut gs.cards);
+    place_cards_for(&mut gs.p2, &mut gs.cards);
 }
 
-fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], pid: u8) {
+fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
     let catalog = get_card_catalog();
+    let pid = player.pid;
     let base = player_base(pid);
     player.hand_size = 0;
     player.deck_size = 0;
