@@ -55,6 +55,7 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: 
         cards,
         active_player: 0,
         turn_player: 0,
+        passes: 0,
         phase: Phase::Start,
         rng,
         stack_idx: None,

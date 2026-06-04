@@ -96,27 +96,31 @@ fn commit_action_card(gs: &mut Gamestate, act: Action) {
     }
 }
 
-/// Handle a pass during the Instant phase. The turn player holds priority first;
-/// when they pass, priority moves to the other player, who may then play their
-/// own instants. Once that player passes too — both players having passed in
-/// succession — the top card of the stack resolves and priority returns to the
-/// turn player. If the stack still holds cards a fresh priority round opens
-/// (staying in the Instant phase); once it empties, control returns to the turn
-/// player's Action phase.
+/// Handle a pass during the Instant phase, tracked by `gs.passes`. Each pass
+/// hands priority to the other player and bumps the consecutive-pass count; the
+/// count is reset to 0 whenever a card is played onto the stack (see
+/// `commit_pending_to_stack`), so it only reaches 2 when both players pass in
+/// succession with no card played between. On that second pass the top card of
+/// the stack resolves, the count resets, and priority returns to the turn
+/// player. If the stack still holds cards a fresh priority round opens (staying
+/// in the Instant phase); once it empties, control returns to the turn player's
+/// Action phase.
 fn handle_instant_pass(gs: &mut Gamestate) {
-    if gs.active_player == gs.turn_player {
-        // Turn player passes priority to the opponent, who may now respond.
-        gs.active_player ^= 1;
-    } else {
-        // Both players have now passed: resolve the top of the stack and hand
-        // priority back to the turn player.
+    gs.passes += 1;
+    if gs.passes >= 2 {
+        // Both players have now passed in succession: resolve the top of the
+        // stack, reset the pass count, and hand priority back to the turn player.
         resolve_top_of_stack(gs);
+        gs.passes = 0;
         gs.active_player = gs.turn_player;
         gs.phase = if gs.stack_idx.is_none() {
             Phase::Action
         } else {
             Phase::Instant
         };
+    } else {
+        // First pass: hand priority to the other player, who may now respond.
+        gs.active_player ^= 1;
     }
 }
 
@@ -189,8 +193,10 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     attach_to_front_of_zone(&mut gs.cards, &mut gs.stack_idx, None, None, pending.index);
 
     // The card now lives on the stack, so it is no longer "pending" — clear it
-    // before opening the Instant phase.
+    // before opening the Instant phase. A new layer landing on the stack also
+    // interrupts any pending resolution, so the consecutive-pass count resets.
     gs.pending_card = None;
+    gs.passes = 0;
     gs.phase = Phase::Instant;
 }
 
@@ -678,6 +684,7 @@ mod tests {
         assert_eq!(gs.phase, Phase::Instant);
         assert_eq!(gs.turn_player, 0);
         assert_eq!(gs.active_player, 1);
+        assert_eq!(gs.passes, 1);
         assert_eq!(gs.stack_idx, Some(cb_idx as u8));
         assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
     }
@@ -696,6 +703,7 @@ mod tests {
         assert_eq!(gs.phase, Phase::Action);
         assert_eq!(gs.active_player, 0);
         assert_eq!(gs.turn_player, 0);
+        assert_eq!(gs.passes, 0);
         assert_eq!(gs.stack_idx, None);
         assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Graveyard);
     }
@@ -736,22 +744,35 @@ mod tests {
 
         // The opponent responds with an instant of their own. Sigil of Solace
         // (cost 0) commits straight to the stack on top of Clearing Bellow; the
-        // responder keeps priority, so they remain the active player.
+        // responder keeps priority, so they remain the active player. Adding this
+        // layer resets the consecutive-pass count.
         step(&mut gs, Action{ typ: ActionType::PlayCard, index: sigil_idx});
 
         assert_eq!(gs.phase, Phase::Instant);
         assert_eq!(gs.active_player, 1);
+        assert_eq!(gs.passes, 0);
         // Sigil is now on top of the stack, above Clearing Bellow.
         assert_eq!(gs.stack_idx, Some(sigil_idx as u8));
         assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
         assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
 
-        // The opponent passes; both have now passed, so the top card (Sigil)
-        // resolves to its owner's graveyard. Clearing Bellow remains on the
-        // stack and priority returns to the turn player for a fresh round.
+        // The opponent passes (1 pass). Because Sigil reset the count, this does
+        // not resolve anything — priority simply returns to the turn player, who
+        // now gets a window to respond to Sigil.
         step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
         assert_eq!(gs.phase, Phase::Instant);
         assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.passes, 1);
+        assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
+        assert_eq!(gs.stack_idx, Some(sigil_idx as u8));
+
+        // The turn player also passes (2 passes in succession): the top card
+        // (Sigil) resolves to its owner's graveyard. Clearing Bellow remains on
+        // the stack and priority returns to the turn player for a fresh round.
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.passes, 0);
         assert_eq!(gs.cards[sigil_idx].location, CardLocation::P2Graveyard);
         assert_eq!(gs.stack_idx, Some(cb_idx as u8));
     }

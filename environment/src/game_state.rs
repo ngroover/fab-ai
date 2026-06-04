@@ -144,6 +144,11 @@ pub struct Gamestate {
     /// when the turn begins and is the player priority returns to after the top
     /// of the stack resolves.
     pub turn_player : u8,
+    /// Consecutive passes during the Instant phase. Each pass increments it; a
+    /// second pass in a row (reaching 2) resolves the top of the stack and
+    /// resets it to 0. Playing a card onto the stack also resets it to 0, since
+    /// the pending resolution has been interrupted by a new layer.
+    pub passes : u8,
     pub phase : Phase,
     pub rng : SmallRng,
     /// Head of the stack: the linked list of cards currently on the stack
