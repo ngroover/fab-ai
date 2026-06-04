@@ -327,66 +327,88 @@ mod tests {
         ]));
     }
 
-    #[test]
-    fn legal_actions_in_defend_phase() {
+    /// Drive the game through the early phases until Dorinthea (p2) is on
+    /// defense. Rhinar (p1) goes first, plays Muscle Mutt (an attack action) and
+    /// pitches Clearing Bellow to pay for it, then both players pass priority so
+    /// the attack resolves onto the combat chain — which flips the active player
+    /// to Dorinthea and enters the Defend phase. This mirrors the real engine
+    /// flow rather than poking `gs.phase` directly.
+    fn step_to_dorinthea_defending() -> Gamestate {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
-        step(&mut gs, go_first);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, index: 0});
 
-        // Enter the Defend phase directly to isolate its legal-action generator.
-        // The active player (Rhinar, p1) stands in as the defender here.
-        gs.phase = Phase::Defend;
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
+
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
+
+        // Both players pass; the attack resolves to the chain and Dorinthea must
+        // now defend.
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.active_player, 1);
+
+        gs
+    }
+
+    #[test]
+    fn legal_actions_in_defend_phase() {
+        let gs = step_to_dorinthea_defending();
 
         let actions = legal_actions(&gs);
 
-        // Rhinar's seed-42 opening hand is three yellow attack actions plus a
-        // blue defense reaction — none are no_block, so every card in hand is
-        // offered as a Defend action sourced from the Hand.
+        // Dorinthea's seed-42 opening hand is Driving Blade plus three red
+        // warrior cards — none are no_block, so every card in hand is offered as
+        // a Defend action sourced from her hand.
         for a in &actions {
             assert_eq!(a.typ, ActionType::Defend);
-            assert_eq!(gs.cards[a.index].location, CardLocation::P1Hand);
+            assert_eq!(gs.cards[a.index].location, CardLocation::P2Hand);
         }
         let blockable: HashSet<Card> = actions.iter()
                 .map(|a| gs.cards[a.index].card)
                 .collect();
         assert_eq!(blockable, HashSet::from([
-            Card::MuscleMuttY,
-            Card::PackCallY,
-            Card::RagingOnslaughtY,
-            Card::ClearingBellowB,
+            Card::DrivingBladeY,
+            Card::SharpenSteelR,
+            Card::SecondSwingR,
+            Card::InTheSwingR,
         ]));
     }
 
     #[test]
     fn legal_actions_in_defend_phase_excludes_no_block() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        let mut gs = step_to_dorinthea_defending();
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
-        step(&mut gs, go_first);
-        gs.phase = Phase::Defend;
-
-        // Turn one hand card into a no_block card (Bare Fangs is a 6/0 attack that
-        // cannot block normally). It must drop out of the defend options while the
-        // rest of the hand is still offered.
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+        // Turn one of Dorinthea's hand cards into Dodge, a defense reaction that
+        // cannot block normally (no_block). It must drop out of the defend
+        // options while the rest of the hand is still offered.
+        let db_idx = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
                 .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        gs.cards[mm_idx].card = Card::BareFangsR;
+                .expect("Driving Blade should be in the opening hand");
+        gs.cards[db_idx].card = Card::DodgeB;
 
         let actions = legal_actions(&gs);
 
-        assert!(actions.iter().all(|a| a.index != mm_idx));
+        assert!(actions.iter().all(|a| a.index != db_idx));
         let blockable: HashSet<Card> = actions.iter()
                 .map(|a| gs.cards[a.index].card)
                 .collect();
         assert_eq!(blockable, HashSet::from([
-            Card::PackCallY,
-            Card::RagingOnslaughtY,
-            Card::ClearingBellowB,
+            Card::SharpenSteelR,
+            Card::SecondSwingR,
+            Card::InTheSwingR,
         ]));
     }
 
