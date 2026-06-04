@@ -45,20 +45,23 @@ fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
 }
 
 fn legal_action_phase(gs: &Gamestate) -> Vec<Action> {
-    // The action phase offers every card that can be played at action speed.
-    legal_play_phase(gs, is_action_phase_playable)
+    // The action phase offers every card playable at action speed, plus
+    // activating equipment and the equipped weapon.
+    legal_play_phase(gs, is_action_phase_playable, true)
 }
 
 fn legal_instant_phase(gs: &Gamestate) -> Vec<Action> {
     // The instant phase shares the action phase's machinery but only ever
-    // offers instants — see `is_instant_phase_playable`.
-    legal_play_phase(gs, is_instant_phase_playable)
+    // offers instants (see `is_instant_phase_playable`). Equipment and weapon
+    // activations are action-speed, so they are not offered here.
+    legal_play_phase(gs, is_instant_phase_playable, false)
 }
 
 /// Shared body for the action and instant phases. They differ only in which
-/// card types may be played, captured by the `is_playable` predicate; the
-/// playable-card, equipment-activation, and pass logic is otherwise identical.
-fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Action> {
+/// card types may be played (the `is_playable` predicate) and whether
+/// equipment/weapon activations are offered (`allow_equipment`); the
+/// playable-card affordability and pass logic is otherwise identical.
+fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool, allow_equipment: bool) -> Vec<Action> {
     let catalog = get_card_catalog();
     let mut legal_actions = Vec::new();
     let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
@@ -71,7 +74,9 @@ fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Ac
         .sum();
 
     legal_actions.extend(get_playable_cards(player, &gs.cards, total_pitch, is_playable));
-    legal_actions.extend(get_equipment_activations(player, &gs.cards, total_pitch));
+    if allow_equipment {
+        legal_actions.extend(get_equipment_activations(player, &gs.cards, total_pitch));
+    }
 
     // Passing is always available; it ends the window without playing or
     // activating anything.
@@ -314,51 +319,38 @@ mod tests {
     }
 
     #[test]
-    fn legal_actions_in_instant_phase_only_offers_instants() {
-        let catalog = get_card_catalog();
+    fn legal_actions_in_instant_phase_only_offers_pass() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
-        // The action phase offers every playable card type; capture its plays so
-        // we can show the instant phase is a strict, instant-only subset.
-        let action_plays: HashSet<Card> = legal_actions(&gs).iter()
-                .filter(|a| a.typ == ActionType::PlayCard)
-                .map(|a| gs.cards[a.index].card)
-                .collect();
-        // Sanity: the opening hand has non-instant plays, so the filter has
-        // something to remove.
-        assert!(action_plays.iter()
-                .any(|c| !is_instant_phase_playable(catalog[*c as usize].typ)));
+        // Rhinar plays Muscle Mutt (cost 3): it becomes pending and we drop into
+        // the Pitch phase.
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
+        assert_eq!(gs.phase, Phase::Pitch);
 
-        // Switch to the instant phase and re-derive the legal actions. The shared
-        // machinery (affordability, equipment activations, pass) is identical;
-        // only the playable card types differ.
-        gs.phase = Phase::Instant;
+        // Pitch Clearing Bellow (pitch 3) to cover the cost. Muscle Mutt commits
+        // to the stack and the game advances to the Instant phase.
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
+        assert_eq!(gs.phase, Phase::Instant);
+
+        // Rhinar's remaining hand is two yellow attack actions (Pack Call, Raging
+        // Onslaught) — no instants. Even though the equipped Bone Basher is still
+        // affordable, weapon/equipment activations are not offered at instant
+        // speed, so the only legal action is to pass.
         let actions = legal_actions(&gs);
-
-        // Every offered PlayCard is an Instant, and the instant plays are exactly
-        // the instant-typed subset of the action-phase plays.
-        let instant_plays: HashSet<Card> = actions.iter()
-                .filter(|a| a.typ == ActionType::PlayCard)
-                .map(|a| gs.cards[a.index].card)
-                .collect();
-        for card in &instant_plays {
-            assert!(is_instant_phase_playable(catalog[*card as usize].typ));
-        }
-        let expected: HashSet<Card> = action_plays.iter()
-                .filter(|c| is_instant_phase_playable(catalog[**c as usize].typ))
-                .copied()
-                .collect();
-        assert_eq!(instant_plays, expected);
-
-        // Pass is still always available so the window can be passed.
-        assert_eq!(
-            actions.iter().filter(|a| a.typ == ActionType::Pass).count(),
-            1
-        );
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].typ, ActionType::Pass);
     }
 
     #[test]
