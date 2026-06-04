@@ -117,14 +117,14 @@ fn handle_instant_pass(gs: &mut Gamestate) {
 }
 
 /// Resolve the card at the top of the stack (its most recently added card),
-/// detaching it from the stack and routing it by card type. The owner is implied
-/// by which half of the shared `cards` array the slot falls in. A no-op when the
-/// stack is empty.
+/// detaching it from the stack and routing it by the action that committed it
+/// (carried on the `PendingCard`). The owner is implied by which half of the
+/// shared `cards` array the slot falls in. A no-op when the stack is empty.
 ///
-/// - An **attack action** moves onto its owner's combat chain at link 0, the
-///   opponent becomes the active player to defend, and we enter the Defend
-///   phase.
-/// - Any **other action** resolves to its owner's graveyard. Priority returns to
+/// - A **played attack action card**, or a **weapon swing** (the weapon card
+///   itself), moves onto its owner's combat chain at link 0, the opponent
+///   becomes the active player to defend, and we enter the Defend phase.
+/// - Anything **else** resolves to its owner's graveyard. Priority returns to
 ///   the turn player, who resumes the Action phase once the stack is empty, or
 ///   keeps responding in the Instant phase while cards remain.
 fn resolve_top_of_stack(gs: &mut Gamestate) {
@@ -135,25 +135,36 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     let owner = if top < PLAYER_CARDS { 0 } else { 1 };
 
     let catalog = get_card_catalog();
-    match catalog[gs.cards[top].card as usize].typ {
-        CardType::AttackAction => {
-            // The attacking card leaves the stack for link 0 of its owner's
-            // combat chain; the opponent must now defend.
-            gs.cards[top].location = CardLocation::combat_chain(owner);
-            let attacker = if owner == 0 { &mut gs.p1 } else { &mut gs.p2 };
-            attacker.chain_link[0] = Some(top as u8);
-            gs.active_player = owner ^ 1;
-            gs.phase = Phase::Defend;
-        }
-        _ => {
-            gs.cards[top].location = CardLocation::graveyard(owner);
-            gs.active_player = gs.turn_player;
-            gs.phase = if gs.stack_is_empty() {
-                Phase::Action
-            } else {
-                Phase::Instant
-            };
-        }
+    let card_type = catalog[gs.cards[top].card as usize].typ;
+
+    // A card joins its owner's combat chain when it is attacking: a played
+    // attack action card, or a weapon being swung (the weapon itself joins the
+    // chain). Everything else resolves to the graveyard.
+    let to_combat_chain = match pending.typ {
+        ActionType::PlayCard => matches!(card_type, CardType::AttackAction),
+        ActionType::Attack => matches!(
+            card_type,
+            CardType::Weapon | CardType::Sword2h | CardType::Club2h
+        ),
+        _ => false,
+    };
+
+    if to_combat_chain {
+        // The attacking card leaves the stack for link 0 of its owner's
+        // combat chain; the opponent must now defend.
+        gs.cards[top].location = CardLocation::combat_chain(owner);
+        let attacker = if owner == 0 { &mut gs.p1 } else { &mut gs.p2 };
+        attacker.chain_link[0] = Some(top as u8);
+        gs.active_player = owner ^ 1;
+        gs.phase = Phase::Defend;
+    } else {
+        gs.cards[top].location = CardLocation::graveyard(owner);
+        gs.active_player = gs.turn_player;
+        gs.phase = if gs.stack_is_empty() {
+            Phase::Action
+        } else {
+            Phase::Instant
+        };
     }
 }
 
@@ -763,6 +774,39 @@ mod tests {
         assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.p1.chain_link[0], Some(mm_idx as u8));
         assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
+    }
+
+    #[test]
+    fn test_weapon_attack_resolves_to_combat_chain() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, index : 0});
+
+        // Swing Bone Basher (cost 2) and pitch Clearing Bellow (pitch 3) to
+        // commit the weapon to the stack, landing in the Instant phase.
+        let weapon_idx = gs.p1.weapon_idx.unwrap() as usize;
+        step(&mut gs, Action{ typ: ActionType::Attack, index: weapon_idx});
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.stack_top().map(|p| p.index), Some(weapon_idx));
+
+        // Both players pass. Because this is a weapon swing, resolving it puts
+        // the weapon card itself on link 0 of Rhinar's combat chain, makes the
+        // opponent (Dorinthea, p2) the active player, and enters the Defend phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.active_player, 1);
+        assert_eq!(gs.turn_player, 0);
+        assert_eq!(gs.stack_top(), None);
+        assert_eq!(gs.p1.chain_link[0], Some(weapon_idx as u8));
+        assert_eq!(gs.cards[weapon_idx].location, CardLocation::P1CombatChain);
     }
 
     #[test]
