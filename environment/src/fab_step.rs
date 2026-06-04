@@ -7,6 +7,7 @@ pub fn step(gs: &mut Gamestate, act: Action) {
     match gs.phase {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::Action => handle_action_phase(gs, act),
+        Phase::Pitch => handle_pitch_phase(gs, act),
         _ => {}
     }
 }
@@ -28,9 +29,11 @@ fn handle_choose_first(gs: &mut Gamestate, act: Action) {
 fn handle_action_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
         // Playing a card or activating equipment/a weapon both commit a card
-        // that must then be paid for. The played/activated card goes onto the
-        // stack, then we record it as pending and move to the Pitch phase where
-        // the player pitches to cover its cost.
+        // that must then be paid for. The card is recorded as `pending_card`
+        // (still sitting in its source zone, not yet on the stack). If banked
+        // resources already cover its cost it is committed to the stack and the
+        // Instant phase immediately; otherwise it stays pending and we drop into
+        // the Pitch phase to pitch for the rest.
         ActionType::PlayCard | ActionType::Activate => {
             // Cost of committing this card, read while it still sits in its
             // source zone (the location distinguishes a weapon attack / played
@@ -39,21 +42,21 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
             let cs = gs.cards[act.index];
             let cost = action_cost(cs.location, &catalog[cs.card as usize]);
 
-            // Borrow the active player and the shared cards/stack head as
-            // disjoint fields so we can move the card onto the stack in one step.
-            let player = if gs.active_player == 0 { &mut gs.p1 } else { &mut gs.p2 };
-            // If banked resources already cover the cost there is nothing to
-            // pitch for, so skip straight to the Instant phase; otherwise the
-            // player still has to pitch to pay, in the Pitch phase.
+            let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
             let already_paid = player.resources >= cost;
-            detach_from_current_zone(player, &mut gs.cards, act.index);
-            gs.cards[act.index].location = CardLocation::Stack;
-            attach_to_front_of_zone(&mut gs.cards, &mut gs.stack_idx, None, None, act.index);
+
             gs.pending_card = Some(PendingCard {
                 index: act.index,
                 typ: act.typ,
             });
-            gs.phase = if already_paid { Phase::Instant } else { Phase::Pitch };
+
+            // Affordable outright: no pitching needed, commit to the stack now.
+            // Otherwise leave it pending (off the stack) and pitch for it.
+            if already_paid {
+                commit_pending_to_stack(gs);
+            } else {
+                gs.phase = Phase::Pitch;
+            }
         }
         // Passing ends the action phase; nothing is pending.
         ActionType::Pass => {
@@ -61,6 +64,63 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
         }
         _ => {}
     }
+}
+
+/// Handle a pitch during the Pitch phase. The pitched card is moved from the
+/// active player's hand into their pitch zone and its pitch value is banked as
+/// resources. Once banked resources cover the pending card's cost, that card is
+/// committed to the stack and the game advances to the Instant phase.
+fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
+    if act.typ != ActionType::Pitch {
+        return;
+    }
+
+    let catalog = get_card_catalog();
+    let pid = gs.active_player;
+    let pitch_val = catalog[gs.cards[act.index].card as usize].pitch;
+
+    // Move the pitched card out of the hand and into the pitch zone, banking the
+    // resources it produces.
+    let player = if pid == 0 { &mut gs.p1 } else { &mut gs.p2 };
+    detach_from_current_zone(player, &mut gs.cards, act.index);
+    gs.cards[act.index].location = CardLocation::pitch(pid);
+    attach_to_front_of_zone(&mut gs.cards, &mut player.pitch_idx, None, None, act.index);
+    player.resources += pitch_val;
+    let resources = player.resources;
+
+    // Cost still owed on the pending card; once we can cover it, commit it.
+    let pending = gs.pending_card.expect("pitch phase requires a pending card");
+    let pcs = gs.cards[pending.index];
+    let cost = action_cost(pcs.location, &catalog[pcs.card as usize]);
+    if resources >= cost {
+        commit_pending_to_stack(gs);
+    }
+}
+
+/// Move the pending card onto the stack, pay its cost from the active player's
+/// banked resources, and advance to the Instant phase. Shared by both the
+/// affordable path (straight from the Action phase) and the Pitch phase (once
+/// enough has been pitched). The card is detached from its source zone — the
+/// hand for a played card, the weapon/armor slot for an activation — and
+/// prepended to the stack. Assumes the player can already cover the cost.
+fn commit_pending_to_stack(gs: &mut Gamestate) {
+    let Some(pending) = gs.pending_card else {
+        return;
+    };
+
+    // Recompute the cost from the card's still-current source location, mirroring
+    // the affordability check that let us get here.
+    let catalog = get_card_catalog();
+    let cs = gs.cards[pending.index];
+    let cost = action_cost(cs.location, &catalog[cs.card as usize]);
+
+    let player = if gs.active_player == 0 { &mut gs.p1 } else { &mut gs.p2 };
+    player.resources -= cost;
+    detach_from_current_zone(player, &mut gs.cards, pending.index);
+    gs.cards[pending.index].location = CardLocation::Stack;
+    attach_to_front_of_zone(&mut gs.cards, &mut gs.stack_idx, None, None, pending.index);
+
+    gs.phase = Phase::Instant;
 }
 
 /// Resource cost of committing a card from `location`. Activating a worn armor
@@ -304,6 +364,11 @@ mod tests {
         let pending = gs.pending_card.expect("pending card should be set");
         assert_eq!(pending.index, mm_idx);
         assert_eq!(pending.typ, ActionType::PlayCard);
+
+        // The pending card is held off the stack and still sits in the hand
+        // until it is actually paid for.
+        assert_eq!(gs.stack_idx, None);
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Hand);
     }
 
     #[test]
@@ -339,44 +404,111 @@ mod tests {
     }
 
     #[test]
-    fn test_play_card_moves_to_stack() {
+    fn test_pitch_commits_played_card_to_stack() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
-        let hand_idx = gs.p1.hand_idx.unwrap() as usize;
-        let hand_size_before = gs.p1.hand_size;
-        let play = Action{ typ: ActionType::PlayCard, index: hand_idx};
-        step(&mut gs, play);
+        // Play Muscle Mutt (cost 3) with no banked resources: it becomes pending
+        // and we drop into the Pitch phase, with nothing on the stack yet.
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
+        assert_eq!(gs.phase, Phase::Pitch);
+        assert_eq!(gs.stack_idx, None);
 
-        // The played card sits on top of the stack and has been removed from the
-        // hand.
-        assert_eq!(gs.stack_idx, Some(hand_idx as u8));
-        assert_eq!(gs.cards[hand_idx].location, CardLocation::Stack);
-        assert_eq!(gs.p1.hand_size, hand_size_before - 1);
-        // The hand linked list no longer contains the played card.
-        assert!(gs.p1.hand_iter(&gs.cards).all(|(idx, _)| idx != hand_idx));
+        // Pitch Clearing Bellow (pitch 3) — exactly covers the cost. The pending
+        // card is committed to the stack, the cost is paid (3 - 3 = 0 resources
+        // left), and the game advances to the Instant phase.
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
+
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.stack_idx, Some(mm_idx as u8));
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
+        assert_eq!(gs.p1.resources, 0);
+        // The pitched card now lives in the pitch zone, not the hand.
+        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Pitch);
     }
 
     #[test]
-    fn test_activate_weapon_moves_to_stack() {
+    fn test_pitch_below_cost_keeps_card_pending() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
-        let weapon_idx = gs.p1.weapon_idx.unwrap() as usize;
-        let activate = Action{ typ: ActionType::Activate, index: weapon_idx};
-        step(&mut gs, activate);
+        // Play Muscle Mutt (cost 3); pitching a single yellow attack action only
+        // banks 2 resources, short of the cost, so the card stays pending and we
+        // remain in the Pitch phase.
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
 
-        // The activated weapon is now on top of the stack and the weapon slot has
-        // been vacated.
+        let pc_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::PackCallY)
+                .map(|(idx, _)| idx)
+                .expect("Pack Call should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, index: pc_idx});
+
+        assert_eq!(gs.phase, Phase::Pitch);
+        assert_eq!(gs.stack_idx, None);
+        assert_eq!(gs.p1.resources, 2);
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Hand);
+        assert_eq!(gs.pending_card.expect("still pending").index, mm_idx);
+
+        // Pitching a second yellow attack action banks a total of 4, now enough
+        // to pay the cost of 3 and commit the card.
+        let ro_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::RagingOnslaughtY)
+                .map(|(idx, _)| idx)
+                .expect("Raging Onslaught should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, index: ro_idx});
+
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.stack_idx, Some(mm_idx as u8));
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
+        assert_eq!(gs.p1.resources, 1);
+    }
+
+    #[test]
+    fn test_pitch_commits_activated_weapon_to_stack() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        step(&mut gs, go_first);
+
+        // Activate Bone Basher (cost 2): pending, off the stack, Pitch phase.
+        let weapon_idx = gs.p1.weapon_idx.unwrap() as usize;
+        step(&mut gs, Action{ typ: ActionType::Activate, index: weapon_idx});
+        assert_eq!(gs.phase, Phase::Pitch);
+        assert_eq!(gs.stack_idx, None);
+        assert_eq!(gs.p1.weapon_idx, Some(weapon_idx as u8));
+
+        // Pitch Clearing Bellow (pitch 3) to cover the cost of 2. The weapon is
+        // committed to the stack, its slot vacated, and 1 resource is left over.
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
+
+        assert_eq!(gs.phase, Phase::Instant);
         assert_eq!(gs.stack_idx, Some(weapon_idx as u8));
         assert_eq!(gs.cards[weapon_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.weapon_idx, None);
+        assert_eq!(gs.p1.resources, 1);
     }
 
     #[test]

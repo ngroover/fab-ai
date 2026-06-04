@@ -27,10 +27,15 @@ fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
     let catalog = get_card_catalog();
     let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
 
-    // Every card in hand is a pitch option, as long as it actually pitches for
-    // resources — cards with a pitch value of 0 produce nothing and can't be
+    // The card being paid for is held pending in the hand; it can't pitch for
+    // itself, so exclude it from the options.
+    let pending_index = gs.pending_card.map(|p| p.index);
+
+    // Every other card in hand is a pitch option, as long as it actually pitches
+    // for resources — cards with a pitch value of 0 produce nothing and can't be
     // pitched.
     player.hand_iter(&gs.cards)
+        .filter(|(idx, _)| Some(*idx) != pending_index)
         .filter(|(_, cs)| catalog[cs.card as usize].pitch > 0)
         .map(|(idx, _)| Action {
             typ: ActionType::Pitch,
@@ -240,6 +245,39 @@ mod tests {
                 .collect();
         assert_eq!(pitchable, HashSet::from([
             Card::MuscleMuttY,
+            Card::PackCallY,
+            Card::RagingOnslaughtY,
+            Card::ClearingBellowB,
+        ]));
+    }
+
+    #[test]
+    fn legal_actions_in_pitch_phase_excludes_pending_card() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        step(&mut gs, go_first);
+
+        // Play Muscle Mutt: it becomes the pending card and we enter the Pitch
+        // phase. The pending card can't pitch for itself, so it should not appear
+        // among the pitch options even though it sits in the hand with a positive
+        // pitch value.
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
+        assert_eq!(gs.phase, Phase::Pitch);
+
+        let actions = legal_actions(&gs);
+        assert!(actions.iter().all(|a| a.index != mm_idx));
+
+        // The rest of the opening hand is still offered.
+        let pitchable: HashSet<Card> = actions.iter()
+                .map(|a| gs.cards[a.index].card)
+                .collect();
+        assert_eq!(pitchable, HashSet::from([
             Card::PackCallY,
             Card::RagingOnslaughtY,
             Card::ClearingBellowB,
