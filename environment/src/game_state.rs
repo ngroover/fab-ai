@@ -134,7 +134,16 @@ pub struct Gamestate {
     /// stack, the combat chain) is a global index into this array, so the owner
     /// of any card is implied by which half it falls in.
     pub cards : [CardState; TOTAL_CARDS],
+    /// The player who currently holds priority and whose action `step` will
+    /// apply. During a turn's action/pitch flow this is the turn player; during
+    /// the Instant phase it ping-pongs between the players as each passes
+    /// priority, returning to `turn_player` once a card resolves.
     pub active_player : u8,
+    /// The player whose turn it is. Unlike `active_player`, this does not change
+    /// as priority passes back and forth during the Instant phase: it is set
+    /// when the turn begins and is the player priority returns to after the top
+    /// of the stack resolves.
+    pub turn_player : u8,
     pub phase : Phase,
     pub rng : SmallRng,
     /// Head of the stack: the linked list of cards currently on the stack

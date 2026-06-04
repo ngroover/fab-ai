@@ -1,5 +1,5 @@
 use crate::action::{Action,ActionType};
-use crate::game_state::{Gamestate,Phase,Player,PendingCard,CardLocation,CardVisibleState,CardState,TOTAL_CARDS};
+use crate::game_state::{Gamestate,Phase,Player,PendingCard,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
 use crate::cards::CardData;
 use crate::classic_battles::get_card_catalog;
 
@@ -8,6 +8,7 @@ pub fn step(gs: &mut Gamestate, act: Action) {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::Action => handle_action_phase(gs, act),
         Phase::Pitch => handle_pitch_phase(gs, act),
+        Phase::Instant => handle_instant_phase(gs, act),
         _ => {}
     }
 }
@@ -18,6 +19,10 @@ fn handle_choose_first(gs: &mut Gamestate, act: Action) {
         // xor to flip the player
         gs.active_player = gs.active_player ^ 1;
     }
+    // The player who goes first owns this turn. `turn_player` tracks them
+    // independently of `active_player`, which will ping-pong as priority passes
+    // during the Instant phase.
+    gs.turn_player = gs.active_player;
     // begin turn logic
     gs.phase = Phase::Action;
     // The cards live in the shared `gs.cards` array; draw each player's opening
@@ -29,34 +34,9 @@ fn handle_choose_first(gs: &mut Gamestate, act: Action) {
 fn handle_action_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
         // Playing a card, activating an armor ability, or swinging a weapon all
-        // commit a card that must then be paid for. The card is recorded as
-        // `pending_card` (still sitting in its source zone, not yet on the
-        // stack). If banked resources already cover its cost it is committed to
-        // the stack and the Instant phase immediately; otherwise it stays pending
-        // and we drop into the Pitch phase to pitch for the rest.
+        // commit a card that must then be paid for (see `commit_action_card`).
         ActionType::PlayCard | ActionType::Activate | ActionType::Attack => {
-            // Cost of committing this card: an Activate pays its ability's cost,
-            // any other action (a played card or a weapon swing) pays the card's
-            // own catalog cost.
-            let catalog = get_card_catalog();
-            let cs = gs.cards[act.index];
-            let cost = action_cost(act.typ, &catalog[cs.card as usize]);
-
-            let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
-            let already_paid = player.resources >= cost;
-
-            gs.pending_card = Some(PendingCard {
-                index: act.index,
-                typ: act.typ,
-            });
-
-            // Affordable outright: no pitching needed, commit to the stack now.
-            // Otherwise leave it pending (off the stack) and pitch for it.
-            if already_paid {
-                commit_pending_to_stack(gs);
-            } else {
-                gs.phase = Phase::Pitch;
-            }
+            commit_action_card(gs, act);
         }
         // Passing ends the action phase; nothing is pending.
         ActionType::Pass => {
@@ -64,6 +44,94 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
         }
         _ => {}
     }
+}
+
+/// Handle an action during the Instant phase. Each player in turn may play
+/// instants — committed exactly like an action-phase play (`commit_action_card`)
+/// — for as long as they keep the priority. Passing hands priority to the other
+/// player; once both have passed in succession, the top of the stack resolves
+/// (see `handle_instant_pass`).
+fn handle_instant_phase(gs: &mut Gamestate, act: Action) {
+    match act.typ {
+        // Only instants are legal here (see `legal_instant_phase`); they commit
+        // through the same pending/pitch flow as an action-phase play.
+        ActionType::PlayCard => {
+            commit_action_card(gs, act);
+        }
+        ActionType::Pass => {
+            handle_instant_pass(gs);
+        }
+        _ => {}
+    }
+}
+
+/// Commit a card the active player has chosen to play, activate, or attack with.
+/// The card is recorded as `pending_card` (still sitting in its source zone, not
+/// yet on the stack). If banked resources already cover its cost it is committed
+/// straight to the stack (advancing to the Instant phase); otherwise it stays
+/// pending and we drop into the Pitch phase to pitch for the rest. Shared by the
+/// Action and Instant phases.
+fn commit_action_card(gs: &mut Gamestate, act: Action) {
+    // Cost of committing this card: an Activate pays its ability's cost, any
+    // other action (a played card or a weapon swing) pays the card's own catalog
+    // cost.
+    let catalog = get_card_catalog();
+    let cs = gs.cards[act.index];
+    let cost = action_cost(act.typ, &catalog[cs.card as usize]);
+
+    let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
+    let already_paid = player.resources >= cost;
+
+    gs.pending_card = Some(PendingCard {
+        index: act.index,
+        typ: act.typ,
+    });
+
+    // Affordable outright: no pitching needed, commit to the stack now.
+    // Otherwise leave it pending (off the stack) and pitch for it.
+    if already_paid {
+        commit_pending_to_stack(gs);
+    } else {
+        gs.phase = Phase::Pitch;
+    }
+}
+
+/// Handle a pass during the Instant phase. The turn player holds priority first;
+/// when they pass, priority moves to the other player, who may then play their
+/// own instants. Once that player passes too — both players having passed in
+/// succession — the top card of the stack resolves and priority returns to the
+/// turn player. If the stack still holds cards a fresh priority round opens
+/// (staying in the Instant phase); once it empties, control returns to the turn
+/// player's Action phase.
+fn handle_instant_pass(gs: &mut Gamestate) {
+    if gs.active_player == gs.turn_player {
+        // Turn player passes priority to the opponent, who may now respond.
+        gs.active_player ^= 1;
+    } else {
+        // Both players have now passed: resolve the top of the stack and hand
+        // priority back to the turn player.
+        resolve_top_of_stack(gs);
+        gs.active_player = gs.turn_player;
+        gs.phase = if gs.stack_idx.is_none() {
+            Phase::Action
+        } else {
+            Phase::Instant
+        };
+    }
+}
+
+/// Resolve the card at the top of the stack (its most recently added card). The
+/// card is detached from the stack and moved to its owner's graveyard — the
+/// owner being implied by which half of the shared `cards` array the slot falls
+/// in. A no-op when the stack is empty.
+fn resolve_top_of_stack(gs: &mut Gamestate) {
+    let Some(top) = gs.stack_idx else {
+        return;
+    };
+    let top = top as usize;
+    let owner = if top < PLAYER_CARDS { 0 } else { 1 };
+    detach_from_linked_list(&mut gs.cards, &mut gs.stack_idx, None, None, top);
+    gs.cards[top].location = CardLocation::graveyard(owner);
 }
 
 /// Handle a pitch during the Pitch phase. The pitched card is moved from the
@@ -561,6 +629,131 @@ mod tests {
         assert_eq!(pending.index, packcall_idx);
         assert_eq!(pending.typ, ActionType::PlayCard);
         assert_eq!(gs.cards[pending.index].card, Card::PackCallY);
+    }
+
+    /// Drive a game to the Instant phase: Rhinar (p1) goes first, plays Clearing
+    /// Bellow (cost 0, so it commits straight to the stack) and we land in the
+    /// Instant phase with p1 as both turn and active player. Returns the gamestate
+    /// and the stack slot the committed card occupies.
+    fn instant_phase_with_one_card() -> (Gamestate, usize) {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, index : 0});
+
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, index: cb_idx});
+
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.turn_player, 0);
+        assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.stack_idx, Some(cb_idx as u8));
+        (gs, cb_idx)
+    }
+
+    #[test]
+    fn test_choose_first_sets_turn_player() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+        assert_eq!(gs.active_player, 0);
+
+        // Going second flips both the active player and, since they own the turn,
+        // the turn player along with it.
+        step(&mut gs, Action{ typ: ActionType::ChooseSecond, index : 0});
+        assert_eq!(gs.active_player, 1);
+        assert_eq!(gs.turn_player, 1);
+    }
+
+    #[test]
+    fn test_instant_pass_gives_priority_to_opponent() {
+        let (mut gs, cb_idx) = instant_phase_with_one_card();
+
+        // The turn player passes: priority moves to the opponent, but nothing
+        // resolves yet — the card stays on the stack and we remain in Instant.
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.turn_player, 0);
+        assert_eq!(gs.active_player, 1);
+        assert_eq!(gs.stack_idx, Some(cb_idx as u8));
+        assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
+    }
+
+    #[test]
+    fn test_both_pass_resolves_top_of_stack() {
+        let (mut gs, cb_idx) = instant_phase_with_one_card();
+
+        // Turn player passes (priority to opponent), then the opponent passes:
+        // both have now passed, so the top of the stack resolves. The card moves
+        // to its owner's graveyard, priority returns to the turn player, and with
+        // an empty stack we drop back into the Action phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.turn_player, 0);
+        assert_eq!(gs.stack_idx, None);
+        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Graveyard);
+    }
+
+    #[test]
+    fn test_opponent_plays_instant_in_response() {
+        let (mut gs, cb_idx) = instant_phase_with_one_card();
+
+        // Seed 42 doesn't deal Dorinthea an instant in her opening hand, so move
+        // a Sigil of Solace (an Instant) from her deck into her hand to set up
+        // the response. The same detach/attach helpers the engine uses keep the
+        // zone bookkeeping consistent.
+        let sigil_idx = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::SigilofSolaceB)
+                .map(|(idx, _)| idx)
+                .or_else(|| {
+                    // Not already in hand: pull one out of the deck.
+                    let from_deck = (PLAYER_CARDS..TOTAL_CARDS)
+                        .find(|&i| gs.cards[i].card == Card::SigilofSolaceB
+                            && gs.cards[i].location == CardLocation::P2Deck)
+                        .expect("Dorinthea's deck should contain Sigil of Solace");
+                    detach_from_current_zone(&mut gs.p2, &mut gs.cards, from_deck);
+                    gs.cards[from_deck].location = CardLocation::P2Hand;
+                    attach_to_front_of_zone(
+                        &mut gs.cards,
+                        &mut gs.p2.hand_idx,
+                        None,
+                        Some(&mut gs.p2.hand_size),
+                        from_deck,
+                    );
+                    Some(from_deck)
+                })
+                .unwrap();
+
+        // Turn player passes; priority moves to the opponent (Dorinthea, p2).
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        assert_eq!(gs.active_player, 1);
+
+        // The opponent responds with an instant of their own. Sigil of Solace
+        // (cost 0) commits straight to the stack on top of Clearing Bellow; the
+        // responder keeps priority, so they remain the active player.
+        step(&mut gs, Action{ typ: ActionType::PlayCard, index: sigil_idx});
+
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.active_player, 1);
+        // Sigil is now on top of the stack, above Clearing Bellow.
+        assert_eq!(gs.stack_idx, Some(sigil_idx as u8));
+        assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
+        assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
+
+        // The opponent passes; both have now passed, so the top card (Sigil)
+        // resolves to its owner's graveyard. Clearing Bellow remains on the
+        // stack and priority returns to the turn player for a fresh round.
+        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.cards[sigil_idx].location, CardLocation::P2Graveyard);
+        assert_eq!(gs.stack_idx, Some(cb_idx as u8));
     }
 
     #[test]
