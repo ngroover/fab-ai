@@ -131,21 +131,19 @@ fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
     }
 }
 
-/// Move the defender's chosen blocker out of their hand and onto the next free
-/// link of their combat chain. The defender is the active player; their chain
-/// links fill from link 0 upward (the attacker's card sits on the *attacker's*
-/// chain, a separate array). A full chain leaves the card in hand as a no-op.
+/// Move the defender's chosen blocker out of their hand and onto the combat
+/// chain. All blockers declared against the current attack join a *single* chain
+/// link (link 0 of the defender's chain), chained together through
+/// `next_card`/`prev_card` just like the hand, deck, and pitch zones — so the one
+/// link can hold any number of blocking cards. The defender is the active player;
+/// the attacker's card sits on the *attacker's* chain, a separate array.
 fn commit_blocker(gs: &mut Gamestate, idx: usize) {
     let pid = gs.active_player;
     let player = if pid == 0 { &mut gs.p1 } else { &mut gs.p2 };
 
-    let Some(link) = player.chain_link.iter().position(|slot| slot.is_none()) else {
-        return; // chain is full; nothing more can block
-    };
-
     detach_from_current_zone(player, &mut gs.cards, idx);
     gs.cards[idx].location = CardLocation::combat_chain(pid);
-    player.chain_link[link] = Some(idx as u8);
+    attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[0], None, None, idx);
 }
 
 /// Resolve the card at the top of the stack (its most recently added card),
@@ -894,10 +892,12 @@ mod tests {
     }
 
     #[test]
-    fn test_defend_multiple_blockers_fill_chain_links() {
+    fn test_defend_multiple_blockers_share_one_chain_link() {
         let mut gs = step_to_dorinthea_defending();
 
-        // Two blockers committed in succession occupy consecutive chain links.
+        // Two blockers committed in succession join the *same* chain link (link 0),
+        // chained together via next_card/prev_card. The link is the head of a
+        // linked list, so it can hold any number of blockers.
         let first = gs.p2.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::DrivingBladeY)
                 .map(|(idx, _)| idx)
@@ -911,10 +911,24 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Defend, index: second});
 
         assert_eq!(gs.phase, Phase::Defend);
-        assert_eq!(gs.p2.chain_link[0], Some(first as u8));
-        assert_eq!(gs.p2.chain_link[1], Some(second as u8));
+        // Both cards live on the combat chain and nowhere fills a second link.
         assert_eq!(gs.cards[first].location, CardLocation::P2CombatChain);
         assert_eq!(gs.cards[second].location, CardLocation::P2CombatChain);
+        assert_eq!(gs.p2.chain_link[1], None);
+
+        // Walk link 0's linked list (head -> ... -> a node pointing at itself) and
+        // confirm it contains exactly the two blockers.
+        let mut on_link: Vec<usize> = Vec::new();
+        let mut cur = gs.p2.chain_link[0].expect("link 0 should hold the blockers") as usize;
+        loop {
+            on_link.push(cur);
+            let next = gs.cards[cur].next_card as usize;
+            if next == cur { break; }
+            cur = next;
+        }
+        assert_eq!(on_link.len(), 2);
+        assert!(on_link.contains(&first));
+        assert!(on_link.contains(&second));
     }
 
     #[test]
