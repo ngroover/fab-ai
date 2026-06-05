@@ -161,6 +161,12 @@ pub struct Gamestate {
     /// `Phase::Defend` (the defender must respond once it resolves), while any
     /// other played card stores `Phase::Action` (the turn player resumes).
     pub return_after_instant : Phase,
+    /// The player who becomes active once the Instant phase ends, banked
+    /// alongside `return_after_instant` when a card is committed from the Action
+    /// phase. An attack action or weapon swing stores the non-turn player (the
+    /// defender, who declares blocks in the Defend phase); any other played card
+    /// stores the turn player, who resumes the Action phase.
+    pub player_after_instant : u8,
     pub rng : SmallRng,
     /// The stack: cards currently waiting to resolve, each paired with the
     /// `ActionType` that committed it (so we know how to resolve it). Slot 0 is

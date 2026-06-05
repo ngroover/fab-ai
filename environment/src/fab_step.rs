@@ -83,18 +83,21 @@ fn commit_action_card(gs: &mut Gamestate, act: Action) {
     let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
     let already_paid = player.resources >= cost;
 
-    // Bank the phase to return to once the Instant phase ends, but only for a
-    // fresh play from the Action phase — a card committed in response during the
-    // Instant phase must not clobber what the original Action-phase play stored.
-    // An attack action or weapon swing heads for the Defend phase (the opponent
-    // must respond once it resolves); any other played card returns to Action.
+    // Bank the phase and active player to restore once the Instant phase ends,
+    // but only for a fresh play from the Action phase — a card committed in
+    // response during the Instant phase must not clobber what the original
+    // Action-phase play stored. An attack action or weapon swing heads for the
+    // Defend phase with the non-turn player (the defender) active; any other
+    // played card returns to the Action phase with the turn player active.
     // Recorded here, before any drop into the Pitch phase masks the origin.
     if gs.phase == Phase::Action {
-        gs.return_after_instant = if commits_as_attack(act.typ, catalog[cs.card as usize].typ) {
-            Phase::Defend
+        if commits_as_attack(act.typ, catalog[cs.card as usize].typ) {
+            gs.return_after_instant = Phase::Defend;
+            gs.player_after_instant = gs.turn_player ^ 1;
         } else {
-            Phase::Action
-        };
+            gs.return_after_instant = Phase::Action;
+            gs.player_after_instant = gs.turn_player;
+        }
     }
 
     gs.pending_card = Some(PendingCard {
@@ -185,25 +188,28 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     // attack action card, or a weapon being swung (the weapon itself joins the
     // chain). Everything else resolves to the graveyard.
     if commits_as_attack(pending.typ, card_type) {
-        // The attacking card leaves the stack for link 0 of its owner's
-        // combat chain; the opponent must now defend. Leaving the Instant phase,
-        // we return to the phase banked when the card was committed (Defend).
+        // The attacking card leaves the stack for link 0 of its owner's combat
+        // chain. Leaving the Instant phase, we restore the phase and active
+        // player banked when the card was committed (Defend, with the non-turn
+        // player active to declare blocks).
         gs.cards[top].location = CardLocation::combat_chain(owner);
         let attacker = if owner == 0 { &mut gs.p1 } else { &mut gs.p2 };
         attacker.chain_link[0] = Some(top as u8);
-        gs.active_player = owner ^ 1;
+        gs.active_player = gs.player_after_instant;
         gs.phase = gs.return_after_instant;
     } else {
         gs.cards[top].location = CardLocation::graveyard(owner);
-        gs.active_player = gs.turn_player;
-        // Once the stack empties we leave the Instant phase, returning to the
-        // banked phase (Action for a non-attack); while cards remain we keep
-        // passing priority in the Instant phase.
-        gs.phase = if gs.stack_is_empty() {
-            gs.return_after_instant
+        if gs.stack_is_empty() {
+            // The stack is empty, so the Instant phase ends: restore the phase
+            // and active player banked when the resolved card was committed.
+            gs.active_player = gs.player_after_instant;
+            gs.phase = gs.return_after_instant;
         } else {
-            Phase::Instant
-        };
+            // Cards remain on the stack: priority returns to the turn player for
+            // a fresh round of responses and we stay in the Instant phase.
+            gs.active_player = gs.turn_player;
+            gs.phase = Phase::Instant;
+        }
     }
 }
 
