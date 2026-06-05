@@ -39,8 +39,8 @@ impl Ability {
             Ability::DiscardCardPlusBlock => CardType::Instant,
             Ability::DestroyGain1Resource => CardType::Action,
             Ability::WeaponPlus1 => CardType::Action,
-            Ability::Attack2 => CardType::Action,
-            Ability::Attack1 => CardType::Action,
+            Ability::Attack2 => CardType::AttackAction,
+            Ability::Attack1 => CardType::AttackAction,
         }
     }
 }

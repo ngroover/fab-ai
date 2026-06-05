@@ -91,7 +91,7 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     // played card returns to the Action phase with the turn player active.
     // Recorded here, before any drop into the Pitch phase masks the origin.
     if gs.phase == Phase::Action {
-        if commits_as_attack(act.typ, catalog[cs.card as usize].typ) {
+        if commits_as_attack(act.typ, &catalog[cs.card as usize]) {
             gs.return_after_instant = Phase::Defend;
             gs.player_after_instant = gs.turn_player ^ 1;
         } else {
@@ -182,12 +182,12 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     let owner = if top < PLAYER_CARDS { 0 } else { 1 };
 
     let catalog = get_card_catalog();
-    let card_type = catalog[gs.cards[top].card as usize].typ;
+    let data = &catalog[gs.cards[top].card as usize];
 
     // A card joins its owner's combat chain when it is attacking: a played
     // attack action card, or a weapon being swung (the weapon itself joins the
     // chain). Everything else resolves to the graveyard.
-    if commits_as_attack(pending.typ, card_type) {
+    if commits_as_attack(pending.typ, data) {
         // The attacking card leaves the stack for link 0 of its owner's combat
         // chain. Leaving the Instant phase, we restore the phase and active
         // player banked when the card was committed (Defend, with the non-turn
@@ -213,21 +213,21 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     }
 }
 
-/// Whether committing `typ` on a card of `card_type` puts an attack on the
-/// stack — a played attack action card, or a weapon being swung. Such a card
-/// resolves onto its owner's combat chain and sends the game to the Defend
-/// phase; every other committed card resolves to the graveyard and returns to
-/// the Action phase.
-fn commits_as_attack(typ: ActionType, card_type: CardType) -> bool {
+/// Whether committing `typ` on `data` puts an attack on the stack — a played
+/// attack action card, or a weapon being swung. Such a card resolves onto its
+/// owner's combat chain and sends the game to the Defend phase; every other
+/// committed card resolves to the graveyard and returns to the Action phase.
+fn commits_as_attack(typ: ActionType, data: &CardData) -> bool {
     match typ {
-        ActionType::PlayCard => matches!(card_type, CardType::AttackAction),
+        ActionType::PlayCard => matches!(data.typ, CardType::AttackAction),
         // An Activate covers both armor abilities and weapon swings; only a
-        // weapon's activation is an attack that joins the combat chain, so it is
-        // distinguished here by the card type.
-        ActionType::Activate => matches!(
-            card_type,
-            CardType::Weapon | CardType::Sword2h | CardType::Club2h
-        ),
+        // weapon's activation is an attack action that joins the combat chain,
+        // so it is distinguished here by the ability's activation card type.
+        ActionType::Activate => data
+            .ability
+            .as_ref()
+            .map(|a| matches!(a.card_type(), CardType::AttackAction))
+            .unwrap_or(false),
         _ => false,
     }
 }
