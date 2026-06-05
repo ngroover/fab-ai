@@ -35,9 +35,9 @@ fn handle_choose_first(gs: &mut Gamestate, act: Action) {
 fn handle_action_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
         // Playing a card, activating an armor ability, or swinging a weapon all
-        // commit a card that must then be paid for (see `commit_action_card`).
+        // commit a card that must then be paid for (see `commit_card_to_pending`).
         ActionType::PlayCard | ActionType::Activate | ActionType::Attack => {
-            commit_action_card(gs, act);
+            commit_card_to_pending(gs, act);
         }
         // Passing ends the action phase; nothing is pending.
         ActionType::Pass => {
@@ -48,7 +48,7 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
 }
 
 /// Handle an action during the Instant phase. Each player in turn may play
-/// instants — committed exactly like an action-phase play (`commit_action_card`)
+/// instants — committed exactly like an action-phase play (`commit_card_to_pending`)
 /// — for as long as they keep the priority. Passing hands priority to the other
 /// player; once both have passed in succession, the top of the stack resolves
 /// (see `handle_instant_pass`).
@@ -57,7 +57,7 @@ fn handle_instant_phase(gs: &mut Gamestate, act: Action) {
         // Only instants are legal here (see `legal_instant_phase`); they commit
         // through the same pending/pitch flow as an action-phase play.
         ActionType::PlayCard => {
-            commit_action_card(gs, act);
+            commit_card_to_pending(gs, act);
         }
         ActionType::Pass => {
             handle_instant_pass(gs);
@@ -72,7 +72,7 @@ fn handle_instant_phase(gs: &mut Gamestate, act: Action) {
 /// straight to the stack (advancing to the Instant phase); otherwise it stays
 /// pending and we drop into the Pitch phase to pitch for the rest. Shared by the
 /// Action and Instant phases.
-fn commit_action_card(gs: &mut Gamestate, act: Action) {
+fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     // Cost of committing this card: an Activate pays its ability's cost, any
     // other action (a played card or a weapon swing) pays the card's own catalog
     // cost.
