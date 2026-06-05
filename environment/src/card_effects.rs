@@ -1,5 +1,7 @@
 use bitflags::bitflags;
 
+use crate::cards::CardType;
+
 #[repr(u8)]
 pub enum ConstantEffect {
     OnDiscard6Intimidate,
@@ -22,6 +24,17 @@ impl Ability {
             Ability::DiscardCardPlusBlock => 0,
             Ability::DestroyGain1Resource => 0,
             Ability::WeaponPlus1 => 1,
+        }
+    }
+
+    /// The card type at which this ability is activated. Action-speed abilities
+    /// cost an action point on your turn; instant-speed abilities can be used at
+    /// any time you have priority (e.g. during the defend step).
+    pub fn card_type(&self) -> CardType {
+        match self {
+            Ability::DiscardCardPlusBlock => CardType::Instant,
+            Ability::DestroyGain1Resource => CardType::Action,
+            Ability::WeaponPlus1 => CardType::Action,
         }
     }
 }
@@ -111,5 +124,28 @@ pub enum TargetEffectType {
 pub struct TargetEffect {
     pub targetType : TargetType,
     pub effectType : TargetEffectType,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ability_card_types() {
+        // Rally the Rearguard's ability is an instant.
+        assert_eq!(
+            Ability::DiscardCardPlusBlock.card_type() as u8,
+            CardType::Instant as u8
+        );
+        // Blossom of Spring and Gallantry Gold abilities are actions.
+        assert_eq!(
+            Ability::DestroyGain1Resource.card_type() as u8,
+            CardType::Action as u8
+        );
+        assert_eq!(
+            Ability::WeaponPlus1.card_type() as u8,
+            CardType::Action as u8
+        );
+    }
 }
 
