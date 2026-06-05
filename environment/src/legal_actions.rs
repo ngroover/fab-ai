@@ -115,17 +115,18 @@ fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], 
     // Each worn piece is only an option if it carries an activated ability
     // (e.g. Blossom of Spring, Gallantry Gold); passive equipment such as Bone
     // Vizier or the Ironhide pieces has none. The weapon belongs here too: a
-    // swing is an activated ability paid for with the ability's resource cost
-    // (not the card's cost), differing from armor only in that it produces an
-    // Attack action rather than an Activate.
+    // swing is just an activated ability paid for with the ability's resource
+    // cost. Each is offered as an Activate; whether resolving it routes the card
+    // to the combat chain (a weapon) or the graveyard (an armor ability) is
+    // decided later from the card type (see `commits_as_attack`).
     let activatable_slots = [
-        (player.head_idx, ActionType::Activate),
-        (player.chest_idx, ActionType::Activate),
-        (player.arms_idx, ActionType::Activate),
-        (player.legs_idx, ActionType::Activate),
-        (player.weapon_idx, ActionType::Attack),
+        player.head_idx,
+        player.chest_idx,
+        player.arms_idx,
+        player.legs_idx,
+        player.weapon_idx,
     ];
-    for (slot, action_typ) in activatable_slots {
+    for slot in activatable_slots {
         if let Some(idx) = slot {
             let idx = idx as usize;
             let Some(ability) = &catalog[cards[idx].card as usize].ability else {
@@ -143,7 +144,7 @@ fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], 
             let needed = ability.resource_cost().saturating_sub(player.resources);
             if total_pitch >= needed {
                 actions.push(Action {
-                    typ: action_typ,
+                    typ: ActionType::Activate,
                     index: idx,
                 });
             }
@@ -478,35 +479,36 @@ mod tests {
         let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
-        // Active player is Rhinar (p1). Only equipment with an activated
-        // ability should be offered as an Activate, plus the equipped weapon
-        // offered as its own Attack.
+        // Active player is Rhinar (p1). Every equipped card with an activated
+        // ability is offered as an Activate, including the weapon swing. The
+        // passive equipment (Bone Vizier, Ironhide Gauntlet/Legs) is not.
         let actions = legal_actions(&gs);
 
         let activations: Vec<&Action> = actions.iter()
                 .filter(|a| a.typ == ActionType::Activate)
                 .collect();
-        let attacks: Vec<&Action> = actions.iter()
-                .filter(|a| a.typ == ActionType::Attack)
-                .collect();
 
-        // Blossom of Spring (activated chest equipment) is the only Activate;
-        // Bone Basher (weapon) is an Attack. The passive equipment (Bone Vizier,
-        // Ironhide Gauntlet/Legs) is neither.
+        // Blossom of Spring (chest ability) and Bone Basher (weapon swing) are
+        // both Activates; the passive equipment is offered as neither.
         let activatable: HashSet<Card> = activations.iter()
                 .map(|a| gs.cards[a.index].card)
                 .collect();
-        let attackable: HashSet<Card> = attacks.iter()
-                .map(|a| gs.cards[a.index].card)
-                .collect();
-        assert_eq!(activatable, HashSet::from([Card::BlossomOfSpring]));
-        assert_eq!(attackable, HashSet::from([Card::BoneBasher]));
+        assert_eq!(
+            activatable,
+            HashSet::from([Card::BlossomOfSpring, Card::BoneBasher])
+        );
 
-        // Each card sits in its expected zone: Bone Basher as the weapon,
-        // Blossom of Spring as chest equipment. (Location is derived from the
-        // card's slot, not carried on the action.)
-        assert_eq!(gs.cards[attacks[0].index].location, CardLocation::P1Weapon);
-        assert_eq!(gs.cards[activations[0].index].location, CardLocation::P1Chest);
+        // Each card sits in its expected zone, derived from its slot rather than
+        // carried on the action: Bone Basher as the weapon, Blossom of Spring as
+        // chest equipment.
+        for a in &activations {
+            let cs = gs.cards[a.index];
+            match cs.card {
+                Card::BoneBasher => assert_eq!(cs.location, CardLocation::P1Weapon),
+                Card::BlossomOfSpring => assert_eq!(cs.location, CardLocation::P1Chest),
+                other => panic!("unexpected activation for {:?}", other),
+            }
+        }
     }
 
     #[test]
@@ -524,33 +526,26 @@ mod tests {
         let activations: Vec<&Action> = actions.iter()
                 .filter(|a| a.typ == ActionType::Activate)
                 .collect();
-        let attacks: Vec<&Action> = actions.iter()
-                .filter(|a| a.typ == ActionType::Attack)
-                .collect();
 
         // Activations: Gallantry Gold (arms) + Blossom of Spring (chest, a
-        // Generic piece in both decks). Dawnblade (weapon) is an Attack instead.
-        // The passive equipment (Ironrot Helm/Legs) is offered as neither.
+        // Generic piece in both decks) + Dawnblade (weapon swing). The passive
+        // equipment (Ironrot Helm/Legs) is offered as neither.
         let activatable: HashSet<Card> = activations.iter()
-                .map(|a| gs.cards[a.index].card)
-                .collect();
-        let attackable: HashSet<Card> = attacks.iter()
                 .map(|a| gs.cards[a.index].card)
                 .collect();
         assert_eq!(
             activatable,
-            HashSet::from([Card::GallantryGold, Card::BlossomOfSpring])
+            HashSet::from([Card::GallantryGold, Card::BlossomOfSpring, Card::Dawnblade])
         );
-        assert_eq!(attackable, HashSet::from([Card::Dawnblade]));
 
         // Each card sits in its expected slot, derived from its CardState rather
         // than carried on the action.
-        assert_eq!(gs.cards[attacks[0].index].location, CardLocation::P2Weapon);
         for a in &activations {
             let cs = gs.cards[a.index];
             match cs.card {
                 Card::GallantryGold => assert_eq!(cs.location, CardLocation::P2Arms),
                 Card::BlossomOfSpring => assert_eq!(cs.location, CardLocation::P2Chest),
+                Card::Dawnblade => assert_eq!(cs.location, CardLocation::P2Weapon),
                 other => panic!("unexpected activation for {:?}", other),
             }
         }

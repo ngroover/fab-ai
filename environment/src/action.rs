@@ -6,7 +6,6 @@ pub enum ActionType {
     ChooseSecond,
     PlayCard,
     Activate,
-    Attack,
     Pitch,
     Defend,
     Pass

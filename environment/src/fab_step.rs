@@ -34,9 +34,10 @@ fn handle_choose_first(gs: &mut Gamestate, act: Action) {
 
 fn handle_action_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
-        // Playing a card, activating an armor ability, or swinging a weapon all
-        // commit a card that must then be paid for (see `commit_card_to_pending`).
-        ActionType::PlayCard | ActionType::Activate | ActionType::Attack => {
+        // Playing a card, or activating an ability (an armor piece or a weapon
+        // swing) both commit a card that must then be paid for (see
+        // `commit_card_to_pending`).
+        ActionType::PlayCard | ActionType::Activate => {
             commit_card_to_pending(gs, act);
         }
         // Passing ends the action phase; nothing is pending.
@@ -73,9 +74,8 @@ fn handle_instant_phase(gs: &mut Gamestate, act: Action) {
 /// pending and we drop into the Pitch phase to pitch for the rest. Shared by the
 /// Action and Instant phases.
 fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
-    // Cost of committing this card: an Activate pays its ability's cost, any
-    // other action (a played card or a weapon swing) pays the card's own catalog
-    // cost.
+    // Cost of committing this card: an Activate (an armor ability or a weapon
+    // swing) pays its ability's cost; a played card pays its own catalog cost.
     let catalog = get_card_catalog();
     let cs = gs.cards[act.index];
     let cost = action_cost(act.typ, &catalog[cs.card as usize]);
@@ -221,7 +221,10 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
 fn commits_as_attack(typ: ActionType, card_type: CardType) -> bool {
     match typ {
         ActionType::PlayCard => matches!(card_type, CardType::AttackAction),
-        ActionType::Attack => matches!(
+        // An Activate covers both armor abilities and weapon swings; only a
+        // weapon's activation is an attack that joins the combat chain, so it is
+        // distinguished here by the card type.
+        ActionType::Activate => matches!(
             card_type,
             CardType::Weapon | CardType::Sword2h | CardType::Club2h
         ),
@@ -291,11 +294,11 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     gs.phase = Phase::Instant;
 }
 
-/// Resource cost of committing a card for the given action. An `Activate` pays
-/// the card's activated ability's resource cost — an Activate is always done on
-/// a card that carries an ability, so the ability is expected to be present.
-/// Every other action (playing a card from hand, or an `Attack` weapon swing)
-/// pays the card's own catalog `cost`. Mirrors the affordability checks in
+/// Resource cost of committing a card for the given action. An `Activate` (an
+/// armor ability or a weapon swing) pays the card's activated ability's resource
+/// cost — an Activate is always done on a card that carries an ability, so the
+/// ability is expected to be present. Every other action (playing a card from
+/// hand) pays the card's own catalog `cost`. Mirrors the affordability checks in
 /// `legal_actions`.
 fn action_cost(typ: ActionType, data: &CardData) -> u8 {
     match typ {
@@ -655,9 +658,9 @@ mod tests {
         let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
         step(&mut gs, go_first);
 
-        // Attack with Bone Basher (cost 2): pending, off the stack, Pitch phase.
+        // Swing Bone Basher (ability cost 2): pending, off the stack, Pitch phase.
         let weapon_idx = gs.p1.weapon_idx.unwrap() as usize;
-        step(&mut gs, Action{ typ: ActionType::Attack, index: weapon_idx});
+        step(&mut gs, Action{ typ: ActionType::Activate, index: weapon_idx});
         assert_eq!(gs.phase, Phase::Pitch);
         assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.p1.weapon_idx, Some(weapon_idx as u8));
@@ -687,13 +690,13 @@ mod tests {
 
         // Swing the equipped weapon. Same flow: record pending, go to Pitch.
         let weapon_idx = gs.p1.weapon_idx.unwrap() as usize;
-        let attack = Action{ typ: ActionType::Attack, index: weapon_idx};
+        let attack = Action{ typ: ActionType::Activate, index: weapon_idx};
         step(&mut gs, attack);
 
         assert_eq!(gs.phase, Phase::Pitch);
         let pending = gs.pending_card.expect("pending card should be set");
         assert_eq!(pending.index, weapon_idx);
-        assert_eq!(pending.typ, ActionType::Attack);
+        assert_eq!(pending.typ, ActionType::Activate);
     }
 
     #[test]
@@ -844,10 +847,10 @@ mod tests {
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, index : 0});
 
-        // Swing Bone Basher (cost 2) and pitch Clearing Bellow (pitch 3) to
-        // commit the weapon to the stack, landing in the Instant phase.
+        // Swing Bone Basher (ability cost 2) and pitch Clearing Bellow (pitch 3)
+        // to commit the weapon to the stack, landing in the Instant phase.
         let weapon_idx = gs.p1.weapon_idx.unwrap() as usize;
-        step(&mut gs, Action{ typ: ActionType::Attack, index: weapon_idx});
+        step(&mut gs, Action{ typ: ActionType::Activate, index: weapon_idx});
         let cb_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::ClearingBellowB)
                 .map(|(idx, _)| idx)
