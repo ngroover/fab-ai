@@ -26,7 +26,7 @@ fn main() {
         "P2 (Dorinthea) — life: {}, intellect: {}",
         game.p2.life, game.p2.intellect
     );
-    println!("Active player: {}", game.active_player);
+    println!("Active player: {}", game.active_player.get());
     step(&mut game, Action{ typ: ActionType::ChooseFirst, card: None});
 
 }

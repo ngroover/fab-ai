@@ -26,6 +26,47 @@ impl CardIdx {
     }
 }
 
+/// One of the two players (0 or 1), wrapped in a newtype so a player id is never
+/// silently confused with the many other small integers in the engine — card
+/// indices (`CardIdx`), counts, or pitch values. Player 0 owns the lower half of
+/// `Gamestate::cards` (`0..PLAYER_CARDS`); player 1 owns the upper half.
+/// Construct with `PlayerIndex::new` (or the `P1`/`P2` constants); read the raw
+/// id back with `get` (a `u8`) or `index` (a `usize`, for indexing the shared
+/// arrays); get the other player with `opponent`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub struct PlayerIndex(pub u8);
+
+impl PlayerIndex {
+    /// Player 0 — owns global card slots `0..PLAYER_CARDS`.
+    pub const P1: PlayerIndex = PlayerIndex(0);
+    /// Player 1 — owns global card slots `PLAYER_CARDS..2*PLAYER_CARDS`.
+    pub const P2: PlayerIndex = PlayerIndex(1);
+
+    /// Wrap a raw 0/1 player id.
+    #[inline]
+    pub const fn new(i: u8) -> Self {
+        PlayerIndex(i)
+    }
+
+    /// The raw 0/1 id as a `u8`.
+    #[inline]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+
+    /// The id as a `usize`, for indexing the two halves of the shared arrays.
+    #[inline]
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+
+    /// The other player (0 ↔ 1).
+    #[inline]
+    pub const fn opponent(self) -> Self {
+        PlayerIndex(self.0 ^ 1)
+    }
+}
+
 /// Number of (non-hero) cards each player owns. The unified `Gamestate::cards`
 /// array is `2 * PLAYER_CARDS` long: player 0 owns slots `0..PLAYER_CARDS` and
 /// player 1 owns slots `PLAYER_CARDS..2*PLAYER_CARDS`.
@@ -87,20 +128,20 @@ pub enum CardLocation {
 // referenced yet as the engine is still being built out.
 #[allow(dead_code)]
 impl CardLocation {
-    /// Per-player zone constructors. `pid` is the owning player (0 or 1); each
-    /// returns that player's variant of the zone.
-    pub const fn hand(pid: u8) -> Self { if pid == 0 { Self::P1Hand } else { Self::P2Hand } }
-    pub const fn deck(pid: u8) -> Self { if pid == 0 { Self::P1Deck } else { Self::P2Deck } }
-    pub const fn pitch(pid: u8) -> Self { if pid == 0 { Self::P1Pitch } else { Self::P2Pitch } }
-    pub const fn graveyard(pid: u8) -> Self { if pid == 0 { Self::P1Graveyard } else { Self::P2Graveyard } }
-    pub const fn arsenal(pid: u8) -> Self { if pid == 0 { Self::P1Arsenal } else { Self::P2Arsenal } }
-    pub const fn banish(pid: u8) -> Self { if pid == 0 { Self::P1BanishZone } else { Self::P2BanishZone } }
-    pub const fn head(pid: u8) -> Self { if pid == 0 { Self::P1Head } else { Self::P2Head } }
-    pub const fn chest(pid: u8) -> Self { if pid == 0 { Self::P1Chest } else { Self::P2Chest } }
-    pub const fn arms(pid: u8) -> Self { if pid == 0 { Self::P1Arms } else { Self::P2Arms } }
-    pub const fn legs(pid: u8) -> Self { if pid == 0 { Self::P1Legs } else { Self::P2Legs } }
-    pub const fn weapon(pid: u8) -> Self { if pid == 0 { Self::P1Weapon } else { Self::P2Weapon } }
-    pub const fn combat_chain(pid: u8) -> Self { if pid == 0 { Self::P1CombatChain } else { Self::P2CombatChain } }
+    /// Per-player zone constructors. `pid` is the owning player; each returns
+    /// that player's variant of the zone.
+    pub const fn hand(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Hand } else { Self::P2Hand } }
+    pub const fn deck(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Deck } else { Self::P2Deck } }
+    pub const fn pitch(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Pitch } else { Self::P2Pitch } }
+    pub const fn graveyard(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Graveyard } else { Self::P2Graveyard } }
+    pub const fn arsenal(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Arsenal } else { Self::P2Arsenal } }
+    pub const fn banish(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1BanishZone } else { Self::P2BanishZone } }
+    pub const fn head(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Head } else { Self::P2Head } }
+    pub const fn chest(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Chest } else { Self::P2Chest } }
+    pub const fn arms(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Arms } else { Self::P2Arms } }
+    pub const fn legs(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Legs } else { Self::P2Legs } }
+    pub const fn weapon(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Weapon } else { Self::P2Weapon } }
+    pub const fn combat_chain(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1CombatChain } else { Self::P2CombatChain } }
 }
 
 #[derive(Clone, Copy)]
@@ -120,7 +161,7 @@ pub struct CardState {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ReturnFrame {
     pub phase : Phase,
-    pub active_player : u8,
+    pub active_player : PlayerIndex,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -145,7 +186,7 @@ pub struct Player {
     /// player 1 owns `PLAYER_CARDS..2*PLAYER_CARDS`. Stored here so the pid
     /// travels with the player rather than being passed as a parallel argument
     /// that could drift out of sync.
-    pub pid: u8,
+    pub pid: PlayerIndex,
     pub life: u8,
     pub intellect: u8,
     pub hero : Card,
@@ -184,12 +225,12 @@ pub struct Gamestate {
     /// apply. During a turn's action/pitch flow this is the turn player; during
     /// the Instant phase it ping-pongs between the players as each passes
     /// priority, returning to `turn_player` once a card resolves.
-    pub active_player : u8,
+    pub active_player : PlayerIndex,
     /// The player whose turn it is. Unlike `active_player`, this does not change
     /// as priority passes back and forth during the Instant phase: it is set
     /// when the turn begins and is the player priority returns to after the top
     /// of the stack resolves.
-    pub turn_player : u8,
+    pub turn_player : PlayerIndex,
     /// Consecutive passes during the Instant phase. Each pass increments it; a
     /// second pass in a row (reaching 2) resolves the top of the stack and
     /// resets it to 0. Playing a card onto the stack also resets it to 0, since

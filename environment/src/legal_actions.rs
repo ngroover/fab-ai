@@ -1,4 +1,4 @@
-use crate::game_state::{Gamestate, Phase, Player, CardState, CardIdx, TOTAL_CARDS};
+use crate::game_state::{Gamestate, Phase, Player, PlayerIndex, CardState, CardIdx, TOTAL_CARDS};
 use crate::action::{Action, ActionType};
 use crate::cards::{Card, CardType};
 use crate::classic_battles::get_card_catalog;
@@ -30,7 +30,7 @@ fn legal_defend_phase(gs: &Gamestate) -> Vec<Action> {
     // When we enter the Defend phase the active player is flipped to the
     // defender (see resolve_top_of_stack), so the usual active-player lookup
     // gives us the player choosing blockers.
-    let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
+    let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
 
     // Every card in hand can be committed as a blocker except those flagged
     // no_block (e.g. cards with no defense that cannot block normally).
@@ -45,7 +45,7 @@ fn legal_defend_phase(gs: &Gamestate) -> Vec<Action> {
 
 fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
     let catalog = get_card_catalog();
-    let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
+    let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
 
     // The card being paid for is held pending in the hand; it can't pitch for
     // itself, so exclude it from the options.
@@ -95,7 +95,7 @@ fn legal_reaction_phase(gs: &Gamestate) -> Vec<Action> {
 fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Action> {
     let catalog = get_card_catalog();
     let mut legal_actions = Vec::new();
-    let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
+    let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
 
     // Total pitch available across the whole hand. Computed once here and shared
     // by both the hand-card playability and equipment-activation affordability
@@ -374,7 +374,7 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Defend);
-        assert_eq!(gs.active_player, 1);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
 
         gs
     }
@@ -448,7 +448,7 @@ mod tests {
         // phase with the turn player (Rhinar, p1) holding priority.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
-        assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
 
         // After committing the attack Rhinar holds two cards. Relabel them to a
         // reaction-speed card (Dodge, a DefenseReaction, cost 0) and a non-
@@ -610,7 +610,7 @@ mod tests {
         // Choosing second flips the active player to Dorinthea (p2).
         let go_second = Action{ typ: ActionType::ChooseSecond, card: None};
         step(&mut gs, go_second);
-        assert_eq!(gs.active_player, 1);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
 
         let actions = legal_actions(&gs);
 

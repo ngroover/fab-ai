@@ -1,5 +1,5 @@
 use crate::action::{Action,ActionType};
-use crate::game_state::{Gamestate,Phase,Player,PendingCard,ReturnFrame,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
+use crate::game_state::{Gamestate,Phase,Player,PendingCard,ReturnFrame,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
 use crate::cards::{CardData,CardType};
 use crate::classic_battles::get_card_catalog;
 
@@ -18,8 +18,8 @@ pub fn step(gs: &mut Gamestate, act: Action) {
 fn handle_choose_first(gs: &mut Gamestate, act: Action) {
     // only need to switch the player if they choose go second
     if act.typ == ActionType::ChooseSecond {
-        // xor to flip the player
-        gs.active_player = gs.active_player ^ 1;
+        // flip to the other player
+        gs.active_player = gs.active_player.opponent();
     }
     // The player who goes first owns this turn. `turn_player` tracks them
     // independently of `active_player`, which will ping-pong as priority passes
@@ -82,7 +82,7 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     let cs = gs.cards[card_idx.get()];
     let cost = action_cost(act.typ, &catalog[cs.card as usize]);
 
-    let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
+    let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
     let already_paid = player.resources >= cost;
 
     // Work out which priority window this card commits into, and (for a fresh
@@ -97,7 +97,7 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
         if commits_as_attack(act.typ, &catalog[cs.card as usize]) {
             gs.push_phase(ReturnFrame { phase: Phase::Action, active_player: gs.turn_player });
             gs.push_phase(ReturnFrame { phase: Phase::Reaction, active_player: gs.turn_player });
-            gs.push_phase(ReturnFrame { phase: Phase::Defend, active_player: gs.turn_player ^ 1 });
+            gs.push_phase(ReturnFrame { phase: Phase::Defend, active_player: gs.turn_player.opponent() });
         } else {
             gs.push_phase(ReturnFrame { phase: Phase::Action, active_player: gs.turn_player });
         }
@@ -155,7 +155,7 @@ fn handle_priority_pass(gs: &mut Gamestate) {
         }
     } else {
         // First pass: hand priority to the other player, who may now respond.
-        gs.active_player ^= 1;
+        gs.active_player = gs.active_player.opponent();
     }
 }
 
@@ -206,7 +206,7 @@ fn handle_reaction_phase(gs: &mut Gamestate, act: Action) {
 /// the attacker's card sits on the *attacker's* chain, a separate array.
 fn commit_blocker(gs: &mut Gamestate, idx: usize) {
     let pid = gs.active_player;
-    let player = if pid == 0 { &mut gs.p1 } else { &mut gs.p2 };
+    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
 
     detach_from_current_zone(player, &mut gs.cards, idx);
     gs.cards[idx].location = CardLocation::combat_chain(pid);
@@ -231,7 +231,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         return;
     };
     let top = pending.index.get();
-    let owner = if top < PLAYER_CARDS { 0 } else { 1 };
+    let owner = if top < PLAYER_CARDS { PlayerIndex::P1 } else { PlayerIndex::P2 };
 
     let catalog = get_card_catalog();
     let data = &catalog[gs.cards[top].card as usize];
@@ -244,7 +244,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         // chain. The instant window is done; advance to the banked Defend frame
         // (the defender declares blocks).
         gs.cards[top].location = CardLocation::combat_chain(owner);
-        let attacker = if owner == 0 { &mut gs.p1 } else { &mut gs.p2 };
+        let attacker = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
         attacker.chain_link[0] = Some(CardIdx::new(top));
         let frame = gs.pop_phase().expect("a defend phase after an attack resolves");
         return_to(gs, frame);
@@ -299,7 +299,7 @@ fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
 
     // Move the pitched card out of the hand and into the pitch zone, banking the
     // resources it produces.
-    let player = if pid == 0 { &mut gs.p1 } else { &mut gs.p2 };
+    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     detach_from_current_zone(player, &mut gs.cards, card_idx);
     gs.cards[card_idx].location = CardLocation::pitch(pid);
     attach_to_front_of_zone(&mut gs.cards, &mut player.pitch_idx, None, None, card_idx);
@@ -333,7 +333,7 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     let cs = gs.cards[pending_idx];
     let cost = action_cost(pending.typ, &catalog[cs.card as usize]);
 
-    let player = if gs.active_player == 0 { &mut gs.p1 } else { &mut gs.p2 };
+    let player = if gs.active_player == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     player.resources -= cost;
     detach_from_current_zone(player, &mut gs.cards, pending_idx);
     gs.cards[pending_idx].location = CardLocation::Stack;
@@ -527,7 +527,7 @@ fn move_from_deck_to_hand(player: &mut Player, cards: &mut [CardState; TOTAL_CAR
     let pid = player.pid;
     detach_from_current_zone(player, cards, card_idx);
     cards[card_idx].location = CardLocation::hand(pid);
-    cards[card_idx].visible = if pid == 0 {
+    cards[card_idx].visible = if pid == PlayerIndex::P1 {
         CardVisibleState::P1Knows
     } else {
         CardVisibleState::P2Knows
@@ -554,12 +554,12 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
-        assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
         assert_eq!(gs.phase, Phase::Action);
     }
 
@@ -568,12 +568,12 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
 
         let go_second = Action{ typ: ActionType::ChooseSecond, card: None};
         step(&mut gs, go_second);
 
-        assert_eq!(gs.active_player, 1);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
         assert_eq!(gs.phase, Phase::Action);
     }
 
@@ -815,8 +815,8 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(cb_idx))});
 
         assert_eq!(gs.phase, Phase::Instant);
-        assert_eq!(gs.turn_player, 0);
-        assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.turn_player, PlayerIndex::P1);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
         assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(cb_idx));
         (gs, cb_idx)
     }
@@ -825,13 +825,13 @@ mod tests {
     fn test_choose_first_sets_turn_player() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
-        assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
 
         // Going second flips both the active player and, since they own the turn,
         // the turn player along with it.
         step(&mut gs, Action{ typ: ActionType::ChooseSecond, card: None});
-        assert_eq!(gs.active_player, 1);
-        assert_eq!(gs.turn_player, 1);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        assert_eq!(gs.turn_player, PlayerIndex::P2);
     }
 
     #[test]
@@ -843,8 +843,8 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Instant);
-        assert_eq!(gs.turn_player, 0);
-        assert_eq!(gs.active_player, 1);
+        assert_eq!(gs.turn_player, PlayerIndex::P1);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
         assert_eq!(gs.passes, 1);
         assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(cb_idx));
         assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
@@ -862,8 +862,8 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Action);
-        assert_eq!(gs.active_player, 0);
-        assert_eq!(gs.turn_player, 0);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+        assert_eq!(gs.turn_player, PlayerIndex::P1);
         assert_eq!(gs.passes, 0);
         assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Graveyard);
@@ -899,8 +899,8 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Defend);
-        assert_eq!(gs.active_player, 1);
-        assert_eq!(gs.turn_player, 0);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        assert_eq!(gs.turn_player, PlayerIndex::P1);
         assert_eq!(gs.passes, 0);
         assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.p1.chain_link[0], Some(CardIdx::new(mm_idx)));
@@ -933,8 +933,8 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Defend);
-        assert_eq!(gs.active_player, 1);
-        assert_eq!(gs.turn_player, 0);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        assert_eq!(gs.turn_player, PlayerIndex::P1);
         assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.p1.chain_link[0], Some(CardIdx::new(weapon_idx)));
         assert_eq!(gs.cards[weapon_idx].location, CardLocation::P1CombatChain);
@@ -965,7 +965,7 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Defend);
-        assert_eq!(gs.active_player, 1);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
         gs
     }
 
@@ -1080,7 +1080,7 @@ mod tests {
 
         step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
         assert_eq!(gs.phase, Phase::Reaction);
-        assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
         assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
 
         // Both players pass: the reaction resolves to its owner's graveyard, the
@@ -1124,7 +1124,7 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Defend);
-        assert_eq!(gs.active_player, tp ^ 1);
+        assert_eq!(gs.active_player, tp.opponent());
 
         // The defender passes (declares no further blocks): advance to the turn
         // player's Reaction window.
@@ -1174,7 +1174,7 @@ mod tests {
 
         // Turn player passes; priority moves to the opponent (Dorinthea, p2).
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.active_player, 1);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
 
         // The opponent responds with an instant of their own. Sigil of Solace
         // (cost 0) commits straight to the stack on top of Clearing Bellow; the
@@ -1183,7 +1183,7 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
 
         assert_eq!(gs.phase, Phase::Instant);
-        assert_eq!(gs.active_player, 1);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
         assert_eq!(gs.passes, 0);
         // Sigil is now on top of the stack, above Clearing Bellow.
         assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(sigil_idx));
@@ -1195,7 +1195,7 @@ mod tests {
         // now gets a window to respond to Sigil.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Instant);
-        assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
         assert_eq!(gs.passes, 1);
         assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
         assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(sigil_idx));
@@ -1205,7 +1205,7 @@ mod tests {
         // the stack and priority returns to the turn player for a fresh round.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Instant);
-        assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
         assert_eq!(gs.passes, 0);
         assert_eq!(gs.cards[sigil_idx].location, CardLocation::P2Graveyard);
         assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(cb_idx));
@@ -1238,7 +1238,7 @@ mod tests {
         assert_eq!(gs.p2.hand_size, 4);
         assert_eq!(gs.p2.deck_size, 36);
 
-        let hand = get_card_states_from_location(&gs, 0, CardLocation::P1Hand);
+        let hand = get_card_states_from_location(&gs, PlayerIndex::P1, CardLocation::P1Hand);
 
         assert_eq!(hand.len(), 4);
 
@@ -1247,7 +1247,7 @@ mod tests {
         assert_eq!(hand[2].card, Card::RagingOnslaughtY);
         assert_eq!(hand[3].card, Card::ClearingBellowB);
 
-        let hand2 = get_card_states_from_location(&gs, 1, CardLocation::P2Hand);
+        let hand2 = get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2Hand);
 
         assert_eq!(hand2.len(), 4);
 

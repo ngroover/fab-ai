@@ -2,8 +2,8 @@ use crate::action::Action;
 use crate::cards::{Card, CardType, EquipmentSlot};
 use crate::classic_battles::get_card_catalog;
 use crate::game_state::{
-    CardIdx, CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase, PLAYER_CARDS,
-    RETURN_STACK_SIZE, STACK_SIZE, TOTAL_CARDS,
+    CardIdx, CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase, PlayerIndex,
+    PLAYER_CARDS, RETURN_STACK_SIZE, STACK_SIZE, TOTAL_CARDS,
 };
 use rand::RngExt;
 use rand::SeedableRng;
@@ -15,7 +15,7 @@ use rand::seq::SliceRandom;
 /// `CardType::Equipment`, which always carries one of the four armor slots;
 /// weapons are placed in `Weapon` via their card type, so anything else falls
 /// back to that player's weapon zone.
-fn equipment_zone(slot: &Option<EquipmentSlot>, pid: u8) -> CardLocation {
+fn equipment_zone(slot: &Option<EquipmentSlot>, pid: PlayerIndex) -> CardLocation {
     match slot {
         Some(EquipmentSlot::Head) => CardLocation::head(pid),
         Some(EquipmentSlot::Chest) => CardLocation::chest(pid),
@@ -26,8 +26,8 @@ fn equipment_zone(slot: &Option<EquipmentSlot>, pid: u8) -> CardLocation {
 }
 
 /// The base offset into `Gamestate::cards` for player `pid`'s cards.
-fn player_base(pid: u8) -> usize {
-    pid as usize * PLAYER_CARDS
+fn player_base(pid: PlayerIndex) -> usize {
+    pid.index() * PLAYER_CARDS
 }
 
 /// Build a `Gamestate` from two decklists.
@@ -38,8 +38,8 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: 
         None => rand::make_rng(),
     };
 
-    let (p1, p1_cards) = player_from_decklist(p1_deck, 0);
-    let (p2, p2_cards) = player_from_decklist(p2_deck, 1);
+    let (p1, p1_cards) = player_from_decklist(p1_deck, PlayerIndex::P1);
+    let (p2, p2_cards) = player_from_decklist(p2_deck, PlayerIndex::P2);
 
     // Concatenate each player's 45 card states into the single shared array:
     // player 0 first, then player 1.
@@ -54,8 +54,8 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: 
         p1,
         p2,
         cards,
-        active_player: 0,
-        turn_player: 0,
+        active_player: PlayerIndex::P1,
+        turn_player: PlayerIndex::P1,
         passes: 0,
         phase: Phase::Start,
         return_stack: [None; RETURN_STACK_SIZE],
@@ -74,7 +74,7 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: 
 /// for them (via `set_life_and_intellect`), so they are populated when the game
 /// is initialized — and re-populated whenever `reset` is run again on a
 /// played-out state. A `Gamestate` is not playable until `reset` has run.
-fn player_from_decklist(deck: [Card; 46], pid: u8) -> (Player, [CardState; PLAYER_CARDS]) {
+fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardState; PLAYER_CARDS]) {
     let catalog = get_card_catalog();
     let mut hero_opt: Option<Card> = None;
     let mut card_states: Vec<CardState> = Vec::with_capacity(PLAYER_CARDS);
@@ -157,7 +157,7 @@ pub fn reset(gs: &mut Gamestate) {
     shuffle_decks(gs);
     set_life_and_intellect(gs);
 
-    gs.active_player = gs.rng.random_range(0u8..2);
+    gs.active_player = PlayerIndex::new(gs.rng.random_range(0u8..2));
 }
 
 
@@ -253,7 +253,7 @@ fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
 }
 
 // helper function to get the CardStates owned by player `pid` matching `card`.
-pub fn get_card_states_from_card(gs: &Gamestate, pid: u8, card: Card) -> Vec<CardState> {
+pub fn get_card_states_from_card(gs: &Gamestate, pid: PlayerIndex, card: Card) -> Vec<CardState> {
     let base = player_base(pid);
     gs.cards[base..base + PLAYER_CARDS]
         .iter()
@@ -263,7 +263,7 @@ pub fn get_card_states_from_card(gs: &Gamestate, pid: u8, card: Card) -> Vec<Car
 }
 
 // helper function to get the CardStates owned by player `pid` in `location`.
-pub fn get_card_states_from_location(gs: &Gamestate, pid: u8, location: CardLocation) -> Vec<CardState> {
+pub fn get_card_states_from_location(gs: &Gamestate, pid: PlayerIndex, location: CardLocation) -> Vec<CardState> {
     let base = player_base(pid);
     gs.cards[base..base + PLAYER_CARDS]
         .iter()
@@ -284,28 +284,28 @@ mod tests {
         reset(&mut gs);
 
         // check bonebasher on p1
-        let bb = get_card_states_from_card(&gs, 0, Card::BoneBasher);
+        let bb = get_card_states_from_card(&gs, PlayerIndex::P1, Card::BoneBasher);
 
         assert_eq!(bb.len(), 1);
         assert_eq!(bb[0].location, CardLocation::P1Weapon);
         assert_eq!(bb[0].visible, CardVisibleState::BothKnow);
 
         // check dawnblade on p2
-        let db = get_card_states_from_card(&gs, 1, Card::Dawnblade);
+        let db = get_card_states_from_card(&gs, PlayerIndex::P2, Card::Dawnblade);
 
         assert_eq!(db.len(), 1);
         assert_eq!(db[0].location, CardLocation::P2Weapon);
         assert_eq!(db[0].visible, CardVisibleState::BothKnow);
 
         // check one piece of equipment from rhinar
-        let ih = get_card_states_from_card(&gs, 0, Card::IronhideLegs);
+        let ih = get_card_states_from_card(&gs, PlayerIndex::P1, Card::IronhideLegs);
 
         assert_eq!(ih.len(), 1);
         assert_eq!(ih[0].location, CardLocation::P1Legs);
         assert_eq!(ih[0].visible, CardVisibleState::BothKnow);
 
         // check one piece of equipment from dorinthea
-        let ih = get_card_states_from_card(&gs, 1, Card::IronrotLegs);
+        let ih = get_card_states_from_card(&gs, PlayerIndex::P2, Card::IronrotLegs);
 
         assert_eq!(ih.len(), 1);
         assert_eq!(ih[0].location, CardLocation::P2Legs);
@@ -318,13 +318,13 @@ mod tests {
         assert_eq!(gs.cards[gs.p2.arms_idx.unwrap().get()].card, Card::GallantryGold);
 
         // check deck from rhinar
-        let rhinardeck = get_card_states_from_location(&gs, 0, CardLocation::P1Deck);
+        let rhinardeck = get_card_states_from_location(&gs, PlayerIndex::P1, CardLocation::P1Deck);
 
         assert_eq!(rhinardeck.len(), 40);
         assert_eq!(gs.p1.deck_size, 40);
 
         // check deck from dorinthea
-        let dorintheadeck = get_card_states_from_location(&gs, 1, CardLocation::P2Deck);
+        let dorintheadeck = get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2Deck);
 
         assert_eq!(dorintheadeck.len(), 40);
         assert_eq!(gs.p2.deck_size, 40);
