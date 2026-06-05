@@ -155,6 +155,12 @@ pub struct Gamestate {
     /// the pending resolution has been interrupted by a new layer.
     pub passes : u8,
     pub phase : Phase,
+    /// The phase to return to once the Instant phase ends (the stack empties and
+    /// priority stops ping-ponging). Set when a card is committed to the stack
+    /// from the Action phase: an attack action or weapon swing stores
+    /// `Phase::Defend` (the defender must respond once it resolves), while any
+    /// other played card stores `Phase::Action` (the turn player resumes).
+    pub return_after_instant : Phase,
     pub rng : SmallRng,
     /// The stack: cards currently waiting to resolve, each paired with the
     /// `ActionType` that committed it (so we know how to resolve it). Slot 0 is

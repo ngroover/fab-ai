@@ -170,31 +170,42 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     // A card joins its owner's combat chain when it is attacking: a played
     // attack action card, or a weapon being swung (the weapon itself joins the
     // chain). Everything else resolves to the graveyard.
-    let to_combat_chain = match pending.typ {
+    if commits_as_attack(pending.typ, card_type) {
+        // The attacking card leaves the stack for link 0 of its owner's
+        // combat chain; the opponent must now defend. Leaving the Instant phase,
+        // we return to the phase banked when the card was committed (Defend).
+        gs.cards[top].location = CardLocation::combat_chain(owner);
+        let attacker = if owner == 0 { &mut gs.p1 } else { &mut gs.p2 };
+        attacker.chain_link[0] = Some(top as u8);
+        gs.active_player = owner ^ 1;
+        gs.phase = gs.return_after_instant;
+    } else {
+        gs.cards[top].location = CardLocation::graveyard(owner);
+        gs.active_player = gs.turn_player;
+        // Once the stack empties we leave the Instant phase, returning to the
+        // banked phase (Action for a non-attack); while cards remain we keep
+        // passing priority in the Instant phase.
+        gs.phase = if gs.stack_is_empty() {
+            gs.return_after_instant
+        } else {
+            Phase::Instant
+        };
+    }
+}
+
+/// Whether committing `typ` on a card of `card_type` puts an attack on the
+/// stack — a played attack action card, or a weapon being swung. Such a card
+/// resolves onto its owner's combat chain and sends the game to the Defend
+/// phase; every other committed card resolves to the graveyard and returns to
+/// the Action phase.
+fn commits_as_attack(typ: ActionType, card_type: CardType) -> bool {
+    match typ {
         ActionType::PlayCard => matches!(card_type, CardType::AttackAction),
         ActionType::Attack => matches!(
             card_type,
             CardType::Weapon | CardType::Sword2h | CardType::Club2h
         ),
         _ => false,
-    };
-
-    if to_combat_chain {
-        // The attacking card leaves the stack for link 0 of its owner's
-        // combat chain; the opponent must now defend.
-        gs.cards[top].location = CardLocation::combat_chain(owner);
-        let attacker = if owner == 0 { &mut gs.p1 } else { &mut gs.p2 };
-        attacker.chain_link[0] = Some(top as u8);
-        gs.active_player = owner ^ 1;
-        gs.phase = Phase::Defend;
-    } else {
-        gs.cards[top].location = CardLocation::graveyard(owner);
-        gs.active_player = gs.turn_player;
-        gs.phase = if gs.stack_is_empty() {
-            Phase::Action
-        } else {
-            Phase::Instant
-        };
     }
 }
 
@@ -251,6 +262,15 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     detach_from_current_zone(player, &mut gs.cards, pending.index);
     gs.cards[pending.index].location = CardLocation::Stack;
     gs.push_to_stack(pending);
+
+    // Bank the phase to return to once the Instant phase ends. An attack action
+    // or weapon swing heads for the Defend phase (the opponent must respond once
+    // it resolves); any other played card returns to the Action phase.
+    gs.return_after_instant = if commits_as_attack(pending.typ, catalog[cs.card as usize].typ) {
+        Phase::Defend
+    } else {
+        Phase::Action
+    };
 
     // The card now lives on the stack, so it is no longer "pending" — clear it
     // before opening the Instant phase. A new layer landing on the stack also
