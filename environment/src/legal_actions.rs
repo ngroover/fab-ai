@@ -112,16 +112,20 @@ fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], 
     let catalog = get_card_catalog();
     let mut actions: Vec<Action> = Vec::new();
 
-    // Worn armor pieces are only an option if they carry an activated ability
-    // (e.g. Blossom of Spring, Gallantry Gold). Passive equipment such as
-    // Bone Vizier or the Ironhide pieces has none.
-    let armor_slots = [
-        player.head_idx,
-        player.chest_idx,
-        player.arms_idx,
-        player.legs_idx,
+    // Each worn piece is only an option if it carries an activated ability
+    // (e.g. Blossom of Spring, Gallantry Gold); passive equipment such as Bone
+    // Vizier or the Ironhide pieces has none. The weapon belongs here too: a
+    // swing is an activated ability paid for with the ability's resource cost
+    // (not the card's cost), differing from armor only in that it produces an
+    // Attack action rather than an Activate.
+    let activatable_slots = [
+        (player.head_idx, ActionType::Activate),
+        (player.chest_idx, ActionType::Activate),
+        (player.arms_idx, ActionType::Activate),
+        (player.legs_idx, ActionType::Activate),
+        (player.weapon_idx, ActionType::Attack),
     ];
-    for slot in armor_slots {
+    for (slot, action_typ) in activatable_slots {
         if let Some(idx) = slot {
             let idx = idx as usize;
             let Some(ability) = &catalog[cards[idx].card as usize].ability else {
@@ -139,31 +143,9 @@ fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], 
             let needed = ability.resource_cost().saturating_sub(player.resources);
             if total_pitch >= needed {
                 actions.push(Action {
-                    typ: ActionType::Activate,
+                    typ: action_typ,
                     index: idx,
                 });
-            }
-        }
-    }
-
-    // A weapon swing is its own action (not an equipment activation): it costs
-    // the weapon's own catalog resource cost, unlike an armor ability which
-    // costs the ability's resource cost. The swing is itself an activated
-    // ability, so it is gated by `is_playable` on that ability's card type
-    // (action-speed weapons drop out of the instant phase this way).
-    if let Some(idx) = player.weapon_idx {
-        let idx = idx as usize;
-        if let Some(ability) = &catalog[cards[idx].card as usize].ability {
-            if is_playable(ability.card_type()) {
-                let needed = catalog[cards[idx].card as usize]
-                    .cost
-                    .saturating_sub(player.resources);
-                if total_pitch >= needed {
-                    actions.push(Action {
-                        typ: ActionType::Attack,
-                        index: idx,
-                    });
-                }
             }
         }
     }
