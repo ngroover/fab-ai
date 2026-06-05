@@ -1,5 +1,5 @@
 use crate::action::{Action,ActionType};
-use crate::game_state::{Gamestate,Phase,Player,PendingCard,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
+use crate::game_state::{Gamestate,Phase,Player,PendingCard,ReturnFrame,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
 use crate::cards::{CardData,CardType};
 use crate::classic_battles::get_card_catalog;
 
@@ -71,9 +71,9 @@ fn handle_instant_phase(gs: &mut Gamestate, act: Action) {
 /// Commit a card the active player has chosen to play, activate, or attack with.
 /// The card is recorded as `pending_card` (still sitting in its source zone, not
 /// yet on the stack). If banked resources already cover its cost it is committed
-/// straight to the stack (advancing to the Instant phase); otherwise it stays
-/// pending and we drop into the Pitch phase to pitch for the rest. Shared by the
-/// Action and Instant phases.
+/// straight to the stack (re-entering the live priority window); otherwise it
+/// stays pending and we drop into the Pitch phase to pitch for the rest. Shared
+/// by the Action, Instant, and Reaction phases.
 fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     // Cost of committing this card: an Activate (an armor ability or a weapon
     // swing) pays its ability's cost; a played card pays its own catalog cost.
@@ -85,30 +85,38 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
     let already_paid = player.resources >= cost;
 
-    // Bank the phase and active player to restore once the Instant phase ends,
-    // but only for a fresh play from the Action phase — a card committed in
-    // response during the Instant phase must not clobber what the original
-    // Action-phase play stored. An attack action or weapon swing heads for the
-    // Defend phase with the non-turn player (the defender) active; any other
-    // played card returns to the Action phase with the turn player active.
-    // Recorded here, before any drop into the Pitch phase masks the origin.
-    if gs.phase == Phase::Action {
-        // A play from the Action phase opens an Instant response window; any
-        // card committed in response (or while layers remain) returns here.
-        gs.response_phase = Phase::Instant;
+    // Work out which priority window this card commits into, and (for a fresh
+    // play from the Action phase) lay down the itinerary that follows it.
+    let window = if gs.phase == Phase::Action {
+        // A play from the Action phase opens an Instant response window. Push the
+        // phases that follow it onto the return stack, innermost last so they pop
+        // back in order. An attack action or weapon swing walks the combat chain
+        // — resume the turn player's Action phase, then their Reaction window,
+        // then the defender's Defend phase — while any other played card simply
+        // resumes the turn player's Action phase once it resolves.
         if commits_as_attack(act.typ, &catalog[cs.card as usize]) {
-            gs.return_after_instant = Phase::Defend;
-            gs.player_after_instant = gs.turn_player ^ 1;
+            gs.push_phase(ReturnFrame { phase: Phase::Action, active_player: gs.turn_player });
+            gs.push_phase(ReturnFrame { phase: Phase::Reaction, active_player: gs.turn_player });
+            gs.push_phase(ReturnFrame { phase: Phase::Defend, active_player: gs.turn_player ^ 1 });
         } else {
-            gs.return_after_instant = Phase::Action;
-            gs.player_after_instant = gs.turn_player;
+            gs.push_phase(ReturnFrame { phase: Phase::Action, active_player: gs.turn_player });
         }
-    }
+        Phase::Instant
+    } else {
+        // Responding inside an already-open window (Instant or Reaction): the
+        // card commits back into that same window.
+        gs.phase
+    };
 
     gs.pending_card = Some(PendingCard {
         index: card_idx,
         typ: act.typ,
     });
+
+    // Push the window to re-enter once the card is paid for, keeping the current
+    // committer on priority. This survives the Pitch detour: `commit_pending_to_stack`
+    // pops it to restore the window whether we pitched or paid outright.
+    gs.push_phase(ReturnFrame { phase: window, active_player: gs.active_player });
 
     // Affordable outright: no pitching needed, commit to the stack now.
     // Otherwise leave it pending (off the stack) and pitch for it.
@@ -126,8 +134,9 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
 /// when both players pass in succession with no card played between. On that
 /// second pass the top card of the stack resolves (see `resolve_top_of_stack`)
 /// and the count resets. The Reaction phase opens on an empty stack, so a double
-/// pass with nothing on the stack instead closes the window and restores the
-/// banked phase/player (the turn player resuming the Action phase).
+/// pass with nothing on the stack instead closes the window and advances to the
+/// next itinerary phase banked on the return stack (the turn player resuming the
+/// Action phase).
 fn handle_priority_pass(gs: &mut Gamestate) {
     gs.passes += 1;
     if gs.passes >= 2 {
@@ -136,9 +145,9 @@ fn handle_priority_pass(gs: &mut Gamestate) {
         if gs.stack_is_empty() {
             // Nothing left to resolve (the reaction window opened on an empty
             // stack, or every layer has already resolved): the window closes and
-            // play returns to the banked phase and player.
-            gs.active_player = gs.player_after_instant;
-            gs.phase = gs.return_after_instant;
+            // play advances to the next itinerary phase.
+            let frame = gs.pop_phase().expect("a phase to return to when the window closes");
+            return_to(gs, frame);
         } else {
             // Resolve the top of the stack. The resolution itself decides where
             // priority and the phase go next, since that depends on the card type.
@@ -151,34 +160,23 @@ fn handle_priority_pass(gs: &mut Gamestate) {
 }
 
 /// Handle an action during the Defend phase. The active player is the defender
-/// (flipped to the opponent of the attacker in `resolve_top_of_stack`). They may
+/// (restored from the `Defend` return frame in `resolve_top_of_stack`). They may
 /// commit blockers one at a time — each chosen card moves out of their hand onto
 /// the next free link of their own combat chain, and the phase stays on Defend so
 /// further blockers can be declared. Passing finishes declaring blockers and
-/// advances to the Reaction phase.
+/// advances to the next itinerary phase — the turn player's Reaction window,
+/// pushed onto the return stack when the attack was committed.
 fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
         ActionType::Defend => commit_blocker(gs, act.card_index()),
-        ActionType::Pass => enter_reaction_phase(gs),
+        ActionType::Pass => {
+            // The attack itinerary banked a Reaction window (turn player active)
+            // for once blocks are declared; resume it.
+            let frame = gs.pop_phase().expect("a reaction window after the defend phase");
+            return_to(gs, frame);
+        }
         _ => {}
     }
-}
-
-/// Open the combat reaction step once the defender has finished declaring
-/// blockers. Like the Instant window this is a priority window driven by the
-/// shared play/pass/resolve machinery, but it opens on an *empty* stack (the
-/// attack already sits on the combat chain, not the stack) and players may add
-/// reactions and instants. Priority starts with the turn player. Once the whole
-/// stack has resolved the window closes and the turn player resumes the Action
-/// phase — banked here so a reaction resolving while layers remain returns to
-/// the Reaction phase, and the final pass returns to the Action phase.
-fn enter_reaction_phase(gs: &mut Gamestate) {
-    gs.phase = Phase::Reaction;
-    gs.response_phase = Phase::Reaction;
-    gs.return_after_instant = Phase::Action;
-    gs.player_after_instant = gs.turn_player;
-    gs.active_player = gs.turn_player;
-    gs.passes = 0;
 }
 
 /// Handle an action during the Reaction phase. The active player may play a
@@ -221,12 +219,13 @@ fn commit_blocker(gs: &mut Gamestate, idx: usize) {
 /// shared `cards` array the slot falls in. A no-op when the stack is empty.
 ///
 /// - A **played attack action card**, or a **weapon swing** (the weapon card
-///   itself), moves onto its owner's combat chain at link 0, the opponent
-///   becomes the active player to defend, and we enter the Defend phase.
-/// - Anything **else** resolves to its owner's graveyard. Priority returns to
-///   the turn player, who resumes the banked phase once the stack is empty, or
-///   keeps responding in the live priority window (Instant or Reaction) while
-///   cards remain.
+///   itself), moves onto its owner's combat chain at link 0, and we advance to
+///   the next itinerary phase — the `Defend` frame banked when the attack was
+///   committed, with the defender active to declare blocks.
+/// - Anything **else** resolves to its owner's graveyard. If the stack is now
+///   empty the window closes and we advance to the next itinerary phase;
+///   otherwise priority returns to the turn player and we keep responding in the
+///   live priority window (Instant or Reaction).
 fn resolve_top_of_stack(gs: &mut Gamestate) {
     let Some(pending) = gs.pop_stack() else {
         return;
@@ -242,27 +241,25 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     // chain). Everything else resolves to the graveyard.
     if commits_as_attack(pending.typ, data) {
         // The attacking card leaves the stack for link 0 of its owner's combat
-        // chain. Leaving the Instant phase, we restore the phase and active
-        // player banked when the card was committed (Defend, with the non-turn
-        // player active to declare blocks).
+        // chain. The instant window is done; advance to the banked Defend frame
+        // (the defender declares blocks).
         gs.cards[top].location = CardLocation::combat_chain(owner);
         let attacker = if owner == 0 { &mut gs.p1 } else { &mut gs.p2 };
         attacker.chain_link[0] = Some(CardIdx::new(top));
-        gs.active_player = gs.player_after_instant;
-        gs.phase = gs.return_after_instant;
+        let frame = gs.pop_phase().expect("a defend phase after an attack resolves");
+        return_to(gs, frame);
     } else {
         gs.cards[top].location = CardLocation::graveyard(owner);
         if gs.stack_is_empty() {
-            // The stack is empty, so the Instant phase ends: restore the phase
-            // and active player banked when the resolved card was committed.
-            gs.active_player = gs.player_after_instant;
-            gs.phase = gs.return_after_instant;
+            // The stack is empty, so the window closes: advance to the next
+            // itinerary phase banked on the return stack.
+            let frame = gs.pop_phase().expect("a phase to return to once the stack empties");
+            return_to(gs, frame);
         } else {
             // Cards remain on the stack: priority returns to the turn player for
             // a fresh round of responses and we stay in the live priority window
-            // (Instant or Reaction).
+            // (`gs.phase` is already that window).
             gs.active_player = gs.turn_player;
-            gs.phase = gs.response_phase;
         }
     }
 }
@@ -319,7 +316,7 @@ fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
 }
 
 /// Move the pending card onto the stack, pay its cost from the active player's
-/// banked resources, and advance to the Instant phase. Shared by both the
+/// banked resources, and re-enter the live priority window. Shared by both the
 /// affordable path (straight from the Action phase) and the Pitch phase (once
 /// enough has been pitched). The card is detached from its source zone — the
 /// hand for a played card, the weapon/armor slot for an activation — and
@@ -342,14 +339,23 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     gs.cards[pending_idx].location = CardLocation::Stack;
     gs.push_to_stack(pending);
 
-    // The card now lives on the stack, so it is no longer "pending" — clear it
-    // before opening the Instant phase. A new layer landing on the stack also
-    // interrupts any pending resolution, so the consecutive-pass count resets.
+    // The card now lives on the stack, so it is no longer "pending" — clear it.
+    // A new layer landing on the stack also interrupts any pending resolution, so
+    // the consecutive-pass count resets.
     gs.pending_card = None;
     gs.passes = 0;
-    // Re-open the live priority window (Instant or Reaction) so the opponent can
-    // respond to the freshly committed card.
-    gs.phase = gs.response_phase;
+    // Re-enter the live priority window (Instant or Reaction), pushed by
+    // `commit_card_to_pending` before any Pitch detour, so the committer keeps
+    // priority and the opponent can respond to the freshly committed card.
+    let frame = gs.pop_phase().expect("a window to return to after committing a card");
+    return_to(gs, frame);
+}
+
+/// Resume the phase recorded on a return frame, restoring the phase and the
+/// player who should hold priority there together.
+fn return_to(gs: &mut Gamestate, frame: ReturnFrame) {
+    gs.phase = frame.phase;
+    gs.active_player = frame.active_player;
 }
 
 /// Resource cost of committing a card for the given action. An `Activate` (an
@@ -1085,6 +1091,55 @@ mod tests {
         assert!(gs.stack_is_empty());
         assert_eq!(gs.phase, Phase::Action);
         assert_eq!(gs.active_player, gs.turn_player);
+    }
+
+    #[test]
+    fn test_attack_itinerary_unwinds_instant_defend_reaction_action() {
+        // Drive a whole attack interaction and confirm the phase-return stack
+        // walks it back in order: the instant window resolves the attack onto the
+        // chain (-> Defend), declaring blocks advances to the turn player's
+        // Reaction window, and emptying that window returns to the Action phase.
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        let tp = gs.turn_player;
+
+        // Rhinar plays Muscle Mutt (an attack action) and pitches Clearing Bellow
+        // to pay for it, opening the Instant window with the attack on the stack.
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.active_player, tp);
+
+        // Both pass: the attack resolves to the chain and we advance to Defend
+        // with the defender (the non-turn player) active.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.active_player, tp ^ 1);
+
+        // The defender passes (declares no further blocks): advance to the turn
+        // player's Reaction window.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Reaction);
+        assert_eq!(gs.active_player, tp);
+
+        // Both pass with an empty stack: the reaction window closes and play
+        // returns to the turn player's Action phase. The return stack is fully
+        // unwound.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.active_player, tp);
+        assert!(gs.return_stack.iter().all(|f| f.is_none()));
     }
 
     #[test]

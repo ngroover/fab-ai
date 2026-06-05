@@ -3,7 +3,7 @@ use crate::cards::{Card, CardType, EquipmentSlot};
 use crate::classic_battles::get_card_catalog;
 use crate::game_state::{
     CardIdx, CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase, PLAYER_CARDS,
-    STACK_SIZE, TOTAL_CARDS,
+    RETURN_STACK_SIZE, STACK_SIZE, TOTAL_CARDS,
 };
 use rand::RngExt;
 use rand::SeedableRng;
@@ -58,9 +58,7 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: 
         turn_player: 0,
         passes: 0,
         phase: Phase::Start,
-        return_after_instant: Phase::Action,
-        player_after_instant: 0,
-        response_phase: Phase::Instant,
+        return_stack: [None; RETURN_STACK_SIZE],
         rng,
         stack: [None; STACK_SIZE],
         pending_card: None,
@@ -153,6 +151,7 @@ fn player_from_decklist(deck: [Card; 46], pid: u8) -> (Player, [CardState; PLAYE
 pub fn reset(gs: &mut Gamestate) {
     gs.phase = Phase::ChooseFirst;
     gs.stack = [None; STACK_SIZE];
+    gs.return_stack = [None; RETURN_STACK_SIZE];
 
     place_cards(gs);
     shuffle_decks(gs);
