@@ -467,7 +467,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             hero_life: 0,
             hero_intellect: 0,
             constant_effect: None,
-            ability: None,
+            ability: Some(Ability::DiscardCardPlusBlock),
             defend_effect: None,
             next_attack_effect: None,
             additional_cost: None,

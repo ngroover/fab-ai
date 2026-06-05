@@ -133,19 +133,10 @@ mod tests {
     #[test]
     fn ability_card_types() {
         // Rally the Rearguard's ability is an instant.
-        assert_eq!(
-            Ability::DiscardCardPlusBlock.card_type() as u8,
-            CardType::Instant as u8
-        );
+        assert_eq!(Ability::DiscardCardPlusBlock.card_type(), CardType::Instant);
         // Blossom of Spring and Gallantry Gold abilities are actions.
-        assert_eq!(
-            Ability::DestroyGain1Resource.card_type() as u8,
-            CardType::Action as u8
-        );
-        assert_eq!(
-            Ability::WeaponPlus1.card_type() as u8,
-            CardType::Action as u8
-        );
+        assert_eq!(Ability::DestroyGain1Resource.card_type(), CardType::Action);
+        assert_eq!(Ability::WeaponPlus1.card_type(), CardType::Action);
     }
 }
 

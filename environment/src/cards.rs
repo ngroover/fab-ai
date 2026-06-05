@@ -3,7 +3,7 @@ use crate::card_effects::{ConstantEffect,Ability,DefendEffect,
     NextAttackEffect,AdditionalCostType,OnPlayEffect,TargetEffect,
     PlayCondition};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum CardType {
     AttackAction,
