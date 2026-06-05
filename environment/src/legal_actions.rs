@@ -67,21 +67,23 @@ fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
 fn legal_action_phase(gs: &Gamestate) -> Vec<Action> {
     // The action phase offers every card playable at action speed, plus
     // activating equipment and the equipped weapon.
-    legal_play_phase(gs, is_action_phase_playable, true)
+    legal_play_phase(gs, is_action_phase_playable)
 }
 
 fn legal_instant_phase(gs: &Gamestate) -> Vec<Action> {
     // The instant phase shares the action phase's machinery but only ever
     // offers instants (see `is_instant_phase_playable`). Equipment and weapon
-    // activations are action-speed, so they are not offered here.
-    legal_play_phase(gs, is_instant_phase_playable, false)
+    // activations are action-speed abilities, so the `is_playable` gate inside
+    // `get_equipment_activations` filters them out here.
+    legal_play_phase(gs, is_instant_phase_playable)
 }
 
 /// Shared body for the action and instant phases. They differ only in which
-/// card types may be played (the `is_playable` predicate) and whether
-/// equipment/weapon activations are offered (`allow_equipment`); the
-/// playable-card affordability and pass logic is otherwise identical.
-fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool, allow_equipment: bool) -> Vec<Action> {
+/// card types may be played (the `is_playable` predicate); the playable-card
+/// affordability, equipment activations, and pass logic are otherwise
+/// identical. Equipment abilities (and the weapon swing) are gated by the same
+/// `is_playable` predicate, applied to each ability's activation card type.
+fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Action> {
     let catalog = get_card_catalog();
     let mut legal_actions = Vec::new();
     let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
@@ -94,9 +96,7 @@ fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool, allow_equ
         .sum();
 
     legal_actions.extend(get_playable_cards(player, &gs.cards, total_pitch, is_playable));
-    if allow_equipment {
-        legal_actions.extend(get_equipment_activations(player, &gs.cards, total_pitch));
-    }
+    legal_actions.extend(get_equipment_activations(player, &gs.cards, total_pitch, is_playable));
 
     // Passing is always available; it ends the window without playing or
     // activating anything.
@@ -108,7 +108,7 @@ fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool, allow_equ
     legal_actions
 }
 
-fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8) -> Vec<Action> {
+fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8, is_playable: fn(CardType) -> bool) -> Vec<Action> {
     let catalog = get_card_catalog();
     let mut actions: Vec<Action> = Vec::new();
 
@@ -128,6 +128,12 @@ fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], 
                 continue;
             };
 
+            // The ability activates at a particular speed; only offer it when
+            // that speed is playable in the current phase.
+            if !is_playable(ability.card_type()) {
+                continue;
+            }
+
             // The activation cost is set by the ability; only offer it when the
             // hand can pitch enough to cover what banked resources don't.
             let needed = ability.resource_cost().saturating_sub(player.resources);
@@ -142,17 +148,23 @@ fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], 
 
     // A weapon swing is its own action (not an equipment activation): it costs
     // the weapon's own catalog resource cost, unlike an armor ability which
-    // costs the ability's resource cost.
+    // costs the ability's resource cost. The swing is itself an activated
+    // ability, so it is gated by `is_playable` on that ability's card type
+    // (action-speed weapons drop out of the instant phase this way).
     if let Some(idx) = player.weapon_idx {
         let idx = idx as usize;
-        let needed = catalog[cards[idx].card as usize]
-            .cost
-            .saturating_sub(player.resources);
-        if total_pitch >= needed {
-            actions.push(Action {
-                typ: ActionType::Attack,
-                index: idx,
-            });
+        if let Some(ability) = &catalog[cards[idx].card as usize].ability {
+            if is_playable(ability.card_type()) {
+                let needed = catalog[cards[idx].card as usize]
+                    .cost
+                    .saturating_sub(player.resources);
+                if total_pitch >= needed {
+                    actions.push(Action {
+                        typ: ActionType::Attack,
+                        index: idx,
+                    });
+                }
+            }
         }
     }
 
