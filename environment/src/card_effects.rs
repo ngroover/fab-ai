@@ -15,6 +15,8 @@ pub enum Ability {
     DiscardCardPlusBlock,
     DestroyGain1Resource,
     WeaponPlus1,
+    Attack2,
+    Attack1,
 }
 
 impl Ability {
@@ -24,6 +26,8 @@ impl Ability {
             Ability::DiscardCardPlusBlock => 0,
             Ability::DestroyGain1Resource => 0,
             Ability::WeaponPlus1 => 1,
+            Ability::Attack2 => 2,
+            Ability::Attack1 => 1,
         }
     }
 
@@ -35,6 +39,8 @@ impl Ability {
             Ability::DiscardCardPlusBlock => CardType::Instant,
             Ability::DestroyGain1Resource => CardType::Action,
             Ability::WeaponPlus1 => CardType::Action,
+            Ability::Attack2 => CardType::Action,
+            Ability::Attack1 => CardType::Action,
         }
     }
 }
