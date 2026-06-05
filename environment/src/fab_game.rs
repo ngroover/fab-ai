@@ -2,8 +2,8 @@ use crate::action::Action;
 use crate::cards::{Card, CardType, EquipmentSlot};
 use crate::classic_battles::get_card_catalog;
 use crate::game_state::{
-    CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase, PLAYER_CARDS, STACK_SIZE,
-    TOTAL_CARDS,
+    CardIdx, CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase, PLAYER_CARDS,
+    STACK_SIZE, TOTAL_CARDS,
 };
 use rand::RngExt;
 use rand::SeedableRng;
@@ -70,11 +70,14 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: 
 /// `pid` is the player this deck belongs to; it determines the per-player
 /// `CardLocation` each card starts in. The returned card states are later copied
 /// into the shared `Gamestate::cards` array (and reset by `place_cards`).
+///
+/// Life and intellect are left at 0 here: `reset` is the single source of truth
+/// for them (via `set_life_and_intellect`), so they are populated when the game
+/// is initialized — and re-populated whenever `reset` is run again on a
+/// played-out state. A `Gamestate` is not playable until `reset` has run.
 fn player_from_decklist(deck: [Card; 46], pid: u8) -> (Player, [CardState; PLAYER_CARDS]) {
     let catalog = get_card_catalog();
     let mut hero_opt: Option<Card> = None;
-    let mut life = 0u8;
-    let mut intellect = 0u8;
     let mut card_states: Vec<CardState> = Vec::with_capacity(PLAYER_CARDS);
 
     for card in deck {
@@ -82,16 +85,14 @@ fn player_from_decklist(deck: [Card; 46], pid: u8) -> (Player, [CardState; PLAYE
         match data.typ {
             CardType::Hero => {
                 hero_opt = Some(card);
-                life = data.hero_life;
-                intellect = data.hero_intellect;
             }
             CardType::Weapon | CardType::Sword2h | CardType::Club2h => {
                 card_states.push(CardState {
                     visible: CardVisibleState::Hidden,
                     location: CardLocation::weapon(pid),
                     card,
-                    next_card: 0,
-                    prev_card: 0,
+                    next_card: CardIdx(0),
+                    prev_card: CardIdx(0),
                 });
             }
             CardType::Equipment => {
@@ -99,8 +100,8 @@ fn player_from_decklist(deck: [Card; 46], pid: u8) -> (Player, [CardState; PLAYE
                     visible: CardVisibleState::Hidden,
                     location: equipment_zone(&data.slot, pid),
                     card,
-                    next_card: 0,
-                    prev_card: 0,
+                    next_card: CardIdx(0),
+                    prev_card: CardIdx(0),
                 });
             }
             _ => {
@@ -108,8 +109,8 @@ fn player_from_decklist(deck: [Card; 46], pid: u8) -> (Player, [CardState; PLAYE
                     visible: CardVisibleState::Hidden,
                     location: CardLocation::deck(pid),
                     card,
-                    next_card: 0,
-                    prev_card: 0,
+                    next_card: CardIdx(0),
+                    prev_card: CardIdx(0),
                 });
             }
         }
@@ -122,8 +123,9 @@ fn player_from_decklist(deck: [Card; 46], pid: u8) -> (Player, [CardState; PLAYE
 
     let player = Player {
         pid,
-        life,
-        intellect,
+        // Populated by `reset` (see `set_life_and_intellect`); 0 until then.
+        life: 0,
+        intellect: 0,
         hero,
         resources: 0,
         action_points: 0,
@@ -187,13 +189,13 @@ fn shuffle_deck_for(
     cards_in_deck.shuffle(rng);
 
     if !cards_in_deck.is_empty() {
-        player.top_deck_idx = cards_in_deck.first().copied().map(|x| x as u8);
-        player.bottom_deck_idx = cards_in_deck.last().copied().map(|x| x as u8);
+        player.top_deck_idx = cards_in_deck.first().copied().map(CardIdx::new);
+        player.bottom_deck_idx = cards_in_deck.last().copied().map(CardIdx::new);
         for (i, c) in cards_in_deck.iter().copied().enumerate() {
             let prev = if i > 0 { cards_in_deck[i - 1] } else { c };
             let next = if i < cards_in_deck.len() - 1 { cards_in_deck[i + 1] } else { c };
-            cards[c].prev_card = prev as u8;
-            cards[c].next_card = next as u8;
+            cards[c].prev_card = CardIdx::new(prev);
+            cards[c].next_card = CardIdx::new(next);
         }
     }
 }
@@ -225,17 +227,17 @@ fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
                 cards[idx].location = equipment_zone(&data.slot, pid);
                 cards[idx].visible = CardVisibleState::BothKnow;
                 match data.slot {
-                    Some(EquipmentSlot::Head) => player.head_idx = Some(idx as u8),
-                    Some(EquipmentSlot::Chest) => player.chest_idx = Some(idx as u8),
-                    Some(EquipmentSlot::Arms) => player.arms_idx = Some(idx as u8),
-                    Some(EquipmentSlot::Legs) => player.legs_idx = Some(idx as u8),
+                    Some(EquipmentSlot::Head) => player.head_idx = Some(CardIdx::new(idx)),
+                    Some(EquipmentSlot::Chest) => player.chest_idx = Some(CardIdx::new(idx)),
+                    Some(EquipmentSlot::Arms) => player.arms_idx = Some(CardIdx::new(idx)),
+                    Some(EquipmentSlot::Legs) => player.legs_idx = Some(CardIdx::new(idx)),
                     _ => {}
                 }
             }
             CardType::Weapon | CardType::Club2h | CardType::Sword2h => {
                 cards[idx].location = CardLocation::weapon(pid);
                 cards[idx].visible = CardVisibleState::BothKnow;
-                player.weapon_idx = Some(idx as u8);
+                player.weapon_idx = Some(CardIdx::new(idx));
             }
             CardType::Hero => {
                 // do nothing
@@ -310,10 +312,10 @@ mod tests {
         assert_eq!(ih[0].visible, CardVisibleState::BothKnow);
 
         // weapon / equipment slot indices point at the right cards
-        assert_eq!(gs.cards[gs.p1.weapon_idx.unwrap() as usize].card, Card::BoneBasher);
-        assert_eq!(gs.cards[gs.p1.legs_idx.unwrap() as usize].card, Card::IronhideLegs);
-        assert_eq!(gs.cards[gs.p2.weapon_idx.unwrap() as usize].card, Card::Dawnblade);
-        assert_eq!(gs.cards[gs.p2.arms_idx.unwrap() as usize].card, Card::GallantryGold);
+        assert_eq!(gs.cards[gs.p1.weapon_idx.unwrap().get()].card, Card::BoneBasher);
+        assert_eq!(gs.cards[gs.p1.legs_idx.unwrap().get()].card, Card::IronhideLegs);
+        assert_eq!(gs.cards[gs.p2.weapon_idx.unwrap().get()].card, Card::Dawnblade);
+        assert_eq!(gs.cards[gs.p2.arms_idx.unwrap().get()].card, Card::GallantryGold);
 
         // check deck from rhinar
         let rhinardeck = get_card_states_from_location(&gs, 0, CardLocation::P1Deck);

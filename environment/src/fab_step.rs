@@ -1,5 +1,5 @@
 use crate::action::{Action,ActionType};
-use crate::game_state::{Gamestate,Phase,Player,PendingCard,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
+use crate::game_state::{Gamestate,Phase,Player,PendingCard,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
 use crate::cards::{CardData,CardType};
 use crate::classic_battles::get_card_catalog;
 
@@ -77,7 +77,8 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     // Cost of committing this card: an Activate (an armor ability or a weapon
     // swing) pays its ability's cost; a played card pays its own catalog cost.
     let catalog = get_card_catalog();
-    let cs = gs.cards[act.index];
+    let card_idx = act.card.expect("play/activate action requires a card");
+    let cs = gs.cards[card_idx.get()];
     let cost = action_cost(act.typ, &catalog[cs.card as usize]);
 
     let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
@@ -101,7 +102,7 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     }
 
     gs.pending_card = Some(PendingCard {
-        index: act.index,
+        index: card_idx,
         typ: act.typ,
     });
 
@@ -142,7 +143,7 @@ fn handle_instant_pass(gs: &mut Gamestate) {
 /// advances to the Reaction phase.
 fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
-        ActionType::Defend => commit_blocker(gs, act.index),
+        ActionType::Defend => commit_blocker(gs, act.card_index()),
         ActionType::Pass => gs.phase = Phase::Reaction,
         _ => {}
     }
@@ -178,7 +179,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     let Some(pending) = gs.pop_stack() else {
         return;
     };
-    let top = pending.index;
+    let top = pending.index.get();
     let owner = if top < PLAYER_CARDS { 0 } else { 1 };
 
     let catalog = get_card_catalog();
@@ -194,7 +195,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         // player active to declare blocks).
         gs.cards[top].location = CardLocation::combat_chain(owner);
         let attacker = if owner == 0 { &mut gs.p1 } else { &mut gs.p2 };
-        attacker.chain_link[0] = Some(top as u8);
+        attacker.chain_link[0] = Some(CardIdx::new(top));
         gs.active_player = gs.player_after_instant;
         gs.phase = gs.return_after_instant;
     } else {
@@ -243,20 +244,21 @@ fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
 
     let catalog = get_card_catalog();
     let pid = gs.active_player;
-    let pitch_val = catalog[gs.cards[act.index].card as usize].pitch;
+    let card_idx = act.card_index();
+    let pitch_val = catalog[gs.cards[card_idx].card as usize].pitch;
 
     // Move the pitched card out of the hand and into the pitch zone, banking the
     // resources it produces.
     let player = if pid == 0 { &mut gs.p1 } else { &mut gs.p2 };
-    detach_from_current_zone(player, &mut gs.cards, act.index);
-    gs.cards[act.index].location = CardLocation::pitch(pid);
-    attach_to_front_of_zone(&mut gs.cards, &mut player.pitch_idx, None, None, act.index);
+    detach_from_current_zone(player, &mut gs.cards, card_idx);
+    gs.cards[card_idx].location = CardLocation::pitch(pid);
+    attach_to_front_of_zone(&mut gs.cards, &mut player.pitch_idx, None, None, card_idx);
     player.resources += pitch_val;
     let resources = player.resources;
 
     // Cost still owed on the pending card; once we can cover it, commit it.
     let pending = gs.pending_card.expect("pitch phase requires a pending card");
-    let pcs = gs.cards[pending.index];
+    let pcs = gs.cards[pending.index.get()];
     let cost = action_cost(pending.typ, &catalog[pcs.card as usize]);
     if resources >= cost {
         commit_pending_to_stack(gs);
@@ -277,13 +279,14 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     // Recompute the cost from the pending action's type, mirroring the
     // affordability check that let us get here.
     let catalog = get_card_catalog();
-    let cs = gs.cards[pending.index];
+    let pending_idx = pending.index.get();
+    let cs = gs.cards[pending_idx];
     let cost = action_cost(pending.typ, &catalog[cs.card as usize]);
 
     let player = if gs.active_player == 0 { &mut gs.p1 } else { &mut gs.p2 };
     player.resources -= cost;
-    detach_from_current_zone(player, &mut gs.cards, pending.index);
-    gs.cards[pending.index].location = CardLocation::Stack;
+    detach_from_current_zone(player, &mut gs.cards, pending_idx);
+    gs.cards[pending_idx].location = CardLocation::Stack;
     gs.push_to_stack(pending);
 
     // The card now lives on the stack, so it is no longer "pending" — clear it
@@ -323,23 +326,23 @@ fn action_cost(typ: ActionType, data: &CardData) -> u8 {
 /// the card's `location`.
 fn attach_to_front_of_zone(
     cards: &mut [CardState; TOTAL_CARDS],
-    head: &mut Option<u8>,
-    bottom: Option<&mut Option<u8>>,
+    head: &mut Option<CardIdx>,
+    bottom: Option<&mut Option<CardIdx>>,
     count: Option<&mut u8>,
     idx: usize,
 ) {
     if let Some(old_head) = *head {
         cards[idx].next_card = old_head;
-        cards[old_head as usize].prev_card = idx as u8;
+        cards[old_head.get()].prev_card = CardIdx::new(idx);
     } else {
         // Empty zone: the card becomes the sole node, its own tail, and the
         // zone's bottom.
-        cards[idx].next_card = idx as u8;
+        cards[idx].next_card = CardIdx::new(idx);
         if let Some(bottom) = bottom {
-            *bottom = Some(idx as u8);
+            *bottom = Some(CardIdx::new(idx));
         }
     }
-    *head = Some(idx as u8);
+    *head = Some(CardIdx::new(idx));
     if let Some(count) = count {
         *count += 1;
     }
@@ -397,13 +400,13 @@ fn detach_from_current_zone(player: &mut Player, cards: &mut [CardState; TOTAL_C
 /// size counter and is decremented.
 fn detach_from_linked_list(
     cards: &mut [CardState; TOTAL_CARDS],
-    head: &mut Option<u8>,
-    bottom: Option<&mut Option<u8>>,
+    head: &mut Option<CardIdx>,
+    bottom: Option<&mut Option<CardIdx>>,
     count: Option<&mut u8>,
     idx: usize,
 ) {
-    let next = cards[idx].next_card as usize;
-    let is_head = *head == Some(idx as u8);
+    let next = cards[idx].next_card.get();
+    let is_head = *head == Some(CardIdx::new(idx));
     let is_tail = next == idx;
 
     if is_head && is_tail {
@@ -415,20 +418,20 @@ fn detach_from_linked_list(
     } else if is_head {
         // Head of a multi-card list; the next card becomes the new head. The
         // tail is unchanged.
-        *head = Some(next as u8);
+        *head = Some(CardIdx::new(next));
     } else {
         // Non-head node always has a valid prev_card.
-        let prev = cards[idx].prev_card as usize;
+        let prev = cards[idx].prev_card.get();
         if is_tail {
             // Removing the tail: prev becomes the new tail (points to itself).
-            cards[prev].next_card = prev as u8;
+            cards[prev].next_card = CardIdx::new(prev);
             if let Some(bottom) = bottom {
-                *bottom = Some(prev as u8);
+                *bottom = Some(CardIdx::new(prev));
             }
         } else {
             // Middle node: splice prev and next together.
-            cards[prev].next_card = next as u8;
-            cards[next].prev_card = prev as u8;
+            cards[prev].next_card = CardIdx::new(next);
+            cards[next].prev_card = CardIdx::new(prev);
         }
     }
     if let Some(count) = count {
@@ -437,7 +440,10 @@ fn detach_from_linked_list(
 }
 
 fn draw_to_intellect(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
-    let need = (player.intellect - player.hand_size).max(0) as usize;
+    // Draw back up to intellect. `saturating_sub` guards the unsigned subtraction:
+    // if the hand is already at or over intellect there is nothing to draw (a
+    // plain `-` would underflow-panic, and `.max(0)` on a `u8` is a no-op).
+    let need = player.intellect.saturating_sub(player.hand_size) as usize;
     draw_cards(player, cards, need);
 }
 
@@ -446,7 +452,7 @@ fn draw_cards(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], num: us
     while drawn < num {
         // Re-read the top each iteration: drawing a card updates `top_deck_idx`,
         // and it becomes `None` once the (formerly last) card is drawn.
-        let Some(current_idx) = player.top_deck_idx.map(|x| x as usize) else {
+        let Some(current_idx) = player.top_deck_idx.map(|x| x.get()) else {
             break; // deck is empty
         };
         move_from_deck_to_hand(player, cards, current_idx);
@@ -489,7 +495,7 @@ mod tests {
 
         assert_eq!(gs.active_player, 0);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
         assert_eq!(gs.active_player, 0);
@@ -503,7 +509,7 @@ mod tests {
 
         assert_eq!(gs.active_player, 0);
 
-        let go_second = Action{ typ: ActionType::ChooseSecond, index : 0};
+        let go_second = Action{ typ: ActionType::ChooseSecond, card: None};
         step(&mut gs, go_second);
 
         assert_eq!(gs.active_player, 1);
@@ -515,7 +521,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
         assert_eq!(gs.phase, Phase::Action);
 
@@ -526,12 +532,12 @@ mod tests {
                 .find(|(_, cs)| cs.card == Card::MuscleMuttY)
                 .map(|(idx, _)| idx)
                 .expect("Muscle Mutt should be in the opening hand");
-        let play = Action{ typ: ActionType::PlayCard, index: mm_idx};
+        let play = Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))};
         step(&mut gs, play);
 
         assert_eq!(gs.phase, Phase::Pitch);
         let pending = gs.pending_card.expect("pending card should be set");
-        assert_eq!(pending.index, mm_idx);
+        assert_eq!(pending.index.get(), mm_idx);
         assert_eq!(pending.typ, ActionType::PlayCard);
 
         // The pending card is held off the stack and still sits in the hand
@@ -545,7 +551,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
         assert_eq!(gs.phase, Phase::Action);
 
@@ -560,7 +566,7 @@ mod tests {
 
         let actions = legal_actions(&gs);
         let play = actions.into_iter()
-                .find(|a| a.typ == ActionType::PlayCard && a.index == cb_idx)
+                .find(|a| a.typ == ActionType::PlayCard && a.card == Some(CardIdx::new(cb_idx)))
                 .expect("playing Clearing Bellow should be a legal action");
 
         step(&mut gs, play);
@@ -569,7 +575,7 @@ mod tests {
         // Once the card hits the stack it is no longer pending.
         assert_eq!(gs.pending_card, None);
         assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
-        assert_eq!(gs.stack_top().map(|p| p.index), Some(cb_idx));
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(cb_idx));
     }
 
     #[test]
@@ -577,7 +583,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
         // Play Muscle Mutt (cost 3) with no banked resources: it becomes pending
@@ -586,7 +592,7 @@ mod tests {
                 .find(|(_, cs)| cs.card == Card::MuscleMuttY)
                 .map(|(idx, _)| idx)
                 .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
         assert_eq!(gs.phase, Phase::Pitch);
         assert_eq!(gs.stack_top(), None);
 
@@ -597,10 +603,10 @@ mod tests {
                 .find(|(_, cs)| cs.card == Card::ClearingBellowB)
                 .map(|(idx, _)| idx)
                 .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
 
         assert_eq!(gs.phase, Phase::Instant);
-        assert_eq!(gs.stack_top().map(|p| p.index), Some(mm_idx));
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
         assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.resources, 0);
         // The pitched card now lives in the pitch zone, not the hand.
@@ -612,7 +618,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
         // Play Muscle Mutt (cost 3); pitching a single yellow attack action only
@@ -622,19 +628,19 @@ mod tests {
                 .find(|(_, cs)| cs.card == Card::MuscleMuttY)
                 .map(|(idx, _)| idx)
                 .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
 
         let pc_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::PackCallY)
                 .map(|(idx, _)| idx)
                 .expect("Pack Call should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, index: pc_idx});
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pc_idx))});
 
         assert_eq!(gs.phase, Phase::Pitch);
         assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.p1.resources, 2);
         assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Hand);
-        assert_eq!(gs.pending_card.expect("still pending").index, mm_idx);
+        assert_eq!(gs.pending_card.expect("still pending").index.get(), mm_idx);
 
         // Pitching a second yellow attack action banks a total of 4, now enough
         // to pay the cost of 3 and commit the card.
@@ -642,10 +648,10 @@ mod tests {
                 .find(|(_, cs)| cs.card == Card::RagingOnslaughtY)
                 .map(|(idx, _)| idx)
                 .expect("Raging Onslaught should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, index: ro_idx});
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(ro_idx))});
 
         assert_eq!(gs.phase, Phase::Instant);
-        assert_eq!(gs.stack_top().map(|p| p.index), Some(mm_idx));
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
         assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.resources, 1);
     }
@@ -655,15 +661,15 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
         // Swing Bone Basher (ability cost 2): pending, off the stack, Pitch phase.
-        let weapon_idx = gs.p1.weapon_idx.unwrap() as usize;
-        step(&mut gs, Action{ typ: ActionType::Activate, index: weapon_idx});
+        let weapon_idx = gs.p1.weapon_idx.unwrap().get();
+        step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(weapon_idx))});
         assert_eq!(gs.phase, Phase::Pitch);
         assert_eq!(gs.stack_top(), None);
-        assert_eq!(gs.p1.weapon_idx, Some(weapon_idx as u8));
+        assert_eq!(gs.p1.weapon_idx, Some(CardIdx::new(weapon_idx)));
 
         // Pitch Clearing Bellow (pitch 3) to cover the cost of 2. The weapon is
         // committed to the stack, its slot vacated, and 1 resource is left over.
@@ -671,10 +677,10 @@ mod tests {
                 .find(|(_, cs)| cs.card == Card::ClearingBellowB)
                 .map(|(idx, _)| idx)
                 .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
 
         assert_eq!(gs.phase, Phase::Instant);
-        assert_eq!(gs.stack_top().map(|p| p.index), Some(weapon_idx));
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(weapon_idx));
         assert_eq!(gs.cards[weapon_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.weapon_idx, None);
         assert_eq!(gs.p1.resources, 1);
@@ -685,17 +691,17 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
         // Swing the equipped weapon. Same flow: record pending, go to Pitch.
-        let weapon_idx = gs.p1.weapon_idx.unwrap() as usize;
-        let attack = Action{ typ: ActionType::Activate, index: weapon_idx};
+        let weapon_idx = gs.p1.weapon_idx.unwrap().get();
+        let attack = Action{ typ: ActionType::Activate, card: Some(CardIdx::new(weapon_idx))};
         step(&mut gs, attack);
 
         assert_eq!(gs.phase, Phase::Pitch);
         let pending = gs.pending_card.expect("pending card should be set");
-        assert_eq!(pending.index, weapon_idx);
+        assert_eq!(pending.index.get(), weapon_idx);
         assert_eq!(pending.typ, ActionType::Activate);
     }
 
@@ -704,7 +710,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
         assert_eq!(gs.phase, Phase::Action);
 
@@ -717,7 +723,7 @@ mod tests {
 
         let actions = legal_actions(&gs);
         let play = actions.into_iter()
-                .find(|a| a.typ == ActionType::PlayCard && a.index == packcall_idx)
+                .find(|a| a.typ == ActionType::PlayCard && a.card == Some(CardIdx::new(packcall_idx)))
                 .expect("playing Pack Call should be a legal action");
 
         step(&mut gs, play);
@@ -726,9 +732,9 @@ mod tests {
         // game has advanced to the Pitch phase to pay for it.
         assert_eq!(gs.phase, Phase::Pitch);
         let pending = gs.pending_card.expect("pending card should be set");
-        assert_eq!(pending.index, packcall_idx);
+        assert_eq!(pending.index.get(), packcall_idx);
         assert_eq!(pending.typ, ActionType::PlayCard);
-        assert_eq!(gs.cards[pending.index].card, Card::PackCallY);
+        assert_eq!(gs.cards[pending.index.get()].card, Card::PackCallY);
     }
 
     /// Drive a game to the Instant phase: Rhinar (p1) goes first, plays Clearing
@@ -739,18 +745,18 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        step(&mut gs, Action{ typ: ActionType::ChooseFirst, index : 0});
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
         let cb_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::ClearingBellowB)
                 .map(|(idx, _)| idx)
                 .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, index: cb_idx});
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(cb_idx))});
 
         assert_eq!(gs.phase, Phase::Instant);
         assert_eq!(gs.turn_player, 0);
         assert_eq!(gs.active_player, 0);
-        assert_eq!(gs.stack_top().map(|p| p.index), Some(cb_idx));
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(cb_idx));
         (gs, cb_idx)
     }
 
@@ -762,7 +768,7 @@ mod tests {
 
         // Going second flips both the active player and, since they own the turn,
         // the turn player along with it.
-        step(&mut gs, Action{ typ: ActionType::ChooseSecond, index : 0});
+        step(&mut gs, Action{ typ: ActionType::ChooseSecond, card: None});
         assert_eq!(gs.active_player, 1);
         assert_eq!(gs.turn_player, 1);
     }
@@ -773,13 +779,13 @@ mod tests {
 
         // The turn player passes: priority moves to the opponent, but nothing
         // resolves yet — the card stays on the stack and we remain in Instant.
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Instant);
         assert_eq!(gs.turn_player, 0);
         assert_eq!(gs.active_player, 1);
         assert_eq!(gs.passes, 1);
-        assert_eq!(gs.stack_top().map(|p| p.index), Some(cb_idx));
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(cb_idx));
         assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
     }
 
@@ -791,8 +797,8 @@ mod tests {
         // both have now passed, so the top of the stack resolves. The card moves
         // to its owner's graveyard, priority returns to the turn player, and with
         // an empty stack we drop back into the Action phase.
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Action);
         assert_eq!(gs.active_player, 0);
@@ -807,7 +813,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        step(&mut gs, Action{ typ: ActionType::ChooseFirst, index : 0});
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
         // Rhinar plays Muscle Mutt (an attack action, cost 3) and pitches
         // Clearing Bellow (pitch 3) to commit it to the stack, landing in the
@@ -816,27 +822,27 @@ mod tests {
                 .find(|(_, cs)| cs.card == Card::MuscleMuttY)
                 .map(|(idx, _)| idx)
                 .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
         let cb_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::ClearingBellowB)
                 .map(|(idx, _)| idx)
                 .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
         assert_eq!(gs.phase, Phase::Instant);
-        assert_eq!(gs.stack_top().map(|p| p.index), Some(mm_idx));
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
 
         // Both players pass. Because Muscle Mutt is an attack action, resolving it
         // moves it off the stack onto link 0 of Rhinar's combat chain, makes the
         // opponent (Dorinthea, p2) the active player, and enters the Defend phase.
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Defend);
         assert_eq!(gs.active_player, 1);
         assert_eq!(gs.turn_player, 0);
         assert_eq!(gs.passes, 0);
         assert_eq!(gs.stack_top(), None);
-        assert_eq!(gs.p1.chain_link[0], Some(mm_idx as u8));
+        assert_eq!(gs.p1.chain_link[0], Some(CardIdx::new(mm_idx)));
         assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
     }
 
@@ -845,31 +851,31 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        step(&mut gs, Action{ typ: ActionType::ChooseFirst, index : 0});
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
         // Swing Bone Basher (ability cost 2) and pitch Clearing Bellow (pitch 3)
         // to commit the weapon to the stack, landing in the Instant phase.
-        let weapon_idx = gs.p1.weapon_idx.unwrap() as usize;
-        step(&mut gs, Action{ typ: ActionType::Activate, index: weapon_idx});
+        let weapon_idx = gs.p1.weapon_idx.unwrap().get();
+        step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(weapon_idx))});
         let cb_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::ClearingBellowB)
                 .map(|(idx, _)| idx)
                 .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
         assert_eq!(gs.phase, Phase::Instant);
-        assert_eq!(gs.stack_top().map(|p| p.index), Some(weapon_idx));
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(weapon_idx));
 
         // Both players pass. Because this is a weapon swing, resolving it puts
         // the weapon card itself on link 0 of Rhinar's combat chain, makes the
         // opponent (Dorinthea, p2) the active player, and enters the Defend phase.
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Defend);
         assert_eq!(gs.active_player, 1);
         assert_eq!(gs.turn_player, 0);
         assert_eq!(gs.stack_top(), None);
-        assert_eq!(gs.p1.chain_link[0], Some(weapon_idx as u8));
+        assert_eq!(gs.p1.chain_link[0], Some(CardIdx::new(weapon_idx)));
         assert_eq!(gs.cards[weapon_idx].location, CardLocation::P1CombatChain);
     }
 
@@ -880,22 +886,22 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        step(&mut gs, Action{ typ: ActionType::ChooseFirst, index: 0});
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
         let mm_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::MuscleMuttY)
                 .map(|(idx, _)| idx)
                 .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
 
         let cb_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::ClearingBellowB)
                 .map(|(idx, _)| idx)
                 .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
 
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Defend);
         assert_eq!(gs.active_player, 1);
@@ -915,14 +921,14 @@ mod tests {
                 .expect("Driving Blade should be in Dorinthea's opening hand");
         let hand_before = gs.p2.hand_size;
 
-        step(&mut gs, Action{ typ: ActionType::Defend, index: db_idx});
+        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
 
         assert_eq!(gs.phase, Phase::Defend);
-        assert_eq!(gs.p2.chain_link[0], Some(db_idx as u8));
+        assert_eq!(gs.p2.chain_link[0], Some(CardIdx::new(db_idx)));
         assert_eq!(gs.cards[db_idx].location, CardLocation::P2CombatChain);
         assert_eq!(gs.p2.hand_size, hand_before - 1);
         // The blocker lands on the defender's chain, not the attacker's.
-        assert_eq!(gs.p1.chain_link[0].map(|i| gs.cards[i as usize].card), Some(Card::MuscleMuttY));
+        assert_eq!(gs.p1.chain_link[0].map(|i| gs.cards[i.get()].card), Some(Card::MuscleMuttY));
     }
 
     #[test]
@@ -936,13 +942,13 @@ mod tests {
                 .find(|(_, cs)| cs.card == Card::DrivingBladeY)
                 .map(|(idx, _)| idx)
                 .expect("Driving Blade should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, index: first});
+        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(first))});
 
         let second = gs.p2.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::InTheSwingR)
                 .map(|(idx, _)| idx)
                 .expect("In the Swing should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, index: second});
+        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(second))});
 
         assert_eq!(gs.phase, Phase::Defend);
         // Both cards live on the combat chain and nowhere fills a second link.
@@ -953,10 +959,10 @@ mod tests {
         // Walk link 0's linked list (head -> ... -> a node pointing at itself) and
         // confirm it contains exactly the two blockers.
         let mut on_link: Vec<usize> = Vec::new();
-        let mut cur = gs.p2.chain_link[0].expect("link 0 should hold the blockers") as usize;
+        let mut cur = gs.p2.chain_link[0].expect("link 0 should hold the blockers").get();
         loop {
             on_link.push(cur);
-            let next = gs.cards[cur].next_card as usize;
+            let next = gs.cards[cur].next_card.get();
             if next == cur { break; }
             cur = next;
         }
@@ -971,7 +977,7 @@ mod tests {
 
         // Passing during the Defend phase finishes declaring blockers and moves
         // the game into the Reaction phase.
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Reaction);
     }
@@ -1007,42 +1013,42 @@ mod tests {
                 .unwrap();
 
         // Turn player passes; priority moves to the opponent (Dorinthea, p2).
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.active_player, 1);
 
         // The opponent responds with an instant of their own. Sigil of Solace
         // (cost 0) commits straight to the stack on top of Clearing Bellow; the
         // responder keeps priority, so they remain the active player. Adding this
         // layer resets the consecutive-pass count.
-        step(&mut gs, Action{ typ: ActionType::PlayCard, index: sigil_idx});
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
 
         assert_eq!(gs.phase, Phase::Instant);
         assert_eq!(gs.active_player, 1);
         assert_eq!(gs.passes, 0);
         // Sigil is now on top of the stack, above Clearing Bellow.
-        assert_eq!(gs.stack_top().map(|p| p.index), Some(sigil_idx));
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(sigil_idx));
         assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
         assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
 
         // The opponent passes (1 pass). Because Sigil reset the count, this does
         // not resolve anything — priority simply returns to the turn player, who
         // now gets a window to respond to Sigil.
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Instant);
         assert_eq!(gs.active_player, 0);
         assert_eq!(gs.passes, 1);
         assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
-        assert_eq!(gs.stack_top().map(|p| p.index), Some(sigil_idx));
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(sigil_idx));
 
         // The turn player also passes (2 passes in succession): the top card
         // (Sigil) resolves to its owner's graveyard. Clearing Bellow remains on
         // the stack and priority returns to the turn player for a fresh round.
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Instant);
         assert_eq!(gs.active_player, 0);
         assert_eq!(gs.passes, 0);
         assert_eq!(gs.cards[sigil_idx].location, CardLocation::P2Graveyard);
-        assert_eq!(gs.stack_top().map(|p| p.index), Some(cb_idx));
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(cb_idx));
     }
 
     #[test]
@@ -1050,10 +1056,10 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
-        let pass = Action{ typ: ActionType::Pass, index: 0};
+        let pass = Action{ typ: ActionType::Pass, card: None};
         step(&mut gs, pass);
 
         assert_eq!(gs.pending_card, None);
@@ -1064,7 +1070,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
         assert_eq!(gs.p1.hand_size, 4);
@@ -1096,7 +1102,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
         // After the opening draw p1 has 36 cards left in the deck.

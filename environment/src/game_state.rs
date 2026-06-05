@@ -2,6 +2,30 @@ use crate::cards::Card;
 use crate::action::ActionType;
 use rand::rngs::SmallRng;
 
+/// A global index into `Gamestate::cards`. Wrapping the raw `u8` in a newtype
+/// keeps card indices from being silently confused with the many other small
+/// integers in the engine that share the same representation — counts
+/// (`hand_size`, `deck_size`), player ids (`pid`, `active_player`), or pitch
+/// values. Construct with `CardIdx::new` from a `usize` slot; read back the
+/// `usize` with `get` when indexing `Gamestate::cards`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub struct CardIdx(pub u8);
+
+impl CardIdx {
+    /// Wrap a `usize` slot position. The shared `cards` array is only
+    /// `TOTAL_CARDS` long, so every valid slot fits in a `u8`.
+    #[inline]
+    pub const fn new(i: usize) -> Self {
+        CardIdx(i as u8)
+    }
+
+    /// The slot as a `usize`, for indexing `Gamestate::cards`.
+    #[inline]
+    pub const fn get(self) -> usize {
+        self.0 as usize
+    }
+}
+
 /// Number of (non-hero) cards each player owns. The unified `Gamestate::cards`
 /// array is `2 * PLAYER_CARDS` long: player 0 owns slots `0..PLAYER_CARDS` and
 /// player 1 owns slots `PLAYER_CARDS..2*PLAYER_CARDS`.
@@ -78,8 +102,8 @@ pub struct CardState {
     pub visible :CardVisibleState,
     pub location: CardLocation,
     pub card : Card,
-    pub next_card : u8,
-    pub prev_card : u8,
+    pub next_card : CardIdx,
+    pub prev_card : CardIdx,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -110,22 +134,22 @@ pub struct Player {
     pub hero : Card,
     pub resources: u8,
     pub action_points: u8,
-    pub top_deck_idx: Option<u8>,
-    pub bottom_deck_idx: Option<u8>,
-    pub pitch_idx : Option<u8>,
-    pub arsenal_idx : Option<u8>,
-    pub hand_idx : Option<u8>,
-    pub banish_idx : Option<u8>,
-    pub weapon_idx : Option<u8>,
-    pub head_idx : Option<u8>,
-    pub chest_idx : Option<u8>,
-    pub arms_idx : Option<u8>,
-    pub legs_idx : Option<u8>,
+    pub top_deck_idx: Option<CardIdx>,
+    pub bottom_deck_idx: Option<CardIdx>,
+    pub pitch_idx : Option<CardIdx>,
+    pub arsenal_idx : Option<CardIdx>,
+    pub hand_idx : Option<CardIdx>,
+    pub banish_idx : Option<CardIdx>,
+    pub weapon_idx : Option<CardIdx>,
+    pub head_idx : Option<CardIdx>,
+    pub chest_idx : Option<CardIdx>,
+    pub arms_idx : Option<CardIdx>,
+    pub legs_idx : Option<CardIdx>,
     /// The combat chain, link by link. Each slot holds the global `cards` index
     /// of the card occupying that chain link, or `None` if the link is empty.
     /// Sized at 5 since a single combat chain is very unlikely to grow longer
     /// than that; the attacking card/weapon is placed at link 0.
-    pub chain_link : [Option<u8>; 5],
+    pub chain_link : [Option<CardIdx>; 5],
     pub hand_size : u8,
     pub deck_size : u8,
 }
@@ -226,7 +250,7 @@ impl Gamestate {
 /// for.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PendingCard {
-    pub index : usize,
+    pub index : CardIdx,
     pub typ : ActionType,
 }
 
@@ -249,7 +273,7 @@ impl<'a> Iterator for HandIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.current?;
         let card = self.cards[idx];
-        let next = card.next_card as usize;
+        let next = card.next_card.get();
         // A node whose `next_card` points at itself marks the end of the list.
         self.current = if next == idx { None } else { Some(next) };
         Some((idx, card))
@@ -264,7 +288,7 @@ impl Player {
     pub fn hand_iter<'a>(&self, cards: &'a [CardState; TOTAL_CARDS]) -> HandIter<'a> {
         HandIter {
             cards,
-            current: self.hand_idx.map(|i| i as usize),
+            current: self.hand_idx.map(|i| i.get()),
         }
     }
 }

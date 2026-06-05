@@ -1,4 +1,4 @@
-use crate::game_state::{Gamestate, Phase, Player, CardState, TOTAL_CARDS};
+use crate::game_state::{Gamestate, Phase, Player, CardState, CardIdx, TOTAL_CARDS};
 use crate::action::{Action, ActionType};
 use crate::cards::{Card, CardType};
 use crate::classic_battles::get_card_catalog;
@@ -10,10 +10,10 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
             let mut actions = Vec::new();
             actions.push(Action{
                         typ : ActionType::ChooseFirst,
-                        index: 0});
+                        card: None});
             actions.push(Action{
                         typ : ActionType::ChooseSecond,
-                        index: 0});
+                        card: None});
             actions
         },
         Phase::Action => legal_action_phase(gs),
@@ -38,7 +38,7 @@ fn legal_defend_phase(gs: &Gamestate) -> Vec<Action> {
         .filter(|(_, cs)| !catalog[cs.card as usize].no_block)
         .map(|(idx, _)| Action {
             typ: ActionType::Defend,
-            index: idx,
+            card: Some(CardIdx::new(idx)),
         })
         .collect()
 }
@@ -49,7 +49,7 @@ fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
 
     // The card being paid for is held pending in the hand; it can't pitch for
     // itself, so exclude it from the options.
-    let pending_index = gs.pending_card.map(|p| p.index);
+    let pending_index = gs.pending_card.map(|p| p.index.get());
 
     // Every other card in hand is a pitch option, as long as it actually pitches
     // for resources — cards with a pitch value of 0 produce nothing and can't be
@@ -59,7 +59,7 @@ fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
         .filter(|(_, cs)| catalog[cs.card as usize].pitch > 0)
         .map(|(idx, _)| Action {
             typ: ActionType::Pitch,
-            index: idx,
+            card: Some(CardIdx::new(idx)),
         })
         .collect()
 }
@@ -102,7 +102,7 @@ fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Ac
     // activating anything.
     legal_actions.push(Action {
         typ: ActionType::Pass,
-        index: 0,
+        card: None,
     });
 
     legal_actions
@@ -128,7 +128,7 @@ fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], 
     ];
     for slot in activatable_slots {
         if let Some(idx) = slot {
-            let idx = idx as usize;
+            let idx = idx.get();
             let Some(ability) = &catalog[cards[idx].card as usize].ability else {
                 continue;
             };
@@ -145,7 +145,7 @@ fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], 
             if total_pitch >= needed {
                 actions.push(Action {
                     typ: ActionType::Activate,
-                    index: idx,
+                    card: Some(CardIdx::new(idx)),
                 });
             }
         }
@@ -178,11 +178,14 @@ fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_p
         let needed = data.cost.saturating_sub(player.resources);
 
         // Free to play, or the remaining hand can pitch enough to cover it.
-        let other_pitch = total_pitch - data.pitch;
+        // `total_pitch` summed the whole hand including this card, so subtracting
+        // this card's own pitch can't underflow; `saturating_sub` makes that
+        // explicit rather than relying on the invariant holding.
+        let other_pitch = total_pitch.saturating_sub(data.pitch);
         if other_pitch >= needed {
             actions.push(Action {
                 typ: ActionType::PlayCard,
-                index: idx,
+                card: Some(CardIdx::new(idx)),
             });
         }
     }
@@ -230,7 +233,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
         // Active player is Rhinar (p1). Every distinct, affordable attack/action
@@ -244,7 +247,7 @@ mod tests {
         // The opening hand is the three yellow attack actions plus Clearing
         // Bellow; all are playable and affordable from the rest of the hand.
         let playable: HashSet<Card> = plays.iter()
-                .map(|a| gs.cards[a.index].card)
+                .map(|a| gs.cards[a.card_index()].card)
                 .collect();
         assert_eq!(playable, HashSet::from([
             Card::MuscleMuttY,
@@ -255,7 +258,7 @@ mod tests {
 
         // Every play is sourced from the Hand.
         for a in &plays {
-            assert_eq!(gs.cards[a.index].location, CardLocation::P1Hand);
+            assert_eq!(gs.cards[a.card_index()].location, CardLocation::P1Hand);
         }
     }
 
@@ -264,7 +267,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
         // Enter the pitch phase directly to isolate its legal-action generator.
@@ -277,10 +280,10 @@ mod tests {
         // hand is offered as a Pitch action sourced from the Hand.
         for a in &actions {
             assert_eq!(a.typ, ActionType::Pitch);
-            assert_eq!(gs.cards[a.index].location, CardLocation::P1Hand);
+            assert_eq!(gs.cards[a.card_index()].location, CardLocation::P1Hand);
         }
         let pitchable: HashSet<Card> = actions.iter()
-                .map(|a| gs.cards[a.index].card)
+                .map(|a| gs.cards[a.card_index()].card)
                 .collect();
         assert_eq!(pitchable, HashSet::from([
             Card::MuscleMuttY,
@@ -295,7 +298,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
         // Play Muscle Mutt: it becomes the pending card and we enter the Pitch
@@ -306,15 +309,15 @@ mod tests {
                 .find(|(_, cs)| cs.card == Card::MuscleMuttY)
                 .map(|(idx, _)| idx)
                 .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
         assert_eq!(gs.phase, Phase::Pitch);
 
         let actions = legal_actions(&gs);
-        assert!(actions.iter().all(|a| a.index != mm_idx));
+        assert!(actions.iter().all(|a| a.card != Some(CardIdx::new(mm_idx))));
 
         // The rest of the opening hand is still offered.
         let pitchable: HashSet<Card> = actions.iter()
-                .map(|a| gs.cards[a.index].card)
+                .map(|a| gs.cards[a.card_index()].card)
                 .collect();
         assert_eq!(pitchable, HashSet::from([
             Card::PackCallY,
@@ -333,24 +336,24 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        step(&mut gs, Action{ typ: ActionType::ChooseFirst, index: 0});
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
         let mm_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::MuscleMuttY)
                 .map(|(idx, _)| idx)
                 .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
 
         let cb_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::ClearingBellowB)
                 .map(|(idx, _)| idx)
                 .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
 
         // Both players pass; the attack resolves to the chain and Dorinthea must
         // now defend.
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
-        step(&mut gs, Action{ typ: ActionType::Pass, index: 0});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Defend);
         assert_eq!(gs.active_player, 1);
@@ -369,10 +372,10 @@ mod tests {
         // a Defend action sourced from her hand.
         for a in &actions {
             assert_eq!(a.typ, ActionType::Defend);
-            assert_eq!(gs.cards[a.index].location, CardLocation::P2Hand);
+            assert_eq!(gs.cards[a.card_index()].location, CardLocation::P2Hand);
         }
         let blockable: HashSet<Card> = actions.iter()
-                .map(|a| gs.cards[a.index].card)
+                .map(|a| gs.cards[a.card_index()].card)
                 .collect();
         assert_eq!(blockable, HashSet::from([
             Card::DrivingBladeY,
@@ -397,9 +400,9 @@ mod tests {
 
         let actions = legal_actions(&gs);
 
-        assert!(actions.iter().all(|a| a.index != db_idx));
+        assert!(actions.iter().all(|a| a.card != Some(CardIdx::new(db_idx))));
         let blockable: HashSet<Card> = actions.iter()
-                .map(|a| gs.cards[a.index].card)
+                .map(|a| gs.cards[a.card_index()].card)
                 .collect();
         assert_eq!(blockable, HashSet::from([
             Card::SharpenSteelR,
@@ -424,7 +427,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
         // Rhinar plays Muscle Mutt (cost 3): it becomes pending and we drop into
@@ -433,7 +436,7 @@ mod tests {
                 .find(|(_, cs)| cs.card == Card::MuscleMuttY)
                 .map(|(idx, _)| idx)
                 .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, index: mm_idx});
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
         assert_eq!(gs.phase, Phase::Pitch);
 
         // Pitch Clearing Bellow (pitch 3) to cover the cost. Muscle Mutt commits
@@ -442,7 +445,7 @@ mod tests {
                 .find(|(_, cs)| cs.card == Card::ClearingBellowB)
                 .map(|(idx, _)| idx)
                 .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, index: cb_idx});
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
         assert_eq!(gs.phase, Phase::Instant);
 
         // Rhinar's remaining hand is two yellow attack actions (Pack Call, Raging
@@ -459,7 +462,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
         // Pass is always offered during the action phase, exactly once.
@@ -468,7 +471,7 @@ mod tests {
                 .filter(|a| a.typ == ActionType::Pass)
                 .collect();
         assert_eq!(passes.len(), 1);
-        assert_eq!(passes[0].index, 0);
+        assert_eq!(passes[0].card, None);
     }
 
     #[test]
@@ -476,7 +479,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs);
 
-        let go_first = Action{ typ: ActionType::ChooseFirst, index : 0};
+        let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
         // Active player is Rhinar (p1). Every equipped card with an activated
@@ -491,7 +494,7 @@ mod tests {
         // Blossom of Spring (chest ability) and Bone Basher (weapon swing) are
         // both Activates; the passive equipment is offered as neither.
         let activatable: HashSet<Card> = activations.iter()
-                .map(|a| gs.cards[a.index].card)
+                .map(|a| gs.cards[a.card_index()].card)
                 .collect();
         assert_eq!(
             activatable,
@@ -502,7 +505,7 @@ mod tests {
         // carried on the action: Bone Basher as the weapon, Blossom of Spring as
         // chest equipment.
         for a in &activations {
-            let cs = gs.cards[a.index];
+            let cs = gs.cards[a.card_index()];
             match cs.card {
                 Card::BoneBasher => assert_eq!(cs.location, CardLocation::P1Weapon),
                 Card::BlossomOfSpring => assert_eq!(cs.location, CardLocation::P1Chest),
@@ -517,7 +520,7 @@ mod tests {
         reset(&mut gs);
 
         // Choosing second flips the active player to Dorinthea (p2).
-        let go_second = Action{ typ: ActionType::ChooseSecond, index : 0};
+        let go_second = Action{ typ: ActionType::ChooseSecond, card: None};
         step(&mut gs, go_second);
         assert_eq!(gs.active_player, 1);
 
@@ -531,7 +534,7 @@ mod tests {
         // Generic piece in both decks) + Dawnblade (weapon swing). The passive
         // equipment (Ironrot Helm/Legs) is offered as neither.
         let activatable: HashSet<Card> = activations.iter()
-                .map(|a| gs.cards[a.index].card)
+                .map(|a| gs.cards[a.card_index()].card)
                 .collect();
         assert_eq!(
             activatable,
@@ -541,7 +544,7 @@ mod tests {
         // Each card sits in its expected slot, derived from its CardState rather
         // than carried on the action.
         for a in &activations {
-            let cs = gs.cards[a.index];
+            let cs = gs.cards[a.card_index()];
             match cs.card {
                 Card::GallantryGold => assert_eq!(cs.location, CardLocation::P2Arms),
                 Card::BlossomOfSpring => assert_eq!(cs.location, CardLocation::P2Chest),
