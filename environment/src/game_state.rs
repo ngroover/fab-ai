@@ -191,6 +191,14 @@ pub struct Gamestate {
     /// defender, who declares blocks in the Defend phase); any other played card
     /// stores the turn player, who resumes the Action phase.
     pub player_after_instant : u8,
+    /// Which kind of priority window is currently open — `Instant` (the response
+    /// window opened when a card is committed from the Action phase) or
+    /// `Reaction` (the combat reaction step entered once blocks are declared).
+    /// Both windows share the same play/pass/resolve machinery; this records
+    /// which one is live so a card committed onto the stack mid-window, or a card
+    /// resolving while layers remain, returns to the right phase rather than
+    /// always falling back to `Instant`.
+    pub response_phase : Phase,
     pub rng : SmallRng,
     /// The stack: cards currently waiting to resolve, each paired with the
     /// `ActionType` that committed it (so we know how to resolve it). Slot 0 is

@@ -20,8 +20,8 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
         Phase::Pitch => legal_pitch_phase(gs),
         Phase::Instant => legal_instant_phase(gs),
         Phase::Defend => legal_defend_phase(gs),
+        Phase::Reaction => legal_reaction_phase(gs),
         Phase::Start => Vec::new(),
-        Phase::Reaction => Vec::new()
     }
 }
 
@@ -76,6 +76,15 @@ fn legal_instant_phase(gs: &Gamestate) -> Vec<Action> {
     // activations are action-speed abilities, so the `is_playable` gate inside
     // `get_equipment_activations` filters them out here.
     legal_play_phase(gs, is_instant_phase_playable)
+}
+
+fn legal_reaction_phase(gs: &Gamestate) -> Vec<Action> {
+    // The reaction phase (the combat reaction step) shares the same machinery
+    // and offers cards playable at reaction speed: instants plus attack and
+    // defense reactions (see `is_reaction_phase_playable`). Activated abilities
+    // of those same speeds — e.g. an instant-speed equipment ability — are
+    // offered too, gated by the same predicate inside `get_equipment_activations`.
+    legal_play_phase(gs, is_reaction_phase_playable)
 }
 
 /// Shared body for the action and instant phases. They differ only in which
@@ -204,6 +213,15 @@ fn is_action_phase_playable(typ: CardType) -> bool {
 
 fn is_instant_phase_playable(typ: CardType) -> bool {
     matches!(typ, CardType::Instant)
+}
+
+fn is_reaction_phase_playable(typ: CardType) -> bool {
+    matches!(
+        typ,
+        CardType::Instant |
+        CardType::AttackReaction |
+        CardType::DefenseReaction
+    )
 }
 
 #[cfg(test)]
@@ -409,6 +427,76 @@ mod tests {
             Card::SecondSwingR,
             Card::InTheSwingR,
         ]));
+    }
+
+    #[test]
+    fn is_reaction_phase_playable_allows_instants_and_reactions() {
+        assert!(is_reaction_phase_playable(CardType::Instant));
+        assert!(is_reaction_phase_playable(CardType::AttackReaction));
+        assert!(is_reaction_phase_playable(CardType::DefenseReaction));
+        assert!(!is_reaction_phase_playable(CardType::AttackAction));
+        assert!(!is_reaction_phase_playable(CardType::Action));
+        assert!(!is_reaction_phase_playable(CardType::Equipment));
+        assert!(!is_reaction_phase_playable(CardType::Weapon));
+    }
+
+    #[test]
+    fn legal_actions_in_reaction_phase_offers_reactions_not_attack_actions() {
+        let mut gs = step_to_dorinthea_defending();
+
+        // Finish declaring blocks: passing the Defend phase opens the Reaction
+        // phase with the turn player (Rhinar, p1) holding priority.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Reaction);
+        assert_eq!(gs.active_player, 0);
+
+        // After committing the attack Rhinar holds two cards. Relabel them to a
+        // reaction-speed card (Dodge, a DefenseReaction, cost 0) and a non-
+        // reaction (Pack Call, an AttackAction) so we can see the predicate
+        // filter at work: only the reaction is offered as a PlayCard.
+        let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+        assert_eq!(hand.len(), 2, "expected Rhinar to hold two cards in reaction");
+        gs.cards[hand[0]].card = Card::DodgeB;
+        gs.cards[hand[1]].card = Card::PackCallY;
+
+        let actions = legal_actions(&gs);
+
+        let playable: HashSet<Card> = actions.iter()
+                .filter(|a| a.typ == ActionType::PlayCard)
+                .map(|a| gs.cards[a.card_index()].card)
+                .collect();
+        assert!(playable.contains(&Card::DodgeB));
+        assert!(!playable.contains(&Card::PackCallY));
+
+        // Relabel the reaction to an Instant (Sigil of Solace) — still a reaction-
+        // speed card, so it stays offered.
+        gs.cards[hand[0]].card = Card::SigilofSolaceB;
+        let actions = legal_actions(&gs);
+        let playable: HashSet<Card> = actions.iter()
+                .filter(|a| a.typ == ActionType::PlayCard)
+                .map(|a| gs.cards[a.card_index()].card)
+                .collect();
+        assert!(playable.contains(&Card::SigilofSolaceB));
+
+        // Pass is still offered exactly once.
+        let passes = actions.iter().filter(|a| a.typ == ActionType::Pass).count();
+        assert_eq!(passes, 1);
+    }
+
+    #[test]
+    fn legal_actions_in_reaction_phase_double_pass_returns_to_action() {
+        let mut gs = step_to_dorinthea_defending();
+
+        // Open the Reaction phase (Defend pass) on an empty stack.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Reaction);
+
+        // Neither player has a reaction to add, so both pass; the reaction step
+        // ends and play returns to the turn player's Action phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.active_player, gs.turn_player);
     }
 
     #[test]

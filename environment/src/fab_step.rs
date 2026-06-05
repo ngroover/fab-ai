@@ -10,6 +10,7 @@ pub fn step(gs: &mut Gamestate, act: Action) {
         Phase::Pitch => handle_pitch_phase(gs, act),
         Phase::Instant => handle_instant_phase(gs, act),
         Phase::Defend => handle_defend_phase(gs, act),
+        Phase::Reaction => handle_reaction_phase(gs, act),
         _ => {}
     }
 }
@@ -61,7 +62,7 @@ fn handle_instant_phase(gs: &mut Gamestate, act: Action) {
             commit_card_to_pending(gs, act);
         }
         ActionType::Pass => {
-            handle_instant_pass(gs);
+            handle_priority_pass(gs);
         }
         _ => {}
     }
@@ -92,6 +93,9 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     // played card returns to the Action phase with the turn player active.
     // Recorded here, before any drop into the Pitch phase masks the origin.
     if gs.phase == Phase::Action {
+        // A play from the Action phase opens an Instant response window; any
+        // card committed in response (or while layers remain) returns here.
+        gs.response_phase = Phase::Instant;
         if commits_as_attack(act.typ, &catalog[cs.card as usize]) {
             gs.return_after_instant = Phase::Defend;
             gs.player_after_instant = gs.turn_player ^ 1;
@@ -115,20 +119,31 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     }
 }
 
-/// Handle a pass during the Instant phase, tracked by `gs.passes`. Each pass
-/// hands priority to the other player and bumps the consecutive-pass count; the
-/// count is reset to 0 whenever a card is played onto the stack (see
-/// `commit_pending_to_stack`), so it only reaches 2 when both players pass in
-/// succession with no card played between. On that second pass the top card of
-/// the stack resolves (see `resolve_top_of_stack`) and the count resets.
-fn handle_instant_pass(gs: &mut Gamestate) {
+/// Handle a pass during a priority window (the Instant or Reaction phase),
+/// tracked by `gs.passes`. Each pass hands priority to the other player and
+/// bumps the consecutive-pass count; the count is reset to 0 whenever a card is
+/// played onto the stack (see `commit_pending_to_stack`), so it only reaches 2
+/// when both players pass in succession with no card played between. On that
+/// second pass the top card of the stack resolves (see `resolve_top_of_stack`)
+/// and the count resets. The Reaction phase opens on an empty stack, so a double
+/// pass with nothing on the stack instead closes the window and restores the
+/// banked phase/player (the turn player resuming the Action phase).
+fn handle_priority_pass(gs: &mut Gamestate) {
     gs.passes += 1;
     if gs.passes >= 2 {
-        // Both players have now passed in succession: resolve the top of the
-        // stack and reset the pass count. The resolution itself decides where
-        // priority and the phase go next, since that depends on the card type.
+        // Both players have now passed in succession; reset the pass count.
         gs.passes = 0;
-        resolve_top_of_stack(gs);
+        if gs.stack_is_empty() {
+            // Nothing left to resolve (the reaction window opened on an empty
+            // stack, or every layer has already resolved): the window closes and
+            // play returns to the banked phase and player.
+            gs.active_player = gs.player_after_instant;
+            gs.phase = gs.return_after_instant;
+        } else {
+            // Resolve the top of the stack. The resolution itself decides where
+            // priority and the phase go next, since that depends on the card type.
+            resolve_top_of_stack(gs);
+        }
     } else {
         // First pass: hand priority to the other player, who may now respond.
         gs.active_player ^= 1;
@@ -144,7 +159,43 @@ fn handle_instant_pass(gs: &mut Gamestate) {
 fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
         ActionType::Defend => commit_blocker(gs, act.card_index()),
-        ActionType::Pass => gs.phase = Phase::Reaction,
+        ActionType::Pass => enter_reaction_phase(gs),
+        _ => {}
+    }
+}
+
+/// Open the combat reaction step once the defender has finished declaring
+/// blockers. Like the Instant window this is a priority window driven by the
+/// shared play/pass/resolve machinery, but it opens on an *empty* stack (the
+/// attack already sits on the combat chain, not the stack) and players may add
+/// reactions and instants. Priority starts with the turn player. Once the whole
+/// stack has resolved the window closes and the turn player resumes the Action
+/// phase — banked here so a reaction resolving while layers remain returns to
+/// the Reaction phase, and the final pass returns to the Action phase.
+fn enter_reaction_phase(gs: &mut Gamestate) {
+    gs.phase = Phase::Reaction;
+    gs.response_phase = Phase::Reaction;
+    gs.return_after_instant = Phase::Action;
+    gs.player_after_instant = gs.turn_player;
+    gs.active_player = gs.turn_player;
+    gs.passes = 0;
+}
+
+/// Handle an action during the Reaction phase. The active player may play a
+/// reaction or instant (committed through the same pending/pitch flow as any
+/// other play) or activate an instant-speed ability, for as long as they keep
+/// priority. Passing hands priority to the other player; once both have passed
+/// in succession the top of the stack resolves, and when the stack is empty the
+/// reaction step ends and play returns to the Action phase (see
+/// `handle_priority_pass`).
+fn handle_reaction_phase(gs: &mut Gamestate, act: Action) {
+    match act.typ {
+        ActionType::PlayCard | ActionType::Activate => {
+            commit_card_to_pending(gs, act);
+        }
+        ActionType::Pass => {
+            handle_priority_pass(gs);
+        }
         _ => {}
     }
 }
@@ -173,8 +224,9 @@ fn commit_blocker(gs: &mut Gamestate, idx: usize) {
 ///   itself), moves onto its owner's combat chain at link 0, the opponent
 ///   becomes the active player to defend, and we enter the Defend phase.
 /// - Anything **else** resolves to its owner's graveyard. Priority returns to
-///   the turn player, who resumes the Action phase once the stack is empty, or
-///   keeps responding in the Instant phase while cards remain.
+///   the turn player, who resumes the banked phase once the stack is empty, or
+///   keeps responding in the live priority window (Instant or Reaction) while
+///   cards remain.
 fn resolve_top_of_stack(gs: &mut Gamestate) {
     let Some(pending) = gs.pop_stack() else {
         return;
@@ -207,9 +259,10 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
             gs.phase = gs.return_after_instant;
         } else {
             // Cards remain on the stack: priority returns to the turn player for
-            // a fresh round of responses and we stay in the Instant phase.
+            // a fresh round of responses and we stay in the live priority window
+            // (Instant or Reaction).
             gs.active_player = gs.turn_player;
-            gs.phase = Phase::Instant;
+            gs.phase = gs.response_phase;
         }
     }
 }
@@ -294,7 +347,9 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     // interrupts any pending resolution, so the consecutive-pass count resets.
     gs.pending_card = None;
     gs.passes = 0;
-    gs.phase = Phase::Instant;
+    // Re-open the live priority window (Instant or Reaction) so the opponent can
+    // respond to the freshly committed card.
+    gs.phase = gs.response_phase;
 }
 
 /// Resource cost of committing a card for the given action. An `Activate` (an
@@ -976,10 +1031,60 @@ mod tests {
         let mut gs = step_to_dorinthea_defending();
 
         // Passing during the Defend phase finishes declaring blockers and moves
-        // the game into the Reaction phase.
+        // the game into the Reaction phase, handing priority to the turn player
+        // (Rhinar, p1) on an empty stack.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Reaction);
+        assert_eq!(gs.active_player, gs.turn_player);
+        assert!(gs.stack_is_empty());
+    }
+
+    #[test]
+    fn test_reaction_phase_double_pass_returns_to_action() {
+        let mut gs = step_to_dorinthea_defending();
+
+        // Open the Reaction phase, then both players pass with nothing to add:
+        // the reaction step closes and the turn player resumes the Action phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.active_player, gs.turn_player);
+    }
+
+    #[test]
+    fn test_reaction_played_resolves_and_returns_to_action() {
+        let mut gs = step_to_dorinthea_defending();
+
+        // Open the Reaction phase; the turn player (p1) holds priority.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Reaction);
+
+        // Relabel a card in p1's hand to Sigil of Solace (an Instant, cost 0) and
+        // play it as a reaction. It commits straight to the stack and we remain in
+        // the Reaction phase (not the Instant phase) with the responder keeping
+        // priority — the live priority window is preserved.
+        let sigil_idx = gs.p1.hand_iter(&gs.cards)
+                .map(|(idx, _)| idx)
+                .next()
+                .expect("p1 should hold a card in the reaction phase");
+        gs.cards[sigil_idx].card = Card::SigilofSolaceB;
+
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
+        assert_eq!(gs.phase, Phase::Reaction);
+        assert_eq!(gs.active_player, 0);
+        assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
+
+        // Both players pass: the reaction resolves to its owner's graveyard, the
+        // stack empties, and play returns to the turn player's Action phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.cards[sigil_idx].location, CardLocation::P1Graveyard);
+        assert!(gs.stack_is_empty());
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.active_player, gs.turn_player);
     }
 
     #[test]
