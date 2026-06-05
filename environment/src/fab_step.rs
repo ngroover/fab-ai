@@ -83,6 +83,20 @@ fn commit_action_card(gs: &mut Gamestate, act: Action) {
     let player = if gs.active_player == 0 { &gs.p1 } else { &gs.p2 };
     let already_paid = player.resources >= cost;
 
+    // Bank the phase to return to once the Instant phase ends, but only for a
+    // fresh play from the Action phase — a card committed in response during the
+    // Instant phase must not clobber what the original Action-phase play stored.
+    // An attack action or weapon swing heads for the Defend phase (the opponent
+    // must respond once it resolves); any other played card returns to Action.
+    // Recorded here, before any drop into the Pitch phase masks the origin.
+    if gs.phase == Phase::Action {
+        gs.return_after_instant = if commits_as_attack(act.typ, catalog[cs.card as usize].typ) {
+            Phase::Defend
+        } else {
+            Phase::Action
+        };
+    }
+
     gs.pending_card = Some(PendingCard {
         index: act.index,
         typ: act.typ,
@@ -262,15 +276,6 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     detach_from_current_zone(player, &mut gs.cards, pending.index);
     gs.cards[pending.index].location = CardLocation::Stack;
     gs.push_to_stack(pending);
-
-    // Bank the phase to return to once the Instant phase ends. An attack action
-    // or weapon swing heads for the Defend phase (the opponent must respond once
-    // it resolves); any other played card returns to the Action phase.
-    gs.return_after_instant = if commits_as_attack(pending.typ, catalog[cs.card as usize].typ) {
-        Phase::Defend
-    } else {
-        Phase::Action
-    };
 
     // The card now lives on the stack, so it is no longer "pending" — clear it
     // before opening the Instant phase. A new layer landing on the stack also
