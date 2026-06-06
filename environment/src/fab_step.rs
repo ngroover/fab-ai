@@ -1,7 +1,6 @@
 use crate::action::{Action,ActionType};
 use crate::game_state::{Gamestate,Phase,Player,PendingCard,ReturnFrame,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
 use crate::cards::{CardData,CardType};
-use crate::classic_battles::get_card_catalog;
 
 pub fn step(gs: &mut Gamestate, act: Action) {
     match gs.phase {
@@ -77,10 +76,9 @@ fn handle_instant_phase(gs: &mut Gamestate, act: Action) {
 fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     // Cost of committing this card: an Activate (an armor ability or a weapon
     // swing) pays its ability's cost; a played card pays its own catalog cost.
-    let catalog = get_card_catalog();
     let card_idx = act.card.expect("play/activate action requires a card");
     let cs = gs.cards[card_idx.get()];
-    let cost = action_cost(act.typ, &catalog[cs.card as usize]);
+    let cost = action_cost(act.typ, cs.card.data());
 
     let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
     let already_paid = player.resources >= cost;
@@ -95,7 +93,7 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
         // a post-defend Instant window (defender holds priority first, per FaB
         // rules), then the defender's Defend phase. Any other played card simply
         // resumes the turn player's Action phase once it resolves.
-        if commits_as_attack(act.typ, &catalog[cs.card as usize]) {
+        if commits_as_attack(act.typ, cs.card.data()) {
             gs.push_phase(ReturnFrame { phase: Phase::Action, active_player: gs.turn_player });
             gs.push_phase(ReturnFrame { phase: Phase::Reaction, active_player: gs.turn_player });
             gs.push_phase(ReturnFrame { phase: Phase::Instant, active_player: gs.turn_player.opponent() });
@@ -235,8 +233,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     let top = pending.index.get();
     let owner = if top < PLAYER_CARDS { PlayerIndex::P1 } else { PlayerIndex::P2 };
 
-    let catalog = get_card_catalog();
-    let data = &catalog[gs.cards[top].card as usize];
+    let data = gs.cards[top].card.data();
 
     // A card joins its owner's combat chain when it is attacking: a played
     // attack action card, or a weapon being swung (the weapon itself joins the
@@ -294,10 +291,9 @@ fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
         return;
     }
 
-    let catalog = get_card_catalog();
     let pid = gs.active_player;
     let card_idx = act.card_index();
-    let pitch_val = catalog[gs.cards[card_idx].card as usize].pitch;
+    let pitch_val = gs.cards[card_idx].card.data().pitch;
 
     // Move the pitched card out of the hand and into the pitch zone, banking the
     // resources it produces.
@@ -311,7 +307,7 @@ fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
     // Cost still owed on the pending card; once we can cover it, commit it.
     let pending = gs.pending_card.expect("pitch phase requires a pending card");
     let pcs = gs.cards[pending.index.get()];
-    let cost = action_cost(pending.typ, &catalog[pcs.card as usize]);
+    let cost = action_cost(pending.typ, pcs.card.data());
     if resources >= cost {
         commit_pending_to_stack(gs);
     }
@@ -330,10 +326,9 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
 
     // Recompute the cost from the pending action's type, mirroring the
     // affordability check that let us get here.
-    let catalog = get_card_catalog();
     let pending_idx = pending.index.get();
     let cs = gs.cards[pending_idx];
-    let cost = action_cost(pending.typ, &catalog[cs.card as usize]);
+    let cost = action_cost(pending.typ, cs.card.data());
 
     let player = if gs.active_player == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     player.resources -= cost;

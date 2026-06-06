@@ -1,4 +1,4 @@
-use crate::cards::{CardClass, CardData, CardType, Color, EquipmentSlot, Keyword};
+use crate::cards::{Card, CardClass, CardData, CardType, Color, EquipmentSlot, Keyword};
 use crate::card_effects::Ability;
 use std::sync::LazyLock;
 
@@ -1224,4 +1224,14 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
 /// Returns a reference to the shared card catalog, initializing it on first use.
 pub fn get_card_catalog() -> &'static [CardData; 52] {
     &CARD_CATALOG
+}
+
+impl Card {
+    /// This card's static stats from the shared catalog. The catalog is
+    /// positional — a `Card`'s discriminant is its index — so this is just that
+    /// array index behind a name, letting call sites write `card.data()` instead
+    /// of `get_card_catalog()[card as usize]` and dropping the `as usize` cast.
+    pub fn data(self) -> &'static CardData {
+        &get_card_catalog()[self as usize]
+    }
 }

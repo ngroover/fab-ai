@@ -1,6 +1,5 @@
 use crate::action::Action;
 use crate::cards::{Card, CardType, EquipmentSlot};
-use crate::classic_battles::get_card_catalog;
 use crate::game_state::{
     CardIdx, CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase, PlayerIndex,
     PLAYER_CARDS, RETURN_STACK_SIZE, STACK_SIZE, TOTAL_CARDS,
@@ -75,12 +74,11 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: 
 /// is initialized — and re-populated whenever `reset` is run again on a
 /// played-out state. A `Gamestate` is not playable until `reset` has run.
 fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardState; PLAYER_CARDS]) {
-    let catalog = get_card_catalog();
     let mut hero_opt: Option<Card> = None;
     let mut card_states: Vec<CardState> = Vec::with_capacity(PLAYER_CARDS);
 
     for card in deck {
-        let data = &catalog[card as usize];
+        let data = card.data();
         match data.typ {
             CardType::Hero => {
                 hero_opt = Some(card);
@@ -162,10 +160,9 @@ pub fn reset(gs: &mut Gamestate) {
 
 
 pub fn set_life_and_intellect(gs: &mut Gamestate) {
-    let catalog = get_card_catalog();
     for player in [&mut gs.p1, &mut gs.p2] {
-        player.life = catalog[player.hero as usize].hero_life;
-        player.intellect = catalog[player.hero as usize].hero_intellect;
+        player.life = player.hero.data().hero_life;
+        player.intellect = player.hero.data().hero_intellect;
     }
 }
 
@@ -206,7 +203,6 @@ pub fn place_cards(gs: &mut Gamestate) {
 }
 
 fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
-    let catalog = get_card_catalog();
     let pid = player.pid;
     let base = player_base(pid);
     player.hand_size = 0;
@@ -221,7 +217,7 @@ fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
     // Walk only this player's half of the shared array, recording each card's
     // global slot position alongside mutating its CardState.
     for idx in base..base + PLAYER_CARDS {
-        let data = &catalog[cards[idx].card as usize];
+        let data = cards[idx].card.data();
         match data.typ {
             CardType::Equipment => {
                 cards[idx].location = equipment_zone(&data.slot, pid);

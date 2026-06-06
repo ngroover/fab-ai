@@ -1,7 +1,6 @@
 use crate::game_state::{Gamestate, Phase, Player, PlayerIndex, CardState, CardIdx, TOTAL_CARDS};
 use crate::action::{Action, ActionType};
 use crate::cards::{Card, CardType};
-use crate::classic_battles::get_card_catalog;
 
 
 pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
@@ -26,7 +25,6 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
 }
 
 fn legal_defend_phase(gs: &Gamestate) -> Vec<Action> {
-    let catalog = get_card_catalog();
     // When we enter the Defend phase the active player is flipped to the
     // defender (see resolve_top_of_stack), so the usual active-player lookup
     // gives us the player choosing blockers.
@@ -35,7 +33,7 @@ fn legal_defend_phase(gs: &Gamestate) -> Vec<Action> {
     // Every card in hand can be committed as a blocker except those flagged
     // no_block (e.g. cards with no defense that cannot block normally).
     player.hand_iter(&gs.cards)
-        .filter(|(_, cs)| !catalog[cs.card as usize].no_block)
+        .filter(|(_, cs)| !cs.card.data().no_block)
         .map(|(idx, _)| Action {
             typ: ActionType::Defend,
             card: Some(CardIdx::new(idx)),
@@ -44,7 +42,6 @@ fn legal_defend_phase(gs: &Gamestate) -> Vec<Action> {
 }
 
 fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
-    let catalog = get_card_catalog();
     let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
 
     // The card being paid for is held pending in the hand; it can't pitch for
@@ -56,7 +53,7 @@ fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
     // pitched.
     player.hand_iter(&gs.cards)
         .filter(|(idx, _)| Some(*idx) != pending_index)
-        .filter(|(_, cs)| catalog[cs.card as usize].pitch > 0)
+        .filter(|(_, cs)| cs.card.data().pitch > 0)
         .map(|(idx, _)| Action {
             typ: ActionType::Pitch,
             card: Some(CardIdx::new(idx)),
@@ -93,7 +90,6 @@ fn legal_reaction_phase(gs: &Gamestate) -> Vec<Action> {
 /// identical. Equipment abilities (and the weapon swing) are gated by the same
 /// `is_playable` predicate, applied to each ability's activation card type.
 fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Action> {
-    let catalog = get_card_catalog();
     let mut legal_actions = Vec::new();
     let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
 
@@ -101,7 +97,7 @@ fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Ac
     // by both the hand-card playability and equipment-activation affordability
     // checks, since pitching pays for either.
     let total_pitch: u8 = player.hand_iter(&gs.cards)
-        .map(|(_, cs)| catalog[cs.card as usize].pitch)
+        .map(|(_, cs)| cs.card.data().pitch)
         .sum();
 
     legal_actions.extend(get_playable_cards(player, &gs.cards, total_pitch, is_playable));
@@ -118,7 +114,6 @@ fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Ac
 }
 
 fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8, is_playable: fn(CardType) -> bool) -> Vec<Action> {
-    let catalog = get_card_catalog();
     let mut actions: Vec<Action> = Vec::new();
 
     // Each worn piece is only an option if it carries an activated ability
@@ -138,7 +133,7 @@ fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], 
     for slot in activatable_slots {
         if let Some(idx) = slot {
             let idx = idx.get();
-            let Some(ability) = &catalog[cards[idx].card as usize].ability else {
+            let Some(ability) = &cards[idx].card.data().ability else {
                 continue;
             };
 
@@ -164,13 +159,12 @@ fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], 
 }
 
 fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8, is_playable: fn(CardType) -> bool) -> Vec<Action> {
-    let catalog = get_card_catalog();
     let mut actions: Vec<Action> = Vec::new();
 
     let mut seen: Vec<Card> = Vec::new();
     for (idx, cardstate) in player.hand_iter(cards) {
         let card = cardstate.card;
-        let data = &catalog[card as usize];
+        let data = card.data();
 
         // Only cards playable in the current phase
         if !is_playable(data.typ) {
