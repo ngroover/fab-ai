@@ -1365,6 +1365,177 @@ mod tests {
     }
 
     #[test]
+    fn test_full_walkthrough_rhinar_attack_dorinthea_takes_damage() {
+        // A complete attack stepped through every phase with no helpers: Rhinar
+        // attacks with Muscle Mutt (power 6), Dorinthea blocks with a single
+        // Driving Blade (defense 3), and 6 - 3 = 3 damage is dealt to her life.
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        // ── ChooseFirst phase ──────────────────────────────────────────────
+        assert_eq!(gs.phase, Phase::ChooseFirst);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.turn_player, PlayerIndex::P1);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+        assert_eq!(gs.p1.action_points, 1);
+        assert_eq!(gs.p2.life, 20);
+
+        // ── Action phase: play Muscle Mutt ─────────────────────────────────
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in Rhinar's opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        assert_eq!(gs.phase, Phase::Pitch);
+        assert_eq!(gs.pending_card.expect("pending Muscle Mutt").index.get(), mm_idx);
+
+        // ── Pitch phase: pitch Clearing Bellow (pitch 3) to pay the cost of 3 ─
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in Rhinar's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
+
+        // ── Instant phase (attack on the stack): both pass to resolve it ───
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Rhinar passes
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Dorinthea passes
+        // The attack resolves onto Rhinar's combat chain and play enters Defend.
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        assert_eq!(gs.p1.chain_link[0], Some(CardIdx::new(mm_idx)));
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
+        assert!(gs.stack_is_empty());
+
+        // ── Defend phase: Dorinthea blocks with Driving Blade (defense 3) ──
+        let db_idx = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
+                .map(|(idx, _)| idx)
+                .expect("Driving Blade should be in Dorinthea's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.p2.chain_link[0], Some(CardIdx::new(db_idx)));
+        assert_eq!(gs.cards[db_idx].location, CardLocation::P2CombatChain);
+        // Done blocking.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        // ── Post-defend Instant window (defender holds priority first) ─────
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Dorinthea passes
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Rhinar passes → close
+
+        // ── Reaction phase (turn player holds priority first) ──────────────
+        assert_eq!(gs.phase, Phase::Reaction);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Rhinar passes
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Dorinthea passes → combat
+
+        // ── Back to the Action phase: damage has been dealt ────────────────
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+        // 6 power - 3 blocked = 3 damage. 20 - 3 = 17.
+        assert_eq!(gs.p2.life, 17);
+        // Muscle Mutt has no Go Again, so its action point is now spent.
+        assert_eq!(gs.p1.action_points, 0);
+    }
+
+    #[test]
+    fn test_full_walkthrough_dorinthea_overblocks_no_damage() {
+        // The same attack, stepped through every phase, but Dorinthea over-blocks:
+        // she commits three defense-3 cards (Driving Blade, In the Swing, Second
+        // Swing) for 9 total defense against Muscle Mutt's 6 power, so no damage
+        // gets through and her life is unchanged.
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        // ── ChooseFirst phase ──────────────────────────────────────────────
+        assert_eq!(gs.phase, Phase::ChooseFirst);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+        assert_eq!(gs.p2.life, 20);
+
+        // ── Action phase: play Muscle Mutt ─────────────────────────────────
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in Rhinar's opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        assert_eq!(gs.phase, Phase::Pitch);
+
+        // ── Pitch phase: pay for it with Clearing Bellow ───────────────────
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in Rhinar's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
+
+        // ── Instant phase: both pass to resolve the attack onto the chain ──
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Rhinar
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Dorinthea
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
+
+        // ── Defend phase: Dorinthea commits three defense-3 blockers ───────
+        let db_idx = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
+                .map(|(idx, _)| idx)
+                .expect("Driving Blade should be in Dorinthea's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
+        assert_eq!(gs.phase, Phase::Defend);
+        let its_idx = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::InTheSwingR)
+                .map(|(idx, _)| idx)
+                .expect("In the Swing should be in Dorinthea's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(its_idx))});
+        assert_eq!(gs.phase, Phase::Defend);
+        let ss_idx = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::SecondSwingR)
+                .map(|(idx, _)| idx)
+                .expect("Second Swing should be in Dorinthea's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(ss_idx))});
+        assert_eq!(gs.phase, Phase::Defend);
+        // All three blockers now sit on Dorinthea's combat chain.
+        assert_eq!(gs.cards[db_idx].location, CardLocation::P2CombatChain);
+        assert_eq!(gs.cards[its_idx].location, CardLocation::P2CombatChain);
+        assert_eq!(gs.cards[ss_idx].location, CardLocation::P2CombatChain);
+        // Done blocking.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        // ── Post-defend Instant window: both pass ──────────────────────────
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Dorinthea
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Rhinar → close
+
+        // ── Reaction phase: both pass → combat resolves ───────────────────
+        assert_eq!(gs.phase, Phase::Reaction);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Rhinar
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Dorinthea → combat
+
+        // ── Back to the Action phase: the over-block soaked all the damage ─
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+        // 6 power - 9 blocked floors at 0 damage; life unchanged.
+        assert_eq!(gs.p2.life, 20);
+        // The attack's action point is still spent even though it dealt no damage.
+        assert_eq!(gs.p1.action_points, 0);
+    }
+
+    #[test]
     fn test_reaction_played_resolves_and_returns_to_action() {
         let mut gs = step_to_dorinthea_defending();
 
