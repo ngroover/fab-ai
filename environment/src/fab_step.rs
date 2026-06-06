@@ -146,8 +146,7 @@ fn handle_priority_pass(gs: &mut Gamestate) {
             // Nothing left to resolve (the reaction window opened on an empty
             // stack, or every layer has already resolved): the window closes and
             // play advances to the next itinerary phase.
-            let frame = gs.pop_phase().expect("a phase to return to when the window closes");
-            return_to(gs, frame);
+            close_priority_window(gs);
         } else {
             // Resolve the top of the stack. The resolution itself decides where
             // priority and the phase go next, since that depends on the card type.
@@ -244,7 +243,10 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         // (the defender declares blocks).
         gs.cards[top].location = CardLocation::combat_chain(owner);
         let attacker = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-        attacker.chain_link[0] = Some(CardIdx::new(top));
+        // Attach through the linked-list helper so the attacker's chain link is
+        // well-terminated (its `next_card` points at itself), letting the chain
+        // be walked the same way as the defender's blockers when combat resolves.
+        attach_to_front_of_zone(&mut gs.cards, &mut attacker.chain_link[0], None, None, top);
         let frame = gs.pop_phase().expect("a defend phase after an attack resolves");
         return_to(gs, frame);
     } else {
@@ -252,8 +254,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         if gs.stack_is_empty() {
             // The stack is empty, so the window closes: advance to the next
             // itinerary phase banked on the return stack.
-            let frame = gs.pop_phase().expect("a phase to return to once the stack empties");
-            return_to(gs, frame);
+            close_priority_window(gs);
         } else {
             // Cards remain on the stack: priority returns to the turn player for
             // a fresh round of responses and we stay in the live priority window
@@ -353,6 +354,64 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
 fn return_to(gs: &mut Gamestate, frame: ReturnFrame) {
     gs.phase = frame.phase;
     gs.active_player = frame.active_player;
+}
+
+/// Close the current priority window and advance to the next banked itinerary
+/// phase. If the window being closed is the Reaction phase, combat resolves
+/// first: the attack on the chain has now been fully responded to, so its damage
+/// is dealt to the defender before play returns to the turn player's Action phase
+/// (see `resolve_combat_damage`). Shared by both window-close paths — a double
+/// pass on an empty stack (`handle_priority_pass`) and a resolution that empties
+/// the stack (`resolve_top_of_stack`).
+fn close_priority_window(gs: &mut Gamestate) {
+    if gs.phase == Phase::Reaction {
+        resolve_combat_damage(gs);
+    }
+    let frame = gs.pop_phase().expect("a phase to return to when the window closes");
+    return_to(gs, frame);
+}
+
+/// Resolve combat as the reaction window closes. The attacker (the turn player)
+/// has its attack card on the combat chain and the defender has its blockers on
+/// theirs; total attack power less total blocked defense is dealt to the
+/// defender's life. A fully (or over-) blocked attack deals nothing — the damage
+/// floors at 0 — and life saturates at 0 rather than underflowing.
+fn resolve_combat_damage(gs: &mut Gamestate) {
+    let defender_id = gs.turn_player.opponent();
+
+    let attacker = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let defender = if defender_id == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let power = combat_chain_total(attacker, &gs.cards, |d| d.power);
+    let blocked = combat_chain_total(defender, &gs.cards, |d| d.defense);
+    let damage = power.saturating_sub(blocked);
+
+    let defender = if defender_id == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    defender.life = defender.life.saturating_sub(damage);
+}
+
+/// Sum a per-card stat (`power` for the attacker, `defense` for the defender)
+/// over every card on `player`'s combat chain. Each occupied chain link is the
+/// head of a linked list — all blockers declared against one attack share a
+/// single link — walked via `next_card` until a node points at itself.
+fn combat_chain_total(
+    player: &Player,
+    cards: &[CardState; TOTAL_CARDS],
+    stat: impl Fn(&CardData) -> u8,
+) -> u8 {
+    let mut total: u8 = 0;
+    for link in player.chain_link.iter() {
+        let Some(head) = link else { continue };
+        let mut cur = head.get();
+        loop {
+            total = total.saturating_add(stat(cards[cur].card.data()));
+            let next = cards[cur].next_card.get();
+            if next == cur {
+                break;
+            }
+            cur = next;
+        }
+    }
+    total
 }
 
 /// Resource cost of committing a card for the given action. An `Activate` (an
@@ -1066,6 +1125,93 @@ mod tests {
 
         assert_eq!(gs.phase, Phase::Action);
         assert_eq!(gs.active_player, gs.turn_player);
+    }
+
+    #[test]
+    fn test_unblocked_attack_deals_full_damage_when_reaction_closes() {
+        // Rhinar attacks with Muscle Mutt (power 6); Dorinthea (20 life) declares
+        // no blocks. When the reaction window closes, the full 6 damage is applied
+        // to her life before play returns to the Action phase.
+        let mut gs = step_to_dorinthea_defending();
+        assert_eq!(gs.p2.life, 20);
+
+        // Defender declares no blocks → post-defend Instant window (defender holds
+        // priority first).
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        // Both pass the post-defend Instant window → turn player's Reaction window.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Reaction);
+
+        // Both pass the Reaction window → combat resolves, then Action phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.active_player, gs.turn_player);
+        // 6 power, nothing blocked → 6 damage. 20 - 6 = 14.
+        assert_eq!(gs.p2.life, 14);
+    }
+
+    #[test]
+    fn test_blocked_attack_deals_reduced_damage_when_reaction_closes() {
+        // Rhinar attacks with Muscle Mutt (power 6); Dorinthea blocks with Driving
+        // Blade (defense 3). When the reaction window closes, 6 - 3 = 3 damage is
+        // applied to her life.
+        let mut gs = step_to_dorinthea_defending();
+        assert_eq!(gs.p2.life, 20);
+
+        // Defender commits Driving Blade as a blocker, then passes to finish.
+        let db_idx = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
+                .map(|(idx, _)| idx)
+                .expect("Driving Blade should be in Dorinthea's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        // Both pass the post-defend Instant window → turn player's Reaction window.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Reaction);
+
+        // Both pass the Reaction window → combat resolves, then Action phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.phase, Phase::Action);
+        // 6 power - 3 blocked = 3 damage. 20 - 3 = 17.
+        assert_eq!(gs.p2.life, 17);
+    }
+
+    #[test]
+    fn test_fully_blocked_attack_deals_no_damage() {
+        // Dorinthea blocks Muscle Mutt (power 6) with both Driving Blade (def 3)
+        // and In the Swing (def 3): 6 total blocked, so no damage gets through and
+        // her life is unchanged when the reaction window closes.
+        let mut gs = step_to_dorinthea_defending();
+        assert_eq!(gs.p2.life, 20);
+
+        let db_idx = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
+                .map(|(idx, _)| idx)
+                .expect("Driving Blade should be in Dorinthea's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
+        let its_idx = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::InTheSwingR)
+                .map(|(idx, _)| idx)
+                .expect("In the Swing should be in Dorinthea's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(its_idx))});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Reaction);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.phase, Phase::Action);
+        // 6 power - 6 blocked = 0 damage. Life unchanged.
+        assert_eq!(gs.p2.life, 20);
     }
 
     #[test]
