@@ -1,6 +1,7 @@
 use crate::game_state::{Gamestate, Phase, Player, PlayerIndex, CardState, CardIdx, TOTAL_CARDS};
 use crate::action::{Action, ActionType};
 use crate::cards::{Card, CardType};
+use crate::fab_step::uses_action_point;
 
 
 pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
@@ -143,6 +144,14 @@ fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], 
                 continue;
             }
 
+            // Action-speed abilities (a weapon swing, or an action ability such
+            // as Blossom of Spring) cost an action point; with none left the
+            // player can't activate them. Instant-speed abilities are free.
+            if uses_action_point(ActionType::Activate, cards[idx].card.data())
+                && player.action_points == 0 {
+                continue;
+            }
+
             // The activation cost is set by the ability; only offer it when the
             // hand can pitch enough to cover what banked resources don't.
             let needed = ability.resource_cost().saturating_sub(player.resources);
@@ -168,6 +177,13 @@ fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_p
 
         // Only cards playable in the current phase
         if !is_playable(data.typ) {
+            continue;
+        }
+
+        // Action cards (attack actions and non-attack actions) cost an action
+        // point to play; with none left they drop out of the options. Instants
+        // are free, so they remain playable.
+        if uses_action_point(ActionType::PlayCard, data) && player.action_points == 0 {
             continue;
         }
 

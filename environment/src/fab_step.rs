@@ -1,6 +1,6 @@
 use crate::action::{Action,ActionType};
 use crate::game_state::{Gamestate,Phase,Player,PendingCard,ReturnFrame,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
-use crate::cards::{CardData,CardType};
+use crate::cards::{CardData,CardType,Keyword};
 
 pub fn step(gs: &mut Gamestate, act: Action) {
     match gs.phase {
@@ -26,10 +26,20 @@ fn handle_choose_first(gs: &mut Gamestate, act: Action) {
     gs.turn_player = gs.active_player;
     // begin turn logic
     gs.phase = Phase::Action;
+    begin_turn(gs);
     // The cards live in the shared `gs.cards` array; draw each player's opening
     // hand by passing that array alongside the player and its id.
     draw_to_intellect(&mut gs.p1, &mut gs.cards);
     draw_to_intellect(&mut gs.p2, &mut gs.cards);
+}
+
+/// Start the turn player's turn. They are granted a single action point — the
+/// resource spent to play an action card or activate an action-speed ability.
+/// It is consumed when an action resolves (or, for an attack, once combat damage
+/// is dealt) unless the card has Go Again.
+fn begin_turn(gs: &mut Gamestate) {
+    let turn_player = if gs.turn_player == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    turn_player.action_points = 1;
 }
 
 fn handle_action_phase(gs: &mut Gamestate, act: Action) {
@@ -251,6 +261,13 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         return_to(gs, frame);
     } else {
         gs.cards[top].location = CardLocation::graveyard(owner);
+        // A resolving non-attack action — an action card, or an activated
+        // action-speed ability — spends the owner's action point unless it has
+        // Go Again. Attacks are handled when combat damage resolves; instants and
+        // reactions are free.
+        if uses_action_point(pending.typ, data) && !data.keyword.contains(Keyword::GoAgain) {
+            spend_action_point(gs, owner);
+        }
         if gs.stack_is_empty() {
             // The stack is empty, so the window closes: advance to the next
             // itinerary phase banked on the return stack.
@@ -281,6 +298,24 @@ fn commits_as_attack(typ: ActionType, data: &CardData) -> bool {
             .unwrap_or(false),
         _ => false,
     }
+}
+
+/// Whether committing `typ` on `data` spends an action point — i.e. it is an
+/// action: an attack action or a non-attack action, played from hand
+/// (`PlayCard`) or activated as an action-speed ability (`Activate`, e.g. a
+/// weapon swing or Blossom of Spring). Instants, reactions, and instant-speed
+/// abilities are free and never touch the action-point pool. The point itself is
+/// only deducted when the action resolves (or, for an attack, once combat damage
+/// is dealt), and Go Again skips that deduction.
+pub(crate) fn uses_action_point(typ: ActionType, data: &CardData) -> bool {
+    let card_type = match typ {
+        ActionType::PlayCard => Some(data.typ),
+        // An Activate is always done on a card carrying an ability; its activation
+        // card type is the speed the ability plays at.
+        ActionType::Activate => data.ability.as_ref().map(|a| a.card_type()),
+        _ => None,
+    };
+    matches!(card_type, Some(CardType::AttackAction | CardType::Action))
 }
 
 /// Handle a pitch during the Pitch phase. The pitched card is moved from the
@@ -377,16 +412,35 @@ fn close_priority_window(gs: &mut Gamestate) {
 /// defender's life. A fully (or over-) blocked attack deals nothing — the damage
 /// floors at 0 — and life saturates at 0 rather than underflowing.
 fn resolve_combat_damage(gs: &mut Gamestate) {
-    let defender_id = gs.turn_player.opponent();
+    let attacker_id = gs.turn_player;
+    let defender_id = attacker_id.opponent();
 
-    let attacker = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let attacker = if attacker_id == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
     let defender = if defender_id == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
     let power = combat_chain_total(attacker, &gs.cards, |d| d.power);
     let blocked = combat_chain_total(defender, &gs.cards, |d| d.defense);
     let damage = power.saturating_sub(blocked);
 
+    // Whether the attacking card (link 0 of the attacker's chain) has Go Again;
+    // if so the turn player keeps their action point and may act again.
+    let attack_has_go_again = attacker.chain_link[0]
+        .map(|idx| gs.cards[idx.get()].card.data().keyword.contains(Keyword::GoAgain))
+        .unwrap_or(false);
+
     let defender = if defender_id == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     defender.life = defender.life.saturating_sub(damage);
+
+    // The attack's action point is spent now that damage has been dealt, unless
+    // Go Again let the turn player keep acting (see `uses_action_point`).
+    if !attack_has_go_again {
+        spend_action_point(gs, attacker_id);
+    }
+}
+
+/// Deduct one action point from `player`, flooring at 0 so it never underflows.
+fn spend_action_point(gs: &mut Gamestate, player: PlayerIndex) {
+    let p = if player == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    p.action_points = p.action_points.saturating_sub(1);
 }
 
 /// Sum a per-card stat (`power` for the attacker, `defense` for the defender)
@@ -1212,6 +1266,102 @@ mod tests {
         assert_eq!(gs.phase, Phase::Action);
         // 6 power - 6 blocked = 0 damage. Life unchanged.
         assert_eq!(gs.p2.life, 20);
+    }
+
+    #[test]
+    fn test_turn_player_starts_with_one_action_point() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        // Before the first-player choice neither player has been granted their
+        // action point yet.
+        assert_eq!(gs.p1.action_points, 0);
+        assert_eq!(gs.p2.action_points, 0);
+
+        // Rhinar goes first; the turn player is granted exactly one action point,
+        // the defender none.
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        assert_eq!(gs.turn_player, PlayerIndex::P1);
+        assert_eq!(gs.p1.action_points, 1);
+        assert_eq!(gs.p2.action_points, 0);
+    }
+
+    #[test]
+    fn test_attack_spends_action_point_and_blocks_further_actions() {
+        // Rhinar steps through a full Muscle Mutt attack: play it, pitch for it,
+        // let it resolve onto the chain, defend, and run out the reaction window
+        // so combat damage is dealt. Muscle Mutt has no Go Again, so its action
+        // point is spent once damage resolves — and back in the Action phase
+        // Rhinar can no longer play another attack action or action.
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        assert_eq!(gs.p1.action_points, 1);
+
+        // Play Muscle Mutt (attack action) and pitch Clearing Bellow to pay for it.
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+
+        // The attack is on the stack but combat is not resolved yet, so the action
+        // point is still in hand.
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.p1.action_points, 1);
+
+        // Both pass: the attack resolves onto the chain → Defend phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Defend);
+        // Still unspent — damage has not been calculated yet.
+        assert_eq!(gs.p1.action_points, 1);
+
+        // Dorinthea declares no blocks → post-defend Instant window; both pass →
+        // Reaction window; both pass → combat resolves.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Reaction);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        // Back in the Action phase: 6 damage dealt (20 → 14) and the attack's
+        // action point has now been spent.
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+        assert_eq!(gs.p2.life, 14);
+        assert_eq!(gs.p1.action_points, 0);
+
+        // With no action points left Rhinar cannot play another attack action or
+        // action (Pack Call and Raging Onslaught remain in hand, and the weapon
+        // swing is an attack-action activation) — every offered action is free of
+        // action-point cost, leaving only Pass.
+        let actions = legal_actions(&gs);
+        for a in &actions {
+            if let Some(idx) = a.card {
+                assert!(
+                    !uses_action_point(a.typ, gs.cards[idx.get()].card.data()),
+                    "with 0 action points, {:?} of {:?} must not be offered",
+                    a.typ, gs.cards[idx.get()].card
+                );
+            }
+        }
+        // No attack-action / action card is offered for play.
+        let play_types: Vec<CardType> = actions.iter()
+                .filter(|a| a.typ == ActionType::PlayCard)
+                .map(|a| gs.cards[a.card_index()].card.data().typ)
+                .collect();
+        assert!(!play_types.contains(&CardType::AttackAction));
+        assert!(!play_types.contains(&CardType::Action));
+        // Passing is still available to end the turn.
+        assert!(actions.iter().any(|a| a.typ == ActionType::Pass));
     }
 
     #[test]
