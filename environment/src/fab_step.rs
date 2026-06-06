@@ -90,13 +90,15 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     let window = if gs.phase == Phase::Action {
         // A play from the Action phase opens an Instant response window. Push the
         // phases that follow it onto the return stack, innermost last so they pop
-        // back in order. An attack action or weapon swing walks the combat chain
-        // — resume the turn player's Action phase, then their Reaction window,
-        // then the defender's Defend phase — while any other played card simply
+        // back in order. An attack action or weapon swing walks the combat chain:
+        // resume the turn player's Action phase, then their Reaction window, then
+        // a post-defend Instant window (defender holds priority first, per FaB
+        // rules), then the defender's Defend phase. Any other played card simply
         // resumes the turn player's Action phase once it resolves.
         if commits_as_attack(act.typ, &catalog[cs.card as usize]) {
             gs.push_phase(ReturnFrame { phase: Phase::Action, active_player: gs.turn_player });
             gs.push_phase(ReturnFrame { phase: Phase::Reaction, active_player: gs.turn_player });
+            gs.push_phase(ReturnFrame { phase: Phase::Instant, active_player: gs.turn_player.opponent() });
             gs.push_phase(ReturnFrame { phase: Phase::Defend, active_player: gs.turn_player.opponent() });
         } else {
             gs.push_phase(ReturnFrame { phase: Phase::Action, active_player: gs.turn_player });
@@ -1033,16 +1035,16 @@ mod tests {
     }
 
     #[test]
-    fn test_defend_pass_advances_to_reaction() {
+    fn test_defend_pass_advances_to_post_defend_instant() {
         let mut gs = step_to_dorinthea_defending();
 
-        // Passing during the Defend phase finishes declaring blockers and moves
-        // the game into the Reaction phase, handing priority to the turn player
-        // (Rhinar, p1) on an empty stack.
+        // Passing during the Defend phase finishes declaring blockers and opens
+        // the post-defend Instant window. The defending player (Dorinthea, p2)
+        // holds priority first per FaB rules; the stack is still empty.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
-        assert_eq!(gs.phase, Phase::Reaction);
-        assert_eq!(gs.active_player, gs.turn_player);
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.active_player, gs.turn_player.opponent());
         assert!(gs.stack_is_empty());
     }
 
@@ -1050,9 +1052,20 @@ mod tests {
     fn test_reaction_phase_double_pass_returns_to_action() {
         let mut gs = step_to_dorinthea_defending();
 
-        // Open the Reaction phase, then both players pass with nothing to add:
-        // the reaction step closes and the turn player resumes the Action phase.
+        // Defend pass → post-defend Instant window (defender holds priority first).
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.active_player, gs.turn_player.opponent());
+
+        // Double pass with empty stack closes the post-defend Instant window
+        // and opens the turn player's Reaction window.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Reaction);
+        assert_eq!(gs.active_player, gs.turn_player);
+
+        // Double pass with empty stack closes the Reaction window and returns
+        // to the turn player's Action phase.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
@@ -1064,9 +1077,17 @@ mod tests {
     fn test_reaction_played_resolves_and_returns_to_action() {
         let mut gs = step_to_dorinthea_defending();
 
-        // Open the Reaction phase; the turn player (p1) holds priority.
+        // Defend pass → post-defend Instant window (defender p2 holds priority).
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.active_player, gs.turn_player.opponent());
+
+        // Double pass closes the post-defend Instant window and opens the
+        // turn player's Reaction window; the turn player (p1) holds priority.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
+        assert_eq!(gs.active_player, gs.turn_player);
 
         // Relabel a card in p1's hand to Sigil of Solace (an Instant, cost 0) and
         // play it as a reaction. It commits straight to the stack and we remain in
@@ -1126,8 +1147,15 @@ mod tests {
         assert_eq!(gs.phase, Phase::Defend);
         assert_eq!(gs.active_player, tp.opponent());
 
-        // The defender passes (declares no further blocks): advance to the turn
-        // player's Reaction window.
+        // The defender passes (declares no further blocks): opens the post-defend
+        // Instant window with the defender holding priority first.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.active_player, tp.opponent());
+
+        // Both pass with an empty stack: the post-defend Instant window closes
+        // and advances to the turn player's Reaction window.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, tp);

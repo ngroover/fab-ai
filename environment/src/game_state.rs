@@ -75,12 +75,12 @@ pub const TOTAL_CARDS: usize = PLAYER_CARDS * 2;
 /// Maximum number of cards the stack can hold at once. Committing a card beyond
 /// this limit panics (see `Gamestate::push_to_stack`).
 pub const STACK_SIZE: usize = 5;
-/// Maximum depth of the phase-return stack. An interaction nests at most a
-/// played card's window plus the attack itinerary (`Action`, `Reaction`,
-/// `Defend`) and the live window re-entered while paying for a response, so
-/// five frames is comfortably enough. Pushing beyond this limit panics (see
-/// `Gamestate::push_phase`).
-pub const RETURN_STACK_SIZE: usize = 5;
+/// Maximum depth of the phase-return stack. An attack itinerary now pushes
+/// five frames (`Action`, `Reaction`, post-defend `Instant`, `Defend`, plus the
+/// live-window re-entry frame), and a response played during the instant window
+/// can add one more for the pitch detour, so eight frames is comfortably
+/// enough. Pushing beyond this limit panics (see `Gamestate::push_phase`).
+pub const RETURN_STACK_SIZE: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]

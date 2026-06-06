@@ -444,8 +444,12 @@ mod tests {
     fn legal_actions_in_reaction_phase_offers_reactions_not_attack_actions() {
         let mut gs = step_to_dorinthea_defending();
 
-        // Finish declaring blocks: passing the Defend phase opens the Reaction
-        // phase with the turn player (Rhinar, p1) holding priority.
+        // Finish declaring blocks: passing the Defend phase opens the post-defend
+        // Instant window. Double pass closes it, advancing to the Reaction phase
+        // with the turn player (Rhinar, p1) holding priority.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Instant);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, PlayerIndex::P1);
@@ -487,7 +491,11 @@ mod tests {
     fn legal_actions_in_reaction_phase_double_pass_returns_to_action() {
         let mut gs = step_to_dorinthea_defending();
 
-        // Open the Reaction phase (Defend pass) on an empty stack.
+        // Defend pass → post-defend Instant window. Double pass closes it,
+        // advancing to the Reaction phase on an empty stack.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Instant);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
 
