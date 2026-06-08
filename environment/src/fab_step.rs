@@ -1175,9 +1175,6 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
-        // Both pass the post-defend Instant window → turn player's Reaction window.
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
 
         // Both pass the Reaction window → combat resolves, then Action phase.
@@ -1275,10 +1272,8 @@ mod tests {
         // Still unspent — damage has not been calculated yet.
         assert_eq!(gs.p1.action_points, 1);
 
-        // Dorinthea declares no blocks → post-defend Instant window; both pass →
+        // Dorinthea declares no blocks → both pass →
         // Reaction window; both pass → combat resolves.
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
