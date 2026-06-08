@@ -75,12 +75,6 @@ pub const TOTAL_CARDS: usize = PLAYER_CARDS * 2;
 /// Maximum number of cards the stack can hold at once. Committing a card beyond
 /// this limit panics (see `Gamestate::push_to_stack`).
 pub const STACK_SIZE: usize = 5;
-/// Maximum depth of the phase-return stack. An attack itinerary now pushes
-/// five frames (`Action`, `Reaction`, post-defend `ActionInstant`, `Defend`, plus the
-/// live-window re-entry frame), and a response played during the instant window
-/// can add one more for the pitch detour, so eight frames is comfortably
-/// enough. Pushing beyond this limit panics (see `Gamestate::push_phase`).
-pub const RETURN_STACK_SIZE: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
@@ -153,16 +147,6 @@ pub struct CardState {
     pub prev_card : CardIdx,
 }
 
-/// A phase to resume, together with the player who should hold priority when it
-/// is resumed. Stored on `Gamestate::return_stack` so unwinding a nested
-/// priority window restores both at once — for example a `Defend` frame carries
-/// the defender as its active player, while a `Reaction`/`Action` frame carries
-/// the turn player.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct ReturnFrame {
-    pub phase : Phase,
-    pub active_player : PlayerIndex,
-}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
@@ -237,16 +221,6 @@ pub struct Gamestate {
     /// the pending resolution has been interrupted by a new layer.
     pub passes : u8,
     pub phase : Phase,
-    /// A stack of phases (with the active player to restore alongside each) to
-    /// return to as nested priority windows unwind. When an interaction opens
-    /// from the Action phase its whole follow-up itinerary is pushed innermost
-    /// last: a played card pushes the phase to resume once it resolves, while an
-    /// attack pushes the chain it walks through — `Action`, then `Reaction`, then
-    /// `Defend` — so they pop back in order. A card committed onto the stack also
-    /// pushes the live window to re-enter once it is paid for (surviving the
-    /// `Pitch` detour). Each frame carries the player who should hold priority
-    /// when that phase is resumed (e.g. the defender for `Defend`).
-    pub return_stack : [Option<ReturnFrame>; RETURN_STACK_SIZE],
     pub rng : SmallRng,
     /// The stack: cards currently waiting to resolve, each paired with the
     /// `ActionType` that committed it (so we know how to resolve it). Slot 0 is
@@ -296,25 +270,6 @@ impl Gamestate {
     pub fn pop_stack(&mut self) -> Option<PendingCard> {
         let top = self.stack_top_slot()?;
         self.stack[top].take()
-    }
-
-    /// Push a phase-return frame onto the top of the return stack. Panics with
-    /// "return stack ran out" if all `RETURN_STACK_SIZE` slots are occupied.
-    pub fn push_phase(&mut self, frame: ReturnFrame) {
-        for slot in self.return_stack.iter_mut() {
-            if slot.is_none() {
-                *slot = Some(frame);
-                return;
-            }
-        }
-        panic!("return stack ran out");
-    }
-
-    /// Remove and return the frame on top of the return stack (the highest
-    /// occupied slot, filled from slot 0 upward), or `None` when empty.
-    pub fn pop_phase(&mut self) -> Option<ReturnFrame> {
-        let top = self.return_stack.iter().rposition(|slot| slot.is_some())?;
-        self.return_stack[top].take()
     }
 }
 

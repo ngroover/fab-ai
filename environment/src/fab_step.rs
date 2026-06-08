@@ -1,5 +1,5 @@
 use crate::action::{Action,ActionType};
-use crate::game_state::{Gamestate,Phase,Player,PendingCard,ReturnFrame,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
+use crate::game_state::{Gamestate,Phase,Player,PendingCard,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
 use crate::cards::{CardData,CardType,Keyword};
 
 pub fn step(gs: &mut Gamestate, act: Action) {
@@ -93,40 +93,10 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
     let already_paid = player.resources >= cost;
 
-    // Work out which priority window this card commits into, and (for a fresh
-    // play from the Action phase) lay down the itinerary that follows it.
-    let window = if gs.phase == Phase::Action {
-        // A play from the Action phase opens an Instant response window. Push the
-        // phases that follow it onto the return stack, innermost last so they pop
-        // back in order. An attack action or weapon swing walks the combat chain:
-        // resume the turn player's Action phase, then their Reaction window, then
-        // a post-defend Instant window (defender holds priority first, per FaB
-        // rules), then the defender's Defend phase. Any other played card simply
-        // resumes the turn player's Action phase once it resolves.
-        if commits_as_attack(act.typ, cs.card.data()) {
-            gs.push_phase(ReturnFrame { phase: Phase::Action, active_player: gs.turn_player });
-            gs.push_phase(ReturnFrame { phase: Phase::Reaction, active_player: gs.turn_player });
-            gs.push_phase(ReturnFrame { phase: Phase::ActionInstant, active_player: gs.turn_player.opponent() });
-            gs.push_phase(ReturnFrame { phase: Phase::Defend, active_player: gs.turn_player.opponent() });
-        } else {
-            gs.push_phase(ReturnFrame { phase: Phase::Action, active_player: gs.turn_player });
-        }
-        Phase::ActionInstant
-    } else {
-        // Responding inside an already-open window (Instant or Reaction): the
-        // card commits back into that same window.
-        gs.phase
-    };
-
     gs.pending_card = Some(PendingCard {
         index: card_idx,
         typ: act.typ,
     });
-
-    // Push the window to re-enter once the card is paid for, keeping the current
-    // committer on priority. This survives the Pitch detour: `commit_pending_to_stack`
-    // pops it to restore the window whether we pitched or paid outright.
-    gs.push_phase(ReturnFrame { phase: window, active_player: gs.active_player });
 
     // Affordable outright: no pitching needed, commit to the stack now.
     // Otherwise leave it pending (off the stack) and pitch for it.
@@ -168,6 +138,18 @@ fn handle_priority_pass(gs: &mut Gamestate) {
     }
 }
 
+fn close_priority_window(gs: &mut Gamestate) {
+    if gs.phase == Phase::ActionInstant {
+        gs.phase = Phase::Defend;
+        gs.active_player = gs.turn_player.opponent();
+    }
+    else if ( gs.phase == Phase::Reaction ) {
+        resolve_combat_damage(gs);
+        gs.phase = Phase::Action;
+        gs.active_player = gs.turn_player
+    }
+}
+
 /// Handle an action during the Defend phase. The active player is the defender
 /// (restored from the `Defend` return frame in `resolve_top_of_stack`). They may
 /// commit blockers one at a time — each chosen card moves out of their hand onto
@@ -179,10 +161,7 @@ fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
         ActionType::Defend => commit_blocker(gs, act.card_index()),
         ActionType::Pass => {
-            // The attack itinerary banked a Reaction window (turn player active)
-            // for once blocks are declared; resume it.
-            let frame = gs.pop_phase().expect("a reaction window after the defend phase");
-            return_to(gs, frame);
+            gs.phase = Phase::Reaction;
         }
         _ => {}
     }
@@ -257,8 +236,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         // well-terminated (its `next_card` points at itself), letting the chain
         // be walked the same way as the defender's blockers when combat resolves.
         attach_to_front_of_zone(&mut gs.cards, &mut attacker.chain_link[0], None, None, top);
-        let frame = gs.pop_phase().expect("a defend phase after an attack resolves");
-        return_to(gs, frame);
+        gs.phase = Phase::Reaction;
     } else {
         gs.cards[top].location = CardLocation::graveyard(owner);
         // A resolving non-attack action — an action card, or an activated
@@ -269,8 +247,6 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
             spend_action_point(gs, owner);
         }
         if gs.stack_is_empty() {
-            // The stack is empty, so the window closes: advance to the next
-            // itinerary phase banked on the return stack.
             close_priority_window(gs);
         } else {
             // Cards remain on the stack: priority returns to the turn player for
@@ -377,33 +353,8 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     // the consecutive-pass count resets.
     gs.pending_card = None;
     gs.passes = 0;
-    // Re-enter the live priority window (Instant or Reaction), pushed by
-    // `commit_card_to_pending` before any Pitch detour, so the committer keeps
-    // priority and the opponent can respond to the freshly committed card.
-    let frame = gs.pop_phase().expect("a window to return to after committing a card");
-    return_to(gs, frame);
-}
 
-/// Resume the phase recorded on a return frame, restoring the phase and the
-/// player who should hold priority there together.
-fn return_to(gs: &mut Gamestate, frame: ReturnFrame) {
-    gs.phase = frame.phase;
-    gs.active_player = frame.active_player;
-}
-
-/// Close the current priority window and advance to the next banked itinerary
-/// phase. If the window being closed is the Reaction phase, combat resolves
-/// first: the attack on the chain has now been fully responded to, so its damage
-/// is dealt to the defender before play returns to the turn player's Action phase
-/// (see `resolve_combat_damage`). Shared by both window-close paths — a double
-/// pass on an empty stack (`handle_priority_pass`) and a resolution that empties
-/// the stack (`resolve_top_of_stack`).
-fn close_priority_window(gs: &mut Gamestate) {
-    if gs.phase == Phase::Reaction {
-        resolve_combat_damage(gs);
-    }
-    let frame = gs.pop_phase().expect("a phase to return to when the window closes");
-    return_to(gs, frame);
+    gs.phase = Phase::ActionInstant;
 }
 
 /// Resolve combat as the reaction window closes. The attacker (the turn player)
