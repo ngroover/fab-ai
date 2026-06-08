@@ -18,7 +18,7 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
         },
         Phase::Action => legal_action_phase(gs),
         Phase::Pitch => legal_pitch_phase(gs),
-        Phase::Instant => legal_instant_phase(gs),
+        Phase::ActionInstant => legal_instant_phase(gs),
         Phase::Defend => legal_defend_phase(gs),
         Phase::Reaction => legal_reaction_phase(gs),
         Phase::Start => Vec::new(),
@@ -458,7 +458,7 @@ mod tests {
         // Instant window. Double pass closes it, advancing to the Reaction phase
         // with the turn player (Rhinar, p1) holding priority.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
@@ -504,7 +504,7 @@ mod tests {
         // Defend pass → post-defend Instant window. Double pass closes it,
         // advancing to the Reaction phase on an empty stack.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
@@ -552,7 +552,7 @@ mod tests {
                 .map(|(idx, _)| idx)
                 .expect("Clearing Bellow should be in the opening hand");
         step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
 
         // Rhinar's remaining hand is two yellow attack actions (Pack Call, Raging
         // Onslaught) — no instants. Even though the equipped Bone Basher is still

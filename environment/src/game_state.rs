@@ -76,7 +76,7 @@ pub const TOTAL_CARDS: usize = PLAYER_CARDS * 2;
 /// this limit panics (see `Gamestate::push_to_stack`).
 pub const STACK_SIZE: usize = 5;
 /// Maximum depth of the phase-return stack. An attack itinerary now pushes
-/// five frames (`Action`, `Reaction`, post-defend `Instant`, `Defend`, plus the
+/// five frames (`Action`, `Reaction`, post-defend `ActionInstant`, `Defend`, plus the
 /// live-window re-entry frame), and a response played during the instant window
 /// can add one more for the pitch detour, so eight frames is comfortably
 /// enough. Pushing beyond this limit panics (see `Gamestate::push_phase`).
@@ -171,7 +171,7 @@ pub enum Phase {
     ChooseFirst,
     Action,
     Pitch,
-    Instant,
+    ActionInstant,
     Defend,
     Reaction,
 }
@@ -223,15 +223,15 @@ pub struct Gamestate {
     pub cards : [CardState; TOTAL_CARDS],
     /// The player who currently holds priority and whose action `step` will
     /// apply. During a turn's action/pitch flow this is the turn player; during
-    /// the Instant phase it ping-pongs between the players as each passes
+    /// the ActionInstant phase it ping-pongs between the players as each passes
     /// priority, returning to `turn_player` once a card resolves.
     pub active_player : PlayerIndex,
     /// The player whose turn it is. Unlike `active_player`, this does not change
-    /// as priority passes back and forth during the Instant phase: it is set
+    /// as priority passes back and forth during the ActionInstant phase: it is set
     /// when the turn begins and is the player priority returns to after the top
     /// of the stack resolves.
     pub turn_player : PlayerIndex,
-    /// Consecutive passes during the Instant phase. Each pass increments it; a
+    /// Consecutive passes during the ActionInstant phase. Each pass increments it; a
     /// second pass in a row (reaching 2) resolves the top of the stack and
     /// resets it to 0. Playing a card onto the stack also resets it to 0, since
     /// the pending resolution has been interrupted by a new layer.

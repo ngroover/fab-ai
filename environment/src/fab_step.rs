@@ -7,7 +7,7 @@ pub fn step(gs: &mut Gamestate, act: Action) {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::Action => handle_action_phase(gs, act),
         Phase::Pitch => handle_pitch_phase(gs, act),
-        Phase::Instant => handle_instant_phase(gs, act),
+        Phase::ActionInstant => handle_instant_phase(gs, act),
         Phase::Defend => handle_defend_phase(gs, act),
         Phase::Reaction => handle_reaction_phase(gs, act),
         _ => {}
@@ -22,7 +22,7 @@ fn handle_choose_first(gs: &mut Gamestate, act: Action) {
     }
     // The player who goes first owns this turn. `turn_player` tracks them
     // independently of `active_player`, which will ping-pong as priority passes
-    // during the Instant phase.
+    // during the ActionInstant phase.
     gs.turn_player = gs.active_player;
     // begin turn logic
     gs.phase = Phase::Action;
@@ -58,7 +58,7 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
     }
 }
 
-/// Handle an action during the Instant phase. Each player in turn may play
+/// Handle an action during the ActionInstant phase. Each player in turn may play
 /// instants — committed exactly like an action-phase play (`commit_card_to_pending`)
 /// — for as long as they keep the priority. Passing hands priority to the other
 /// player; once both have passed in succession, the top of the stack resolves
@@ -82,7 +82,7 @@ fn handle_instant_phase(gs: &mut Gamestate, act: Action) {
 /// yet on the stack). If banked resources already cover its cost it is committed
 /// straight to the stack (re-entering the live priority window); otherwise it
 /// stays pending and we drop into the Pitch phase to pitch for the rest. Shared
-/// by the Action, Instant, and Reaction phases.
+/// by the Action, ActionInstant, and Reaction phases.
 fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     // Cost of committing this card: an Activate (an armor ability or a weapon
     // swing) pays its ability's cost; a played card pays its own catalog cost.
@@ -106,12 +106,12 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
         if commits_as_attack(act.typ, cs.card.data()) {
             gs.push_phase(ReturnFrame { phase: Phase::Action, active_player: gs.turn_player });
             gs.push_phase(ReturnFrame { phase: Phase::Reaction, active_player: gs.turn_player });
-            gs.push_phase(ReturnFrame { phase: Phase::Instant, active_player: gs.turn_player.opponent() });
+            gs.push_phase(ReturnFrame { phase: Phase::ActionInstant, active_player: gs.turn_player.opponent() });
             gs.push_phase(ReturnFrame { phase: Phase::Defend, active_player: gs.turn_player.opponent() });
         } else {
             gs.push_phase(ReturnFrame { phase: Phase::Action, active_player: gs.turn_player });
         }
-        Phase::Instant
+        Phase::ActionInstant
     } else {
         // Responding inside an already-open window (Instant or Reaction): the
         // card commits back into that same window.
@@ -137,7 +137,7 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     }
 }
 
-/// Handle a pass during a priority window (the Instant or Reaction phase),
+/// Handle a pass during a priority window (the ActionInstant or Reaction phase),
 /// tracked by `gs.passes`. Each pass hands priority to the other player and
 /// bumps the consecutive-pass count; the count is reset to 0 whenever a card is
 /// played onto the stack (see `commit_pending_to_stack`), so it only reaches 2
@@ -742,7 +742,7 @@ mod tests {
 
         step(&mut gs, play);
 
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         // Once the card hits the stack it is no longer pending.
         assert_eq!(gs.pending_card, None);
         assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
@@ -776,7 +776,7 @@ mod tests {
                 .expect("Clearing Bellow should be in the opening hand");
         step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
 
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
         assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.resources, 0);
@@ -821,7 +821,7 @@ mod tests {
                 .expect("Raging Onslaught should be in the opening hand");
         step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(ro_idx))});
 
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
         assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.resources, 1);
@@ -850,7 +850,7 @@ mod tests {
                 .expect("Clearing Bellow should be in the opening hand");
         step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
 
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(weapon_idx));
         assert_eq!(gs.cards[weapon_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.weapon_idx, None);
@@ -924,7 +924,7 @@ mod tests {
                 .expect("Clearing Bellow should be in the opening hand");
         step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(cb_idx))});
 
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.turn_player, PlayerIndex::P1);
         assert_eq!(gs.active_player, PlayerIndex::P1);
         assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(cb_idx));
@@ -952,7 +952,7 @@ mod tests {
         // resolves yet — the card stays on the stack and we remain in Instant.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.turn_player, PlayerIndex::P1);
         assert_eq!(gs.active_player, PlayerIndex::P2);
         assert_eq!(gs.passes, 1);
@@ -999,7 +999,7 @@ mod tests {
                 .map(|(idx, _)| idx)
                 .expect("Clearing Bellow should be in the opening hand");
         step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
 
         // Both players pass. Because Muscle Mutt is an attack action, resolving it
@@ -1033,7 +1033,7 @@ mod tests {
                 .map(|(idx, _)| idx)
                 .expect("Clearing Bellow should be in the opening hand");
         step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(weapon_idx));
 
         // Both players pass. Because this is a weapon swing, resolving it puts
@@ -1162,7 +1162,7 @@ mod tests {
 
         // Defend pass → post-defend Instant window (defender holds priority first).
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, gs.turn_player.opponent());
 
         // Double pass with empty stack closes the post-defend Instant window
@@ -1313,7 +1313,7 @@ mod tests {
 
         // The attack is on the stack but combat is not resolved yet, so the action
         // point is still in hand.
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.p1.action_points, 1);
 
         // Both pass: the attack resolves onto the chain → Defend phase.
@@ -1403,7 +1403,7 @@ mod tests {
 
         // ── Instant phase (attack on the stack): both pass to resolve it ───
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Rhinar passes
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, PlayerIndex::P2);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Dorinthea passes
         // The attack resolves onto Rhinar's combat chain and play enters Defend.
@@ -1426,7 +1426,7 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         // ── Post-defend Instant window (defender holds priority first) ─────
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, PlayerIndex::P2);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Dorinthea passes
         assert_eq!(gs.active_player, PlayerIndex::P1);
@@ -1478,7 +1478,7 @@ mod tests {
                 .map(|(idx, _)| idx)
                 .expect("Clearing Bellow should be in Rhinar's opening hand");
         step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
 
         // ── Instant phase: both pass to resolve the attack onto the chain ──
@@ -1515,7 +1515,7 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         // ── Post-defend Instant window: both pass ──────────────────────────
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, PlayerIndex::P2);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Dorinthea
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Rhinar → close
@@ -1541,7 +1541,7 @@ mod tests {
 
         // Defend pass → post-defend Instant window (defender p2 holds priority).
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, gs.turn_player.opponent());
 
         // Double pass closes the post-defend Instant window and opens the
@@ -1599,7 +1599,7 @@ mod tests {
                 .map(|(idx, _)| idx)
                 .expect("Clearing Bellow should be in the opening hand");
         step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, tp);
 
         // Both pass: the attack resolves to the chain and we advance to Defend
@@ -1612,7 +1612,7 @@ mod tests {
         // The defender passes (declares no further blocks): opens the post-defend
         // Instant window with the defender holding priority first.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, tp.opponent());
 
         // Both pass with an empty stack: the post-defend Instant window closes
@@ -1672,7 +1672,7 @@ mod tests {
         // layer resets the consecutive-pass count.
         step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
 
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, PlayerIndex::P2);
         assert_eq!(gs.passes, 0);
         // Sigil is now on top of the stack, above Clearing Bellow.
@@ -1684,7 +1684,7 @@ mod tests {
         // not resolve anything — priority simply returns to the turn player, who
         // now gets a window to respond to Sigil.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, PlayerIndex::P1);
         assert_eq!(gs.passes, 1);
         assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
@@ -1694,7 +1694,7 @@ mod tests {
         // (Sigil) resolves to its owner's graveyard. Clearing Bellow remains on
         // the stack and priority returns to the turn player for a fresh round.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, PlayerIndex::P1);
         assert_eq!(gs.passes, 0);
         assert_eq!(gs.cards[sigil_idx].location, CardLocation::P2Graveyard);
