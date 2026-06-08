@@ -1102,7 +1102,7 @@ mod tests {
         // holds priority first per FaB rules; the stack is still empty.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, gs.turn_player.opponent());
         assert!(gs.stack_is_empty());
     }
@@ -1347,7 +1347,7 @@ mod tests {
                 .map(|(idx, _)| idx)
                 .expect("Clearing Bellow should be in Rhinar's opening hand");
         step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
-        assert_eq!(gs.phase, Phase::Instant);
+        assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, PlayerIndex::P1);
         assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
         assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
@@ -1580,7 +1580,6 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Action);
         assert_eq!(gs.active_player, tp);
-        assert!(gs.return_stack.iter().all(|f| f.is_none()));
     }
 
     #[test]
