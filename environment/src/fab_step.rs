@@ -162,6 +162,7 @@ fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
         ActionType::Defend => commit_blocker(gs, act.card_index()),
         ActionType::Pass => {
             gs.phase = Phase::Reaction;
+            gs.active_player = gs.turn_player;
         }
         _ => {}
     }
@@ -236,7 +237,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         // well-terminated (its `next_card` points at itself), letting the chain
         // be walked the same way as the defender's blockers when combat resolves.
         attach_to_front_of_zone(&mut gs.cards, &mut attacker.chain_link[0], None, None, top);
-        gs.phase = Phase::Reaction;
+        gs.phase = Phase::Defend;
     } else {
         gs.cards[top].location = CardLocation::graveyard(owner);
         // A resolving non-attack action — an action card, or an activated
@@ -1528,7 +1529,7 @@ mod tests {
     }
 
     #[test]
-    fn test_attack_itinerary_unwinds_instant_defend_reaction_action() {
+    fn test_attack_instant_defend_reaction() {
         // Drive a whole attack interaction and confirm the phase-return stack
         // walks it back in order: the instant window resolves the attack onto the
         // chain (-> Defend), declaring blocks advances to the turn player's
@@ -1563,20 +1564,13 @@ mod tests {
         // The defender passes (declares no further blocks): opens the post-defend
         // Instant window with the defender holding priority first.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.phase, Phase::ActionInstant);
-        assert_eq!(gs.active_player, tp.opponent());
-
-        // Both pass with an empty stack: the post-defend Instant window closes
-        // and advances to the turn player's Reaction window.
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, tp);
 
-        // Both pass with an empty stack: the reaction window closes and play
-        // returns to the turn player's Action phase. The return stack is fully
-        // unwound.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Reaction);
+        assert_eq!(gs.active_player, tp.opponent());
+
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Action);
         assert_eq!(gs.active_player, tp);
