@@ -6,7 +6,7 @@ pub fn step(gs: &mut Gamestate, act: Action) {
     match gs.phase {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::Action => handle_action_phase(gs, act),
-        Phase::Pitch => handle_pitch_phase(gs, act),
+        Phase::ActionPitch | Phase::ReactionPitch => handle_pitch_phase(gs, act),
         Phase::ActionInstant => handle_action_instant_phase(gs, act),
         Phase::Defend => handle_defend_phase(gs, act),
         Phase::Reaction => handle_reaction_phase(gs, act),
@@ -81,8 +81,10 @@ fn handle_action_instant_phase(gs: &mut Gamestate, act: Action) {
 /// The card is recorded as `pending_card` (still sitting in its source zone, not
 /// yet on the stack). If banked resources already cover its cost it is committed
 /// straight to the stack (re-entering the live priority window); otherwise it
-/// stays pending and we drop into the Pitch phase to pitch for the rest. Shared
-/// by the Action, ActionInstant, and Reaction phases.
+/// stays pending and we drop into a pitch phase to pitch for the rest — the
+/// `ReactionPitch` phase when committing during the Reaction window (so play
+/// returns to it once paid), or the `ActionPitch` phase otherwise. Shared by
+/// the Action, ActionInstant, and Reaction phases.
 fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     // Cost of committing this card: an Activate (an armor ability or a weapon
     // swing) pays its ability's cost; a played card pays its own catalog cost.
@@ -103,7 +105,14 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     if already_paid {
         commit_pending_to_stack(gs);
     } else {
-        gs.phase = Phase::Pitch;
+        // Pitching during the Reaction window stays within that window: drop
+        // into ReactionPitch so we return to Reaction once paid. Every other
+        // caller (the Action and ActionInstant phases) uses ActionPitch.
+        gs.phase = if gs.phase == Phase::Reaction {
+            Phase::ReactionPitch
+        } else {
+            Phase::ActionPitch
+        };
     }
 }
 
@@ -295,10 +304,12 @@ pub(crate) fn uses_action_point(typ: ActionType, data: &CardData) -> bool {
     matches!(card_type, Some(CardType::AttackAction | CardType::Action))
 }
 
-/// Handle a pitch during the Pitch phase. The pitched card is moved from the
-/// active player's hand into their pitch zone and its pitch value is banked as
-/// resources. Once banked resources cover the pending card's cost, that card is
-/// committed to the stack and the game advances to the Instant phase.
+/// Handle a pitch during a pitch phase (`ActionPitch` or `ReactionPitch`). The
+/// pitched card is moved from the active player's hand into their pitch zone and
+/// its pitch value is banked as resources. Once banked resources cover the
+/// pending card's cost, that card is committed to the stack and the game returns
+/// to the window the pitch interrupted (the ActionInstant or Reaction phase; see
+/// `commit_pending_to_stack`).
 fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
     if act.typ != ActionType::Pitch {
         return;
@@ -328,7 +339,7 @@ fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
 
 /// Move the pending card onto the stack, pay its cost from the active player's
 /// banked resources, and re-enter the live priority window. Shared by both the
-/// affordable path (straight from the Action phase) and the Pitch phase (once
+/// affordable path (straight from the Action phase) and a pitch phase (once
 /// enough has been pitched). The card is detached from its source zone — the
 /// hand for a played card, the weapon/armor slot for an activation — and
 /// prepended to the stack. Assumes the player can already cover the cost.
@@ -355,9 +366,15 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     gs.pending_card = None;
     gs.passes = 0;
 
-    // we keep our phase normally unless we are going from Action or pitch phase
-    if gs.phase == Phase::Action || gs.phase == Phase::Pitch {
+    // We keep our phase normally unless we are coming from a phase that opens a
+    // fresh priority window once the card is paid for. Committing from the
+    // Action phase, or after paying in the ActionPitch phase, opens the
+    // ActionInstant window; paying in the ReactionPitch phase returns to the
+    // Reaction window the pitch interrupted.
+    if gs.phase == Phase::Action || gs.phase == Phase::ActionPitch {
         gs.phase = Phase::ActionInstant;
+    } else if gs.phase == Phase::ReactionPitch {
+        gs.phase = Phase::Reaction;
     }
 }
 
@@ -661,7 +678,7 @@ mod tests {
         let play = Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))};
         step(&mut gs, play);
 
-        assert_eq!(gs.phase, Phase::Pitch);
+        assert_eq!(gs.phase, Phase::ActionPitch);
         let pending = gs.pending_card.expect("pending card should be set");
         assert_eq!(pending.index.get(), mm_idx);
         assert_eq!(pending.typ, ActionType::PlayCard);
@@ -713,13 +730,13 @@ mod tests {
         step(&mut gs, go_first);
 
         // Play Muscle Mutt (cost 3) with no banked resources: it becomes pending
-        // and we drop into the Pitch phase, with nothing on the stack yet.
+        // and we drop into the ActionPitch phase, with nothing on the stack yet.
         let mm_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::MuscleMuttY)
                 .map(|(idx, _)| idx)
                 .expect("Muscle Mutt should be in the opening hand");
         step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        assert_eq!(gs.phase, Phase::Pitch);
+        assert_eq!(gs.phase, Phase::ActionPitch);
         assert_eq!(gs.stack_top(), None);
 
         // Pitch Clearing Bellow (pitch 3) — exactly covers the cost. The pending
@@ -749,7 +766,7 @@ mod tests {
 
         // Play Muscle Mutt (cost 3); pitching a single yellow attack action only
         // banks 2 resources, short of the cost, so the card stays pending and we
-        // remain in the Pitch phase.
+        // remain in the ActionPitch phase.
         let mm_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::MuscleMuttY)
                 .map(|(idx, _)| idx)
@@ -762,7 +779,7 @@ mod tests {
                 .expect("Pack Call should be in the opening hand");
         step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pc_idx))});
 
-        assert_eq!(gs.phase, Phase::Pitch);
+        assert_eq!(gs.phase, Phase::ActionPitch);
         assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.p1.resources, 2);
         assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Hand);
@@ -793,7 +810,7 @@ mod tests {
         // Swing Bone Basher (ability cost 2): pending, off the stack, Pitch phase.
         let weapon_idx = gs.p1.weapon_idx.unwrap().get();
         step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(weapon_idx))});
-        assert_eq!(gs.phase, Phase::Pitch);
+        assert_eq!(gs.phase, Phase::ActionPitch);
         assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.p1.weapon_idx, Some(CardIdx::new(weapon_idx)));
 
@@ -825,7 +842,7 @@ mod tests {
         let attack = Action{ typ: ActionType::Activate, card: Some(CardIdx::new(weapon_idx))};
         step(&mut gs, attack);
 
-        assert_eq!(gs.phase, Phase::Pitch);
+        assert_eq!(gs.phase, Phase::ActionPitch);
         let pending = gs.pending_card.expect("pending card should be set");
         assert_eq!(pending.index.get(), weapon_idx);
         assert_eq!(pending.typ, ActionType::Activate);
@@ -855,8 +872,8 @@ mod tests {
         step(&mut gs, play);
 
         // Pack Call is now the pending card, committed via PlayCard, and the
-        // game has advanced to the Pitch phase to pay for it.
-        assert_eq!(gs.phase, Phase::Pitch);
+        // game has advanced to the ActionPitch phase to pay for it.
+        assert_eq!(gs.phase, Phase::ActionPitch);
         let pending = gs.pending_card.expect("pending card should be set");
         assert_eq!(pending.index.get(), packcall_idx);
         assert_eq!(pending.typ, ActionType::PlayCard);
@@ -1325,7 +1342,7 @@ mod tests {
                 .map(|(idx, _)| idx)
                 .expect("Muscle Mutt should be in Rhinar's opening hand");
         step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        assert_eq!(gs.phase, Phase::Pitch);
+        assert_eq!(gs.phase, Phase::ActionPitch);
         assert_eq!(gs.pending_card.expect("pending Muscle Mutt").index.get(), mm_idx);
 
         // ── Pitch phase: pitch Clearing Bellow (pitch 3) to pay the cost of 3 ─
@@ -1401,7 +1418,7 @@ mod tests {
                 .map(|(idx, _)| idx)
                 .expect("Muscle Mutt should be in Rhinar's opening hand");
         step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        assert_eq!(gs.phase, Phase::Pitch);
+        assert_eq!(gs.phase, Phase::ActionPitch);
 
         // ── Pitch phase: pay for it with Clearing Bellow ───────────────────
         let cb_idx = gs.p1.hand_iter(&gs.cards)
@@ -1492,6 +1509,55 @@ mod tests {
         assert!(gs.stack_is_empty());
         assert_eq!(gs.phase, Phase::Action);
         assert_eq!(gs.active_player, gs.turn_player);
+    }
+
+    #[test]
+    fn test_reaction_pitch_returns_to_reaction() {
+        // A reaction played during the Reaction window that can't be paid for
+        // outright drops into the ReactionPitch phase; once enough is pitched
+        // the reaction commits to the stack and play returns to the Reaction
+        // window it interrupted — not the ActionInstant window. Toughen Up, a
+        // defense reaction that costs 2 (and so must be pitched for), exercises
+        // this path.
+        let mut gs = step_to_dorinthea_defending();
+
+        // Defender declares no blocks; the post-defend Reaction window opens with
+        // the turn player (the attacker, p1) holding priority first.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Reaction);
+        assert_eq!(gs.active_player, gs.turn_player);
+
+        // Turn player passes; priority moves to the defender (p2), who reacts.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+
+        // Relabel two cards in the defender's hand: one to Toughen Up (the
+        // reaction to play, cost 2) and one to Clearing Bellow (pitch 3) to pay
+        // for it. Seed 42 doesn't guarantee this exact pairing, so set it up
+        // explicitly — only the card stats matter here, the zones are untouched.
+        let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+        let tu_idx = hand[0];
+        let pitch_idx = hand[1];
+        gs.cards[tu_idx].card = Card::ToughenUpB;
+        gs.cards[pitch_idx].card = Card::ClearingBellowB;
+
+        // Play Toughen Up. It costs 2 and the defender has no banked resources,
+        // so instead of committing to the stack we drop into the ReactionPitch
+        // phase with Toughen Up held pending in hand and nothing on the stack.
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(tu_idx))});
+        assert_eq!(gs.phase, Phase::ReactionPitch);
+        assert_eq!(gs.pending_card.expect("Toughen Up pending").index.get(), tu_idx);
+        assert!(gs.stack_is_empty());
+
+        // Pitch Clearing Bellow (pitch 3) to cover the cost of 2. That commits
+        // Toughen Up to the stack and returns to the Reaction window — not the
+        // ActionInstant window — with the responder (p2) keeping priority.
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitch_idx))});
+        assert_eq!(gs.phase, Phase::Reaction);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(tu_idx));
+        assert_eq!(gs.cards[tu_idx].location, CardLocation::Stack);
+        assert_eq!(gs.cards[pitch_idx].location, CardLocation::P2Pitch);
     }
 
     #[test]

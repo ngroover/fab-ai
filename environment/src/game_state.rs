@@ -154,10 +154,11 @@ pub enum Phase {
     Start,
     ChooseFirst,
     Action,
-    Pitch,
+    ActionPitch,
     ActionInstant,
     Defend,
     Reaction,
+    ReactionPitch,
 }
 
 /// Per-player state. The cards themselves live in `Gamestate::cards`; a player
@@ -230,7 +231,8 @@ pub struct Gamestate {
     /// Committing a card when all `STACK_SIZE` slots are full panics.
     pub stack : [Option<PendingCard>; STACK_SIZE],
     /// The card the active player has chosen to play or activate and is now
-    /// paying for. Set when leaving the `Action` phase for the `Pitch` phase;
+    /// paying for. Set when leaving the `Action` phase for the `ActionPitch`
+    /// phase (or the `Reaction` phase for the `ReactionPitch` phase);
     /// holds the global slot index into `cards` together with the location it is
     /// being played/activated from. `None` outside the pay-for-a-card flow.
     pub pending_card : Option<PendingCard>,
@@ -274,7 +276,7 @@ impl Gamestate {
 }
 
 /// A card the active player has committed to play, activate, or attack with,
-/// pending payment during the `Pitch` phase. `index` is the global slot into
+/// pending payment during a pitch phase. `index` is the global slot into
 /// `Gamestate::cards`; `typ` is the action that committed it (`PlayCard`,
 /// `Activate`, or `Attack`), which determines how the card resolves once paid
 /// for.

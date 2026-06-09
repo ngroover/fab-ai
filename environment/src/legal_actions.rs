@@ -17,7 +17,7 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
             actions
         },
         Phase::Action => legal_action_phase(gs),
-        Phase::Pitch => legal_pitch_phase(gs),
+        Phase::ActionPitch | Phase::ReactionPitch => legal_pitch_phase(gs),
         Phase::ActionInstant => legal_instant_phase(gs),
         Phase::Defend => legal_defend_phase(gs),
         Phase::Reaction => legal_reaction_phase(gs),
@@ -299,7 +299,7 @@ mod tests {
         step(&mut gs, go_first);
 
         // Enter the pitch phase directly to isolate its legal-action generator.
-        gs.phase = Phase::Pitch;
+        gs.phase = Phase::ActionPitch;
 
         let actions = legal_actions(&gs);
 
@@ -338,7 +338,7 @@ mod tests {
                 .map(|(idx, _)| idx)
                 .expect("Muscle Mutt should be in the opening hand");
         step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        assert_eq!(gs.phase, Phase::Pitch);
+        assert_eq!(gs.phase, Phase::ActionPitch);
 
         let actions = legal_actions(&gs);
         assert!(actions.iter().all(|a| a.card != Some(CardIdx::new(mm_idx))));
@@ -531,13 +531,13 @@ mod tests {
         step(&mut gs, go_first);
 
         // Rhinar plays Muscle Mutt (cost 3): it becomes pending and we drop into
-        // the Pitch phase.
+        // the ActionPitch phase.
         let mm_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::MuscleMuttY)
                 .map(|(idx, _)| idx)
                 .expect("Muscle Mutt should be in the opening hand");
         step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        assert_eq!(gs.phase, Phase::Pitch);
+        assert_eq!(gs.phase, Phase::ActionPitch);
 
         // Pitch Clearing Bellow (pitch 3) to cover the cost. Muscle Mutt commits
         // to the stack and the game advances to the Instant phase.
