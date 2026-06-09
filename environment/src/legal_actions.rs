@@ -458,9 +458,6 @@ mod tests {
         // Instant window. Double pass closes it, advancing to the Reaction phase
         // with the turn player (Rhinar, p1) holding priority.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.phase, Phase::ActionInstant);
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, PlayerIndex::P1);
 
@@ -503,9 +500,6 @@ mod tests {
 
         // Defend pass → post-defend Instant window. Double pass closes it,
         // advancing to the Reaction phase on an empty stack.
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.phase, Phase::ActionInstant);
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
 

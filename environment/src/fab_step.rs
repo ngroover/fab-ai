@@ -7,7 +7,7 @@ pub fn step(gs: &mut Gamestate, act: Action) {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::Action => handle_action_phase(gs, act),
         Phase::Pitch => handle_pitch_phase(gs, act),
-        Phase::ActionInstant => handle_instant_phase(gs, act),
+        Phase::ActionInstant => handle_action_instant_phase(gs, act),
         Phase::Defend => handle_defend_phase(gs, act),
         Phase::Reaction => handle_reaction_phase(gs, act),
         _ => {}
@@ -62,8 +62,8 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
 /// instants — committed exactly like an action-phase play (`commit_card_to_pending`)
 /// — for as long as they keep the priority. Passing hands priority to the other
 /// player; once both have passed in succession, the top of the stack resolves
-/// (see `handle_instant_pass`).
-fn handle_instant_phase(gs: &mut Gamestate, act: Action) {
+/// (see `handle_action_instant_pass`).
+fn handle_action_instant_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
         // Only instants are legal here (see `legal_instant_phase`); they commit
         // through the same pending/pitch flow as an action-phase play.
@@ -140,8 +140,8 @@ fn handle_priority_pass(gs: &mut Gamestate) {
 
 fn close_priority_window(gs: &mut Gamestate) {
     if gs.phase == Phase::ActionInstant {
-        gs.phase = Phase::Defend;
-        gs.active_player = gs.turn_player.opponent();
+        gs.phase = Phase::Action;
+        gs.active_player = gs.turn_player;
     }
     else if ( gs.phase == Phase::Reaction ) {
         resolve_combat_damage(gs);
@@ -355,7 +355,10 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     gs.pending_card = None;
     gs.passes = 0;
 
-    gs.phase = Phase::ActionInstant;
+    // we keep our phase normally unless we are going from Action or pitch phase
+    if gs.phase == Phase::Action || gs.phase == Phase::Pitch {
+        gs.phase = Phase::ActionInstant;
+    }
 }
 
 /// Resolve combat as the reaction window closes. The attacker (the turn player)
@@ -1103,8 +1106,8 @@ mod tests {
         // holds priority first per FaB rules; the stack is still empty.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
-        assert_eq!(gs.phase, Phase::ActionInstant);
-        assert_eq!(gs.active_player, gs.turn_player.opponent());
+        assert_eq!(gs.phase, Phase::Reaction);
+        assert_eq!(gs.active_player, gs.turn_player);
         assert!(gs.stack_is_empty());
     }
 
@@ -1113,13 +1116,6 @@ mod tests {
         let mut gs = step_to_dorinthea_defending();
 
         // Defend pass → post-defend Instant window (defender holds priority first).
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.phase, Phase::ActionInstant);
-        assert_eq!(gs.active_player, gs.turn_player.opponent());
-
-        // Double pass with empty stack closes the post-defend Instant window
-        // and opens the turn player's Reaction window.
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, gs.turn_player);
@@ -1143,9 +1139,6 @@ mod tests {
 
         // Defender declares no blocks → post-defend Instant window (defender holds
         // priority first).
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        // Both pass the post-defend Instant window → turn player's Reaction window.
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
 
@@ -1206,8 +1199,6 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(its_idx))});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
@@ -1372,13 +1363,6 @@ mod tests {
         // Done blocking.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
-        // ── Post-defend Instant window (defender holds priority first) ─────
-        assert_eq!(gs.phase, Phase::ActionInstant);
-        assert_eq!(gs.active_player, PlayerIndex::P2);
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Dorinthea passes
-        assert_eq!(gs.active_player, PlayerIndex::P1);
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Rhinar passes → close
-
         // ── Reaction phase (turn player holds priority first) ──────────────
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, PlayerIndex::P1);
@@ -1461,12 +1445,6 @@ mod tests {
         // Done blocking.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
-        // ── Post-defend Instant window: both pass ──────────────────────────
-        assert_eq!(gs.phase, Phase::ActionInstant);
-        assert_eq!(gs.active_player, PlayerIndex::P2);
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Dorinthea
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Rhinar → close
-
         // ── Reaction phase: both pass → combat resolves ───────────────────
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, PlayerIndex::P1);
@@ -1487,13 +1465,6 @@ mod tests {
         let mut gs = step_to_dorinthea_defending();
 
         // Defend pass → post-defend Instant window (defender p2 holds priority).
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.phase, Phase::ActionInstant);
-        assert_eq!(gs.active_player, gs.turn_player.opponent());
-
-        // Double pass closes the post-defend Instant window and opens the
-        // turn player's Reaction window; the turn player (p1) holds priority.
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, gs.turn_player);
