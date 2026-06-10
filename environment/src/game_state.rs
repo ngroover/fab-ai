@@ -179,7 +179,7 @@ impl Phase {
 /// The maximum number of turns a game may run before it is declared a draw. A
 /// game that reaches this many turns without either hero being reduced to 0 life
 /// ends in `Phase::Draw`.
-pub const MAX_TURNS: u16 = 40;
+pub const MAX_TURNS: u8 = 40;
 
 /// Per-player state. The cards themselves live in `Gamestate::cards`; a player
 /// only holds the (global) head/tail indices into that shared array for each of
@@ -245,7 +245,7 @@ pub struct Gamestate {
     /// How many turns have begun so far this game. Incremented at the start of
     /// every turn (see `begin_turn`); once it reaches `MAX_TURNS` the game ends
     /// in a draw (see `check_game_end`).
-    pub turn_count : u16,
+    pub turn_count : u8,
     pub rng : SmallRng,
     /// The stack: cards currently waiting to resolve, each paired with the
     /// `ActionType` that committed it (so we know how to resolve it). Slot 0 is
