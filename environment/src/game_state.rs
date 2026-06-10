@@ -218,8 +218,9 @@ pub struct Player {
     /// This player's view of the game log: what they would legitimately know,
     /// with hidden information (e.g. the identity of a card the opponent drew)
     /// redacted. `None` when logging is disabled (the default, so simulation
-    /// and cloning pay nothing); `reset(gs, true)` turns it on. One entry is
-    /// pushed per `step`, plus one per life-total change.
+    /// and cloning pay nothing); `reset(gs, true)` turns it on. Entries are
+    /// pushed at the moment each event happens, so a single `step` may log
+    /// several (e.g. a pass that also resolves the top of the stack).
     pub log : Option<Vec<String>>,
 }
 
@@ -269,8 +270,9 @@ pub struct Gamestate {
     /// The omniscient game log: every logged event with nothing redacted (the
     /// per-player views with hidden information removed live on `Player::log`).
     /// `None` when logging is disabled (the default, so simulation and cloning
-    /// pay nothing); `reset(gs, true)` turns it on. One entry is pushed per
-    /// `step`, plus one per life-total change.
+    /// pay nothing); `reset(gs, true)` turns it on. Entries are pushed at the
+    /// moment each event happens, so a single `step` may log several (e.g. a
+    /// pass that also resolves the top of the stack).
     pub log : Option<Vec<String>>,
 }
 

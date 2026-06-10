@@ -8,11 +8,6 @@ pub fn step(gs: &mut Gamestate, act: Action) {
     if gs.is_game_over() {
         return;
     }
-    // Captured before the handlers run so the log can describe the action from
-    // the state it was taken in, and so life changes can be detected after.
-    let actor = gs.active_player;
-    let phase_before = gs.phase;
-    let life_before = (gs.p1.life, gs.p2.life);
     match gs.phase {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::Action => handle_action_phase(gs, act),
@@ -21,10 +16,6 @@ pub fn step(gs: &mut Gamestate, act: Action) {
         Phase::Defend => handle_defend_phase(gs, act),
         Phase::Reaction => handle_reaction_phase(gs, act),
         _ => {}
-    }
-    if gs.logging_enabled() {
-        log_step(gs, act, phase_before, actor);
-        log_life_changes(gs, life_before);
     }
 }
 
@@ -42,59 +33,30 @@ fn hand_card_names(player: &Player, cards: &[CardState; TOTAL_CARDS]) -> String 
         .join(", ")
 }
 
-/// Push the one log entry describing this `step` to the three logs (the
-/// omniscient gamestate log and each player's view). Most actions are fully
-/// public — playing, pitching, or defending with a card reveals it — so all
-/// three logs get the same message. The first-player choice also draws both
-/// opening hands, which is hidden information: each player's log names only
-/// their own cards and sees just a count for the opponent's, while the
-/// gamestate log names both hands.
-fn log_step(gs: &mut Gamestate, act: Action, phase_before: Phase, actor: PlayerIndex) {
-    let name = player_name(actor);
-    if phase_before == Phase::ChooseFirst {
-        let choice = if act.typ == ActionType::ChooseSecond { "second" } else { "first" };
-        let p1_hand = hand_card_names(&gs.p1, &gs.cards);
-        let p2_hand = hand_card_names(&gs.p2, &gs.cards);
-        let prefix = format!("{} chooses to go {}", name, choice);
-        gs.log_views(
-            format!("{}; P1 draws [{}]; P2 draws [{}]", prefix, p1_hand, p2_hand),
-            format!("{}; P1 draws [{}]; P2 draws {} cards", prefix, p1_hand, gs.p2.hand_size),
-            format!("{}; P1 draws {} cards; P2 draws [{}]", prefix, gs.p1.hand_size, p2_hand),
-        );
+/// Log that `pid` drew their opening hand. The drawn cards are hidden
+/// information: the omniscient gamestate log and the drawing player's own log
+/// name the cards, while the opponent's log only records how many were drawn.
+fn log_opening_hand(gs: &mut Gamestate, pid: PlayerIndex) {
+    if !gs.logging_enabled() {
         return;
     }
-
-    // Everything below is public knowledge: the named card is revealed by the
-    // action itself (played/activated cards go to the stack, pitched cards to
-    // the pitch zone, blockers to the combat chain).
-    let card = act.card.map(|idx| gs.cards[idx.get()].card);
-    let msg = match (act.typ, card) {
-        (ActionType::PlayCard, Some(card)) => format!("{} plays {:?}", name, card),
-        (ActionType::Activate, Some(card)) => format!("{} activates {:?}", name, card),
-        (ActionType::Pitch, Some(card)) => format!("{} pitches {:?}", name, card),
-        (ActionType::Defend, Some(card)) => format!("{} defends with {:?}", name, card),
-        (ActionType::Pass, _) => format!("{} passes", name),
-        // Fallback for malformed or future actions; logged rather than dropped
-        // so every step still produces exactly one entry per log.
-        (typ, _) => format!("{} {:?}", name, typ),
+    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let named = format!("{} draws [{}]", player_name(pid), hand_card_names(player, &gs.cards));
+    let hidden = format!("{} draws {} cards", player_name(pid), player.hand_size);
+    let (p1_msg, p2_msg) = if pid == PlayerIndex::P1 {
+        (named.clone(), hidden)
+    } else {
+        (hidden, named.clone())
     };
-    gs.log_public(msg);
-}
-
-/// Push one additional public log entry per life total that changed during this
-/// `step` (e.g. combat damage resolving as the reaction window closes).
-fn log_life_changes(gs: &mut Gamestate, life_before: (u8, u8)) {
-    for (pid, before, after) in [
-        (PlayerIndex::P1, life_before.0, gs.p1.life),
-        (PlayerIndex::P2, life_before.1, gs.p2.life),
-    ] {
-        if before != after {
-            gs.log_public(format!("{} life: {} -> {}", player_name(pid), before, after));
-        }
-    }
+    gs.log_views(named, p1_msg, p2_msg);
 }
 
 fn handle_choose_first(gs: &mut Gamestate, act: Action) {
+    if gs.logging_enabled() {
+        // The chooser is the active player *before* any flip below.
+        let choice = if act.typ == ActionType::ChooseSecond { "second" } else { "first" };
+        gs.log_public(format!("{} chooses to go {}", player_name(gs.active_player), choice));
+    }
     // only need to switch the player if they choose go second
     if act.typ == ActionType::ChooseSecond {
         // flip to the other player
@@ -110,7 +72,9 @@ fn handle_choose_first(gs: &mut Gamestate, act: Action) {
     // The cards live in the shared `gs.cards` array; draw each player's opening
     // hand by passing that array alongside the player and its id.
     draw_to_intellect(&mut gs.p1, &mut gs.cards);
+    log_opening_hand(gs, PlayerIndex::P1);
     draw_to_intellect(&mut gs.p2, &mut gs.cards);
+    log_opening_hand(gs, PlayerIndex::P2);
 }
 
 /// Start the turn player's turn. They are granted a single action point — the
@@ -136,6 +100,9 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
         }
         // Passing ends the action phase; nothing is pending.
         ActionType::Pass => {
+            if gs.logging_enabled() {
+                gs.log_public(format!("{} passes", player_name(gs.active_player)));
+            }
             gs.pending_card = None;
         }
         _ => {}
@@ -176,6 +143,12 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     let cs = gs.cards[card_idx.get()];
     let cost = action_cost(act.typ, cs.card.data());
 
+    // Committing a card reveals it, so the announcement is public.
+    if gs.logging_enabled() {
+        let verb = if act.typ == ActionType::Activate { "activates" } else { "plays" };
+        gs.log_public(format!("{} {} {:?}", player_name(gs.active_player), verb, cs.card));
+    }
+
     let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
     let already_paid = player.resources >= cost;
 
@@ -211,6 +184,9 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
 /// next itinerary phase banked on the return stack (the turn player resuming the
 /// Action phase).
 fn handle_priority_pass(gs: &mut Gamestate) {
+    if gs.logging_enabled() {
+        gs.log_public(format!("{} passes", player_name(gs.active_player)));
+    }
     gs.passes += 1;
     if gs.passes >= 2 {
         // Both players have now passed in succession; reset the pass count.
@@ -259,6 +235,9 @@ fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
         ActionType::Defend => commit_blocker(gs, act.card_index()),
         ActionType::Pass => {
+            if gs.logging_enabled() {
+                gs.log_public(format!("{} passes", player_name(gs.active_player)));
+            }
             gs.phase = Phase::Reaction;
             gs.active_player = gs.turn_player;
         }
@@ -293,6 +272,10 @@ fn handle_reaction_phase(gs: &mut Gamestate, act: Action) {
 /// the attacker's card sits on the *attacker's* chain, a separate array.
 fn commit_blocker(gs: &mut Gamestate, idx: usize) {
     let pid = gs.active_player;
+    // Declaring a blocker reveals it, so the announcement is public.
+    if gs.logging_enabled() {
+        gs.log_public(format!("{} defends with {:?}", player_name(pid), gs.cards[idx].card));
+    }
     let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
 
     detach_from_current_zone(player, &mut gs.cards, idx);
@@ -321,6 +304,16 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     let owner = if top < PLAYER_CARDS { PlayerIndex::P1 } else { PlayerIndex::P2 };
 
     let data = gs.cards[top].card.data();
+
+    if gs.logging_enabled() {
+        let card = gs.cards[top].card;
+        let msg = if commits_as_attack(pending.typ, data) {
+            format!("{} attacks with {:?}", player_name(owner), card)
+        } else {
+            format!("{}'s {:?} resolves", player_name(owner), card)
+        };
+        gs.log_public(msg);
+    }
 
     // A card joins its owner's combat chain when it is attacking: a played
     // attack action card, or a weapon being swung (the weapon itself joins the
@@ -408,6 +401,11 @@ fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
     let card_idx = act.card_index();
     let pitch_val = gs.cards[card_idx].card.data().pitch;
 
+    // Pitched cards land face-up in the pitch zone, so the pitch is public.
+    if gs.logging_enabled() {
+        gs.log_public(format!("{} pitches {:?}", player_name(pid), gs.cards[card_idx].card));
+    }
+
     // Move the pitched card out of the hand and into the pitch zone, banking the
     // resources it produces.
     let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
@@ -487,9 +485,24 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     let attack_has_go_again = attacker.chain_link[0]
         .map(|idx| gs.cards[idx.get()].card.data().keyword.contains(Keyword::GoAgain))
         .unwrap_or(false);
+    // The attacking card, for the damage log message.
+    let attack_card = attacker.chain_link[0].map(|idx| gs.cards[idx.get()].card);
 
     let defender = if defender_id == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    let life_before = defender.life;
     defender.life = defender.life.saturating_sub(damage);
+    let life_after = defender.life;
+
+    // The damage and the resulting life change are one event, logged together.
+    if gs.logging_enabled() {
+        let source = attack_card
+            .map(|c| format!("{:?}", c))
+            .unwrap_or_else(|| "unknown".to_string());
+        gs.log_public(format!(
+            "{} takes {} damage from {} attack (life: {}->{})",
+            player_name(defender_id), damage, source, life_before, life_after
+        ));
+    }
 
     // A hero reduced to 0 ends the game in the attacker's favour.
     gs.check_game_end();
@@ -2072,12 +2085,18 @@ mod tests {
     }
 
     #[test]
-    fn test_logging_one_entry_per_step() {
+    fn test_logging_events_as_they_happen() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs, true);
 
-        // Three steps with no life change: exactly three entries in each log.
+        // The first-player choice logs three events: the choice itself, then
+        // each player's opening-hand draw the moment it happens.
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        assert_eq!(gs.log.as_ref().unwrap().len(), 3);
+        assert_eq!(gs.log.as_ref().unwrap()[0], "P1 chooses to go first");
+
+        // Playing and pitching each log one public event, identical in all
+        // three logs.
         let mm_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::MuscleMuttY)
                 .map(|(idx, _)| idx)
@@ -2091,15 +2110,43 @@ mod tests {
 
         for log in [&gs.log, &gs.p1.log, &gs.p2.log] {
             let log = log.as_ref().expect("logging is enabled");
-            assert_eq!(log.len(), 3);
+            assert_eq!(log.len(), 5);
+            assert_eq!(log[3], "P1 plays MuscleMuttY");
+            assert_eq!(log[4], "P1 pitches ClearingBellowB");
         }
+    }
 
-        // The play and pitch are public: identical in all three logs.
-        let full = gs.log.as_ref().unwrap();
-        assert_eq!(full[1], "P1 plays MuscleMuttY");
-        assert_eq!(full[2], "P1 pitches ClearingBellowB");
-        assert_eq!(&gs.p1.log.as_ref().unwrap()[1..], &full[1..]);
-        assert_eq!(&gs.p2.log.as_ref().unwrap()[1..], &full[1..]);
+    #[test]
+    fn test_logging_pass_and_stack_resolution_in_one_step() {
+        // Drive Muscle Mutt onto the stack with logging on.
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, true);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        assert_eq!(gs.phase, Phase::ActionInstant);
+
+        // First pass logs only the pass.
+        let len = gs.log.as_ref().unwrap().len();
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.log.as_ref().unwrap().len(), len + 1);
+        assert_eq!(gs.log.as_ref().unwrap()[len], "P1 passes");
+
+        // The second pass logs two events in the same step: the pass, then the
+        // attack resolving off the stack.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        let log = gs.log.as_ref().unwrap();
+        assert_eq!(log.len(), len + 3);
+        assert_eq!(log[len + 1], "P2 passes");
+        assert_eq!(log[len + 2], "P1 attacks with MuscleMuttY");
     }
 
     #[test]
@@ -2108,26 +2155,25 @@ mod tests {
         reset(&mut gs, true);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
+        // Entries 1 and 2 are the opening-hand draws (entry 0 is the choice).
         // Seed 42 opening hands (see test_initial_hand).
-        let full = &gs.log.as_ref().unwrap()[0];
-        let p1_view = &gs.p1.log.as_ref().unwrap()[0];
-        let p2_view = &gs.p2.log.as_ref().unwrap()[0];
+        let full = gs.log.as_ref().unwrap();
+        let p1_view = gs.p1.log.as_ref().unwrap();
+        let p2_view = gs.p2.log.as_ref().unwrap();
 
         // The omniscient log names cards from both hands.
-        assert!(full.contains("MuscleMuttY"), "full log should name p1's cards: {}", full);
-        assert!(full.contains("DrivingBladeY"), "full log should name p2's cards: {}", full);
+        assert!(full[1].contains("MuscleMuttY"), "full log should name p1's cards: {}", full[1]);
+        assert!(full[2].contains("DrivingBladeY"), "full log should name p2's cards: {}", full[2]);
 
         // Each player sees their own cards but only a count for the opponent's.
-        assert!(p1_view.contains("MuscleMuttY"));
-        assert!(!p1_view.contains("DrivingBladeY"), "p1 must not see p2's hand: {}", p1_view);
-        assert!(p1_view.contains("P2 draws 4 cards"));
-        assert!(p2_view.contains("DrivingBladeY"));
-        assert!(!p2_view.contains("MuscleMuttY"), "p2 must not see p1's hand: {}", p2_view);
-        assert!(p2_view.contains("P1 draws 4 cards"));
+        assert!(p1_view[1].contains("MuscleMuttY"));
+        assert_eq!(p1_view[2], "P2 draws 4 cards");
+        assert!(p2_view[2].contains("DrivingBladeY"));
+        assert_eq!(p2_view[1], "P1 draws 4 cards");
     }
 
     #[test]
-    fn test_logging_life_change_adds_extra_entry() {
+    fn test_logging_damage_message_includes_life_change() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs, true);
         // Re-drive step_to_dorinthea_defending with logging on, then run out the
@@ -2150,8 +2196,9 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         let entries_before = gs.log.as_ref().unwrap().len();
-        // The final pass closes the reaction window and deals 6 damage: that
-        // step logs its pass entry plus one extra entry for the life change.
+        // The final pass closes the reaction window and deals 6 damage: the
+        // step logs the pass, then a single damage message carrying the life
+        // change inline.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.p2.life, 14);
 
@@ -2159,7 +2206,10 @@ mod tests {
             let log = log.as_ref().expect("logging is enabled");
             assert_eq!(log.len(), entries_before + 2);
             assert_eq!(log[log.len() - 2], "P2 passes");
-            assert_eq!(log[log.len() - 1], "P2 life: 20 -> 14");
+            assert_eq!(
+                log[log.len() - 1],
+                "P2 takes 6 damage from MuscleMuttY attack (life: 20->14)"
+            );
         }
     }
 }
