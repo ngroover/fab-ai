@@ -8,6 +8,11 @@ pub fn step(gs: &mut Gamestate, act: Action) {
     if gs.is_game_over() {
         return;
     }
+    // Captured before the handlers run so the log can describe the action from
+    // the state it was taken in, and so life changes can be detected after.
+    let actor = gs.active_player;
+    let phase_before = gs.phase;
+    let life_before = (gs.p1.life, gs.p2.life);
     match gs.phase {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::Action => handle_action_phase(gs, act),
@@ -16,6 +21,76 @@ pub fn step(gs: &mut Gamestate, act: Action) {
         Phase::Defend => handle_defend_phase(gs, act),
         Phase::Reaction => handle_reaction_phase(gs, act),
         _ => {}
+    }
+    if gs.logging_enabled() {
+        log_step(gs, act, phase_before, actor);
+        log_life_changes(gs, life_before);
+    }
+}
+
+/// Short display name for a player in log messages.
+fn player_name(pid: PlayerIndex) -> &'static str {
+    if pid == PlayerIndex::P1 { "P1" } else { "P2" }
+}
+
+/// The card names in `player`'s hand, joined for a log message.
+fn hand_card_names(player: &Player, cards: &[CardState; TOTAL_CARDS]) -> String {
+    player
+        .hand_iter(cards)
+        .map(|(_, cs)| format!("{:?}", cs.card))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Push the one log entry describing this `step` to the three logs (the
+/// omniscient gamestate log and each player's view). Most actions are fully
+/// public — playing, pitching, or defending with a card reveals it — so all
+/// three logs get the same message. The first-player choice also draws both
+/// opening hands, which is hidden information: each player's log names only
+/// their own cards and sees just a count for the opponent's, while the
+/// gamestate log names both hands.
+fn log_step(gs: &mut Gamestate, act: Action, phase_before: Phase, actor: PlayerIndex) {
+    let name = player_name(actor);
+    if phase_before == Phase::ChooseFirst {
+        let choice = if act.typ == ActionType::ChooseSecond { "second" } else { "first" };
+        let p1_hand = hand_card_names(&gs.p1, &gs.cards);
+        let p2_hand = hand_card_names(&gs.p2, &gs.cards);
+        let prefix = format!("{} chooses to go {}", name, choice);
+        gs.log_views(
+            format!("{}; P1 draws [{}]; P2 draws [{}]", prefix, p1_hand, p2_hand),
+            format!("{}; P1 draws [{}]; P2 draws {} cards", prefix, p1_hand, gs.p2.hand_size),
+            format!("{}; P1 draws {} cards; P2 draws [{}]", prefix, gs.p1.hand_size, p2_hand),
+        );
+        return;
+    }
+
+    // Everything below is public knowledge: the named card is revealed by the
+    // action itself (played/activated cards go to the stack, pitched cards to
+    // the pitch zone, blockers to the combat chain).
+    let card = act.card.map(|idx| gs.cards[idx.get()].card);
+    let msg = match (act.typ, card) {
+        (ActionType::PlayCard, Some(card)) => format!("{} plays {:?}", name, card),
+        (ActionType::Activate, Some(card)) => format!("{} activates {:?}", name, card),
+        (ActionType::Pitch, Some(card)) => format!("{} pitches {:?}", name, card),
+        (ActionType::Defend, Some(card)) => format!("{} defends with {:?}", name, card),
+        (ActionType::Pass, _) => format!("{} passes", name),
+        // Fallback for malformed or future actions; logged rather than dropped
+        // so every step still produces exactly one entry per log.
+        (typ, _) => format!("{} {:?}", name, typ),
+    };
+    gs.log_public(msg);
+}
+
+/// Push one additional public log entry per life total that changed during this
+/// `step` (e.g. combat damage resolving as the reaction window closes).
+fn log_life_changes(gs: &mut Gamestate, life_before: (u8, u8)) {
+    for (pid, before, after) in [
+        (PlayerIndex::P1, life_before.0, gs.p1.life),
+        (PlayerIndex::P2, life_before.1, gs.p2.life),
+    ] {
+        if before != after {
+            gs.log_public(format!("{} life: {} -> {}", player_name(pid), before, after));
+        }
     }
 }
 
@@ -651,7 +726,7 @@ mod tests {
     #[test]
     fn test_go_first_step() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         assert_eq!(gs.active_player, PlayerIndex::P1);
 
@@ -665,7 +740,7 @@ mod tests {
     #[test]
     fn test_go_second_step() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         assert_eq!(gs.active_player, PlayerIndex::P1);
 
@@ -679,7 +754,7 @@ mod tests {
     #[test]
     fn test_play_card_moves_to_pitch() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -709,7 +784,7 @@ mod tests {
     #[test]
     fn test_play_affordable_card_moves_to_instant() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -741,7 +816,7 @@ mod tests {
     #[test]
     fn test_pitch_commits_played_card_to_stack() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -776,7 +851,7 @@ mod tests {
     #[test]
     fn test_pitch_below_cost_keeps_card_pending() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -819,7 +894,7 @@ mod tests {
     #[test]
     fn test_pitch_commits_weapon_attack_to_stack() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -849,7 +924,7 @@ mod tests {
     #[test]
     fn test_attack_card_moves_to_pitch() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -868,7 +943,7 @@ mod tests {
     #[test]
     fn test_play_packcall() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -903,7 +978,7 @@ mod tests {
     /// and the stack slot the committed card occupies.
     fn instant_phase_with_one_card() -> (Gamestate, usize) {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -923,7 +998,7 @@ mod tests {
     #[test]
     fn test_choose_first_sets_turn_player() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
         assert_eq!(gs.active_player, PlayerIndex::P1);
 
         // Going second flips both the active player and, since they own the turn,
@@ -971,7 +1046,7 @@ mod tests {
     #[test]
     fn test_attack_action_resolves_to_combat_chain() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -1009,7 +1084,7 @@ mod tests {
     #[test]
     fn test_weapon_attack_resolves_to_combat_chain() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -1044,7 +1119,7 @@ mod tests {
     /// gamestate in the Defend phase with p2 as the active (defending) player.
     fn step_to_dorinthea_defending() -> Gamestate {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -1245,7 +1320,7 @@ mod tests {
     #[test]
     fn test_turn_player_starts_with_one_action_point() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         // Before the first-player choice neither player has been granted their
         // action point yet.
@@ -1268,7 +1343,7 @@ mod tests {
         // point is spent once damage resolves — and back in the Action phase
         // Rhinar can no longer play another attack action or action.
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         assert_eq!(gs.p1.action_points, 1);
@@ -1342,7 +1417,7 @@ mod tests {
         // attacks with Muscle Mutt (power 6), Dorinthea blocks with a single
         // Driving Blade (defense 3), and 6 - 3 = 3 damage is dealt to her life.
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         // ── ChooseFirst phase ──────────────────────────────────────────────
         assert_eq!(gs.phase, Phase::ChooseFirst);
@@ -1420,7 +1495,7 @@ mod tests {
         // Swing) for 9 total defense against Muscle Mutt's 6 power, so no damage
         // gets through and her life is unchanged.
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         // ── ChooseFirst phase ──────────────────────────────────────────────
         assert_eq!(gs.phase, Phase::ChooseFirst);
@@ -1584,7 +1659,7 @@ mod tests {
         // chain (-> Defend), declaring blocks advances to the turn player's
         // Reaction window, and emptying that window returns to the Action phase.
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         let tp = gs.turn_player;
 
@@ -1697,7 +1772,7 @@ mod tests {
     #[test]
     fn test_pass_clears_pending_card() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -1711,7 +1786,7 @@ mod tests {
     #[test]
     fn test_initial_hand() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -1743,7 +1818,7 @@ mod tests {
     #[test]
     fn test_draw_cards_includes_last_card() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -1778,7 +1853,7 @@ mod tests {
     /// point for poking the win/draw conditions.
     fn fresh_game() -> Gamestate {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         gs
     }
@@ -1978,7 +2053,113 @@ mod tests {
     fn test_reset_clears_turn_count() {
         let mut gs = fresh_game();
         gs.turn_count = 17;
-        reset(&mut gs);
+        reset(&mut gs, false);
         assert_eq!(gs.turn_count, 0);
+    }
+
+    // ── Logging ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_logging_disabled_leaves_logs_none() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert!(gs.log.is_none());
+        assert!(gs.p1.log.is_none());
+        assert!(gs.p2.log.is_none());
+    }
+
+    #[test]
+    fn test_logging_one_entry_per_step() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, true);
+
+        // Three steps with no life change: exactly three entries in each log.
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+
+        for log in [&gs.log, &gs.p1.log, &gs.p2.log] {
+            let log = log.as_ref().expect("logging is enabled");
+            assert_eq!(log.len(), 3);
+        }
+
+        // The play and pitch are public: identical in all three logs.
+        let full = gs.log.as_ref().unwrap();
+        assert_eq!(full[1], "P1 plays MuscleMuttY");
+        assert_eq!(full[2], "P1 pitches ClearingBellowB");
+        assert_eq!(&gs.p1.log.as_ref().unwrap()[1..], &full[1..]);
+        assert_eq!(&gs.p2.log.as_ref().unwrap()[1..], &full[1..]);
+    }
+
+    #[test]
+    fn test_logging_hides_opponent_draws() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, true);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        // Seed 42 opening hands (see test_initial_hand).
+        let full = &gs.log.as_ref().unwrap()[0];
+        let p1_view = &gs.p1.log.as_ref().unwrap()[0];
+        let p2_view = &gs.p2.log.as_ref().unwrap()[0];
+
+        // The omniscient log names cards from both hands.
+        assert!(full.contains("MuscleMuttY"), "full log should name p1's cards: {}", full);
+        assert!(full.contains("DrivingBladeY"), "full log should name p2's cards: {}", full);
+
+        // Each player sees their own cards but only a count for the opponent's.
+        assert!(p1_view.contains("MuscleMuttY"));
+        assert!(!p1_view.contains("DrivingBladeY"), "p1 must not see p2's hand: {}", p1_view);
+        assert!(p1_view.contains("P2 draws 4 cards"));
+        assert!(p2_view.contains("DrivingBladeY"));
+        assert!(!p2_view.contains("MuscleMuttY"), "p2 must not see p1's hand: {}", p2_view);
+        assert!(p2_view.contains("P1 draws 4 cards"));
+    }
+
+    #[test]
+    fn test_logging_life_change_adds_extra_entry() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, true);
+        // Re-drive step_to_dorinthea_defending with logging on, then run out the
+        // reaction window so Muscle Mutt's 6 damage lands.
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Defend);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        let entries_before = gs.log.as_ref().unwrap().len();
+        // The final pass closes the reaction window and deals 6 damage: that
+        // step logs its pass entry plus one extra entry for the life change.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.p2.life, 14);
+
+        for log in [&gs.log, &gs.p1.log, &gs.p2.log] {
+            let log = log.as_ref().expect("logging is enabled");
+            assert_eq!(log.len(), entries_before + 2);
+            assert_eq!(log[log.len() - 2], "P2 passes");
+            assert_eq!(log[log.len() - 1], "P2 life: 20 -> 14");
+        }
     }
 }

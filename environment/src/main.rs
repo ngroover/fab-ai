@@ -17,7 +17,7 @@ use fab_step::step;
 
 fn main() {
     let mut game = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-    reset(&mut game);
+    reset(&mut game, true);
     println!(
         "P1 (Rhinar)    — life: {}, intellect: {}",
         game.p1.life, game.p1.intellect
@@ -29,4 +29,10 @@ fn main() {
     println!("Active player: {}", game.active_player.get());
     step(&mut game, Action{ typ: ActionType::ChooseFirst, card: None});
 
+    if let Some(log) = &game.log {
+        println!("Game log:");
+        for entry in log {
+            println!("  {}", entry);
+        }
+    }
 }

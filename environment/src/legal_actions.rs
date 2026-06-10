@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn legal_actions_in_choose_first_phase() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let actions = legal_actions(&gs);
 
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn legal_actions_in_action_phase_playcard() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -295,7 +295,7 @@ mod tests {
     #[test]
     fn legal_actions_in_pitch_phase() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn legal_actions_in_pitch_phase_excludes_pending_card() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -364,7 +364,7 @@ mod tests {
     /// flow rather than poking `gs.phase` directly.
     fn step_to_dorinthea_defending() -> Gamestate {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -527,7 +527,7 @@ mod tests {
     #[test]
     fn legal_actions_in_instant_phase_only_offers_pass() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -562,7 +562,7 @@ mod tests {
     #[test]
     fn legal_actions_in_action_phase_includes_pass() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -579,7 +579,7 @@ mod tests {
     #[test]
     fn legal_actions_in_action_phase_activate_equipment() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -619,7 +619,7 @@ mod tests {
     #[test]
     fn legal_actions_in_action_phase_activate_equipment_dorinthea() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         // Choosing second flips the active player to Dorinthea (p2).
         let go_second = Action{ typ: ActionType::ChooseSecond, card: None};

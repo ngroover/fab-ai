@@ -215,6 +215,12 @@ pub struct Player {
     pub chain_link : [Option<CardIdx>; 5],
     pub hand_size : u8,
     pub deck_size : u8,
+    /// This player's view of the game log: what they would legitimately know,
+    /// with hidden information (e.g. the identity of a card the opponent drew)
+    /// redacted. `None` when logging is disabled (the default, so simulation
+    /// and cloning pay nothing); `reset(gs, true)` turns it on. One entry is
+    /// pushed per `step`, plus one per life-total change.
+    pub log : Option<Vec<String>>,
 }
 
 pub struct Gamestate {
@@ -260,6 +266,12 @@ pub struct Gamestate {
     /// holds the global slot index into `cards` together with the location it is
     /// being played/activated from. `None` outside the pay-for-a-card flow.
     pub pending_card : Option<PendingCard>,
+    /// The omniscient game log: every logged event with nothing redacted (the
+    /// per-player views with hidden information removed live on `Player::log`).
+    /// `None` when logging is disabled (the default, so simulation and cloning
+    /// pay nothing); `reset(gs, true)` turns it on. One entry is pushed per
+    /// `step`, plus one per life-total change.
+    pub log : Option<Vec<String>>,
 }
 
 impl Gamestate {
@@ -330,6 +342,33 @@ impl Gamestate {
     pub fn pop_stack(&mut self) -> Option<PendingCard> {
         let top = self.stack_top_slot()?;
         self.stack[top].take()
+    }
+
+    /// True when logging was enabled by `reset(gs, true)`. Callers should check
+    /// this before building log strings so disabled logging costs nothing.
+    pub fn logging_enabled(&self) -> bool {
+        self.log.is_some()
+    }
+
+    /// Append a fully-public event: the same message goes to the omniscient
+    /// gamestate log and both players' logs. A no-op when logging is disabled.
+    pub fn log_public(&mut self, msg: String) {
+        self.log_views(msg.clone(), msg.clone(), msg);
+    }
+
+    /// Append an event involving hidden information: `full` (nothing redacted)
+    /// goes to the omniscient gamestate log, while `p1` and `p2` carry each
+    /// player's legitimate view of it. A no-op when logging is disabled.
+    pub fn log_views(&mut self, full: String, p1: String, p2: String) {
+        if let Some(log) = &mut self.p1.log {
+            log.push(p1);
+        }
+        if let Some(log) = &mut self.p2.log {
+            log.push(p2);
+        }
+        if let Some(log) = &mut self.log {
+            log.push(full);
+        }
     }
 }
 

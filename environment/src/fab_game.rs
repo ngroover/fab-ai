@@ -61,6 +61,8 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: 
         rng,
         stack: [None; STACK_SIZE],
         pending_card: None,
+        // Logging is opted into via `reset(gs, true)`; off until then.
+        log: None,
     }
 }
 
@@ -140,16 +142,28 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
         chain_link : [None; 5],
         hand_size : 0,
         deck_size : 0,
+        // Logging is opted into via `reset(gs, true)`; off until then.
+        log: None,
     };
 
     (player, cards)
 }
 
 
-pub fn reset(gs: &mut Gamestate) {
+/// Reset `gs` to a fresh, playable game. `logging` opts into the game logs:
+/// when `true`, the omniscient `Gamestate::log` and the per-player
+/// `Player::log` views are allocated (empty) and `step` appends to them; when
+/// `false` all three are `None` and logging costs nothing — the right choice
+/// for simulation or heavy gamestate cloning.
+pub fn reset(gs: &mut Gamestate, logging: bool) {
     gs.phase = Phase::ChooseFirst;
     gs.stack = [None; STACK_SIZE];
     gs.turn_count = 0;
+
+    let new_log = || if logging { Some(Vec::new()) } else { None };
+    gs.log = new_log();
+    gs.p1.log = new_log();
+    gs.p2.log = new_log();
 
     place_cards(gs);
     shuffle_decks(gs);
@@ -277,7 +291,7 @@ mod tests {
     #[test]
     fn test_reset_cards() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), None);
-        reset(&mut gs);
+        reset(&mut gs, false);
 
         // check bonebasher on p1
         let bb = get_card_states_from_card(&gs, PlayerIndex::P1, Card::BoneBasher);
