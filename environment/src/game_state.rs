@@ -159,6 +159,9 @@ pub enum Phase {
     Defend,
     Reaction,
     ReactionPitch,
+    /// The end of the turn player's action phase: they have passed, the combat
+    /// chain has closed, and they may now move a card into their arsenal.
+    Arsenal,
     /// Terminal phase: player 1 has won (player 2's hero was reduced to 0 life).
     Player1Win,
     /// Terminal phase: player 2 has won (player 1's hero was reduced to 0 life).

@@ -98,12 +98,15 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
         ActionType::PlayCard | ActionType::Activate => {
             commit_card_to_pending(gs, act);
         }
-        // Passing ends the action phase; nothing is pending.
+        // Passing ends the action phase; nothing is pending. The combat chain
+        // closes and play advances to the turn player's Arsenal phase.
         ActionType::Pass => {
             if gs.logging_enabled() {
                 gs.log_public(format!("{} passes", player_name(gs.active_player)));
             }
             gs.pending_card = None;
+            close_combat_chain(gs);
+            gs.phase = Phase::Arsenal;
         }
         _ => {}
     }
@@ -512,6 +515,56 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     if !attack_has_go_again {
         spend_action_point(gs, attacker_id);
     }
+}
+
+/// Close the combat chain as the action phase ends. Every card still sitting on
+/// either player's chain leaves it: a weapon returns to its owner's weapon slot,
+/// every other card goes to its owner's graveyard. Each occupied chain link is
+/// the head of a linked list (all blockers against one attack share a link), so
+/// the whole list is walked before the link is cleared. Cards on a player's
+/// chain are owned by that player — attacks sit on the attacker's chain,
+/// blockers on the defender's — so the owner is the chain's player.
+fn close_combat_chain(gs: &mut Gamestate) {
+    let chain_occupied = gs.p1.chain_link.iter().chain(gs.p2.chain_link.iter())
+        .any(|link| link.is_some());
+    if chain_occupied && gs.logging_enabled() {
+        gs.log_public("combat chain closes".to_string());
+    }
+    for pid in [PlayerIndex::P1, PlayerIndex::P2] {
+        // Borrow the player and the shared cards array as disjoint fields so the
+        // chain links and the card states can be updated in the same walk.
+        let (player, cards) = if pid == PlayerIndex::P1 {
+            (&mut gs.p1, &mut gs.cards)
+        } else {
+            (&mut gs.p2, &mut gs.cards)
+        };
+        for link in player.chain_link.iter_mut() {
+            let Some(head) = link.take() else { continue };
+            let mut cur = head.get();
+            loop {
+                let next = cards[cur].next_card.get();
+                if is_weapon(cards[cur].card.data()) {
+                    // A weapon on the chain returns to the slot it swung from.
+                    cards[cur].location = CardLocation::weapon(pid);
+                    player.weapon_idx = Some(CardIdx::new(cur));
+                } else {
+                    cards[cur].location = CardLocation::graveyard(pid);
+                }
+                // A node whose next_card points at itself ends the list.
+                if next == cur {
+                    break;
+                }
+                cur = next;
+            }
+        }
+    }
+}
+
+/// Whether `data` is a weapon card (one that lives in the weapon slot rather
+/// than the deck). Mirrors the weapon classification used when dealing out a
+/// decklist in `fab_game`.
+fn is_weapon(data: &CardData) -> bool {
+    matches!(data.typ, CardType::Weapon | CardType::Sword2h | CardType::Club2h)
 }
 
 /// Deduct one action point from `player`, flooring at 0 so it never underflows.
@@ -1796,6 +1849,155 @@ mod tests {
         assert_eq!(gs.pending_card, None);
     }
 
+    // ── Arsenal phase / closing the combat chain ───────────────────────────
+
+    #[test]
+    fn test_action_phase_pass_advances_to_arsenal() {
+        // The turn player passing during the Action phase ends it: play advances
+        // to the Arsenal phase. With nothing ever attacked there is no combat
+        // chain to close.
+        let mut gs = fresh_game();
+        assert_eq!(gs.phase, Phase::Action);
+
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.phase, Phase::Arsenal);
+        assert_eq!(gs.turn_player, PlayerIndex::P1);
+        assert!(gs.p1.chain_link.iter().all(|l| l.is_none()));
+        assert!(gs.p2.chain_link.iter().all(|l| l.is_none()));
+    }
+
+    #[test]
+    fn test_action_phase_pass_closes_combat_chain_to_graveyards() {
+        // Run a full Muscle Mutt attack blocked by Driving Blade, returning to
+        // the Action phase with both cards still sitting on the combat chain.
+        let mut gs = step_to_dorinthea_defending();
+        let mm_idx = gs.p1.chain_link[0].expect("attack on p1's chain").get();
+        let db_idx = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
+                .map(|(idx, _)| idx)
+                .expect("Driving Blade should be in Dorinthea's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
+        assert_eq!(gs.cards[db_idx].location, CardLocation::P2CombatChain);
+
+        // The turn player passes: the chain breaks. Each card on it goes to its
+        // owner's graveyard — the attack to the attacker's, the blocker to the
+        // defender's — every link clears, and play enters the Arsenal phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.phase, Phase::Arsenal);
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Graveyard);
+        assert_eq!(gs.cards[db_idx].location, CardLocation::P2Graveyard);
+        assert!(gs.p1.chain_link.iter().all(|l| l.is_none()));
+        assert!(gs.p2.chain_link.iter().all(|l| l.is_none()));
+    }
+
+    #[test]
+    fn test_action_phase_pass_closes_chain_multiple_blockers() {
+        // Two blockers share chain link 0 as a linked list; closing the chain
+        // must walk the whole list, not just the head.
+        let mut gs = step_to_dorinthea_defending();
+        let first = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
+                .map(|(idx, _)| idx)
+                .expect("Driving Blade should be in Dorinthea's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(first))});
+        let second = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::InTheSwingR)
+                .map(|(idx, _)| idx)
+                .expect("In the Swing should be in Dorinthea's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(second))});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Action);
+
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.phase, Phase::Arsenal);
+        assert_eq!(gs.cards[first].location, CardLocation::P2Graveyard);
+        assert_eq!(gs.cards[second].location, CardLocation::P2Graveyard);
+        assert!(gs.p2.chain_link.iter().all(|l| l.is_none()));
+    }
+
+    #[test]
+    fn test_action_phase_pass_returns_weapon_to_weapon_slot() {
+        // Swing Bone Basher through a full combat so the weapon card is left on
+        // the combat chain when play returns to the Action phase.
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        let weapon_idx = gs.p1.weapon_idx.unwrap().get();
+        step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(weapon_idx))});
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Defend);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.cards[weapon_idx].location, CardLocation::P1CombatChain);
+        assert_eq!(gs.p1.weapon_idx, None);
+
+        // The turn player passes: the chain breaks, and the weapon goes back to
+        // the weapon slot it swung from rather than the graveyard.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.phase, Phase::Arsenal);
+        assert_eq!(gs.cards[weapon_idx].location, CardLocation::P1Weapon);
+        assert_eq!(gs.p1.weapon_idx, Some(CardIdx::new(weapon_idx)));
+        assert!(gs.p1.chain_link.iter().all(|l| l.is_none()));
+    }
+
+    #[test]
+    fn test_close_combat_chain_logs_once() {
+        // With logging on, closing a populated chain logs a single public event
+        // after the pass itself.
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, true);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Action);
+
+        let len = gs.log.as_ref().unwrap().len();
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        let log = gs.log.as_ref().unwrap();
+        assert_eq!(log.len(), len + 2);
+        assert_eq!(log[len], "P1 passes");
+        assert_eq!(log[len + 1], "combat chain closes");
+
+        // An empty chain closes silently: only the pass is logged.
+        gs.phase = Phase::Action;
+        let len = gs.log.as_ref().unwrap().len();
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.log.as_ref().unwrap().len(), len + 1);
+    }
+
     #[test]
     fn test_initial_hand() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
@@ -1880,6 +2082,7 @@ mod tests {
         for p in [
             Phase::Start, Phase::ChooseFirst, Phase::Action, Phase::ActionPitch,
             Phase::ActionInstant, Phase::Defend, Phase::Reaction, Phase::ReactionPitch,
+            Phase::Arsenal,
         ] {
             assert!(!p.is_terminal(), "{:?} should not be terminal", p);
         }

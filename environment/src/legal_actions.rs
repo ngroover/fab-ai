@@ -21,6 +21,9 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
         Phase::ActionInstant => legal_instant_phase(gs),
         Phase::Defend => legal_defend_phase(gs),
         Phase::Reaction => legal_reaction_phase(gs),
+        // Arsenal-phase choices (move a card into the arsenal, or pass) are not
+        // implemented yet.
+        Phase::Arsenal => Vec::new(),
         Phase::Start => Vec::new(),
         // Terminal phases: the game is over, so there are no legal actions.
         Phase::Player1Win | Phase::Player2Win | Phase::Draw => Vec::new(),
