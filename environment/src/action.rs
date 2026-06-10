@@ -9,6 +9,7 @@ pub enum ActionType {
     Activate,
     Pitch,
     Defend,
+    Arsenal,
     Pass
 }
 
@@ -26,7 +27,8 @@ pub struct Action {
 impl Action {
     /// The `cards` slot this action refers to, as a `usize` for indexing.
     /// Panics if the action carries no card, so only call it for
-    /// card-referencing actions (`PlayCard`, `Activate`, `Pitch`, `Defend`).
+    /// card-referencing actions (`PlayCard`, `Activate`, `Pitch`, `Defend`,
+    /// `Arsenal`).
     pub fn card_index(&self) -> usize {
         self.card.expect("action carries no card").get()
     }

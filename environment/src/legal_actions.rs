@@ -21,9 +21,7 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
         Phase::ActionInstant => legal_instant_phase(gs),
         Phase::Defend => legal_defend_phase(gs),
         Phase::Reaction => legal_reaction_phase(gs),
-        // Arsenal-phase choices (move a card into the arsenal, or pass) are not
-        // implemented yet.
-        Phase::Arsenal => Vec::new(),
+        Phase::Arsenal => legal_arsenal_phase(gs),
         Phase::Start => Vec::new(),
         // Terminal phases: the game is over, so there are no legal actions.
         Phase::Player1Win | Phase::Player2Win | Phase::Draw => Vec::new(),
@@ -45,6 +43,33 @@ fn legal_defend_phase(gs: &Gamestate) -> Vec<Action> {
             card: Some(CardIdx::new(idx)),
         })
         .collect()
+}
+
+fn legal_arsenal_phase(gs: &Gamestate) -> Vec<Action> {
+    // The turn player has passed their action phase and may now set a card
+    // aside. The active player is the turn player here, so the usual lookup
+    // gives us the player choosing.
+    let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+
+    let mut actions = Vec::new();
+
+    // The arsenal holds a single card: every card in hand is a choice, but only
+    // while the slot is free.
+    if player.arsenal_idx.is_none() {
+        actions.extend(player.hand_iter(&gs.cards).map(|(idx, _)| Action {
+            typ: ActionType::Arsenal,
+            card: Some(CardIdx::new(idx)),
+        }));
+    }
+
+    // Arsenaling is optional (and the only choice when the slot is occupied or
+    // the hand is empty): passing skips it and ends the turn.
+    actions.push(Action {
+        typ: ActionType::Pass,
+        card: None,
+    });
+
+    actions
 }
 
 fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
@@ -442,6 +467,78 @@ mod tests {
             Card::SecondSwingR,
             Card::InTheSwingR,
         ]));
+    }
+
+    #[test]
+    fn legal_actions_in_arsenal_phase_offers_whole_hand_plus_pass() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        // Rhinar passes his action phase without playing anything, entering the
+        // Arsenal phase with his full opening hand of four cards.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Arsenal);
+
+        let actions = legal_actions(&gs);
+
+        // Every card in hand is offered as an Arsenal choice, sourced from the
+        // hand, plus exactly one Pass to skip arsenaling.
+        let arsenals: Vec<&Action> = actions.iter()
+                .filter(|a| a.typ == ActionType::Arsenal)
+                .collect();
+        assert_eq!(arsenals.len(), 4);
+        for a in &arsenals {
+            assert_eq!(gs.cards[a.card_index()].location, CardLocation::P1Hand);
+        }
+        let choices: HashSet<Card> = arsenals.iter()
+                .map(|a| gs.cards[a.card_index()].card)
+                .collect();
+        assert_eq!(choices, HashSet::from([
+            Card::MuscleMuttY,
+            Card::PackCallY,
+            Card::RagingOnslaughtY,
+            Card::ClearingBellowB,
+        ]));
+
+        let passes = actions.iter().filter(|a| a.typ == ActionType::Pass).count();
+        assert_eq!(passes, 1);
+        assert_eq!(actions.len(), 5);
+    }
+
+    #[test]
+    fn legal_actions_in_arsenal_phase_occupied_only_offers_pass() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        // Turn 1: Rhinar passes and arsenals a card, handing the turn to
+        // Dorinthea. Turn 2: she passes and skips her arsenal, handing the turn
+        // back. Turn 3: Rhinar passes into his Arsenal phase again — his slot is
+        // still occupied from turn 1.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Arsenal, card: Some(CardIdx::new(mm_idx))});
+
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Arsenal);
+        assert!(gs.p1.arsenal_idx.is_some());
+
+        // The single arsenal slot is taken, so no Arsenal choices are offered —
+        // only the Pass that ends the turn.
+        let actions = legal_actions(&gs);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].typ, ActionType::Pass);
     }
 
     #[test]

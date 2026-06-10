@@ -15,6 +15,7 @@ pub fn step(gs: &mut Gamestate, act: Action) {
         Phase::ActionInstant => handle_action_instant_phase(gs, act),
         Phase::Defend => handle_defend_phase(gs, act),
         Phase::Reaction => handle_reaction_phase(gs, act),
+        Phase::Arsenal => handle_arsenal_phase(gs, act),
         _ => {}
     }
 }
@@ -246,6 +247,90 @@ fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
         }
         _ => {}
     }
+}
+
+/// Handle an action during the Arsenal phase. The turn player (the active
+/// player here) may set one card from their hand into their empty arsenal slot
+/// (`Arsenal`), or pass to keep their whole hand. Either way the turn then
+/// ends: they draw back up to intellect and the opponent's turn begins (see
+/// `end_turn`).
+fn handle_arsenal_phase(gs: &mut Gamestate, act: Action) {
+    match act.typ {
+        ActionType::Arsenal => {
+            let pid = gs.active_player;
+            let card_idx = act.card_index();
+
+            // The arsenal is face-down: its owner (and the omniscient log) know
+            // the card, the opponent only sees that a card was set aside.
+            if gs.logging_enabled() {
+                let named = format!("{} arsenals {:?}", player_name(pid), gs.cards[card_idx].card);
+                let hidden = format!("{} arsenals a card", player_name(pid));
+                let (p1_msg, p2_msg) = if pid == PlayerIndex::P1 {
+                    (named.clone(), hidden)
+                } else {
+                    (hidden, named.clone())
+                };
+                gs.log_views(named, p1_msg, p2_msg);
+            }
+
+            // Move the chosen card out of the hand into the arsenal slot.
+            let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+            detach_from_current_zone(player, &mut gs.cards, card_idx);
+            gs.cards[card_idx].location = CardLocation::arsenal(pid);
+            player.arsenal_idx = Some(CardIdx::new(card_idx));
+
+            end_turn(gs);
+        }
+        ActionType::Pass => {
+            if gs.logging_enabled() {
+                gs.log_public(format!("{} passes", player_name(gs.active_player)));
+            }
+            end_turn(gs);
+        }
+        _ => {}
+    }
+}
+
+/// End the turn player's turn: they draw back up to intellect, then the turn
+/// and active player both flip to the opponent, whose Action phase begins.
+fn end_turn(gs: &mut Gamestate) {
+    let pid = gs.turn_player;
+    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    let hand_before = player.hand_size;
+    draw_to_intellect(player, &mut gs.cards);
+    let drawn = player.hand_size - hand_before;
+    log_end_of_turn_draw(gs, pid, drawn);
+
+    gs.turn_player = gs.turn_player.opponent();
+    gs.active_player = gs.turn_player;
+    gs.phase = Phase::Action;
+    begin_turn(gs);
+}
+
+/// Log that `pid` drew back up to intellect at the end of their turn. The drawn
+/// cards are hidden information: the omniscient log and the drawing player's
+/// own log name them, while the opponent's log only records the count. Drawn
+/// cards are prepended to the hand, so the first `drawn` hand cards are the
+/// ones just drawn. Drawing nothing logs nothing.
+fn log_end_of_turn_draw(gs: &mut Gamestate, pid: PlayerIndex, drawn: u8) {
+    if !gs.logging_enabled() || drawn == 0 {
+        return;
+    }
+    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let names = player
+        .hand_iter(&gs.cards)
+        .take(drawn as usize)
+        .map(|(_, cs)| format!("{:?}", cs.card))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let named = format!("{} draws [{}]", player_name(pid), names);
+    let hidden = format!("{} draws {} cards", player_name(pid), drawn);
+    let (p1_msg, p2_msg) = if pid == PlayerIndex::P1 {
+        (named.clone(), hidden)
+    } else {
+        (hidden, named.clone())
+    };
+    gs.log_views(named, p1_msg, p2_msg);
 }
 
 /// Handle an action during the Reaction phase. The active player may play a
@@ -1958,6 +2043,91 @@ mod tests {
         assert_eq!(gs.cards[weapon_idx].location, CardLocation::P1Weapon);
         assert_eq!(gs.p1.weapon_idx, Some(CardIdx::new(weapon_idx)));
         assert!(gs.p1.chain_link.iter().all(|l| l.is_none()));
+    }
+
+    #[test]
+    fn test_arsenal_moves_card_and_starts_opponent_turn() {
+        let mut gs = fresh_game();
+        assert_eq!(gs.turn_count, 1);
+
+        // Rhinar passes his action phase and sets Muscle Mutt into his arsenal.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Arsenal);
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Arsenal, card: Some(CardIdx::new(mm_idx))});
+
+        // The card left the hand for the arsenal slot.
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Arsenal);
+        assert_eq!(gs.p1.arsenal_idx, Some(CardIdx::new(mm_idx)));
+
+        // Arsenaling dropped the hand to 3; the end-of-turn draw refills it to
+        // intellect (4), taking one card off the deck.
+        assert_eq!(gs.p1.hand_size, 4);
+        assert_eq!(gs.p1.deck_size, 35);
+
+        // The opponent's turn begins: both the turn and active player flip, play
+        // is back in the Action phase, and the new turn player has their action
+        // point.
+        assert_eq!(gs.turn_player, PlayerIndex::P2);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.p2.action_points, 1);
+        assert_eq!(gs.turn_count, 2);
+    }
+
+    #[test]
+    fn test_arsenal_pass_skips_arsenal_and_starts_opponent_turn() {
+        let mut gs = fresh_game();
+
+        // Rhinar passes his action phase, then passes again to skip arsenaling.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Arsenal);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        // Nothing was arsenaled, and the hand was already at intellect so
+        // nothing was drawn.
+        assert_eq!(gs.p1.arsenal_idx, None);
+        assert_eq!(gs.p1.hand_size, 4);
+        assert_eq!(gs.p1.deck_size, 36);
+
+        // The opponent's turn still begins.
+        assert_eq!(gs.turn_player, PlayerIndex::P2);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.turn_count, 2);
+    }
+
+    #[test]
+    fn test_arsenal_logs_hide_card_from_opponent() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, true);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Arsenal, card: Some(CardIdx::new(mm_idx))});
+
+        // The arsenal is face-down and the end-of-turn draw is hidden: the
+        // omniscient log and the owner's log name the cards, the opponent's log
+        // only sees that a card was arsenaled and one was drawn.
+        let last_two = |log: &Option<Vec<String>>| {
+            let log = log.as_ref().unwrap();
+            log[log.len() - 2..].to_vec()
+        };
+        assert_eq!(last_two(&gs.log)[0], "P1 arsenals MuscleMuttY");
+        assert!(last_two(&gs.log)[1].starts_with("P1 draws ["));
+        assert_eq!(last_two(&gs.p1.log)[0], "P1 arsenals MuscleMuttY");
+        assert!(last_two(&gs.p1.log)[1].starts_with("P1 draws ["));
+        assert_eq!(last_two(&gs.p2.log), vec![
+            "P1 arsenals a card".to_string(),
+            "P1 draws 1 cards".to_string(),
+        ]);
     }
 
     #[test]
