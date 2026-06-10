@@ -62,6 +62,11 @@ class Phase(Enum):
     PITCH_ORDER  = auto()   # end-of-turn: player orders pitch zone cards to deck bottom one at a time
     MENTOR_FLIP  = auto()   # start of turn: player may flip face-down mentor face-up
     END          = auto()
+    # Terminal phases — set once the game is over. The env is `done` in all of
+    # these, so legal_actions() returns []; they record HOW the game ended.
+    PLAYER1_WIN  = auto()   # player 1 (index 0 / agent_0) won — opponent at ≤ 0 life
+    PLAYER2_WIN  = auto()   # player 2 (index 1 / agent_1) won — opponent at ≤ 0 life
+    DRAW         = auto()   # draw — both players dead, or the turn limit was reached
 
 
 # ──────────────────────────────────────────────────────────────
@@ -117,7 +122,11 @@ class FaBEnv:
     """
 
     metadata = {"name": "fab_classic_battles_v0"}
-    MAX_TURNS = 80
+    # Turn count at which an undecided game is called a draw. Once
+    # game.turn_number exceeds this, the game ends in Phase.DRAW.
+    DRAW_TURN_LIMIT = 40
+    # Backwards-compatible alias — older code referred to the turn cap as MAX_TURNS.
+    MAX_TURNS = DRAW_TURN_LIMIT
 
     def __init__(self, verbose: bool = False, log_file: Optional[str] = None,
                  log_callback=None, log_callback_p0=None, log_callback_p1=None):
@@ -296,7 +305,7 @@ class FaBEnv:
         self._dispatch_action(action, active, opponent)
 
         # ── Check game over ──
-        if self._game.is_over() or self._game.turn_number > self.MAX_TURNS:
+        if self._game.is_over() or self._game.turn_number > self.DRAW_TURN_LIMIT:
             self._finalize()
 
         # ── Auto-execute forced (single-legal-action) states ──
@@ -312,7 +321,7 @@ class FaBEnv:
 
             self._dispatch_action(auto_action, auto_active, auto_opponent)
 
-            if self._game.is_over() or self._game.turn_number > self.MAX_TURNS:
+            if self._game.is_over() or self._game.turn_number > self.DRAW_TURN_LIMIT:
                 self._finalize()
 
         obs = self._get_obs()
@@ -1797,33 +1806,49 @@ class FaBEnv:
         }
 
     def _finalize(self):
+        """End the game, choosing the terminal phase based on who is alive.
+
+        Resolves to exactly one of three terminal phases:
+          • Phase.PLAYER1_WIN — player 2 (agent_1) is dead, player 1 survives.
+          • Phase.PLAYER2_WIN — player 1 (agent_0) is dead, player 2 survives.
+          • Phase.DRAW        — both players dead at once, or the turn limit was
+                                reached with neither player dead.
+        """
         self.done = True
-        winner = self._game.winner()
+        winner_idx = self._game.winner_index()
+        turn_limit_reached = self._game.turn_number > self.DRAW_TURN_LIMIT
+
         self._log(f"\n{'★'*60}")
-        if winner:
-            loser = [p for p in self._game.players if p != winner][0]
+        if winner_idx is not None:
+            winner = self._game.players[winner_idx]
+            loser = self._game.players[1 - winner_idx]
+            self._phase = Phase.PLAYER1_WIN if winner_idx == 0 else Phase.PLAYER2_WIN
             self._log(f"  🏆 GAME OVER! {winner.name} WINS! ({winner.life} life remaining)")
             self._log(f"  {loser.name} reduced to {loser.life} life.")
-            winner_idx = self._game.players.index(winner)
             self._rewards[f"agent_{winner_idx}"] = 1.0
-            self._rewards[f"agent_{1-winner_idx}"] = -1.0
+            self._rewards[f"agent_{1 - winner_idx}"] = -1.0
+            # A decisive kill is a terminal state for both agents.
+            self._terminations = {"agent_0": True, "agent_1": True}
+            self._truncations = {"agent_0": False, "agent_1": False}
         else:
-            self._log(f"  ⏱  Draw after {self.MAX_TURNS} turns.")
+            self._phase = Phase.DRAW
             self._rewards = {"agent_0": 0.0, "agent_1": 0.0}
+            if self._game.is_over():
+                # Both players hit 0 life simultaneously — a genuine terminal draw.
+                self._log(f"  🤝 GAME OVER! Draw — both players reduced to 0 life.")
+                self._terminations = {"agent_0": True, "agent_1": True}
+                self._truncations = {"agent_0": False, "agent_1": False}
+            else:
+                # Ran out the clock — a draw by turn limit (truncation, not termination).
+                self._log(f"  ⏱  GAME OVER! Draw after {self.DRAW_TURN_LIMIT} turns.")
+                self._terminations = {"agent_0": False, "agent_1": False}
+                self._truncations = {"agent_0": True, "agent_1": True}
         self._log(f"{'★'*60}")
-
-        self._terminations = {
-            "agent_0": self._game.players[0].is_dead() or not self._game.is_over(),
-            "agent_1": self._game.players[1].is_dead() or not self._game.is_over(),
-        }
-        # Truncation if turn limit hit
-        if self._game.turn_number > self.MAX_TURNS:
-            self._truncations = {"agent_0": True, "agent_1": True}
-            self._terminations = {"agent_0": False, "agent_1": False}
 
     def _finalize_stuck_draw(self):
         """Both players have exhausted all cards and neither can take a meaningful action."""
         self.done = True
+        self._phase = Phase.DRAW
         self._log(f"\n{'★'*60}")
         self._log(f"  🤝 DRAW — both players have no cards remaining and cannot act.")
         self._rewards = {"agent_0": 0.0, "agent_1": 0.0}

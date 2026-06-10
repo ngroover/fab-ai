@@ -88,3 +88,8 @@ Mentor: `mentor_face_up`, `mentor_lesson_counters`.
 ## Phases (fab_env.py:Phase enum)
 
 `ATTACK` → `PITCH` → `DEFEND` → `ARSENAL` → (back to `ATTACK` for next player)
+
+Terminal phases (set by `_finalize`, env is `done`, `legal_actions()` returns `[]`):
+`PLAYER1_WIN` (player 2 / agent_1 at ≤ 0 life), `PLAYER2_WIN` (player 1 / agent_0 at
+≤ 0 life), `DRAW` (both dead at once, or `game.turn_number > FaBEnv.DRAW_TURN_LIMIT`,
+default 40). The turn counter is `GameState.turn_number`.

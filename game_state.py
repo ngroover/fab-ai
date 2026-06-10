@@ -217,7 +217,15 @@ class GameState:
         return any(p.is_dead() for p in self.players)
 
     def winner(self) -> Optional[Player]:
-        for p in self.players:
-            if not p.is_dead():
-                return p
-        return None
+        idx = self.winner_index()
+        return self.players[idx] if idx is not None else None
+
+    def winner_index(self) -> Optional[int]:
+        """Index of the sole surviving player (0 or 1), or None when there is no
+        decisive winner — i.e. both players still alive, or both dead at once.
+
+        A player wins when their opponent is reduced to 0 or less life while they
+        themselves are still alive.
+        """
+        alive = [i for i, p in enumerate(self.players) if not p.is_dead()]
+        return alive[0] if len(alive) == 1 else None
