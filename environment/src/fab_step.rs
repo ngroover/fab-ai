@@ -3,6 +3,11 @@ use crate::game_state::{Gamestate,Phase,Player,PendingCard,PlayerIndex,CardIdx,C
 use crate::cards::{CardData,CardType,Keyword};
 
 pub fn step(gs: &mut Gamestate, act: Action) {
+    // Once the game has been won or drawn it is frozen: no further actions are
+    // processed.
+    if gs.is_game_over() {
+        return;
+    }
     match gs.phase {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::Action => handle_action_phase(gs, act),
@@ -38,8 +43,12 @@ fn handle_choose_first(gs: &mut Gamestate, act: Action) {
 /// It is consumed when an action resolves (or, for an attack, once combat damage
 /// is dealt) unless the card has Go Again.
 fn begin_turn(gs: &mut Gamestate) {
+    // Count this turn. Reaching `MAX_TURNS` with both heroes alive ends the game
+    // in a draw, which `check_game_end` detects from the bumped counter.
+    gs.turn_count += 1;
     let turn_player = if gs.turn_player == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     turn_player.action_points = 1;
+    gs.check_game_end();
 }
 
 fn handle_action_phase(gs: &mut Gamestate, act: Action) {
@@ -154,8 +163,13 @@ fn close_priority_window(gs: &mut Gamestate) {
     }
     else if ( gs.phase == Phase::Reaction ) {
         resolve_combat_damage(gs);
-        gs.phase = Phase::Action;
-        gs.active_player = gs.turn_player
+        // Combat damage may have reduced a hero to 0 and ended the game; if so,
+        // leave the terminal phase in place rather than returning to the Action
+        // phase.
+        if !gs.is_game_over() {
+            gs.phase = Phase::Action;
+            gs.active_player = gs.turn_player
+        }
     }
 }
 
@@ -401,6 +415,9 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
 
     let defender = if defender_id == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     defender.life = defender.life.saturating_sub(damage);
+
+    // A hero reduced to 0 ends the game in the attacker's favour.
+    gs.check_game_end();
 
     // The attack's action point is spent now that damage has been dealt, unless
     // Go Again let the turn player keep acting (see `uses_action_point`).
@@ -1750,5 +1767,218 @@ mod tests {
         draw_cards(&mut gs.p1, &mut gs.cards, 5);
         assert_eq!(gs.p1.deck_size, 0);
         assert_eq!(gs.p1.hand_size, hand_before + deck_before);
+    }
+
+    // ── Win / draw phases ──────────────────────────────────────────────────
+
+    use crate::game_state::MAX_TURNS;
+
+    /// A fresh, reset game just past the first-player choice — both heroes at 20
+    /// life, the turn counter at 1, in the Action phase. A convenient starting
+    /// point for poking the win/draw conditions.
+    fn fresh_game() -> Gamestate {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        gs
+    }
+
+    #[test]
+    fn test_is_terminal_classifies_phases() {
+        assert!(Phase::Player1Win.is_terminal());
+        assert!(Phase::Player2Win.is_terminal());
+        assert!(Phase::Draw.is_terminal());
+        // Every non-terminal phase reports false.
+        for p in [
+            Phase::Start, Phase::ChooseFirst, Phase::Action, Phase::ActionPitch,
+            Phase::ActionInstant, Phase::Defend, Phase::Reaction, Phase::ReactionPitch,
+        ] {
+            assert!(!p.is_terminal(), "{:?} should not be terminal", p);
+        }
+    }
+
+    #[test]
+    fn test_check_game_end_no_op_while_both_alive() {
+        let mut gs = fresh_game();
+        // Both heroes alive and well under the turn limit: nothing changes.
+        assert!(!gs.check_game_end());
+        assert!(!gs.is_game_over());
+        assert_eq!(gs.phase, Phase::Action);
+    }
+
+    #[test]
+    fn test_check_game_end_player1_wins_when_p2_dies() {
+        let mut gs = fresh_game();
+        gs.p2.life = 0;
+
+        assert!(gs.check_game_end());
+        assert!(gs.is_game_over());
+        assert_eq!(gs.phase, Phase::Player1Win);
+    }
+
+    #[test]
+    fn test_check_game_end_player2_wins_when_p1_dies() {
+        let mut gs = fresh_game();
+        gs.p1.life = 0;
+
+        assert!(gs.check_game_end());
+        assert!(gs.is_game_over());
+        assert_eq!(gs.phase, Phase::Player2Win);
+    }
+
+    #[test]
+    fn test_check_game_end_draw_at_turn_limit() {
+        let mut gs = fresh_game();
+        // Reaching the turn cap with both heroes alive is a draw.
+        gs.turn_count = MAX_TURNS;
+
+        assert!(gs.check_game_end());
+        assert!(gs.is_game_over());
+        assert_eq!(gs.phase, Phase::Draw);
+    }
+
+    #[test]
+    fn test_check_game_end_is_idempotent() {
+        let mut gs = fresh_game();
+        gs.p2.life = 0;
+        assert!(gs.check_game_end());
+        assert_eq!(gs.phase, Phase::Player1Win);
+
+        // A win already recorded is never overwritten — even if the turn counter
+        // later crosses the draw threshold, the original result stands.
+        gs.turn_count = MAX_TURNS;
+        assert!(gs.check_game_end());
+        assert_eq!(gs.phase, Phase::Player1Win);
+    }
+
+    #[test]
+    fn test_death_takes_priority_over_draw() {
+        let mut gs = fresh_game();
+        // Both the turn cap and a dead hero in the same call: a decided game beats
+        // a draw, so player 1 is declared the winner.
+        gs.turn_count = MAX_TURNS;
+        gs.p2.life = 0;
+
+        assert!(gs.check_game_end());
+        assert_eq!(gs.phase, Phase::Player1Win);
+    }
+
+    #[test]
+    fn test_begin_turn_increments_turn_count() {
+        let mut gs = fresh_game();
+        // The first-player choice ran one `begin_turn`, so the counter is at 1.
+        assert_eq!(gs.turn_count, 1);
+
+        begin_turn(&mut gs);
+        assert_eq!(gs.turn_count, 2);
+        assert!(!gs.is_game_over());
+    }
+
+    #[test]
+    fn test_begin_turn_draws_at_turn_limit() {
+        let mut gs = fresh_game();
+        // One more turn would tip the counter to the cap; beginning it ends the
+        // game in a draw.
+        gs.turn_count = MAX_TURNS - 1;
+        begin_turn(&mut gs);
+
+        assert_eq!(gs.turn_count, MAX_TURNS);
+        assert_eq!(gs.phase, Phase::Draw);
+        assert!(gs.is_game_over());
+    }
+
+    #[test]
+    fn test_step_is_frozen_once_game_is_over() {
+        let mut gs = fresh_game();
+        gs.p2.life = 0;
+        gs.check_game_end();
+        assert_eq!(gs.phase, Phase::Player1Win);
+
+        // Any further action is a no-op: the phase, the turn counter, and life
+        // totals are all untouched.
+        let turns_before = gs.turn_count;
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        assert_eq!(gs.phase, Phase::Player1Win);
+        assert_eq!(gs.turn_count, turns_before);
+        assert_eq!(gs.p1.life, 20);
+        assert_eq!(gs.p2.life, 0);
+    }
+
+    #[test]
+    fn test_terminal_phase_has_no_legal_actions() {
+        let mut gs = fresh_game();
+        for terminal in [Phase::Player1Win, Phase::Player2Win, Phase::Draw] {
+            gs.phase = terminal;
+            assert!(legal_actions(&gs).is_empty(), "{:?} should offer no actions", terminal);
+        }
+    }
+
+    #[test]
+    fn test_lethal_combat_ends_game_with_player1_win() {
+        // Drive Rhinar's Muscle Mutt (power 6) attack against a Dorinthea whose
+        // life has been whittled down to 6. With no block, the 6 damage is
+        // exactly lethal: combat resolution should end the game as a player-1 win
+        // rather than returning to the Action phase.
+        let mut gs = step_to_dorinthea_defending();
+        gs.p2.life = 6;
+
+        // Defender declares no blocks → Reaction window.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Reaction);
+
+        // Both pass → combat resolves → 6 damage drops Dorinthea to 0.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.p2.life, 0);
+        assert_eq!(gs.phase, Phase::Player1Win);
+        assert!(gs.is_game_over());
+    }
+
+    #[test]
+    fn test_blocked_lethal_attack_does_not_end_game() {
+        // The same low-life Dorinthea (6 life) blocks Muscle Mutt with Driving
+        // Blade (defense 3): only 3 damage gets through, leaving her at 3 life, so
+        // the game continues into the Action phase as usual.
+        let mut gs = step_to_dorinthea_defending();
+        gs.p2.life = 6;
+
+        let db_idx = gs.p2.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
+                .map(|(idx, _)| idx)
+                .expect("Driving Blade should be in Dorinthea's opening hand");
+        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.p2.life, 3);
+        assert_eq!(gs.phase, Phase::Action);
+        assert!(!gs.is_game_over());
+    }
+
+    #[test]
+    fn test_overkill_damage_still_ends_game() {
+        // A hero on 2 life facing 6 unblocked power: life saturates at 0 (no
+        // underflow) and the game still ends as a player-1 win.
+        let mut gs = step_to_dorinthea_defending();
+        gs.p2.life = 2;
+
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.p2.life, 0);
+        assert_eq!(gs.phase, Phase::Player1Win);
+    }
+
+    #[test]
+    fn test_reset_clears_turn_count() {
+        let mut gs = fresh_game();
+        gs.turn_count = 17;
+        reset(&mut gs);
+        assert_eq!(gs.turn_count, 0);
     }
 }

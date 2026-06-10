@@ -57,6 +57,7 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: 
         turn_player: PlayerIndex::P1,
         passes: 0,
         phase: Phase::Start,
+        turn_count: 0,
         rng,
         stack: [None; STACK_SIZE],
         pending_card: None,
@@ -148,6 +149,7 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
 pub fn reset(gs: &mut Gamestate) {
     gs.phase = Phase::ChooseFirst;
     gs.stack = [None; STACK_SIZE];
+    gs.turn_count = 0;
 
     place_cards(gs);
     shuffle_decks(gs);

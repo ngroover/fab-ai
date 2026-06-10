@@ -159,7 +159,27 @@ pub enum Phase {
     Defend,
     Reaction,
     ReactionPitch,
+    /// Terminal phase: player 1 has won (player 2's hero was reduced to 0 life).
+    Player1Win,
+    /// Terminal phase: player 2 has won (player 1's hero was reduced to 0 life).
+    Player2Win,
+    /// Terminal phase: the game ended in a draw (the turn limit was reached with
+    /// both heroes still alive).
+    Draw,
 }
+
+impl Phase {
+    /// True for the three terminal phases (`Player1Win`, `Player2Win`, `Draw`).
+    /// Once the game reaches one of these no further actions are processed.
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Phase::Player1Win | Phase::Player2Win | Phase::Draw)
+    }
+}
+
+/// The maximum number of turns a game may run before it is declared a draw. A
+/// game that reaches this many turns without either hero being reduced to 0 life
+/// ends in `Phase::Draw`.
+pub const MAX_TURNS: u16 = 40;
 
 /// Per-player state. The cards themselves live in `Gamestate::cards`; a player
 /// only holds the (global) head/tail indices into that shared array for each of
@@ -222,6 +242,10 @@ pub struct Gamestate {
     /// the pending resolution has been interrupted by a new layer.
     pub passes : u8,
     pub phase : Phase,
+    /// How many turns have begun so far this game. Incremented at the start of
+    /// every turn (see `begin_turn`); once it reaches `MAX_TURNS` the game ends
+    /// in a draw (see `check_game_end`).
+    pub turn_count : u16,
     pub rng : SmallRng,
     /// The stack: cards currently waiting to resolve, each paired with the
     /// `ActionType` that committed it (so we know how to resolve it). Slot 0 is
@@ -239,6 +263,40 @@ pub struct Gamestate {
 }
 
 impl Gamestate {
+    /// True once the game has reached a terminal phase (a win for either player
+    /// or a draw). When this holds, `step` is a no-op and there are no legal
+    /// actions.
+    pub fn is_game_over(&self) -> bool {
+        self.phase.is_terminal()
+    }
+
+    /// Evaluate the win/draw conditions and, if any is met, move the game into
+    /// the matching terminal phase. A hero reduced to 0 life loses, handing the
+    /// win to the opponent (`life` is unsigned and damage saturates at 0, so
+    /// `life == 0` captures "0 or less"); reaching `MAX_TURNS` with both heroes
+    /// still alive is a draw. Returns `true` when the game has ended.
+    ///
+    /// Idempotent: once a terminal phase is set it is left untouched, so callers
+    /// may invoke this freely after any life change or at the start of a turn.
+    pub fn check_game_end(&mut self) -> bool {
+        if self.is_game_over() {
+            return true;
+        }
+        if self.p1.life == 0 {
+            self.phase = Phase::Player2Win;
+            return true;
+        }
+        if self.p2.life == 0 {
+            self.phase = Phase::Player1Win;
+            return true;
+        }
+        if self.turn_count >= MAX_TURNS {
+            self.phase = Phase::Draw;
+            return true;
+        }
+        false
+    }
+
     /// Slot index of the topmost (next-to-resolve) card on the stack, or `None`
     /// when the stack is empty. The stack fills from slot 0 upward, so this is
     /// the highest occupied slot.
