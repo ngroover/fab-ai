@@ -159,6 +159,8 @@ pub fn reset(gs: &mut Gamestate, logging: bool) {
     gs.phase = Phase::ChooseFirst;
     gs.stack = [None; STACK_SIZE];
     gs.turn_count = 0;
+    gs.pending_card = None;
+    gs.passes = 0;
 
     let new_log = || if logging { Some(Vec::new()) } else { None };
     gs.log = new_log();
@@ -228,6 +230,15 @@ fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
     player.arms_idx = None;
     player.legs_idx = None;
     player.chain_link = [None; 5];
+    // Clear the zone heads and turn resources left over from a played-out
+    // game; every non-equipment card returns to the deck below (the deck's
+    // own head/tail are rebuilt by `shuffle_decks`).
+    player.hand_idx = None;
+    player.pitch_idx = None;
+    player.arsenal_idx = None;
+    player.banish_idx = None;
+    player.resources = 0;
+    player.action_points = 0;
     // Walk only this player's half of the shared array, recording each card's
     // global slot position alongside mutating its CardState.
     for idx in base..base + PLAYER_CARDS {
@@ -259,6 +270,33 @@ fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
                 // everything else
             }
         }
+    }
+}
+
+/// The generic `simulator::Game` view of the FaB gamestate, bridging the
+/// engine's free functions (`reset`, `legal_actions`, `step`) so the simulator
+/// can drive a game without knowing anything FaB-specific.
+impl crate::simulator::Game for Gamestate {
+    type Action = Action;
+
+    fn reset(&mut self, logging: bool) {
+        reset(self, logging);
+    }
+
+    fn legal_actions(&self) -> Vec<Action> {
+        crate::legal_actions::legal_actions(self)
+    }
+
+    fn step(&mut self, action: Action) {
+        crate::fab_step::step(self, action);
+    }
+
+    fn is_over(&self) -> bool {
+        self.is_game_over()
+    }
+
+    fn player_to_act(&self) -> usize {
+        self.active_player.index()
     }
 }
 

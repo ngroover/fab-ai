@@ -36,13 +36,22 @@ fn legal_defend_phase(gs: &Gamestate) -> Vec<Action> {
 
     // Every card in hand can be committed as a blocker except those flagged
     // no_block (e.g. cards with no defense that cannot block normally).
-    player.hand_iter(&gs.cards)
+    let mut actions: Vec<Action> = player.hand_iter(&gs.cards)
         .filter(|(_, cs)| !cs.card.data().no_block)
         .map(|(idx, _)| Action {
             typ: ActionType::Defend,
             card: Some(CardIdx::new(idx)),
         })
-        .collect()
+        .collect();
+
+    // Blocking is optional (and the only choice once the hand is empty):
+    // passing finishes declaring blockers and advances to the reaction window.
+    actions.push(Action {
+        typ: ActionType::Pass,
+        card: None,
+    });
+
+    actions
 }
 
 fn legal_arsenal_phase(gs: &Gamestate) -> Vec<Action> {
@@ -428,11 +437,13 @@ mod tests {
         // Dorinthea's seed-42 opening hand is Driving Blade plus three red
         // warrior cards — none are no_block, so every card in hand is offered as
         // a Defend action sourced from her hand.
-        for a in &actions {
-            assert_eq!(a.typ, ActionType::Defend);
+        let defends: Vec<&Action> = actions.iter()
+                .filter(|a| a.typ == ActionType::Defend)
+                .collect();
+        for a in &defends {
             assert_eq!(gs.cards[a.card_index()].location, CardLocation::P2Hand);
         }
-        let blockable: HashSet<Card> = actions.iter()
+        let blockable: HashSet<Card> = defends.iter()
                 .map(|a| gs.cards[a.card_index()].card)
                 .collect();
         assert_eq!(blockable, HashSet::from([
@@ -441,6 +452,11 @@ mod tests {
             Card::SecondSwingR,
             Card::InTheSwingR,
         ]));
+
+        // Blocking is optional: passing is offered too, exactly once.
+        let passes = actions.iter().filter(|a| a.typ == ActionType::Pass).count();
+        assert_eq!(passes, 1);
+        assert_eq!(actions.len(), defends.len() + 1);
     }
 
     #[test]
@@ -460,6 +476,7 @@ mod tests {
 
         assert!(actions.iter().all(|a| a.card != Some(CardIdx::new(db_idx))));
         let blockable: HashSet<Card> = actions.iter()
+                .filter(|a| a.typ == ActionType::Defend)
                 .map(|a| gs.cards[a.card_index()].card)
                 .collect();
         assert_eq!(blockable, HashSet::from([
