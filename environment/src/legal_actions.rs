@@ -83,7 +83,8 @@ fn legal_arsenal_phase(gs: &Gamestate) -> Vec<Action> {
 }
 
 fn legal_pitch_order_phase(gs: &Gamestate) -> Vec<Action> {
-    // The turn player (the active player here) picks, card by card, the order
+    // The active player — the owner of the pitch zone being cleared, the turn
+    // player first and then the opponent — picks, card by card, the order
     // their pitched cards go to the bottom of their deck. Every card still in
     // the pitch zone is a choice; there is no pass — the phase only ends once
     // the zone is empty (see `handle_pitch_order_phase`).

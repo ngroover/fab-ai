@@ -162,11 +162,13 @@ pub enum Phase {
     /// The end of the turn player's action phase: they have passed, the combat
     /// chain has closed, and they may now move a card into their arsenal.
     Arsenal,
-    /// After the Arsenal phase, when two or more cards sit in the turn player's
-    /// pitch zone: they choose, one `BottomPitch` action at a time, the order
-    /// the pitched cards go to the bottom of their deck. The turn ends once the
-    /// pitch zone is empty. (A single pitched card has only one possible order,
-    /// so it is bottomed automatically without entering this phase.)
+    /// After the Arsenal phase, when two or more cards sit in a player's pitch
+    /// zone: the zone's owner (the active player — the turn player first, then
+    /// the opponent) chooses, one `BottomPitch` action at a time, the order
+    /// their pitched cards go to the bottom of their deck. The turn ends once
+    /// both players' pitch zones are empty. (A single pitched card has only one
+    /// possible order, so it is bottomed automatically without entering this
+    /// phase.)
     PitchOrder,
     /// Terminal phase: player 1 has won (player 2's hero was reduced to 0 life).
     Player1Win,
