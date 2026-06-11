@@ -293,6 +293,8 @@ fn handle_arsenal_phase(gs: &mut Gamestate, act: Action) {
 
 /// End the turn player's turn: they draw back up to intellect, then the turn
 /// and active player both flip to the opponent, whose Action phase begins.
+/// Unspent resource points are lost at the end of the turn — both players',
+/// since the defender can bank leftovers from reaction-window pitches too.
 fn end_turn(gs: &mut Gamestate) {
     let pid = gs.turn_player;
     let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
@@ -300,6 +302,9 @@ fn end_turn(gs: &mut Gamestate) {
     draw_to_intellect(player, &mut gs.cards);
     let drawn = player.hand_size - hand_before;
     log_end_of_turn_draw(gs, pid, drawn);
+
+    gs.p1.resources = 0;
+    gs.p2.resources = 0;
 
     gs.turn_player = gs.turn_player.opponent();
     gs.active_player = gs.turn_player;
@@ -1070,6 +1075,29 @@ mod tests {
         assert_eq!(gs.cards[weapon_idx].location, CardLocation::Stack);
         assert_eq!(gs.p1.weapon_idx, None);
         assert_eq!(gs.p1.resources, 1);
+    }
+
+    #[test]
+    fn test_end_turn_clears_unspent_resources() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        // Bank leftover resource points on both players mid-turn (as if each
+        // had over-pitched paying for something), then let Rhinar pass his
+        // Action and Arsenal phases to end the turn.
+        gs.p1.resources = 2;
+        gs.p2.resources = 1;
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Arsenal);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        // The turn has flipped to Dorinthea and both pools are empty: unspent
+        // resource points are lost at the end of the turn, not carried over.
+        assert_eq!(gs.turn_player, PlayerIndex::P2);
+        assert_eq!(gs.p1.resources, 0);
+        assert_eq!(gs.p2.resources, 0);
     }
 
     #[test]
