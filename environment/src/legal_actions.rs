@@ -117,11 +117,17 @@ fn legal_instant_phase(gs: &Gamestate) -> Vec<Action> {
 
 fn legal_reaction_phase(gs: &Gamestate) -> Vec<Action> {
     // The reaction phase (the combat reaction step) shares the same machinery
-    // and offers cards playable at reaction speed: instants plus attack and
-    // defense reactions (see `is_reaction_phase_playable`). Activated abilities
-    // of those same speeds — e.g. an instant-speed equipment ability — are
-    // offered too, gated by the same predicate inside `get_equipment_activations`.
-    legal_play_phase(gs, is_reaction_phase_playable)
+    // and offers cards playable at reaction speed, which depends on the side:
+    // the attacker (the turn player — only the turn player attacks) may play
+    // instants and attack reactions, the defender instants and defense
+    // reactions. Activated abilities of those same speeds — e.g. an
+    // instant-speed equipment ability — are offered too, gated by the same
+    // predicate inside `get_equipment_activations`.
+    if gs.active_player == gs.turn_player {
+        legal_play_phase(gs, is_attacker_reaction_playable)
+    } else {
+        legal_play_phase(gs, is_defender_reaction_playable)
+    }
 }
 
 /// Shared body for the action and instant phases. They differ only in which
@@ -264,11 +270,18 @@ fn is_instant_phase_playable(typ: CardType) -> bool {
     matches!(typ, CardType::Instant)
 }
 
-fn is_reaction_phase_playable(typ: CardType) -> bool {
+fn is_attacker_reaction_playable(typ: CardType) -> bool {
     matches!(
         typ,
         CardType::Instant |
-        CardType::AttackReaction |
+        CardType::AttackReaction
+    )
+}
+
+fn is_defender_reaction_playable(typ: CardType) -> bool {
+    matches!(
+        typ,
+        CardType::Instant |
         CardType::DefenseReaction
     )
 }
@@ -559,14 +572,25 @@ mod tests {
     }
 
     #[test]
-    fn is_reaction_phase_playable_allows_instants_and_reactions() {
-        assert!(is_reaction_phase_playable(CardType::Instant));
-        assert!(is_reaction_phase_playable(CardType::AttackReaction));
-        assert!(is_reaction_phase_playable(CardType::DefenseReaction));
-        assert!(!is_reaction_phase_playable(CardType::AttackAction));
-        assert!(!is_reaction_phase_playable(CardType::Action));
-        assert!(!is_reaction_phase_playable(CardType::Equipment));
-        assert!(!is_reaction_phase_playable(CardType::Weapon));
+    fn is_attacker_reaction_playable_allows_instants_and_attack_reactions() {
+        assert!(is_attacker_reaction_playable(CardType::Instant));
+        assert!(is_attacker_reaction_playable(CardType::AttackReaction));
+        assert!(!is_attacker_reaction_playable(CardType::DefenseReaction));
+        assert!(!is_attacker_reaction_playable(CardType::AttackAction));
+        assert!(!is_attacker_reaction_playable(CardType::Action));
+        assert!(!is_attacker_reaction_playable(CardType::Equipment));
+        assert!(!is_attacker_reaction_playable(CardType::Weapon));
+    }
+
+    #[test]
+    fn is_defender_reaction_playable_allows_instants_and_defense_reactions() {
+        assert!(is_defender_reaction_playable(CardType::Instant));
+        assert!(is_defender_reaction_playable(CardType::DefenseReaction));
+        assert!(!is_defender_reaction_playable(CardType::AttackReaction));
+        assert!(!is_defender_reaction_playable(CardType::AttackAction));
+        assert!(!is_defender_reaction_playable(CardType::Action));
+        assert!(!is_defender_reaction_playable(CardType::Equipment));
+        assert!(!is_defender_reaction_playable(CardType::Weapon));
     }
 
     #[test]
@@ -580,13 +604,14 @@ mod tests {
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, PlayerIndex::P1);
 
-        // After committing the attack Rhinar holds two cards. Relabel them to a
-        // reaction-speed card (Dodge, a DefenseReaction, cost 0) and a non-
-        // reaction (Pack Call, an AttackAction) so we can see the predicate
-        // filter at work: only the reaction is offered as a PlayCard.
+        // After committing the attack Rhinar holds two cards. Rhinar is the
+        // attacker here, so relabel them to an attack reaction (In the Swing)
+        // and a non-reaction (Pack Call, an AttackAction) so we can see the
+        // predicate filter at work: only the attack reaction is offered as a
+        // PlayCard.
         let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
         assert_eq!(hand.len(), 2, "expected Rhinar to hold two cards in reaction");
-        gs.cards[hand[0]].card = Card::DodgeB;
+        gs.cards[hand[0]].card = Card::InTheSwingR;
         gs.cards[hand[1]].card = Card::PackCallY;
 
         let actions = legal_actions(&gs);
@@ -595,8 +620,15 @@ mod tests {
                 .filter(|a| a.typ == ActionType::PlayCard)
                 .map(|a| gs.cards[a.card_index()].card)
                 .collect();
-        assert!(playable.contains(&Card::DodgeB));
+        assert!(playable.contains(&Card::InTheSwingR));
         assert!(!playable.contains(&Card::PackCallY));
+
+        // A defense reaction (Dodge) is not the attacker's to play: relabeled
+        // to one, the card drops out of the offered plays.
+        gs.cards[hand[0]].card = Card::DodgeB;
+        let actions = legal_actions(&gs);
+        assert!(actions.iter().all(|a| a.typ != ActionType::PlayCard
+                || gs.cards[a.card_index()].card != Card::DodgeB));
 
         // Relabel the reaction to an Instant (Sigil of Solace) — still a reaction-
         // speed card, so it stays offered.
@@ -611,6 +643,37 @@ mod tests {
         // Pass is still offered exactly once.
         let passes = actions.iter().filter(|a| a.typ == ActionType::Pass).count();
         assert_eq!(passes, 1);
+    }
+
+    #[test]
+    fn legal_actions_in_reaction_phase_defender_plays_defense_not_attack_reactions() {
+        let mut gs = step_to_dorinthea_defending();
+
+        // Defend pass → post-defend Instant window → Reaction phase with the
+        // attacker (Rhinar, p1) holding priority; his pass hands priority to
+        // the defender (Dorinthea, p2).
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Reaction);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Reaction);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+
+        // Relabel two of Dorinthea's hand cards to a defense reaction (Dodge)
+        // and an attack reaction (Thrust): as the defender she is offered the
+        // defense reaction but not the attack reaction.
+        let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+        assert!(hand.len() >= 2, "expected Dorinthea to hold cards in reaction");
+        gs.cards[hand[0]].card = Card::DodgeB;
+        gs.cards[hand[1]].card = Card::ThrustR;
+
+        let actions = legal_actions(&gs);
+
+        let playable: HashSet<Card> = actions.iter()
+                .filter(|a| a.typ == ActionType::PlayCard)
+                .map(|a| gs.cards[a.card_index()].card)
+                .collect();
+        assert!(playable.contains(&Card::DodgeB));
+        assert!(!playable.contains(&Card::ThrustR));
     }
 
     #[test]
