@@ -8,6 +8,9 @@ pub enum ActionType {
     PlayCard,
     Activate,
     Pitch,
+    /// Place a card from the pitch zone on the bottom of its owner's deck,
+    /// during the PitchOrder phase at the end of the turn.
+    BottomPitch,
     Defend,
     Arsenal,
     Pass
@@ -27,8 +30,8 @@ pub struct Action {
 impl Action {
     /// The `cards` slot this action refers to, as a `usize` for indexing.
     /// Panics if the action carries no card, so only call it for
-    /// card-referencing actions (`PlayCard`, `Activate`, `Pitch`, `Defend`,
-    /// `Arsenal`).
+    /// card-referencing actions (`PlayCard`, `Activate`, `Pitch`,
+    /// `BottomPitch`, `Defend`, `Arsenal`).
     pub fn card_index(&self) -> usize {
         self.card.expect("action carries no card").get()
     }

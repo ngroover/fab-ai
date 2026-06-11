@@ -16,6 +16,7 @@ pub fn step(gs: &mut Gamestate, act: Action) {
         Phase::Defend => handle_defend_phase(gs, act),
         Phase::Reaction => handle_reaction_phase(gs, act),
         Phase::Arsenal => handle_arsenal_phase(gs, act),
+        Phase::PitchOrder => handle_pitch_order_phase(gs, act),
         _ => {}
     }
 }
@@ -252,8 +253,9 @@ fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
 /// Handle an action during the Arsenal phase. The turn player (the active
 /// player here) may set one card from their hand into their empty arsenal slot
 /// (`Arsenal`), or pass to keep their whole hand. Either way the turn then
-/// ends: they draw back up to intellect and the opponent's turn begins (see
-/// `end_turn`).
+/// winds down: their pitched cards return to the bottom of their deck (see
+/// `start_pitch_order`) and the turn ends — they draw back up to intellect and
+/// the opponent's turn begins (see `end_turn`).
 fn handle_arsenal_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
         ActionType::Arsenal => {
@@ -279,16 +281,88 @@ fn handle_arsenal_phase(gs: &mut Gamestate, act: Action) {
             gs.cards[card_idx].location = CardLocation::arsenal(pid);
             player.arsenal_idx = Some(CardIdx::new(card_idx));
 
-            end_turn(gs);
+            start_pitch_order(gs);
         }
         ActionType::Pass => {
             if gs.logging_enabled() {
                 gs.log_public(format!("{} passes", player_name(gs.active_player)));
             }
-            end_turn(gs);
+            start_pitch_order(gs);
         }
         _ => {}
     }
+}
+
+/// Wind down the turn after the Arsenal phase. The turn player's pitched cards
+/// must return to the bottom of their deck before the turn ends: an empty pitch
+/// zone ends the turn immediately, a single pitched card is bottomed
+/// automatically (there is only one possible order), and two or more cards
+/// enter the PitchOrder phase so the turn player picks the order, one
+/// `BottomPitch` action at a time (see `handle_pitch_order_phase`).
+fn start_pitch_order(gs: &mut Gamestate) {
+    let player = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let pitch_count = player.pitch_iter(&gs.cards).count();
+    let pitch_head = player.pitch_idx;
+    match pitch_count {
+        0 => end_turn(gs),
+        1 => {
+            bottom_pitched_card(gs, pitch_head.expect("pitch zone holds a card").get());
+            end_turn(gs);
+        }
+        _ => {
+            // The active player is already the turn player coming out of the
+            // Arsenal phase, so only the phase changes.
+            gs.phase = Phase::PitchOrder;
+        }
+    }
+}
+
+/// Handle an action during the PitchOrder phase. The turn player picks pitched
+/// cards one at a time; each chosen card is placed on the bottom of their deck.
+/// Once the pitch zone is empty the turn ends normally (see `end_turn`).
+fn handle_pitch_order_phase(gs: &mut Gamestate, act: Action) {
+    if act.typ != ActionType::BottomPitch {
+        return;
+    }
+    bottom_pitched_card(gs, act.card_index());
+
+    let player = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    if player.pitch_idx.is_none() {
+        end_turn(gs);
+    }
+}
+
+/// Move the card at global index `idx` out of its owner's pitch zone onto the
+/// bottom of their deck. Pitched cards sit face-up, so the move is public.
+fn bottom_pitched_card(gs: &mut Gamestate, idx: usize) {
+    let pid = if idx < PLAYER_CARDS { PlayerIndex::P1 } else { PlayerIndex::P2 };
+    if gs.logging_enabled() {
+        gs.log_public(format!(
+            "{} puts {:?} on the bottom of their deck",
+            player_name(pid), gs.cards[idx].card
+        ));
+    }
+    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    detach_from_current_zone(player, &mut gs.cards, idx);
+    gs.cards[idx].location = CardLocation::deck(pid);
+    attach_to_bottom_of_deck(player, &mut gs.cards, idx);
+}
+
+/// Append the card at global index `idx` to the bottom of `player`'s deck. The
+/// card becomes the new tail terminator (its `next_card` points at itself); an
+/// empty deck makes it the top as well. Counterpart of `attach_to_front_of_zone`
+/// for the one zone that grows from its tail. The caller is responsible for
+/// setting the card's `location`.
+fn attach_to_bottom_of_deck(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], idx: usize) {
+    if let Some(old_bottom) = player.bottom_deck_idx {
+        cards[old_bottom.get()].next_card = CardIdx::new(idx);
+        cards[idx].prev_card = old_bottom;
+    } else {
+        player.top_deck_idx = Some(CardIdx::new(idx));
+    }
+    cards[idx].next_card = CardIdx::new(idx);
+    player.bottom_deck_idx = Some(CardIdx::new(idx));
+    player.deck_size += 1;
 }
 
 /// End the turn player's turn: they draw back up to intellect, then the turn
@@ -2128,6 +2202,160 @@ mod tests {
         assert_eq!(gs.turn_count, 2);
     }
 
+    // ── PitchOrder phase ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_single_pitched_card_bottoms_automatically_at_end_of_turn() {
+        // Rhinar's Muscle Mutt attack pitched a single card (Clearing Bellow).
+        // Run the turn out: with exactly one card in the pitch zone there is no
+        // order to choose, so it goes to the bottom of the deck automatically
+        // and the turn ends without entering the PitchOrder phase.
+        let mut gs = step_to_dorinthea_defending();
+        let cb_idx = gs.p1.pitch_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should sit in the pitch zone");
+        assert_eq!(gs.p1.deck_size, 36);
+
+        // Defender declares no blocks → Reaction window → combat resolves →
+        // Action phase; the turn player passes through Arsenal to end the turn.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Action);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Arsenal);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        // The turn ended normally — no PitchOrder phase for a single card.
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.turn_player, PlayerIndex::P2);
+
+        // Clearing Bellow left the pitch zone for the bottom of the deck. The
+        // deck went 36 → 37, then the end-of-turn draw (hand 2 → 4) left 35.
+        assert_eq!(gs.p1.pitch_idx, None);
+        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Deck);
+        assert_eq!(gs.p1.bottom_deck_idx, Some(CardIdx::new(cb_idx)));
+        assert_eq!(gs.p1.deck_size, 35);
+        assert_eq!(gs.p1.hand_size, 4);
+    }
+
+    /// Drive Rhinar through a Muscle Mutt attack paid for with *two* pitched
+    /// cards (Pack Call and Raging Onslaught, pitch 2 each, against the cost of
+    /// 3), then run the turn out to the Arsenal pass. Ends with the game in the
+    /// PitchOrder phase and returns the gamestate plus the two pitched slots.
+    fn step_to_pitch_order() -> (Gamestate, usize, usize) {
+        let mut gs = fresh_game();
+
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let pc_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::PackCallY)
+                .map(|(idx, _)| idx)
+                .expect("Pack Call should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pc_idx))});
+        let ro_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::RagingOnslaughtY)
+                .map(|(idx, _)| idx)
+                .expect("Raging Onslaught should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(ro_idx))});
+        assert_eq!(gs.phase, Phase::ActionInstant);
+
+        // Resolve the attack onto the chain, decline blocks, run out the
+        // reaction window, and pass the Action and Arsenal phases.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Defend);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Action);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Arsenal);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        // Two cards sit in the pitch zone, so instead of ending the turn we
+        // enter the PitchOrder phase with the turn player still active.
+        assert_eq!(gs.phase, Phase::PitchOrder);
+        assert_eq!(gs.turn_player, PlayerIndex::P1);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+
+        (gs, pc_idx, ro_idx)
+    }
+
+    #[test]
+    fn test_two_pitched_cards_enter_pitch_order_phase() {
+        let (gs, pc_idx, ro_idx) = step_to_pitch_order();
+
+        // Both pitched cards are still in the pitch zone, and each is offered
+        // as a BottomPitch action — nothing else, no pass.
+        assert_eq!(gs.cards[pc_idx].location, CardLocation::P1Pitch);
+        assert_eq!(gs.cards[ro_idx].location, CardLocation::P1Pitch);
+        let actions = legal_actions(&gs);
+        assert_eq!(actions.len(), 2);
+        assert!(actions.iter().all(|a| a.typ == ActionType::BottomPitch));
+        let offered: Vec<usize> = actions.iter().map(|a| a.card_index()).collect();
+        assert!(offered.contains(&pc_idx));
+        assert!(offered.contains(&ro_idx));
+    }
+
+    #[test]
+    fn test_bottom_pitch_orders_cards_and_ends_turn() {
+        let (mut gs, pc_idx, ro_idx) = step_to_pitch_order();
+        assert_eq!(gs.p1.deck_size, 36);
+
+        // Bottom Pack Call first: it leaves the pitch zone for the bottom of
+        // the deck, and with Raging Onslaught still pitched the phase stays on
+        // PitchOrder with the turn not yet over.
+        step(&mut gs, Action{ typ: ActionType::BottomPitch, card: Some(CardIdx::new(pc_idx))});
+        assert_eq!(gs.phase, Phase::PitchOrder);
+        assert_eq!(gs.turn_player, PlayerIndex::P1);
+        assert_eq!(gs.cards[pc_idx].location, CardLocation::P1Deck);
+        assert_eq!(gs.p1.bottom_deck_idx, Some(CardIdx::new(pc_idx)));
+        assert_eq!(gs.p1.deck_size, 37);
+
+        // Only the remaining pitched card is offered now.
+        let actions = legal_actions(&gs);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].typ, ActionType::BottomPitch);
+        assert_eq!(actions[0].card_index(), ro_idx);
+
+        // Bottom Raging Onslaught: the pitch zone empties and the turn ends
+        // normally — Raging Onslaught is the new bottom card, sitting below
+        // Pack Call, and the opponent's turn begins.
+        step(&mut gs, Action{ typ: ActionType::BottomPitch, card: Some(CardIdx::new(ro_idx))});
+        assert_eq!(gs.p1.pitch_idx, None);
+        assert_eq!(gs.cards[ro_idx].location, CardLocation::P1Deck);
+        assert_eq!(gs.p1.bottom_deck_idx, Some(CardIdx::new(ro_idx)));
+        assert_eq!(gs.cards[pc_idx].next_card, CardIdx::new(ro_idx));
+
+        // End-of-turn bookkeeping ran as usual: the hand (1 card after playing
+        // and pitching three) drew back to intellect, 38 - 3 = 35 cards remain
+        // in the deck, and the turn flipped to Dorinthea.
+        assert_eq!(gs.p1.hand_size, 4);
+        assert_eq!(gs.p1.deck_size, 35);
+        assert_eq!(gs.turn_player, PlayerIndex::P2);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.turn_count, 2);
+    }
+
+    #[test]
+    fn test_pitch_order_ignores_non_bottom_pitch_actions() {
+        let (mut gs, pc_idx, ro_idx) = step_to_pitch_order();
+
+        // A stray Pass (or any other action type) is a no-op in the PitchOrder
+        // phase: the phase, the pitch zone, and the turn are all untouched.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::PitchOrder);
+        assert_eq!(gs.cards[pc_idx].location, CardLocation::P1Pitch);
+        assert_eq!(gs.cards[ro_idx].location, CardLocation::P1Pitch);
+        assert_eq!(gs.turn_player, PlayerIndex::P1);
+    }
+
     #[test]
     fn test_arsenal_logs_hide_card_from_opponent() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
@@ -2280,7 +2508,7 @@ mod tests {
         for p in [
             Phase::Start, Phase::ChooseFirst, Phase::Action, Phase::ActionPitch,
             Phase::ActionInstant, Phase::Defend, Phase::Reaction, Phase::ReactionPitch,
-            Phase::Arsenal,
+            Phase::Arsenal, Phase::PitchOrder,
         ] {
             assert!(!p.is_terminal(), "{:?} should not be terminal", p);
         }

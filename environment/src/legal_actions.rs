@@ -22,6 +22,7 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
         Phase::Defend => legal_defend_phase(gs),
         Phase::Reaction => legal_reaction_phase(gs),
         Phase::Arsenal => legal_arsenal_phase(gs),
+        Phase::PitchOrder => legal_pitch_order_phase(gs),
         Phase::Start => Vec::new(),
         // Terminal phases: the game is over, so there are no legal actions.
         Phase::Player1Win | Phase::Player2Win | Phase::Draw => Vec::new(),
@@ -79,6 +80,21 @@ fn legal_arsenal_phase(gs: &Gamestate) -> Vec<Action> {
     });
 
     actions
+}
+
+fn legal_pitch_order_phase(gs: &Gamestate) -> Vec<Action> {
+    // The turn player (the active player here) picks, card by card, the order
+    // their pitched cards go to the bottom of their deck. Every card still in
+    // the pitch zone is a choice; there is no pass — the phase only ends once
+    // the zone is empty (see `handle_pitch_order_phase`).
+    let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+
+    player.pitch_iter(&gs.cards)
+        .map(|(idx, _)| Action {
+            typ: ActionType::BottomPitch,
+            card: Some(CardIdx::new(idx)),
+        })
+        .collect()
 }
 
 fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
