@@ -13,12 +13,17 @@ pub enum CardType {
     DefenseReaction,
     Equipment,
     Weapon,
-    Sword2h,
-    Club2h,
     Hero,
     Mentor,
     Resource,
     Token
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum WeaponType {
+    Sword2h,
+    Club2h
 }
 
 #[repr(u8)]
@@ -58,6 +63,7 @@ bitflags! {
 
 pub struct CardData {
     pub typ: CardType,
+    pub weapon_type: Option<WeaponType>,
     pub cost: u8,
     pub pitch: u8,
     pub power: u8,

@@ -758,7 +758,7 @@ fn close_combat_chain(gs: &mut Gamestate) {
 /// than the deck). Mirrors the weapon classification used when dealing out a
 /// decklist in `fab_game`.
 fn is_weapon(data: &CardData) -> bool {
-    matches!(data.typ, CardType::Weapon | CardType::Sword2h | CardType::Club2h)
+    matches!(data.typ, CardType::Weapon)
 }
 
 /// Deduct one action point from `player`, flooring at 0 so it never underflows.

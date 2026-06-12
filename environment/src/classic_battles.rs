@@ -1,4 +1,4 @@
-use crate::cards::{Card, CardClass, CardData, CardType, Color, EquipmentSlot, Keyword};
+use crate::cards::{Card, CardClass, CardData, CardType, Color, EquipmentSlot, Keyword, WeaponType};
 use crate::card_effects::Ability;
 use std::sync::LazyLock;
 
@@ -15,6 +15,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Rhinar
         CardData {
             typ: CardType::Hero,
+            weapon_type: None,
             cost: 0,
             pitch: 0,
             power: 0,
@@ -38,6 +39,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Dorinthea, Quicksilver Prodigy
         CardData {
             typ: CardType::Hero,
+            weapon_type: None,
             cost: 0,
             pitch: 0,
             power: 0,
@@ -62,6 +64,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Alpha Rampage
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 3,
             pitch: 1,
             power: 9,
@@ -85,6 +88,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Awakening Bellow
         CardData {
             typ: CardType::Action,
+            weapon_type: None,
             cost: 1,
             pitch: 1,
             power: 0,
@@ -108,6 +112,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Bare Fangs
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 2,
             pitch: 1,
             power: 6,
@@ -131,6 +136,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Beast Mode
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 3,
             pitch: 1,
             power: 6,
@@ -154,6 +160,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Pack Hunt
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 2,
             pitch: 1,
             power: 6,
@@ -177,6 +184,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Wild Ride
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 2,
             pitch: 1,
             power: 6,
@@ -200,6 +208,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Wrecking Ball
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 3,
             pitch: 1,
             power: 6,
@@ -224,6 +233,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Barraging Beatdown
         CardData {
             typ: CardType::Action,
+            weapon_type: None,
             cost: 0,
             pitch: 2,
             power: 0,
@@ -247,6 +257,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Muscle Mutt
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 3,
             pitch: 2,
             power: 6,
@@ -270,6 +281,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Pack Call
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 3,
             pitch: 2,
             power: 6,
@@ -293,6 +305,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Raging Onslaught
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 3,
             pitch: 2,
             power: 6,
@@ -316,6 +329,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Smash Instinct
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 3,
             pitch: 2,
             power: 6,
@@ -339,6 +353,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Smash with Big Tree
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 2,
             pitch: 2,
             power: 6,
@@ -362,6 +377,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Wounded Bull
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 3,
             pitch: 2,
             power: 6,
@@ -386,6 +402,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Clearing Bellow
         CardData {
             typ: CardType::Action,
+            weapon_type: None,
             cost: 0,
             pitch: 3,
             power: 0,
@@ -409,6 +426,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Come to Fight
         CardData {
             typ: CardType::Action,
+            weapon_type: None,
             cost: 1,
             pitch: 3,
             power: 0,
@@ -432,6 +450,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Dodge
         CardData {
             typ: CardType::DefenseReaction,
+            weapon_type: None,
             cost: 0,
             pitch: 3,
             power: 0,
@@ -455,6 +474,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Rally the Rearguard
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 2,
             pitch: 3,
             power: 4,
@@ -478,6 +498,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Titanium Bauble
         CardData {
             typ: CardType::Resource,
+            weapon_type: None,
             cost: 0,
             pitch: 3,
             power: 0,
@@ -501,6 +522,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Wrecker Romp
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 2,
             pitch: 3,
             power: 6,
@@ -525,6 +547,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Chief Ruk'utan
         CardData {
             typ: CardType::Mentor,
+            weapon_type: None,
             cost: 0,
             pitch: 0,
             power: 0,
@@ -548,7 +571,8 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // ── RHINAR — EQUIPMENT ──────────────────────────────────────────
         // Bone Basher
         CardData {
-            typ: CardType::Club2h,
+            typ: CardType::Weapon,
+            weapon_type: Some(WeaponType::Club2h),
             cost: 2,
             pitch: 0,
             power: 4,
@@ -572,6 +596,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Blossom of Spring
         CardData {
             typ: CardType::Equipment,
+            weapon_type: None,
             cost: 0,
             pitch: 0,
             power: 0,
@@ -595,6 +620,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Bone Vizier
         CardData {
             typ: CardType::Equipment,
+            weapon_type: None,
             cost: 0,
             pitch: 0,
             power: 0,
@@ -618,6 +644,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Ironhide Gauntlet
         CardData {
             typ: CardType::Equipment,
+            weapon_type: None,
             cost: 0,
             pitch: 0,
             power: 0,
@@ -641,6 +668,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Ironhide Legs
         CardData {
             typ: CardType::Equipment,
+            weapon_type: None,
             cost: 0,
             pitch: 0,
             power: 0,
@@ -665,6 +693,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // En Garde
         CardData {
             typ: CardType::Action,
+            weapon_type: None,
             cost: 1,
             pitch: 1,
             power: 0,
@@ -688,6 +717,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Flock of the Feather Walkers
         CardData {
             typ: CardType::AttackAction,
+            weapon_type: None,
             cost: 1,
             pitch: 1,
             power: 5,
@@ -711,6 +741,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // In the Swing
         CardData {
             typ: CardType::AttackReaction,
+            weapon_type: None,
             cost: 0,
             pitch: 1,
             power: 0,
@@ -734,6 +765,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Ironsong Response
         CardData {
             typ: CardType::AttackReaction,
+            weapon_type: None,
             cost: 0,
             pitch: 1,
             power: 0,
@@ -757,6 +789,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Second Swing
         CardData {
             typ: CardType::Action,
+            weapon_type: None,
             cost: 1,
             pitch: 1,
             power: 0,
@@ -780,6 +813,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Sharpen Steel
         CardData {
             typ: CardType::Action,
+            weapon_type: None,
             cost: 0,
             pitch: 1,
             power: 0,
@@ -803,6 +837,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Thrust
         CardData {
             typ: CardType::AttackReaction,
+            weapon_type: None,
             cost: 1,
             pitch: 1,
             power: 0,
@@ -826,6 +861,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Warrior's Valor
         CardData {
             typ: CardType::Action,
+            weapon_type: None,
             cost: 1,
             pitch: 1,
             power: 0,
@@ -850,6 +886,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Driving Blade
         CardData {
             typ: CardType::Action,
+            weapon_type: None,
             cost: 2,
             pitch: 2,
             power: 0,
@@ -873,6 +910,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Glistening Steelblade
         CardData {
             typ: CardType::Action,
+            weapon_type: None,
             cost: 1,
             pitch: 2,
             power: 0,
@@ -896,6 +934,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // On a Knife Edge
         CardData {
             typ: CardType::Action,
+            weapon_type: None,
             cost: 0,
             pitch: 2,
             power: 0,
@@ -919,6 +958,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Out for Blood
         CardData {
             typ: CardType::AttackReaction,
+            weapon_type: None,
             cost: 1,
             pitch: 2,
             power: 0,
@@ -942,6 +982,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Run Through
         CardData {
             typ: CardType::AttackReaction,
+            weapon_type: None,
             cost: 1,
             pitch: 2,
             power: 0,
@@ -965,6 +1006,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Slice and Dice
         CardData {
             typ: CardType::Action,
+            weapon_type: None,
             cost: 0,
             pitch: 2,
             power: 0,
@@ -989,6 +1031,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Blade Flash
         CardData {
             typ: CardType::AttackReaction,
+            weapon_type: None,
             cost: 1,
             pitch: 3,
             power: 0,
@@ -1012,6 +1055,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Hit and Run
         CardData {
             typ: CardType::Action,
+            weapon_type: None,
             cost: 0,
             pitch: 3,
             power: 0,
@@ -1035,6 +1079,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Sigil of Solace
         CardData {
             typ: CardType::Instant,
+            weapon_type: None,
             cost: 0,
             pitch: 3,
             power: 0,
@@ -1058,6 +1103,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Toughen Up
         CardData {
             typ: CardType::DefenseReaction,
+            weapon_type: None,
             cost: 2,
             pitch: 3,
             power: 0,
@@ -1081,6 +1127,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Visit the Blacksmith
         CardData {
             typ: CardType::Action,
+            weapon_type: None,
             cost: 0,
             pitch: 3,
             power: 0,
@@ -1105,6 +1152,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Hala Goldenhelm
         CardData {
             typ: CardType::Mentor,
+            weapon_type: None,
             cost: 0,
             pitch: 0,
             power: 0,
@@ -1128,7 +1176,8 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // ── DORINTHEA — EQUIPMENT ───────────────────────────────────────
         // Dawnblade, Resplendent
         CardData {
-            typ: CardType::Sword2h,
+            typ: CardType::Weapon,
+            weapon_type: Some(WeaponType::Sword2h),
             cost: 1,
             pitch: 0,
             power: 2,
@@ -1152,6 +1201,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Gallantry Gold
         CardData {
             typ: CardType::Equipment,
+            weapon_type: None,
             cost: 1,
             pitch: 0,
             power: 0,
@@ -1175,6 +1225,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Ironrot Helm
         CardData {
             typ: CardType::Equipment,
+            weapon_type: None,
             cost: 0,
             pitch: 0,
             power: 0,
@@ -1198,6 +1249,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
         // Ironrot Legs
         CardData {
             typ: CardType::Equipment,
+            weapon_type: None,
             cost: 0,
             pitch: 0,
             power: 0,
@@ -1233,5 +1285,27 @@ impl Card {
     /// of `get_card_catalog()[card as usize]` and dropping the `as usize` cast.
     pub fn data(self) -> &'static CardData {
         &get_card_catalog()[self as usize]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn two_handed_weapons_are_typed_weapon_with_a_weapon_type() {
+        let bone_basher = Card::BoneBasher.data();
+        assert_eq!(bone_basher.typ, CardType::Weapon);
+        assert_eq!(bone_basher.weapon_type, Some(WeaponType::Club2h));
+
+        let dawnblade = Card::Dawnblade.data();
+        assert_eq!(dawnblade.typ, CardType::Weapon);
+        assert_eq!(dawnblade.weapon_type, Some(WeaponType::Sword2h));
+    }
+
+    #[test]
+    fn non_weapon_cards_have_no_weapon_type() {
+        assert_eq!(Card::Rhinar.data().weapon_type, None);
+        assert_eq!(Card::BoneVizier.data().weapon_type, None);
     }
 }

@@ -85,7 +85,7 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
             CardType::Hero => {
                 hero_opt = Some(card);
             }
-            CardType::Weapon | CardType::Sword2h | CardType::Club2h => {
+            CardType::Weapon => {
                 card_states.push(CardState {
                     visible: CardVisibleState::Hidden,
                     location: CardLocation::weapon(pid),
@@ -255,7 +255,7 @@ fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
                     _ => {}
                 }
             }
-            CardType::Weapon | CardType::Club2h | CardType::Sword2h => {
+            CardType::Weapon => {
                 cards[idx].location = CardLocation::weapon(pid);
                 cards[idx].visible = CardVisibleState::BothKnow;
                 player.weapon_idx = Some(CardIdx::new(idx));
