@@ -103,6 +103,11 @@ pub enum CardLocation {
     P2Arsenal,
     P1BanishZone,
     P2BanishZone,
+    /// Cards a player was forced to banish to an opponent's Intimidate. Kept
+    /// separate from the ordinary banish zone so an Intimidate banish can be
+    /// tracked and (later) returned/cleared on its own.
+    P1IntimidateBanish,
+    P2IntimidateBanish,
     P1Head,
     P2Head,
     P1Chest,
@@ -130,6 +135,7 @@ impl CardLocation {
     pub const fn graveyard(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Graveyard } else { Self::P2Graveyard } }
     pub const fn arsenal(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Arsenal } else { Self::P2Arsenal } }
     pub const fn banish(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1BanishZone } else { Self::P2BanishZone } }
+    pub const fn intimidate_banish(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1IntimidateBanish } else { Self::P2IntimidateBanish } }
     pub const fn head(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Head } else { Self::P2Head } }
     pub const fn chest(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Chest } else { Self::P2Chest } }
     pub const fn arms(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Arms } else { Self::P2Arms } }
@@ -214,6 +220,9 @@ pub struct Player {
     pub arsenal_idx : Option<CardIdx>,
     pub hand_idx : Option<CardIdx>,
     pub banish_idx : Option<CardIdx>,
+    /// Head of the linked list of cards this player was forced to banish to an
+    /// opponent's Intimidate. `None` when no such card has been banished.
+    pub intimidate_banish_idx : Option<CardIdx>,
     pub weapon_idx : Option<CardIdx>,
     pub head_idx : Option<CardIdx>,
     pub chest_idx : Option<CardIdx>,
