@@ -134,6 +134,7 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
         arsenal_idx: None,
         hand_idx: None,
         banish_idx : None,
+        intimidate_banish_idx : None,
         weapon_idx : None,
         head_idx : None,
         chest_idx : None,

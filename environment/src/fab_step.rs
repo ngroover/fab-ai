@@ -1,6 +1,7 @@
 use crate::action::{Action,ActionType};
 use crate::game_state::{Gamestate,Phase,Player,PendingCard,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
 use crate::cards::{CardData,CardType,Keyword};
+use rand::RngExt;
 
 pub fn step(gs: &mut Gamestate, act: Action) {
     // Once the game has been won or drawn it is frozen: no further actions are
@@ -512,6 +513,14 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         gs.log_public(msg);
     }
 
+    // Intimidate triggers as the card resolves, regardless of whether it goes on
+    // to the combat chain (an attack action) or to the graveyard (a non-attack
+    // action): the resolving player's opponent banishes a random card from their
+    // hand to their Intimidate banish zone.
+    if data.keyword.contains(Keyword::Intimidate) {
+        apply_intimidate(gs, owner);
+    }
+
     // A card joins its owner's combat chain when it is attacking: a played
     // attack action card, or a weapon being swung (the weapon itself joins the
     // chain). Everything else resolves to the graveyard.
@@ -544,6 +553,44 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
             gs.active_player = gs.turn_player;
         }
     }
+}
+
+/// Resolve an Intimidate trigger: the opponent of `attacker` (the player whose
+/// card just resolved) banishes one card chosen uniformly at random from their
+/// hand into their Intimidate banish zone. A no-op when that opponent's hand is
+/// empty. The banished card is hidden information to the attacker, so the log
+/// reveals its identity only to the banishing player.
+fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
+    let victim = attacker.opponent();
+
+    // Snapshot the victim's hand slots, releasing the borrow on `gs.cards`
+    // before we draw from the rng and mutate the hand below.
+    let hand: Vec<usize> = {
+        let player = if victim == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+        player.hand_iter(&gs.cards).map(|(idx, _)| idx).collect()
+    };
+    if hand.is_empty() {
+        return;
+    }
+
+    let pick = hand[gs.rng.random_range(0..hand.len())];
+
+    if gs.logging_enabled() {
+        let card = gs.cards[pick].card;
+        let full = format!("{} banishes {:?} to Intimidate", player_name(victim), card);
+        let hidden = format!("{} banishes a card to Intimidate", player_name(victim));
+        let (p1_view, p2_view) = if victim == PlayerIndex::P1 {
+            (full.clone(), hidden)
+        } else {
+            (hidden, full.clone())
+        };
+        gs.log_views(full, p1_view, p2_view);
+    }
+
+    let player = if victim == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    detach_from_current_zone(player, &mut gs.cards, pick);
+    gs.cards[pick].location = CardLocation::intimidate_banish(victim);
+    attach_to_front_of_zone(&mut gs.cards, &mut player.intimidate_banish_idx, None, None, pick);
 }
 
 /// Whether committing `typ` on `data` puts an attack on the stack — a played
@@ -881,6 +928,9 @@ fn detach_from_current_zone(player: &mut Player, cards: &mut [CardState; TOTAL_C
         CardLocation::P1Legs | CardLocation::P2Legs => player.legs_idx = None,
         CardLocation::P1Arsenal | CardLocation::P2Arsenal => player.arsenal_idx = None,
         CardLocation::P1BanishZone | CardLocation::P2BanishZone => player.banish_idx = None,
+        CardLocation::P1IntimidateBanish | CardLocation::P2IntimidateBanish => {
+            detach_from_linked_list(cards, &mut player.intimidate_banish_idx, None, None, idx);
+        }
         _ => {}
     }
 }
@@ -3030,5 +3080,79 @@ mod tests {
                 "P2 takes 6 damage from MuscleMuttY attack (life: 20->14)"
             );
         }
+    }
+
+    #[test]
+    fn test_pack_hunt_intimidate_banishes_opponent_card() {
+        // Pack Hunt is an attack action carrying Intimidate. When it resolves
+        // (onto the attacker's combat chain) the defending player must banish a
+        // random card from their hand into their Intimidate banish zone.
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        // Relabel two of Rhinar's (p1) hand cards: one to Pack Hunt (the attack
+        // action to play, cost 2) and one to Clearing Bellow (pitch 3) to pay for
+        // it. Only the card stats matter here; the zones stay untouched.
+        let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+        let ph_idx = hand[0];
+        let pitch_idx = hand[1];
+        gs.cards[ph_idx].card = Card::PackHuntR;
+        gs.cards[pitch_idx].card = Card::ClearingBellowB;
+
+        // The opponent (p2) starts with a full opening hand to banish from.
+        let victim_hand_before = gs.p2.hand_size;
+        assert!(victim_hand_before > 0);
+        assert_eq!(gs.p2.intimidate_banish_idx, None);
+
+        // Play Pack Hunt and pitch Clearing Bellow to cover its cost, opening the
+        // instant window with the attack on the stack.
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(ph_idx))});
+        assert_eq!(gs.phase, Phase::ActionPitch);
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitch_idx))});
+        assert_eq!(gs.phase, Phase::ActionInstant);
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(ph_idx));
+
+        // Both players pass: Pack Hunt resolves onto p1's combat chain and its
+        // Intimidate fires, forcing p2 to banish one card from hand.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.cards[ph_idx].location, CardLocation::P1CombatChain);
+
+        // Exactly one card left p2's hand for the Intimidate banish zone.
+        assert_eq!(gs.p2.hand_size, victim_hand_before - 1);
+        let banished_idx = gs.p2.intimidate_banish_idx.expect("a card was banished to Intimidate");
+        assert_eq!(gs.cards[banished_idx.get()].location, CardLocation::P2IntimidateBanish);
+        let banished = get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2IntimidateBanish);
+        assert_eq!(banished.len(), 1);
+    }
+
+    #[test]
+    fn test_clearing_bellow_intimidate_banishes_opponent_card() {
+        // Clearing Bellow is a (non-attack) action carrying Intimidate. When it
+        // resolves (to the graveyard) its Intimidate still fires, forcing the
+        // opponent to banish a random card from hand into their Intimidate banish
+        // zone.
+        let (mut gs, cb_idx) = instant_phase_with_one_card();
+
+        let victim_hand_before = gs.p2.hand_size;
+        assert!(victim_hand_before > 0);
+        assert_eq!(gs.p2.intimidate_banish_idx, None);
+
+        // Both players pass: Clearing Bellow resolves to p1's graveyard and its
+        // Intimidate fires.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Graveyard);
+
+        // Exactly one card left p2's hand for the Intimidate banish zone.
+        assert_eq!(gs.p2.hand_size, victim_hand_before - 1);
+        let banished_idx = gs.p2.intimidate_banish_idx.expect("a card was banished to Intimidate");
+        assert_eq!(gs.cards[banished_idx.get()].location, CardLocation::P2IntimidateBanish);
+        let banished = get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2IntimidateBanish);
+        assert_eq!(banished.len(), 1);
     }
 }
