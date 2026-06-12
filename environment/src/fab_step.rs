@@ -110,6 +110,10 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
             gs.pending_card = None;
             close_combat_chain(gs);
             gs.phase = Phase::Arsenal;
+            // Intimidate banishes last only until end of turn: as the turn passes
+            // into the Arsenal phase, every Intimidate-banished card returns to its
+            // owner's hand (the ordinary banished zone is left untouched).
+            return_intimidate_banished_to_hands(gs);
         }
         _ => {}
     }
@@ -591,6 +595,52 @@ fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
     detach_from_current_zone(player, &mut gs.cards, pick);
     gs.cards[pick].location = CardLocation::intimidate_banish(victim);
     attach_to_front_of_zone(&mut gs.cards, &mut player.intimidate_banish_idx, None, None, pick);
+}
+
+/// Return every card sitting in either player's Intimidate banish zone to its
+/// owner's hand. Intimidate only banishes a card until the end of the turn:
+/// unlike the ordinary banished zone (which is permanent), the Intimidate banish
+/// zone empties back into its owner's hand as the turn passes into the Arsenal
+/// phase. Both players' zones are drained, since either could have been
+/// intimidated during the turn.
+fn return_intimidate_banished_to_hands(gs: &mut Gamestate) {
+    for pid in [PlayerIndex::P1, PlayerIndex::P2] {
+        // Drain the zone from its head; each move advances `intimidate_banish_idx`
+        // to the next card, so the loop ends once the zone is empty.
+        loop {
+            let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+            let Some(head) = player.intimidate_banish_idx else { break };
+            let idx = head.get();
+
+            if gs.logging_enabled() {
+                let card = gs.cards[idx].card;
+                let full = format!("{} returns {:?} from Intimidate banish to hand", player_name(pid), card);
+                let hidden = format!("{} returns a card from Intimidate banish to hand", player_name(pid));
+                let (p1_view, p2_view) = if pid == PlayerIndex::P1 {
+                    (full.clone(), hidden)
+                } else {
+                    (hidden, full.clone())
+                };
+                gs.log_views(full, p1_view, p2_view);
+            }
+
+            let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+            detach_from_current_zone(player, &mut gs.cards, idx);
+            gs.cards[idx].location = CardLocation::hand(pid);
+            gs.cards[idx].visible = if pid == PlayerIndex::P1 {
+                CardVisibleState::P1Knows
+            } else {
+                CardVisibleState::P2Knows
+            };
+            attach_to_front_of_zone(
+                &mut gs.cards,
+                &mut player.hand_idx,
+                None,
+                Some(&mut player.hand_size),
+                idx,
+            );
+        }
+    }
 }
 
 /// Whether committing `typ` on `data` puts an attack on the stack — a played
@@ -3154,5 +3204,41 @@ mod tests {
         assert_eq!(gs.cards[banished_idx.get()].location, CardLocation::P2IntimidateBanish);
         let banished = get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2IntimidateBanish);
         assert_eq!(banished.len(), 1);
+    }
+
+    #[test]
+    fn test_intimidate_banished_card_returns_to_hand_in_arsenal() {
+        // A card Intimidate-banished during the turn returns to its owner's hand
+        // as the turn passes into the Arsenal phase; the ordinary banished zone is
+        // untouched. Clearing Bellow (a non-attack action with Intimidate and Go
+        // Again) is convenient: after it resolves play returns to p1's Action
+        // phase, and one more pass closes the turn into the Arsenal phase.
+        let (mut gs, cb_idx) = instant_phase_with_one_card();
+        let victim_hand_before = gs.p2.hand_size;
+
+        // Both players pass: Clearing Bellow resolves and its Intimidate banishes a
+        // random card from p2's hand. We are back in p1's Action phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Graveyard);
+
+        let banished_idx = gs.p2.intimidate_banish_idx
+            .expect("a card was banished to Intimidate")
+            .get();
+        assert_eq!(gs.cards[banished_idx].location, CardLocation::P2IntimidateBanish);
+        assert_eq!(gs.p2.hand_size, victim_hand_before - 1);
+
+        // p1 passes, closing the turn into the Arsenal phase. Entering it returns
+        // the Intimidate-banished card to p2's hand and empties the zone.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Arsenal);
+
+        assert_eq!(gs.p2.intimidate_banish_idx, None);
+        assert_eq!(gs.cards[banished_idx].location, CardLocation::P2Hand);
+        assert_eq!(gs.p2.hand_size, victim_hand_before);
+        assert!(get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2IntimidateBanish).is_empty());
+        // The returned card is reachable again by walking p2's hand.
+        assert!(gs.p2.hand_iter(&gs.cards).any(|(idx, _)| idx == banished_idx));
     }
 }
