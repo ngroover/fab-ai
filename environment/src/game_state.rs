@@ -235,6 +235,13 @@ pub struct Player {
     pub chain_link : [Option<CardIdx>; 5],
     pub hand_size : u8,
     pub deck_size : u8,
+    /// Extra power added to this player's current attack on top of the cards on
+    /// the combat chain. Set by on-play effects that conditionally pump the
+    /// attacking card (e.g. Bare Fangs's "+2 power if you discarded a card with
+    /// 6 or more power"), consumed when combat damage resolves, and reset to 0
+    /// afterward (and at the start of each turn) so it never leaks to a later
+    /// attack.
+    pub attack_power_bonus : u8,
     /// This player's view of the game log: what they would legitimately know,
     /// with hidden information (e.g. the identity of a card the opponent drew)
     /// redacted. `None` when logging is disabled (the default, so simulation

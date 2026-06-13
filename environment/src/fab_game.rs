@@ -143,6 +143,7 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
         chain_link : [None; 5],
         hand_size : 0,
         deck_size : 0,
+        attack_power_bonus : 0,
         // Logging is opted into via `reset(gs, true)`; off until then.
         log: None,
     };

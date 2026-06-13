@@ -1,5 +1,5 @@
 use crate::cards::{Card, CardClass, CardData, CardType, Color, EquipmentSlot, Keyword, WeaponType};
-use crate::card_effects::Ability;
+use crate::card_effects::{Ability, OnPlayConditionType, OnPlayEffect, OnPlayEffectType};
 use std::sync::LazyLock;
 
 /// Catalog of every card in the Rhinar vs Dorinthea classic battle.
@@ -131,7 +131,11 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             additional_cost: None,
             target_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::DrawDiscardHit6,
+                effectType: OnPlayEffectType::ConditionalPower,
+                magnitude: 2,
+            }),
         },
         // Beast Mode
         CardData {
@@ -1307,5 +1311,17 @@ mod tests {
     fn non_weapon_cards_have_no_weapon_type() {
         assert_eq!(Card::Rhinar.data().weapon_type, None);
         assert_eq!(Card::BoneVizier.data().weapon_type, None);
+    }
+
+    #[test]
+    fn bare_fangs_has_draw_discard_hit6_conditional_power() {
+        let effect = Card::BareFangsR
+            .data()
+            .play_effect
+            .as_ref()
+            .expect("Bare Fangs should carry an on-play effect");
+        assert!(matches!(effect.condition, OnPlayConditionType::DrawDiscardHit6));
+        assert!(matches!(effect.effectType, OnPlayEffectType::ConditionalPower));
+        assert_eq!(effect.magnitude, 2);
     }
 }

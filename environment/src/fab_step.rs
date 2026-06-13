@@ -1,6 +1,7 @@
 use crate::action::{Action,ActionType};
 use crate::game_state::{Gamestate,Phase,Player,PendingCard,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
 use crate::cards::{CardData,CardType,Keyword};
+use crate::card_effects::{OnPlayEffect,OnPlayConditionType,OnPlayEffectType};
 use rand::RngExt;
 
 pub fn step(gs: &mut Gamestate, act: Action) {
@@ -90,6 +91,10 @@ fn begin_turn(gs: &mut Gamestate) {
     gs.turn_count += 1;
     let turn_player = if gs.turn_player == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     turn_player.action_points = 1;
+    // Any unconsumed attack-power bonus from a prior turn is cleared so it can
+    // never leak into this turn's attacks.
+    gs.p1.attack_power_bonus = 0;
+    gs.p2.attack_power_bonus = 0;
     gs.check_game_end();
 }
 
@@ -525,6 +530,14 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         apply_intimidate(gs, owner);
     }
 
+    // "When you play" on-play effects fire as the card resolves, before it goes
+    // on to the combat chain (an attack) or the graveyard. `data` is a 'static
+    // reference into the card catalog, so holding the effect across the mutable
+    // `gs` calls below is fine.
+    if let Some(effect) = &data.play_effect {
+        apply_on_play_effect(gs, owner, effect);
+    }
+
     // A card joins its owner's combat chain when it is attacking: a played
     // attack action card, or a weapon being swung (the weapon itself joins the
     // chain). Everything else resolves to the graveyard.
@@ -595,6 +608,77 @@ fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
     detach_from_current_zone(player, &mut gs.cards, pick);
     gs.cards[pick].location = CardLocation::intimidate_banish(victim);
     attach_to_front_of_zone(&mut gs.cards, &mut player.intimidate_banish_idx, None, None, pick);
+}
+
+/// Resolve a card's "when you play" effect as it resolves off the stack. The
+/// effect is a (condition, effect, magnitude) triple: the condition is evaluated
+/// first (it may itself move cards, as `DrawDiscardHit6` does), and the effect is
+/// applied only when the condition holds. `owner` is the player whose card is
+/// resolving. Conditions/effects the engine does not model yet are no-ops.
+fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayEffect) {
+    let condition_met = match effect.condition {
+        OnPlayConditionType::DrawDiscardHit6 => draw_then_discard_hit6(gs, owner),
+        _ => false,
+    };
+    if !condition_met {
+        return;
+    }
+    match effect.effectType {
+        // The resolving attack gains `magnitude` power. The card is on its way to
+        // link 0 of the owner's combat chain; the bonus is banked on the player
+        // and folded into the chain's power when combat damage resolves.
+        OnPlayEffectType::ConditionalPower => {
+            let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+            player.attack_power_bonus = player.attack_power_bonus.saturating_add(effect.magnitude);
+        }
+        _ => {}
+    }
+}
+
+/// `DrawDiscardHit6`: the owner draws a card, then discards a card; the condition
+/// is met when the discarded card had 6 or more power. The discard target is
+/// chosen uniformly at random from the resulting hand, mirroring how the engine
+/// resolves other forced selections without a dedicated choice phase (see
+/// `apply_intimidate`). Returns whether the discarded card hit the power-6
+/// threshold; returns `false` if the hand is empty after drawing (nothing to
+/// discard, e.g. an empty deck and hand).
+fn draw_then_discard_hit6(gs: &mut Gamestate, owner: PlayerIndex) -> bool {
+    // Draw a card. Borrow the owning player and the shared cards array as
+    // disjoint fields so both can be mutated in the same call.
+    {
+        let (player, cards) = if owner == PlayerIndex::P1 {
+            (&mut gs.p1, &mut gs.cards)
+        } else {
+            (&mut gs.p2, &mut gs.cards)
+        };
+        draw_cards(player, cards, 1);
+    }
+
+    // Snapshot the hand, then pick a card to discard at random.
+    let hand: Vec<usize> = {
+        let player = if owner == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+        player.hand_iter(&gs.cards).map(|(idx, _)| idx).collect()
+    };
+    if hand.is_empty() {
+        return false;
+    }
+    let pick = hand[gs.rng.random_range(0..hand.len())];
+    let discarded_power = gs.cards[pick].card.data().power;
+
+    // The discard lands face-up in the graveyard, so it is public.
+    if gs.logging_enabled() {
+        let card = gs.cards[pick].card;
+        gs.log_public(format!("{} discards {:?}", player_name(owner), card));
+    }
+
+    // Move the discarded card from hand to graveyard. The graveyard is tracked
+    // purely by `location` (it has no head pointer), so detaching from the hand
+    // and retagging the location is all that is required.
+    let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    detach_from_current_zone(player, &mut gs.cards, pick);
+    gs.cards[pick].location = CardLocation::graveyard(owner);
+
+    discarded_power >= 6
 }
 
 /// Return every card sitting in either player's Intimidate banish zone to its
@@ -770,7 +854,10 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
 
     let attacker = if attacker_id == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
     let defender = if defender_id == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let power = combat_chain_total(attacker, &gs.cards, |d| d.power);
+    // Total attack power is the cards on the chain plus any banked on-play bonus
+    // (e.g. Bare Fangs's conditional +2 power).
+    let power = combat_chain_total(attacker, &gs.cards, |d| d.power)
+        .saturating_add(attacker.attack_power_bonus);
     let blocked = combat_chain_total(defender, &gs.cards, |d| d.defense);
     let damage = power.saturating_sub(blocked);
 
@@ -806,6 +893,11 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     if !attack_has_go_again {
         spend_action_point(gs, attacker_id);
     }
+
+    // The on-play power bonus is single-use: consume it so a follow-up attack
+    // (e.g. after Go Again) doesn't inherit it.
+    let attacker = if attacker_id == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    attacker.attack_power_bonus = 0;
 }
 
 /// Close the combat chain as the action phase ends. Every card still sitting on
