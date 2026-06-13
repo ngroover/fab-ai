@@ -238,6 +238,7 @@ fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
     player.pitch_idx = None;
     player.arsenal_idx = None;
     player.banish_idx = None;
+    player.intimidate_banish_idx = None;
     player.resources = 0;
     player.action_points = 0;
     // Walk only this player's half of the shared array, recording each card's
