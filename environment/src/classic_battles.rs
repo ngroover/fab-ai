@@ -207,7 +207,14 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             additional_cost: None,
             target_effect: None,
             play_condition: None,
-            play_effect: None,
+            // Like Bare Fangs, draw then discard a card; if the discard had 6 or
+            // more power the condition is met — but Wild Ride grants Go Again
+            // rather than +power. Magnitude is unused for the Go Again effect.
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::DrawDiscardHit6,
+                effectType: OnPlayEffectType::ConditionalGoAgain,
+                magnitude: 0,
+            }),
         },
         // Wrecking Ball
         CardData {

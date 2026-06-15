@@ -95,6 +95,10 @@ fn begin_turn(gs: &mut Gamestate) {
     // never leak into this turn's attacks.
     gs.p1.attack_power_bonus = 0;
     gs.p2.attack_power_bonus = 0;
+    // Likewise clear any unconsumed conditional Go Again so it cannot leak into
+    // this turn's attacks.
+    gs.p1.attack_go_again_bonus = false;
+    gs.p2.attack_go_again_bonus = false;
     gs.check_game_end();
 }
 
@@ -631,6 +635,13 @@ fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayE
             let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
             player.attack_power_bonus = player.attack_power_bonus.saturating_add(effect.magnitude);
         }
+        // The resolving attack gains Go Again. Like the power bonus, the card is on
+        // its way to link 0 of the owner's combat chain; the flag is banked on the
+        // player and folded into the Go Again check when combat damage resolves.
+        OnPlayEffectType::ConditionalGoAgain => {
+            let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+            player.attack_go_again_bonus = true;
+        }
         _ => {}
     }
 }
@@ -862,10 +873,13 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     let damage = power.saturating_sub(blocked);
 
     // Whether the attacking card (link 0 of the attacker's chain) has Go Again;
-    // if so the turn player keeps their action point and may act again.
-    let attack_has_go_again = attacker.chain_link[0]
-        .map(|idx| gs.cards[idx.get()].card.data().keyword.contains(Keyword::GoAgain))
-        .unwrap_or(false);
+    // if so the turn player keeps their action point and may act again. An on-play
+    // effect may have conditionally granted Go Again (e.g. Wild Ride after
+    // discarding a 6-power card), banked on the player.
+    let attack_has_go_again = attacker.attack_go_again_bonus
+        || attacker.chain_link[0]
+            .map(|idx| gs.cards[idx.get()].card.data().keyword.contains(Keyword::GoAgain))
+            .unwrap_or(false);
     // The attacking card, for the damage log message.
     let attack_card = attacker.chain_link[0].map(|idx| gs.cards[idx.get()].card);
 
@@ -898,6 +912,7 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // (e.g. after Go Again) doesn't inherit it.
     let attacker = if attacker_id == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     attacker.attack_power_bonus = 0;
+    attacker.attack_go_again_bonus = false;
 }
 
 /// Close the combat chain as the action phase ends. Every card still sitting on
@@ -3427,6 +3442,61 @@ mod tests {
         // The discard missed the power-6 threshold, so no power is banked; the
         // card still moves to the graveyard.
         assert_eq!(gs.p1.attack_power_bonus, 0);
+        assert_eq!(gs.cards[pick].location, CardLocation::P1Graveyard);
+    }
+
+    #[test]
+    fn wild_ride_discarding_power6_grants_go_again() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        // Force the draw-then-discard to land on a power-6 card: empty p1's hand,
+        // then seat a 6-power card on top of the deck. After the forced draw the
+        // hand holds exactly that card, so it is the one discarded.
+        move_hand_to_graveyard(&mut gs, PlayerIndex::P1);
+        let pick = find_p1_deck_card(&gs, |power| power >= 6);
+        assert!(gs.cards[pick].card.data().power >= 6);
+        put_on_top_of_deck(&mut gs, PlayerIndex::P1, pick);
+
+        let effect = Card::WildRideR
+            .data()
+            .play_effect
+            .as_ref()
+            .expect("Wild Ride should carry an on-play effect");
+        apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+
+        // Discarding a 6-power card satisfies the condition, banking Go Again for
+        // the attack (and no power bonus); the discarded card is now in p1's
+        // graveyard.
+        assert!(gs.p1.attack_go_again_bonus);
+        assert_eq!(gs.p1.attack_power_bonus, 0);
+        assert_eq!(gs.cards[pick].location, CardLocation::P1Graveyard);
+    }
+
+    #[test]
+    fn wild_ride_discarding_below_power6_grants_no_go_again() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        // Same setup, but seat a sub-6-power card on top so the forced discard
+        // fails the threshold.
+        move_hand_to_graveyard(&mut gs, PlayerIndex::P1);
+        let pick = find_p1_deck_card(&gs, |power| power < 6);
+        assert!(gs.cards[pick].card.data().power < 6);
+        put_on_top_of_deck(&mut gs, PlayerIndex::P1, pick);
+
+        let effect = Card::WildRideR
+            .data()
+            .play_effect
+            .as_ref()
+            .expect("Wild Ride should carry an on-play effect");
+        apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+
+        // The discard missed the power-6 threshold, so no Go Again is banked; the
+        // card still moves to the graveyard.
+        assert!(!gs.p1.attack_go_again_bonus);
         assert_eq!(gs.cards[pick].location, CardLocation::P1Graveyard);
     }
 }
