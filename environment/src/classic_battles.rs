@@ -1,5 +1,5 @@
 use crate::cards::{Card, CardClass, CardData, CardType, Color, EquipmentSlot, Keyword, WeaponType};
-use crate::card_effects::{Ability, OnPlayConditionType, OnPlayEffect, OnPlayEffectType};
+use crate::card_effects::{AdditionalCostType, Ability, OnPlayConditionType, OnPlayEffect, OnPlayEffectType};
 use std::sync::LazyLock;
 
 /// Catalog of every card in the Rhinar vs Dorinthea classic battle.
@@ -80,7 +80,8 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             ability: None,
             defend_effect: None,
             next_attack_effect: None,
-            additional_cost: None,
+            // "As an additional cost to play Alpha Rampage, discard a card."
+            additional_cost: Some(AdditionalCostType::DiscardCard),
             target_effect: None,
             play_condition: None,
             play_effect: None,
@@ -549,7 +550,8 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             ability: None,
             defend_effect: None,
             next_attack_effect: None,
-            additional_cost: None,
+            // "As an additional cost to play Wrecker Romp, discard a card."
+            additional_cost: Some(AdditionalCostType::DiscardCard),
             target_effect: None,
             play_condition: None,
             play_effect: None,

@@ -1,6 +1,7 @@
 use crate::game_state::{Gamestate, Phase, Player, PlayerIndex, CardState, CardIdx, TOTAL_CARDS};
 use crate::action::{Action, ActionType};
 use crate::cards::{Card, CardType};
+use crate::card_effects::AdditionalCostType;
 use crate::fab_step::uses_action_point;
 
 
@@ -258,11 +259,25 @@ fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_p
         // Cost still owed after spending banked resource points.
         let needed = data.cost.saturating_sub(player.resources);
 
-        // Free to play, or the remaining hand can pitch enough to cover it.
+        // Pitch available from the rest of the hand to pay this card's cost.
         // `total_pitch` summed the whole hand including this card, so subtracting
         // this card's own pitch can't underflow; `saturating_sub` makes that
         // explicit rather than relying on the invariant holding.
-        let other_pitch = total_pitch.saturating_sub(data.pitch);
+        let mut other_pitch = total_pitch.saturating_sub(data.pitch);
+
+        // A "discard a card" additional cost reserves one card in hand to be
+        // discarded — it can't also be pitched. Set aside the lowest-pitch card
+        // among the rest of the hand (the cheapest to give up) for the discard,
+        // so only what remains can pay the cost. With no other card to discard,
+        // the additional cost can't be paid and the card isn't playable.
+        if matches!(data.additional_cost, Some(AdditionalCostType::DiscardCard)) {
+            match min_other_hand_pitch(player, cards, idx) {
+                Some(reserved) => other_pitch = other_pitch.saturating_sub(reserved),
+                None => continue,
+            }
+        }
+
+        // Free to play, or the remaining hand can pitch enough to cover it.
         if other_pitch >= needed {
             actions.push(Action {
                 typ: ActionType::PlayCard,
@@ -272,6 +287,18 @@ fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_p
     }
 
     actions
+}
+
+/// The pitch value of the lowest-pitch card in `player`'s hand other than the
+/// card at `played_idx`. This is the card a "discard a card" additional cost
+/// would set aside to discard (the cheapest to lose), and removing it from the
+/// pitch pool is equivalent to sorting the hand by pitch and dropping the
+/// lowest card. `None` when the hand holds no other card to discard.
+fn min_other_hand_pitch(player: &Player, cards: &[CardState; TOTAL_CARDS], played_idx: usize) -> Option<u8> {
+    player.hand_iter(cards)
+        .filter(|(idx, _)| *idx != played_idx)
+        .map(|(_, cs)| cs.card.data().pitch)
+        .min()
 }
 
 fn is_action_phase_playable(typ: CardType) -> bool {
@@ -851,6 +878,124 @@ mod tests {
                 other => panic!("unexpected activation for {:?}", other),
             }
         }
+    }
+
+    /// Build a fresh game with Rhinar (p1) on his action phase, ready for his
+    /// hand to be set up for a legal-actions check.
+    fn setup_rhinar_action_phase() -> Gamestate {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        assert_eq!(gs.phase, Phase::Action);
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+        gs
+    }
+
+    /// Replace `pid`'s hand with exactly `desired`, in order. The opening hand is
+    /// trimmed from the front — surplus cards are parked in the graveyard — down
+    /// to `desired.len()` cards, then the survivors are relabelled. Panics if the
+    /// hand is smaller than requested.
+    fn set_hand(gs: &mut Gamestate, pid: PlayerIndex, desired: &[Card]) {
+        {
+            let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+            assert!(player.hand_size as usize >= desired.len(),
+                "opening hand too small to set to the requested cards");
+            // Pop cards off the front of the hand list until only `desired.len()`
+            // remain. The hand is a singly-linked list whose tail points at
+            // itself; advancing `hand_idx` to the head's `next_card` drops the
+            // head, mirroring how the engine detaches a hand card.
+            while player.hand_size as usize > desired.len() {
+                let head = player.hand_idx.expect("hand non-empty while trimming").get();
+                let next = gs.cards[head].next_card.get();
+                player.hand_idx = if next == head { None } else { Some(CardIdx::new(next)) };
+                player.hand_size -= 1;
+                gs.cards[head].location = CardLocation::graveyard(pid);
+            }
+        }
+        let survivors: Vec<usize> = {
+            let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+            player.hand_iter(&gs.cards).map(|(idx, _)| idx).collect()
+        };
+        assert_eq!(survivors.len(), desired.len());
+        for (slot, &card) in survivors.iter().zip(desired) {
+            gs.cards[*slot].card = card;
+        }
+    }
+
+    /// The set of distinct cards offered as `PlayCard` actions for the active
+    /// player in the current phase.
+    fn playable_cards(gs: &Gamestate) -> HashSet<Card> {
+        legal_actions(gs).iter()
+            .filter(|a| a.typ == ActionType::PlayCard)
+            .map(|a| gs.cards[a.card_index()].card)
+            .collect()
+    }
+
+    #[test]
+    fn discard_cost_card_unplayable_when_paying_leaves_no_card_to_discard() {
+        // Both Alpha Rampage and Wrecker Romp carry a "discard a card" additional
+        // cost, so a card must be kept back from the pitch pool to discard. In a
+        // two-card hand the only partner is a single pitch-3 card: it alone covers
+        // the cost, so each card would be playable but for the discard cost —
+        // paying it consumes the one card that would otherwise be discarded.
+
+        // Alpha Rampage (cost 3) + Clearing Bellow (pitch 3): not playable.
+        let mut gs = setup_rhinar_action_phase();
+        set_hand(&mut gs, PlayerIndex::P1, &[Card::AlphaRampageR, Card::ClearingBellowB]);
+        gs.p1.resources = 0;
+        assert!(!playable_cards(&gs).contains(&Card::AlphaRampageR));
+
+        // Control: Muscle Mutt is also cost 3 but has no additional cost, so the
+        // identical hand shape (Muscle Mutt + a pitch-3 card) leaves it playable —
+        // confirming the block above comes from the discard cost, not the pitch.
+        let mut gs = setup_rhinar_action_phase();
+        set_hand(&mut gs, PlayerIndex::P1, &[Card::MuscleMuttY, Card::ClearingBellowB]);
+        gs.p1.resources = 0;
+        assert!(playable_cards(&gs).contains(&Card::MuscleMuttY));
+
+        // Wrecker Romp (cost 2) + Clearing Bellow (pitch 3): not playable.
+        let mut gs = setup_rhinar_action_phase();
+        set_hand(&mut gs, PlayerIndex::P1, &[Card::WreckerRompB, Card::ClearingBellowB]);
+        gs.p1.resources = 0;
+        assert!(!playable_cards(&gs).contains(&Card::WreckerRompB));
+    }
+
+    #[test]
+    fn discard_cost_card_playable_with_a_spare_card_to_discard() {
+        // With pitch enough to both pay the cost and keep a card back to discard,
+        // the discard-cost cards are offered. The hand holds Alpha Rampage,
+        // Wrecker Romp, a pitch-3 card (Clearing Bellow) and a pitch-1 card (Bare
+        // Fangs): the lowest-pitch card is set aside for the discard and the rest
+        // still covers each card's cost.
+        let mut gs = setup_rhinar_action_phase();
+        set_hand(&mut gs, PlayerIndex::P1,
+            &[Card::AlphaRampageR, Card::WreckerRompB, Card::ClearingBellowB, Card::BareFangsR]);
+        gs.p1.resources = 0;
+
+        let playable = playable_cards(&gs);
+        assert!(playable.contains(&Card::AlphaRampageR));
+        assert!(playable.contains(&Card::WreckerRompB));
+    }
+
+    #[test]
+    fn discard_cost_card_playable_when_floating_resources_cover_the_gap() {
+        // Floating resources count toward the cost, so a single point of banked
+        // resource can be the difference. Hand: Alpha Rampage (cost 3, pitch 1)
+        // plus three pitch-1 cards. Setting one pitch-1 card aside to discard
+        // leaves only 2 pitch — short of the cost by itself, but with 1 floating
+        // resource the remaining 2 pitch covers the other 2 owed.
+        let mut gs = setup_rhinar_action_phase();
+        set_hand(&mut gs, PlayerIndex::P1,
+            &[Card::AlphaRampageR, Card::AlphaRampageR, Card::AwakeningBellowR, Card::BareFangsR]);
+
+        // Without the floating resource the remaining 2 pitch can't cover cost 3.
+        gs.p1.resources = 0;
+        assert!(!playable_cards(&gs).contains(&Card::AlphaRampageR));
+
+        // One floating resource drops what's owed to 2, which the spare pitch
+        // covers — so Alpha Rampage becomes playable.
+        gs.p1.resources = 1;
+        assert!(playable_cards(&gs).contains(&Card::AlphaRampageR));
     }
 
 }
