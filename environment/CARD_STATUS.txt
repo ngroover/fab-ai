@@ -1,0 +1,112 @@
+==============================================================================
+ CARD IMPLEMENTATION & TEST STATUS
+ Flesh and Blood (Blitz) — Rhinar (Brute) vs Dorinthea (Warrior)
+==============================================================================
+
+Legend:
+  [x] DONE      — effect implemented AND covered by unit tests
+  [ ] TODO      — still needs implementation and/or unit tests
+
+Unit tests for completed cards live in:
+  environment/src/fab_step_card_tests.rs
+(declared as a child test module of `fab_step` so they can reach its private
+on-play-effect helpers).
+
+
+------------------------------------------------------------------------------
+ COMPLETE (implemented + unit tested)
+------------------------------------------------------------------------------
+  [x] Bare Fangs   (Card::BareFangsR)
+        Draw a card then discard a card; if the discarded card has 6 or more
+        power, this attack gets +2 power.
+        Tests: bare_fangs_discarding_power6_grants_plus2_power,
+               bare_fangs_discarding_below_power6_grants_no_bonus
+
+  [x] Wild Ride    (Card::WildRideR)
+        Draw a card then discard a card; if the discarded card has 6 or more
+        power, this attack gains Go Again.
+        Tests: wild_ride_discarding_power6_grants_go_again,
+               wild_ride_discarding_below_power6_grants_no_go_again
+
+
+------------------------------------------------------------------------------
+ TODO — RHINAR (Brute) attack/action cards
+------------------------------------------------------------------------------
+  [ ] Alpha Rampage          (Card::AlphaRampageR)
+  [ ] Awakening Bellow       (Card::AwakeningBellowR)
+  [ ] Beast Mode             (Card::BeastModeR)
+  [ ] Pack Hunt              (Card::PackHuntR)
+  [ ] Wrecking Ball          (Card::WreckingBallR)
+  [ ] Barraging Beatdown     (Card::BarragingBeatdownY)
+  [ ] Muscle Mutt            (Card::MuscleMuttY)
+  [ ] Pack Call              (Card::PackCallY)
+  [ ] Raging Onslaught       (Card::RagingOnslaughtY)
+  [ ] Smash Instinct         (Card::SmashInstinctY)
+  [ ] Smash With Big Tree    (Card::SmashWithBigTreeY)
+  [ ] Wounded Bull           (Card::WoundedBullY)
+  [ ] Clearing Bellow        (Card::ClearingBellowB)
+  [ ] Come to Fight          (Card::ComeToFightB)
+  [ ] Dodge                  (Card::DodgeB)
+  [ ] Rally the Rearguard    (Card::RallyTheRearguardB)
+  [ ] Titanium Bauble        (Card::TitaniumBaubleB)
+  [ ] Wrecker Romp           (Card::WreckerRompB)
+
+
+------------------------------------------------------------------------------
+ TODO — RHINAR hero / weapon / equipment
+------------------------------------------------------------------------------
+  [ ] Rhinar (hero)          (Card::Rhinar)
+  [ ] Chief Rukutan          (Card::ChiefRukutan)
+  [ ] Bone Basher (weapon)   (Card::BoneBasher)
+  [ ] Blossom of Spring      (Card::BlossomOfSpring)
+  [ ] Bone Vizier            (Card::BoneVizier)
+  [ ] Ironhide Gauntlet      (Card::IronhideGauntlet)
+  [ ] Ironhide Legs          (Card::IronhideLegs)
+
+
+------------------------------------------------------------------------------
+ TODO — DORINTHEA (Warrior) attack/action cards
+------------------------------------------------------------------------------
+  [ ] En Garde                       (Card::EnGardeR)
+  [ ] Flock of the Feather Walkers   (Card::FlockOfTheFeatherWalkersR)
+  [ ] In the Swing                   (Card::InTheSwingR)
+  [ ] Ironsong Response              (Card::IronsongResponseR)
+  [ ] Second Swing                   (Card::SecondSwingR)
+  [ ] Sharpen Steel                  (Card::SharpenSteelR)
+  [ ] Thrust                         (Card::ThrustR)
+  [ ] Warrior's Valor                (Card::WarriorsValorR)
+  [ ] Driving Blade                  (Card::DrivingBladeY)
+  [ ] Glistening Steelblade          (Card::GlisteningSteelbladeY)
+  [ ] On a Knife Edge                (Card::OnAKnifeEdgeY)
+  [ ] Out for Blood                  (Card::OutForBloodY)
+  [ ] Run Through                    (Card::RunThroughY)
+  [ ] Slice and Dice                 (Card::SliceAndDiceY)
+  [ ] Blade Flash                    (Card::BladeFlashB)
+  [ ] Hit and Run                    (Card::HitAndRunB)
+  [ ] Sigil of Solace                (Card::SigilofSolaceB)
+  [ ] Toughen Up                     (Card::ToughenUpB)
+  [ ] Visit the Blacksmith           (Card::VisitTheBlacksmithB)
+
+
+------------------------------------------------------------------------------
+ TODO — DORINTHEA hero / weapon / equipment
+------------------------------------------------------------------------------
+  [ ] Dorinthea (hero)       (Card::Dorinthea)
+  [ ] Hala Goldenhelm        (Card::HalaGoldenhelm)
+  [ ] Dawnblade (weapon)     (Card::Dawnblade)
+  [ ] Gallantry Gold         (Card::GallantryGold)
+  [ ] Ironrot Helm           (Card::IronrotHelm)
+  [ ] Ironrot Legs           (Card::IronrotLegs)
+
+
+==============================================================================
+ NOTES
+==============================================================================
+- Some shared combat mechanics (e.g. Intimidate, Pack Call token generation)
+  already have coverage in the general `fab_step::tests` module, but the cards
+  above are not yet considered fully implemented + dedicated-card-tested and so
+  remain on the TODO list.
+- When a card is finished, add its dedicated test(s) to
+  environment/src/fab_step_card_tests.rs and move it up to the COMPLETE
+  section.
+==============================================================================
