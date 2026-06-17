@@ -106,17 +106,85 @@ fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
     // itself, so exclude it from the options.
     let pending_index = gs.pending_card.map(|p| p.index.get());
 
+    // A pending card with a "discard a card" additional cost must leave a card
+    // behind to discard once its cost is paid. When that's the case, pitching a
+    // card is only legal if the rest of the hand can still both finish covering
+    // the cost and keep a spare card to discard — so pitching the card that
+    // ought to be discarded (e.g. the lone low-pitch card) is disallowed.
+    let discard_cost_cost: Option<u8> = gs.pending_card.and_then(|p| {
+        let data = gs.cards[p.index.get()].card.data();
+        matches!(data.additional_cost, Some(AdditionalCostType::DiscardCard)).then_some(data.cost)
+    });
+
     // Every other card in hand is a pitch option, as long as it actually pitches
     // for resources — cards with a pitch value of 0 produce nothing and can't be
     // pitched.
     player.hand_iter(&gs.cards)
         .filter(|(idx, _)| Some(*idx) != pending_index)
         .filter(|(_, cs)| cs.card.data().pitch > 0)
+        .filter(|(idx, cs)| match discard_cost_cost {
+            Some(cost) => pitch_leaves_card_to_discard(
+                player,
+                &gs.cards,
+                pending_index.expect("discard cost implies a pending card"),
+                cost,
+                player.resources,
+                *idx,
+                cs.card.data().pitch,
+            ),
+            None => true,
+        })
         .map(|(idx, _)| Action {
             typ: ActionType::Pitch,
             card: Some(CardIdx::new(idx)),
         })
         .collect()
+}
+
+/// While paying for a card that carries a "discard a card" additional cost,
+/// decide whether pitching the candidate at `cand_idx` can still leave a card in
+/// hand to discard once the cost is covered. Pitching it banks `cand_pitch` more
+/// resources; the rest of the hand (everything except the pending card and the
+/// candidate) must then be able to cover whatever cost remains while keeping its
+/// lowest-pitch card back to discard.
+fn pitch_leaves_card_to_discard(
+    player: &Player,
+    cards: &[CardState; TOTAL_CARDS],
+    pending_idx: usize,
+    cost: u8,
+    resources: u8,
+    cand_idx: usize,
+    cand_pitch: u8,
+) -> bool {
+    // Cost still owed after banking what this candidate pitches.
+    let remaining_cost = cost.saturating_sub(resources.saturating_add(cand_pitch));
+
+    // Summarise the rest of the hand left after pitching the candidate.
+    let mut count: u32 = 0;
+    let mut total: u32 = 0;
+    let mut min_pitch: Option<u8> = None;
+    for (idx, cs) in player.hand_iter(cards) {
+        if idx == pending_idx || idx == cand_idx {
+            continue;
+        }
+        let p = cs.card.data().pitch;
+        count += 1;
+        total += p as u32;
+        min_pitch = Some(min_pitch.map_or(p, |m| m.min(p)));
+    }
+
+    // No card left means nothing to discard, so this pitch is a dead end.
+    if count == 0 {
+        return false;
+    }
+    // Cost already fully covered: the remaining cards include the discard.
+    if remaining_cost == 0 {
+        return true;
+    }
+    // Reserve the lowest-pitch remaining card for the discard; the rest must
+    // still cover what's owed.
+    let reserved = min_pitch.unwrap_or(0) as u32;
+    total.saturating_sub(reserved) >= remaining_cost as u32
 }
 
 fn legal_action_phase(gs: &Gamestate) -> Vec<Action> {
@@ -996,6 +1064,37 @@ mod tests {
         // covers — so Alpha Rampage becomes playable.
         gs.p1.resources = 1;
         assert!(playable_cards(&gs).contains(&Card::AlphaRampageR));
+    }
+
+    #[test]
+    fn pitch_for_discard_cost_card_excludes_the_card_needed_to_discard() {
+        // Paying for a card with a "discard a card" additional cost must leave a
+        // card in hand to discard. Hand: Alpha Rampage (cost 3) plus a red
+        // 1-pitch card and a blue 3-pitch card.
+        let mut gs = setup_rhinar_action_phase();
+        set_hand(&mut gs, PlayerIndex::P1,
+            &[Card::AlphaRampageR, Card::BareFangsR, Card::ClearingBellowB]);
+        gs.p1.resources = 0;
+
+        // Play Alpha Rampage: it can't be paid outright, so we drop into the
+        // pitch phase with Alpha Rampage pending in hand.
+        let ar_idx = gs.p1.hand_iter(&gs.cards)
+            .find(|(_, cs)| cs.card == Card::AlphaRampageR)
+            .map(|(idx, _)| idx)
+            .expect("Alpha Rampage should be in hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(ar_idx))});
+        assert_eq!(gs.phase, Phase::ActionPitch);
+
+        // Only the blue 3-pitch card is a legal pitch: pitching it covers the
+        // cost and leaves the red card to discard. Pitching the red 1-pitch card
+        // would force the blue card to be pitched too, leaving nothing to
+        // discard — so the red card is not offered.
+        let pitchable: HashSet<Card> = legal_actions(&gs).iter()
+            .filter(|a| a.typ == ActionType::Pitch)
+            .map(|a| gs.cards[a.card_index()].card)
+            .collect();
+        assert_eq!(pitchable, HashSet::from([Card::ClearingBellowB]));
+        assert!(!pitchable.contains(&Card::BareFangsR));
     }
 
 }
