@@ -28,11 +28,27 @@ on-play-effect helpers).
         Tests: wild_ride_discarding_power6_grants_go_again,
                wild_ride_discarding_below_power6_grants_no_go_again
 
+  [x] Alpha Rampage (Card::AlphaRampageR)
+        As an additional cost to play, discard a card. Legal-action gates only
+        offer it (and the pitches paying for it) when the hand can both cover
+        the cost and keep a card back to discard; the discard (a random hand
+        card) is paid as the card is played.
+        Tests: discard_cost_card_unplayable_when_paying_leaves_no_card_to_discard,
+               discard_cost_card_playable_with_a_spare_card_to_discard,
+               discard_cost_card_playable_when_floating_resources_cover_the_gap,
+               pitch_for_discard_cost_card_excludes_the_card_needed_to_discard,
+               test_discard_cost_card_discards_a_hand_card_when_played
+
+  [x] Wrecker Romp  (Card::WreckerRompB)
+        As an additional cost to play, discard a card. Shares the discard-cost
+        legal-action gating and play-time discard with Alpha Rampage.
+        Tests: discard_cost_card_unplayable_when_paying_leaves_no_card_to_discard,
+               discard_cost_card_playable_with_a_spare_card_to_discard
+
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
-  [ ] Alpha Rampage          (Card::AlphaRampageR)
   [ ] Awakening Bellow       (Card::AwakeningBellowR)
   [ ] Beast Mode             (Card::BeastModeR)
   [ ] Pack Hunt              (Card::PackHuntR)
@@ -49,7 +65,6 @@ on-play-effect helpers).
   [ ] Dodge                  (Card::DodgeB)
   [ ] Rally the Rearguard    (Card::RallyTheRearguardB)
   [ ] Titanium Bauble        (Card::TitaniumBaubleB)
-  [ ] Wrecker Romp           (Card::WreckerRompB)
 
 
 ------------------------------------------------------------------------------
