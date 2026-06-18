@@ -526,13 +526,6 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         gs.log_public(msg);
     }
 
-    // Pay any "discard a card" additional cost as the card resolves: the
-    // resolving player discards a random card from their hand. The play/pitch
-    // legal-action gates guarantee a card was kept back in hand to satisfy this.
-    if matches!(data.additional_cost, Some(AdditionalCostType::DiscardCard)) {
-        apply_discard_cost(gs, owner);
-    }
-
     // Intimidate triggers as the card resolves, regardless of whether it goes on
     // to the combat chain (an attack action) or to the graveyard (a non-attack
     // action): the resolving player's opponent banishes a random card from their
@@ -622,11 +615,12 @@ fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
 }
 
 /// Pay a "discard a card" additional cost (e.g. Alpha Rampage, Wrecker Romp):
-/// `owner`, the player whose card is resolving, discards one card chosen
-/// uniformly at random from their hand into their graveyard. A no-op when the
-/// hand is empty. Like Intimidate and the on-play discards, the choice is made
-/// by the engine without a dedicated choice phase; the play/pitch legal-action
-/// gates ensure a card is held back in hand so this cost can always be paid.
+/// `owner`, the player playing the card, discards one card chosen uniformly at
+/// random from their hand into their graveyard. Paid as the card is played (once
+/// it is on the stack and out of hand). A no-op when the hand is empty. Like
+/// Intimidate and the on-play discards, the choice is made by the engine without
+/// a dedicated choice phase; the play/pitch legal-action gates ensure a card is
+/// held back in hand so this cost can always be paid.
 fn apply_discard_cost(gs: &mut Gamestate, owner: PlayerIndex) {
     // Snapshot the owner's hand slots, releasing the borrow on `gs.cards`
     // before drawing from the rng and mutating the hand below.
@@ -875,6 +869,16 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     detach_from_current_zone(player, &mut gs.cards, pending_idx);
     gs.cards[pending_idx].location = CardLocation::Stack;
     gs.push_to_stack(pending);
+
+    // Additional costs are paid as the card is played. A "discard a card" cost
+    // (e.g. Alpha Rampage, Wrecker Romp) is paid now that the card is on the
+    // stack and out of hand, so the discard is drawn from the rest of the hand.
+    // The play/pitch legal-action gates guarantee a card was held back to satisfy
+    // it. Only played cards carry this cost; activations have no additional cost.
+    if matches!(cs.card.data().additional_cost, Some(AdditionalCostType::DiscardCard)) {
+        let owner = gs.active_player;
+        apply_discard_cost(gs, owner);
+    }
 
     // The card now lives on the stack, so it is no longer "pending" — clear it.
     // A new layer landing on the stack also interrupts any pending resolution, so
@@ -1619,7 +1623,7 @@ mod tests {
     }
 
     #[test]
-    fn test_discard_cost_card_discards_a_hand_card_on_resolve() {
+    fn test_discard_cost_card_discards_a_hand_card_when_played() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs, false);
 
@@ -1645,9 +1649,20 @@ mod tests {
                 .map(|(idx, _)| idx)
                 .expect("Raging Onslaught should be in the opening hand");
 
-        // Play Alpha Rampage and pitch Clearing Bellow (pitch 3) to cover its
-        // cost, committing it to the stack.
+        // Play Alpha Rampage; it can't be paid outright so it stays pending.
         step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(ar_idx))});
+        assert_eq!(gs.phase, Phase::ActionPitch);
+
+        // Before paying, Pack Call and Raging Onslaught are both still in hand —
+        // the discard cost has not been paid yet.
+        assert_eq!(gs.cards[pack_idx].location, CardLocation::P1Hand);
+        assert_eq!(gs.cards[ro_idx].location, CardLocation::P1Hand);
+
+        // Pitch Clearing Bellow (pitch 3) to cover the cost. This commits Alpha
+        // Rampage to the stack, and the "discard a card" additional cost is paid
+        // as it is played: one random card from the rest of the hand (Pack Call
+        // or Raging Onslaught) is discarded to the graveyard immediately — well
+        // before the card resolves.
         let cb_idx = gs.p1.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::ClearingBellowB)
                 .map(|(idx, _)| idx)
@@ -1656,32 +1671,28 @@ mod tests {
         assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(ar_idx));
 
-        // At this point only Pack Call and Raging Onslaught remain in hand.
-        assert_eq!(gs.p1.hand_size, 2);
-        assert_eq!(gs.cards[pack_idx].location, CardLocation::P1Hand);
-        assert_eq!(gs.cards[ro_idx].location, CardLocation::P1Hand);
+        // Exactly one of the two remaining cards was discarded at play time; the
+        // other stays in hand, leaving a single card in hand.
+        let discarded_at_play = [pack_idx, ro_idx]
+                .into_iter()
+                .filter(|&idx| gs.cards[idx].location == CardLocation::P1Graveyard)
+                .count();
+        assert_eq!(discarded_at_play, 1, "exactly one hand card should be discarded when played");
+        assert_eq!(gs.p1.hand_size, 1);
 
-        // Both players pass: Alpha Rampage resolves. As it resolves it pays its
-        // "discard a card" additional cost by discarding one random card from
-        // Rhinar's hand to his graveyard, then (as an attack action) moves onto
-        // his combat chain, sending the game to the Defend phase.
+        // Both players pass: Alpha Rampage resolves onto the combat chain. No
+        // further discard happens at resolution — the cost was already paid.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Defend);
         assert_eq!(gs.cards[ar_idx].location, CardLocation::P1CombatChain);
 
-        // Exactly one of the two remaining cards was discarded; the other stays in
-        // hand. Rhinar's hand shrank by the one discarded card.
-        let pack_loc = gs.cards[pack_idx].location;
-        let ro_loc = gs.cards[ro_idx].location;
-        let discarded = [pack_idx, ro_idx]
+        let discarded_after_resolve = [pack_idx, ro_idx]
                 .into_iter()
                 .filter(|&idx| gs.cards[idx].location == CardLocation::P1Graveyard)
                 .count();
-        assert_eq!(discarded, 1, "exactly one hand card should be discarded");
-        assert!(pack_loc == CardLocation::P1Hand || ro_loc == CardLocation::P1Hand,
-            "the card not discarded should still be in hand");
+        assert_eq!(discarded_after_resolve, 1, "the discard cost is paid once, at play time");
         assert_eq!(gs.p1.hand_size, 1);
     }
 
