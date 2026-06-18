@@ -1,7 +1,7 @@
 use crate::action::{Action,ActionType};
 use crate::game_state::{Gamestate,Phase,Player,PendingCard,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
 use crate::cards::{CardData,CardType,Keyword};
-use crate::card_effects::{OnPlayEffect,OnPlayConditionType,OnPlayEffectType};
+use crate::card_effects::{OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType};
 use rand::RngExt;
 
 pub fn step(gs: &mut Gamestate, act: Action) {
@@ -526,6 +526,13 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         gs.log_public(msg);
     }
 
+    // Pay any "discard a card" additional cost as the card resolves: the
+    // resolving player discards a random card from their hand. The play/pitch
+    // legal-action gates guarantee a card was kept back in hand to satisfy this.
+    if matches!(data.additional_cost, Some(AdditionalCostType::DiscardCard)) {
+        apply_discard_cost(gs, owner);
+    }
+
     // Intimidate triggers as the card resolves, regardless of whether it goes on
     // to the combat chain (an attack action) or to the graveyard (a non-attack
     // action): the resolving player's opponent banishes a random card from their
@@ -612,6 +619,39 @@ fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
     detach_from_current_zone(player, &mut gs.cards, pick);
     gs.cards[pick].location = CardLocation::intimidate_banish(victim);
     attach_to_front_of_zone(&mut gs.cards, &mut player.intimidate_banish_idx, None, None, pick);
+}
+
+/// Pay a "discard a card" additional cost (e.g. Alpha Rampage, Wrecker Romp):
+/// `owner`, the player whose card is resolving, discards one card chosen
+/// uniformly at random from their hand into their graveyard. A no-op when the
+/// hand is empty. Like Intimidate and the on-play discards, the choice is made
+/// by the engine without a dedicated choice phase; the play/pitch legal-action
+/// gates ensure a card is held back in hand so this cost can always be paid.
+fn apply_discard_cost(gs: &mut Gamestate, owner: PlayerIndex) {
+    // Snapshot the owner's hand slots, releasing the borrow on `gs.cards`
+    // before drawing from the rng and mutating the hand below.
+    let hand: Vec<usize> = {
+        let player = if owner == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+        player.hand_iter(&gs.cards).map(|(idx, _)| idx).collect()
+    };
+    if hand.is_empty() {
+        return;
+    }
+
+    let pick = hand[gs.rng.random_range(0..hand.len())];
+
+    // The discard lands face-up in the graveyard, so it is public.
+    if gs.logging_enabled() {
+        let card = gs.cards[pick].card;
+        gs.log_public(format!("{} discards {:?}", player_name(owner), card));
+    }
+
+    // Move the discarded card from hand to graveyard. The graveyard is tracked
+    // purely by `location` (it has no head pointer), so detaching from the hand
+    // and retagging the location is all that is required.
+    let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    detach_from_current_zone(player, &mut gs.cards, pick);
+    gs.cards[pick].location = CardLocation::graveyard(owner);
 }
 
 /// Resolve a card's "when you play" effect as it resolves off the stack. The
@@ -1576,6 +1616,73 @@ mod tests {
         assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.p1.chain_link[0], Some(CardIdx::new(mm_idx)));
         assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
+    }
+
+    #[test]
+    fn test_discard_cost_card_discards_a_hand_card_on_resolve() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        // Relabel Muscle Mutt to Alpha Rampage (cost 3, carries a "discard a card"
+        // additional cost). Rhinar's opening hand is then Alpha Rampage, Pack Call,
+        // Raging Onslaught and Clearing Bellow.
+        let ar_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        gs.cards[ar_idx].card = Card::AlphaRampageR;
+
+        // The two cards that will be left in hand once Alpha Rampage is committed
+        // and Clearing Bellow is pitched — the discard must land on one of them.
+        let pack_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::PackCallY)
+                .map(|(idx, _)| idx)
+                .expect("Pack Call should be in the opening hand");
+        let ro_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::RagingOnslaughtY)
+                .map(|(idx, _)| idx)
+                .expect("Raging Onslaught should be in the opening hand");
+
+        // Play Alpha Rampage and pitch Clearing Bellow (pitch 3) to cover its
+        // cost, committing it to the stack.
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(ar_idx))});
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        assert_eq!(gs.phase, Phase::ActionInstant);
+        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(ar_idx));
+
+        // At this point only Pack Call and Raging Onslaught remain in hand.
+        assert_eq!(gs.p1.hand_size, 2);
+        assert_eq!(gs.cards[pack_idx].location, CardLocation::P1Hand);
+        assert_eq!(gs.cards[ro_idx].location, CardLocation::P1Hand);
+
+        // Both players pass: Alpha Rampage resolves. As it resolves it pays its
+        // "discard a card" additional cost by discarding one random card from
+        // Rhinar's hand to his graveyard, then (as an attack action) moves onto
+        // his combat chain, sending the game to the Defend phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.cards[ar_idx].location, CardLocation::P1CombatChain);
+
+        // Exactly one of the two remaining cards was discarded; the other stays in
+        // hand. Rhinar's hand shrank by the one discarded card.
+        let pack_loc = gs.cards[pack_idx].location;
+        let ro_loc = gs.cards[ro_idx].location;
+        let discarded = [pack_idx, ro_idx]
+                .into_iter()
+                .filter(|&idx| gs.cards[idx].location == CardLocation::P1Graveyard)
+                .count();
+        assert_eq!(discarded, 1, "exactly one hand card should be discarded");
+        assert!(pack_loc == CardLocation::P1Hand || ro_loc == CardLocation::P1Hand,
+            "the card not discarded should still be in hand");
+        assert_eq!(gs.p1.hand_size, 1);
     }
 
     #[test]
