@@ -37,7 +37,7 @@ on-play-effect helpers).
                discard_cost_card_playable_with_a_spare_card_to_discard,
                discard_cost_card_playable_when_floating_resources_cover_the_gap,
                pitch_for_discard_cost_card_excludes_the_card_needed_to_discard,
-               test_discard_cost_card_discards_a_hand_card_when_played
+               discard_cost_card_discards_a_hand_card_when_played
 
   [x] Wrecker Romp  (Card::WreckerRompB)
         As an additional cost to play, discard a card. Shares the discard-cost
