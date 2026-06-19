@@ -1,7 +1,7 @@
 use crate::action::{Action,ActionType};
 use crate::game_state::{Gamestate,Phase,Player,PendingCard,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
 use crate::cards::{CardClass,CardData,CardType,Keyword};
-use crate::card_effects::{OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType};
+use crate::card_effects::{OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect};
 use rand::RngExt;
 
 pub fn step(gs: &mut Gamestate, act: Action) {
@@ -656,6 +656,7 @@ fn apply_discard_cost(gs: &mut Gamestate, owner: PlayerIndex) {
     }
 
     let pick = hand[gs.rng.random_range(0..hand.len())];
+    let discarded_power = gs.cards[pick].card.data().power;
 
     // The discard lands face-up in the graveyard, so it is public.
     if gs.logging_enabled() {
@@ -669,6 +670,27 @@ fn apply_discard_cost(gs: &mut Gamestate, owner: PlayerIndex) {
     let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     detach_from_current_zone(player, &mut gs.cards, pick);
     gs.cards[pick].location = CardLocation::graveyard(owner);
+
+    maybe_discard6_intimidate(gs, owner, discarded_power);
+}
+
+/// Apply Rhinar's `OnDiscard6Intimidate` constant hero ability after a card has
+/// just been discarded from `owner`'s hand: when the discarded card had 6 or more
+/// power and the owner's hero carries the constant effect, trigger an Intimidate
+/// (`apply_intimidate`). This fires for every discard path — the "discard a card"
+/// additional cost (e.g. Alpha Rampage, Wrecker Romp) and the play-effect
+/// draw-then-discard (e.g. Bare Fangs, Wild Ride) — and is independent of the
+/// played card's own keywords, so a card that both carries Intimidate and
+/// discards a 6-power card (e.g. Alpha Rampage) intimidates twice.
+fn maybe_discard6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, discarded_power: u8) {
+    // `hero` is `Copy` and `data()` returns a `'static` reference, so this read
+    // releases its borrow of the player before `apply_intimidate` mutates `gs`.
+    let hero_data = (if owner == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 }).hero.data();
+    if discarded_power >= 6
+        && matches!(hero_data.constant_effect, Some(ConstantEffect::OnDiscard6Intimidate))
+    {
+        apply_intimidate(gs, owner);
+    }
 }
 
 /// Resolve a card's "when you play" effect as it resolves off the stack. The
@@ -763,6 +785,10 @@ fn draw_then_discard_hit6(gs: &mut Gamestate, owner: PlayerIndex) -> bool {
     // A discard lands face-up in the graveyard, so it becomes known to both
     // players.
     gs.cards[pick].visible = CardVisibleState::BothKnow;
+
+    // Rhinar's constant ability also triggers off this discard: a power-6 discard
+    // intimidates, on top of whatever the play effect itself does.
+    maybe_discard6_intimidate(gs, owner, discarded_power);
 
     discarded_power >= 6
 }

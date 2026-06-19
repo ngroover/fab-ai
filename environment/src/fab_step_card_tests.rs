@@ -573,3 +573,146 @@ fn beast_mode_no_bonus_when_player_has_not_intimidated() {
 
     assert_eq!(gs.p2.life, life_before - 6);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rhinar's constant hero ability: OnDiscard6Intimidate
+//
+// Whenever Rhinar discards a card with 6 or more power, he Intimidates (the
+// opponent banishes a card from hand). This fires for every discard path — the
+// "discard a card" additional cost (Alpha Rampage, Wrecker Romp) and the
+// play-effect draw-then-discard (Bare Fangs, Wild Ride) — and stacks with a
+// card's own Intimidate keyword.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Count the cards sitting in `pid`'s Intimidate banish zone by location tag.
+fn intimidate_banish_count(gs: &Gamestate, pid: PlayerIndex) -> usize {
+    let loc = CardLocation::intimidate_banish(pid);
+    gs.cards.iter().filter(|cs| cs.location == loc).count()
+}
+
+#[test]
+fn rhinar_constant_ability_is_on_discard6_intimidate() {
+    use crate::card_effects::ConstantEffect;
+    assert!(matches!(
+        Card::Rhinar.data().constant_effect,
+        Some(ConstantEffect::OnDiscard6Intimidate)
+    ));
+    // The opposing hero (Dorinthea) carries no such constant effect.
+    assert!(Card::Dorinthea.data().constant_effect.is_none());
+}
+
+#[test]
+fn discard_cost_of_power6_card_triggers_intimidate() {
+    let mut gs = setup_rhinar_action_phase();
+
+    // Seat a single power-6 card in Rhinar's hand so the "discard a card" cost
+    // is forced to discard it. Wrecker Romp is power 6.
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::WreckerRompB]);
+    assert!(Card::WreckerRompB.data().power >= 6);
+    assert!(gs.p2.hand_size > 0, "opponent needs a card to be intimidated");
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
+
+    apply_discard_cost(&mut gs, PlayerIndex::P1);
+
+    // The 6-power discard triggered Rhinar's constant ability: the opponent
+    // banished one card from hand to their Intimidate banish zone.
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
+}
+
+#[test]
+fn discard_cost_of_sub_power6_card_does_not_trigger_intimidate() {
+    let mut gs = setup_rhinar_action_phase();
+
+    // Clearing Bellow is power 0, below the threshold, so the discard cost pays
+    // out without triggering the constant ability.
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::ClearingBellowB]);
+    assert!(Card::ClearingBellowB.data().power < 6);
+
+    apply_discard_cost(&mut gs, PlayerIndex::P1);
+
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
+}
+
+#[test]
+fn bare_fangs_play_effect_power6_discard_also_intimidates() {
+    // The play-effect draw-then-discard path (Bare Fangs / Wild Ride) routes
+    // through the same constant-ability check, so a power-6 discard intimidates
+    // on top of banking the card's own +2 power.
+    let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+    reset(&mut gs, false);
+    step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+    move_hand_to_graveyard(&mut gs, PlayerIndex::P1);
+    let pick = find_p1_deck_card(&gs, |power| power >= 6);
+    put_on_top_of_deck(&mut gs, PlayerIndex::P1, pick);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
+
+    let effect = Card::BareFangsR.data().play_effect.as_ref().unwrap();
+    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+
+    // The play effect banked its +2, and the 6-power discard also intimidated.
+    assert_eq!(gs.p1.attack_power_bonus, 2);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
+}
+
+#[test]
+fn non_rhinar_hero_power6_discard_does_not_intimidate() {
+    // The constant ability keys off the discarding hero, not the discard itself.
+    // Dorinthea (p2) discarding a 6-power card does not intimidate p1.
+    let mut gs = setup_rhinar_action_phase();
+    assert!(Card::Dorinthea.data().constant_effect.is_none());
+
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::WreckerRompB]);
+    assert!(Card::WreckerRompB.data().power >= 6);
+
+    apply_discard_cost(&mut gs, PlayerIndex::P2);
+
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P1), 0);
+}
+
+#[test]
+fn alpha_rampage_power6_discard_intimidates_twice() {
+    // Alpha Rampage carries the Intimidate keyword *and* a "discard a card" cost.
+    // When the discarded card is power 6+, the keyword Intimidate (at resolution)
+    // and Rhinar's constant ability (at the discard) both fire — two cards leave
+    // the opponent's hand.
+    let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+    reset(&mut gs, false);
+    step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+    // Make every non-Alpha-Rampage hand card a power-6 card so whichever one the
+    // discard cost picks is guaranteed to clear the threshold. Rhinar's opening
+    // hand is Muscle Mutt, Pack Call, Raging Onslaught and Clearing Bellow.
+    let mut ar_idx = None;
+    let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    for (slot, &idx) in hand.iter().enumerate() {
+        if slot == 0 {
+            gs.cards[idx].card = Card::AlphaRampageR;
+            ar_idx = Some(idx);
+        } else {
+            gs.cards[idx].card = Card::WreckerRompB; // power 6
+        }
+    }
+    let ar_idx = ar_idx.expect("opening hand should be non-empty");
+    assert!(Card::AlphaRampageR.data().keyword.contains(crate::cards::Keyword::Intimidate));
+
+    // Pay the cost 3 outright so no pitching disturbs the hand.
+    gs.p1.resources = 3;
+    assert!(gs.p2.hand_size >= 2, "opponent needs two cards to be intimidated twice");
+
+    // Play Alpha Rampage: paid from resources, it commits to the stack and the
+    // discard cost is paid from the (all power-6) remainder of the hand — the
+    // constant ability intimidates once here.
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(ar_idx))});
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1,
+        "the power-6 discard cost should intimidate once");
+
+    // Both players pass so Alpha Rampage resolves; its Intimidate keyword fires
+    // as it lands on the chain, intimidating a second time.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+    assert_eq!(gs.cards[ar_idx].location, CardLocation::P1CombatChain);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 2,
+        "keyword Intimidate plus the constant ability should intimidate twice in total");
+}

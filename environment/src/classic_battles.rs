@@ -1,5 +1,5 @@
 use crate::cards::{Card, CardClass, CardData, CardType, Color, EquipmentSlot, Keyword, WeaponType};
-use crate::card_effects::{AdditionalCostType, Ability, OnPlayConditionType, OnPlayEffect, OnPlayEffectType};
+use crate::card_effects::{AdditionalCostType, Ability, ConstantEffect, OnPlayConditionType, OnPlayEffect, OnPlayEffectType};
 use std::sync::LazyLock;
 
 /// Catalog of every card in the Rhinar vs Dorinthea classic battle.
@@ -27,7 +27,11 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             keyword: Keyword::empty(),
             hero_life: 20,
             hero_intellect: 4,
-            constant_effect: None,
+            // Constant ability: whenever Rhinar discards a card with 6 or more
+            // power, Intimidate (the opponent banishes a card from hand). This
+            // stacks with a card's own Intimidate keyword — e.g. Alpha Rampage
+            // (Intimidate) that discards a 6-power card intimidates twice.
+            constant_effect: Some(ConstantEffect::OnDiscard6Intimidate),
             ability: None,
             defend_effect: None,
             next_attack_effect: None,
