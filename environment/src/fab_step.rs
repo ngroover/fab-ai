@@ -389,6 +389,9 @@ fn bottom_pitched_card(gs: &mut Gamestate, idx: usize) {
     let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     detach_from_current_zone(player, &mut gs.cards, idx);
     gs.cards[idx].location = CardLocation::deck(pid);
+    // These cards were pitched face-up, so both players already saw them; putting
+    // them on the bottom of the deck keeps that knowledge (visibility is left as
+    // BothKnow rather than reset to Hidden).
     attach_to_bottom_of_deck(player, &mut gs.cards, idx);
 }
 
@@ -491,6 +494,9 @@ fn commit_blocker(gs: &mut Gamestate, idx: usize) {
 
     detach_from_current_zone(player, &mut gs.cards, idx);
     gs.cards[idx].location = CardLocation::combat_chain(pid);
+    // Declaring a blocker plays it face-up onto the combat chain, so it becomes
+    // known to both players.
+    gs.cards[idx].visible = CardVisibleState::BothKnow;
     attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[0], None, None, idx);
 }
 
@@ -558,6 +564,8 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         gs.phase = Phase::Defend;
     } else {
         gs.cards[top].location = CardLocation::graveyard(owner);
+        // A resolved card sits face-up in the graveyard, known to both players.
+        gs.cards[top].visible = CardVisibleState::BothKnow;
         // A resolving non-attack action — an action card, or an activated
         // action-speed ability — spends the owner's action point unless it has
         // Go Again. Attacks are handled when combat damage resolves; instants and
@@ -722,6 +730,9 @@ fn draw_then_discard_hit6(gs: &mut Gamestate, owner: PlayerIndex) -> bool {
     let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     detach_from_current_zone(player, &mut gs.cards, pick);
     gs.cards[pick].location = CardLocation::graveyard(owner);
+    // A discard lands face-up in the graveyard, so it becomes known to both
+    // players.
+    gs.cards[pick].visible = CardVisibleState::BothKnow;
 
     discarded_power >= 6
 }
@@ -756,11 +767,7 @@ fn return_intimidate_banished_to_hands(gs: &mut Gamestate) {
             let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
             detach_from_current_zone(player, &mut gs.cards, idx);
             gs.cards[idx].location = CardLocation::hand(pid);
-            gs.cards[idx].visible = if pid == PlayerIndex::P1 {
-                CardVisibleState::P1Knows
-            } else {
-                CardVisibleState::P2Knows
-            };
+            gs.cards[idx].visible = hand_visibility(pid);
             attach_to_front_of_zone(
                 &mut gs.cards,
                 &mut player.hand_idx,
@@ -834,6 +841,9 @@ fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
     let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     detach_from_current_zone(player, &mut gs.cards, card_idx);
     gs.cards[card_idx].location = CardLocation::pitch(pid);
+    // A pitched card lands face-up in the pitch zone, so it becomes known to both
+    // players.
+    gs.cards[card_idx].visible = CardVisibleState::BothKnow;
     attach_to_front_of_zone(&mut gs.cards, &mut player.pitch_idx, None, None, card_idx);
     player.resources += pitch_val;
     let resources = player.resources;
@@ -868,6 +878,9 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     player.resources -= cost;
     detach_from_current_zone(player, &mut gs.cards, pending_idx);
     gs.cards[pending_idx].location = CardLocation::Stack;
+    // Playing a card puts it on the shared stack face-up, so it becomes known to
+    // both players.
+    gs.cards[pending_idx].visible = CardVisibleState::BothKnow;
     gs.push_to_stack(pending);
 
     // Additional costs are paid as the card is played. A "discard a card" cost
@@ -991,6 +1004,9 @@ fn close_combat_chain(gs: &mut Gamestate) {
                     player.weapon_idx = Some(CardIdx::new(cur));
                 } else {
                     cards[cur].location = CardLocation::graveyard(pid);
+                    // The graveyard is a public zone, so a card landing there is
+                    // known to both players.
+                    cards[cur].visible = CardVisibleState::BothKnow;
                 }
                 // A node whose next_card points at itself ends the list.
                 if next == cur {
@@ -1206,17 +1222,23 @@ fn draw_cards(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], num: us
     }
 }
 
+/// Visibility of a card held in `pid`'s hand: cards in hand are known only to the
+/// player holding them, never to the opponent.
+fn hand_visibility(pid: PlayerIndex) -> CardVisibleState {
+    if pid == PlayerIndex::P1 {
+        CardVisibleState::P1Knows
+    } else {
+        CardVisibleState::P2Knows
+    }
+}
+
 fn move_from_deck_to_hand(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], card_idx : usize) {
     // Pull the card off the deck (updates top/bottom pointers and deck_size),
     // then prepend it to the hand and mark it as known to its owner.
     let pid = player.pid;
     detach_from_current_zone(player, cards, card_idx);
     cards[card_idx].location = CardLocation::hand(pid);
-    cards[card_idx].visible = if pid == PlayerIndex::P1 {
-        CardVisibleState::P1Knows
-    } else {
-        CardVisibleState::P2Knows
-    };
+    cards[card_idx].visible = hand_visibility(pid);
     attach_to_front_of_zone(
         cards,
         &mut player.hand_idx,
@@ -1364,6 +1386,76 @@ mod tests {
         assert_eq!(gs.p1.resources, 0);
         // The pitched card now lives in the pitch zone, not the hand.
         assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Pitch);
+    }
+
+    #[test]
+    fn test_card_visibility_follows_zone() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        // Cards still in the deck are hidden from both players; cards drawn into a
+        // hand are known only to the player holding them.
+        let deck_card = (0..PLAYER_CARDS)
+                .find(|&i| gs.cards[i].location == CardLocation::P1Deck)
+                .expect("p1 should still have cards in the deck");
+        assert_eq!(gs.cards[deck_card].visible, CardVisibleState::Hidden);
+
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Hand);
+        assert_eq!(gs.cards[mm_idx].visible, CardVisibleState::P1Knows);
+
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        assert_eq!(gs.cards[cb_idx].visible, CardVisibleState::P1Knows);
+
+        // Play Muscle Mutt and pitch Clearing Bellow to pay for it.
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        // While the card is pending it is still in hand, so it stays known only to
+        // its holder.
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Hand);
+        assert_eq!(gs.cards[mm_idx].visible, CardVisibleState::P1Knows);
+
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+
+        // Playing the card put it on the stack and pitching revealed the pitched
+        // card; both are now known to both players.
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
+        assert_eq!(gs.cards[mm_idx].visible, CardVisibleState::BothKnow);
+        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Pitch);
+        assert_eq!(gs.cards[cb_idx].visible, CardVisibleState::BothKnow);
+    }
+
+    #[test]
+    fn test_bottomed_pitch_card_stays_visible() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        // Pitch a card to pay for Muscle Mutt, then play through to the end of the
+        // turn so the pitched card is bottomed back into the deck.
+        let mm_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+                .map(|(idx, _)| idx)
+                .expect("Muscle Mutt should be in the opening hand");
+        let cb_idx = gs.p1.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+                .map(|(idx, _)| idx)
+                .expect("Clearing Bellow should be in the opening hand");
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        assert_eq!(gs.cards[cb_idx].visible, CardVisibleState::BothKnow);
+
+        // Bottom the pitched card directly; both players already saw it pitched, so
+        // its visibility is preserved even though it is back in the deck.
+        bottom_pitched_card(&mut gs, cb_idx);
+        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Deck);
+        assert_eq!(gs.cards[cb_idx].visible, CardVisibleState::BothKnow);
     }
 
     #[test]
