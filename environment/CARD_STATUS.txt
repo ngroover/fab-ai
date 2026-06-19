@@ -84,13 +84,22 @@ on-play-effect helpers).
         Tests: smash_instinct_has_intimidate,
                smash_instinct_intimidates_on_resolve
 
+  [x] Wrecking Ball (Card::WreckingBallR)
+        Brute attack action. On play, draw a card then discard a card; if the
+        discarded card has 6 or more power, Intimidate (the ConditionalIntimidate
+        on-play effect on the shared DrawDiscardHit6 condition). Under Rhinar a
+        6-power discard Intimidates twice — once from his OnDiscard6Intimidate
+        constant ability (fired inside the discard) and once from this effect.
+        Tests: wrecking_ball_discarding_power6_intimidates_twice_under_rhinar,
+               wrecking_ball_discarding_below_power6_does_not_intimidate
+
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
   [x] Beast Mode             (Card::BeastModeR)
   [x] Pack Hunt              (Card::PackHuntR)  — see COMPLETE section above
-  [ ] Wrecking Ball          (Card::WreckingBallR)
+  [x] Wrecking Ball          (Card::WreckingBallR)  — see COMPLETE section above
   [ ] Barraging Beatdown     (Card::BarragingBeatdownY)
   [ ] Muscle Mutt            (Card::MuscleMuttY)
   [ ] Pack Call              (Card::PackCallY)

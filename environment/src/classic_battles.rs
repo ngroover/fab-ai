@@ -254,7 +254,15 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             additional_cost: None,
             target_effect: None,
             play_condition: None,
-            play_effect: None,
+            // "When you play Wrecking Ball, draw a card then discard a card. If
+            // the discarded card has 6 or more power, Intimidate." Same draw-then-
+            // discard condition as Bare Fangs / Wild Ride, but the payoff is an
+            // Intimidate instead of a power/Go Again buff.
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::DrawDiscardHit6,
+                effectType: OnPlayEffectType::ConditionalIntimidate,
+                magnitude: 0,
+            }),
         },
         // ── RHINAR — YELLOW ─────────────────────────────────────────────
         // Barraging Beatdown

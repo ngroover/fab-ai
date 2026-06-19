@@ -736,6 +736,14 @@ fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayE
             let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
             player.next_brute_attack_action_bonus = player.next_brute_attack_action_bonus.saturating_add(effect.magnitude);
         }
+        // The owner Intimidates: their opponent banishes a random card from hand
+        // (e.g. Wrecking Ball, whose `DrawDiscardHit6` condition Intimidates on a
+        // 6-power discard). This is separate from Rhinar's `OnDiscard6Intimidate`
+        // constant ability, which already fired inside the condition's own
+        // discard — so Rhinar hitting a 6 with Wrecking Ball Intimidates twice.
+        OnPlayEffectType::ConditionalIntimidate => {
+            apply_intimidate(gs, owner);
+        }
         _ => {}
     }
 }

@@ -785,3 +785,65 @@ fn smash_instinct_intimidates_on_resolve() {
     // The Intimidate keyword fired once as the attack resolved.
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wrecking Ball (Card::WreckingBallR)
+//
+// Brute attack action. On play, draw a card then discard a card; if the
+// discarded card has 6 or more power, Intimidate. Same DrawDiscardHit6 condition
+// as Bare Fangs / Wild Ride, but the payoff is a conditional Intimidate rather
+// than a power / Go Again buff. Played by Rhinar, a 6-power discard Intimidates
+// twice — once from his OnDiscard6Intimidate constant ability (which fires inside
+// the discard) and once from Wrecking Ball's own conditional Intimidate.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn wrecking_ball_discarding_power6_intimidates_twice_under_rhinar() {
+    let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+    reset(&mut gs, false);
+    step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+    // Force the draw-then-discard to land on a power-6 card: empty p1's hand,
+    // then seat a 6-power card on top of the deck so it is the one drawn and
+    // discarded.
+    move_hand_to_graveyard(&mut gs, PlayerIndex::P1);
+    let pick = find_p1_deck_card(&gs, |power| power >= 6);
+    put_on_top_of_deck(&mut gs, PlayerIndex::P1, pick);
+    assert!(gs.p2.hand_size >= 2, "opponent needs two cards to be intimidated twice");
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
+
+    let effect = Card::WreckingBallR
+        .data()
+        .play_effect
+        .as_ref()
+        .expect("Wrecking Ball should carry an on-play effect");
+    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+
+    // The 6-power discard intimidates twice (constant ability + the card's own
+    // conditional Intimidate) and banks no power; the card is now in the
+    // graveyard.
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 2);
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+    assert_eq!(gs.cards[pick].location, CardLocation::P1Graveyard);
+}
+
+#[test]
+fn wrecking_ball_discarding_below_power6_does_not_intimidate() {
+    let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+    reset(&mut gs, false);
+    step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+    // Seat a sub-6-power card on top so the forced discard fails the threshold.
+    move_hand_to_graveyard(&mut gs, PlayerIndex::P1);
+    let pick = find_p1_deck_card(&gs, |power| power < 6);
+    put_on_top_of_deck(&mut gs, PlayerIndex::P1, pick);
+
+    let effect = Card::WreckingBallR.data().play_effect.as_ref().unwrap();
+    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+
+    // The discard missed the power-6 threshold, so neither the constant ability
+    // nor the conditional Intimidate fires; the card still moves to the
+    // graveyard.
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
+    assert_eq!(gs.cards[pick].location, CardLocation::P1Graveyard);
+}
