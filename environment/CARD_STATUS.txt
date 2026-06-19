@@ -55,6 +55,20 @@ on-play-effect helpers).
                awakening_bellow_followup_brute_attack_gets_plus3,
                awakening_bellow_followup_generic_attack_does_not_get_plus3
 
+  [x] Rhinar (hero)  (Card::Rhinar)
+        Constant ability (OnDiscard6Intimidate): whenever Rhinar discards a card
+        with 6 or more power, Intimidate (the opponent banishes a card from
+        hand). Fires from both discard paths — the "discard a card" additional
+        cost (Alpha Rampage, Wrecker Romp) and the play-effect draw-then-discard
+        (Bare Fangs, Wild Ride). Independent of the played card's own keywords,
+        so Alpha Rampage (Intimidate) discarding a 6-power card intimidates twice.
+        Tests: rhinar_constant_ability_is_on_discard6_intimidate,
+               discard_cost_of_power6_card_triggers_intimidate,
+               discard_cost_of_sub_power6_card_does_not_trigger_intimidate,
+               bare_fangs_play_effect_power6_discard_also_intimidates,
+               non_rhinar_hero_power6_discard_does_not_intimidate,
+               alpha_rampage_power6_discard_intimidates_twice
+
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
@@ -79,7 +93,7 @@ on-play-effect helpers).
 ------------------------------------------------------------------------------
  TODO — RHINAR hero / weapon / equipment
 ------------------------------------------------------------------------------
-  [ ] Rhinar (hero)          (Card::Rhinar)
+  [x] Rhinar (hero)          (Card::Rhinar)  — see COMPLETE section above
   [ ] Chief Rukutan          (Card::ChiefRukutan)
   [ ] Bone Basher (weapon)   (Card::BoneBasher)
   [ ] Blossom of Spring      (Card::BlossomOfSpring)
