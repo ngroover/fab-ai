@@ -69,18 +69,33 @@ on-play-effect helpers).
                non_rhinar_hero_power6_discard_does_not_intimidate,
                alpha_rampage_power6_discard_intimidates_twice
 
+  [x] Pack Hunt    (Card::PackHuntR)
+        Brute attack action with Intimidate. When it resolves onto the combat
+        chain, the opponent banishes a random card from hand to their Intimidate
+        banish zone (the keyword is applied generically at card resolution).
+        Tests: pack_hunt_has_intimidate,
+               pack_hunt_intimidates_on_resolve,
+               test_pack_hunt_intimidate_banishes_opponent_card
+
+  [x] Smash Instinct (Card::SmashInstinctY)
+        Brute attack action with Intimidate. Shares the resolution-time Intimidate
+        with Pack Hunt: the opponent banishes a random card from hand when it
+        resolves onto the combat chain.
+        Tests: smash_instinct_has_intimidate,
+               smash_instinct_intimidates_on_resolve
+
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
   [x] Beast Mode             (Card::BeastModeR)
-  [ ] Pack Hunt              (Card::PackHuntR)
+  [x] Pack Hunt              (Card::PackHuntR)  — see COMPLETE section above
   [ ] Wrecking Ball          (Card::WreckingBallR)
   [ ] Barraging Beatdown     (Card::BarragingBeatdownY)
   [ ] Muscle Mutt            (Card::MuscleMuttY)
   [ ] Pack Call              (Card::PackCallY)
   [ ] Raging Onslaught       (Card::RagingOnslaughtY)
-  [ ] Smash Instinct         (Card::SmashInstinctY)
+  [x] Smash Instinct         (Card::SmashInstinctY)  — see COMPLETE section above
   [ ] Smash With Big Tree    (Card::SmashWithBigTreeY)
   [ ] Wounded Bull           (Card::WoundedBullY)
   [ ] Clearing Bellow        (Card::ClearingBellowB)

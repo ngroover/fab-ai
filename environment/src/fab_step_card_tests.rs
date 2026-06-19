@@ -716,3 +716,72 @@ fn alpha_rampage_power6_discard_intimidates_twice() {
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 2,
         "keyword Intimidate plus the constant ability should intimidate twice in total");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pack Hunt (Card::PackHuntR) and Smash Instinct (Card::SmashInstinctY)
+//
+// Both are brute attack actions carrying the Intimidate keyword. Intimidate is
+// applied generically as a card resolves, so when either attack resolves onto
+// the combat chain the defending player banishes a random card from hand into
+// their Intimidate banish zone. Neither card has a discard cost or discard play
+// effect, so Rhinar's OnDiscard6Intimidate does not also fire — the keyword is
+// the sole source of the single Intimidate.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Play `card` (an attack action costing at most 3) from p1's hand and resolve
+/// it onto the combat chain. The first two opening-hand cards are relabelled to
+/// `card` and to Clearing Bellow (pitch 3, used to pay the cost); both players
+/// then pass so the attack resolves. Returns the game and the played card's
+/// global index.
+fn play_and_resolve_attack(card: Card) -> (Gamestate, usize) {
+    let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+    reset(&mut gs, false);
+    step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+    let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    let atk_idx = hand[0];
+    let pitch_idx = hand[1];
+    gs.cards[atk_idx].card = card;
+    gs.cards[pitch_idx].card = Card::ClearingBellowB; // pitch 3 covers cost <= 3
+    assert!(card.data().cost <= 3, "helper only pays costs up to a single pitch-3 card");
+
+    // Play the attack, pitch to cover its cost, then both players pass so it
+    // resolves onto p1's combat chain (its Intimidate fires as it resolves).
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(atk_idx))});
+    assert_eq!(gs.phase, Phase::ActionPitch);
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitch_idx))});
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    (gs, atk_idx)
+}
+
+#[test]
+fn pack_hunt_has_intimidate() {
+    use crate::cards::Keyword;
+    assert!(Card::PackHuntR.data().keyword.contains(Keyword::Intimidate));
+}
+
+#[test]
+fn smash_instinct_has_intimidate() {
+    use crate::cards::Keyword;
+    assert!(Card::SmashInstinctY.data().keyword.contains(Keyword::Intimidate));
+}
+
+#[test]
+fn pack_hunt_intimidates_on_resolve() {
+    let (gs, atk_idx) = play_and_resolve_attack(Card::PackHuntR);
+    assert_eq!(gs.phase, Phase::Defend);
+    assert_eq!(gs.cards[atk_idx].location, CardLocation::P1CombatChain);
+    // The Intimidate keyword fired once as the attack resolved.
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
+}
+
+#[test]
+fn smash_instinct_intimidates_on_resolve() {
+    let (gs, atk_idx) = play_and_resolve_attack(Card::SmashInstinctY);
+    assert_eq!(gs.phase, Phase::Defend);
+    assert_eq!(gs.cards[atk_idx].location, CardLocation::P1CombatChain);
+    // The Intimidate keyword fired once as the attack resolved.
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
+}
