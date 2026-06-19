@@ -400,3 +400,119 @@ fn discard_cost_card_discards_a_hand_card_when_played() {
     assert_eq!(discarded_after_resolve, 1, "the discard cost is paid once, at play time");
     assert_eq!(gs.p1.hand_size, 1);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Awakening Bellow (Card::AwakeningBellowR)
+//
+// An action with Go Again and Intimidate whose on-play effect banks +3 power for
+// the next *brute* attack the owner plays this turn. The tests below verify the
+// keywords, that a follow-up brute attack gets the +3, and that a follow-up
+// generic (non-brute) attack does not (and leaves the bonus banked).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Seat `card` on `pid`'s combat-chain link 0 as the attacking card, ready for
+/// `resolve_combat_damage`. The head of `pid`'s hand is relabelled to `card`,
+/// detached from the hand, and attached to the chain; its global index (the
+/// attacking card) is returned.
+fn place_attacker_on_chain(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
+    let idx = {
+        let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+        player.hand_idx.expect("hand should have a card to seat as the attacker").get()
+    };
+    gs.cards[idx].card = card;
+    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    detach_from_current_zone(player, &mut gs.cards, idx);
+    gs.cards[idx].location = CardLocation::combat_chain(pid);
+    attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[0], None, None, idx);
+    idx
+}
+
+#[test]
+fn awakening_bellow_has_go_again_and_intimidate() {
+    use crate::cards::Keyword;
+    let data = Card::AwakeningBellowR.data();
+    assert!(data.keyword.contains(Keyword::GoAgain));
+    assert!(data.keyword.contains(Keyword::Intimidate));
+}
+
+#[test]
+fn awakening_bellow_banks_plus3_for_the_next_brute_attack() {
+    let mut gs = setup_rhinar_action_phase();
+
+    // Resolving Awakening Bellow's on-play effect banks +3 for the next brute.
+    let effect = Card::AwakeningBellowR
+        .data()
+        .play_effect
+        .as_ref()
+        .expect("Awakening Bellow should carry an on-play effect");
+    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
+}
+
+#[test]
+fn awakening_bellow_followup_brute_attack_gets_plus3() {
+    let mut gs = setup_rhinar_action_phase();
+
+    // Bank the +3 brute bonus from Awakening Bellow.
+    let effect = Card::AwakeningBellowR.data().play_effect.as_ref().unwrap();
+    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
+
+    // A follow-up brute attack — Bare Fangs (brute, 6 power) — is seated on the
+    // chain against an undefended opponent and resolves combat damage.
+    let attacker = place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BareFangsR);
+    assert_eq!(gs.cards[attacker].card.data().card_class, CardClass::Brute);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    // Brute attack: it gets the +3, so 6 + 3 = 9 damage, and the bonus is spent.
+    assert_eq!(gs.p2.life, life_before - 9);
+    assert_eq!(gs.p1.next_brute_attack_action_bonus, 0);
+}
+
+#[test]
+fn awakening_bellow_followup_generic_attack_does_not_get_plus3() {
+    let mut gs = setup_rhinar_action_phase();
+
+    // Bank the +3 brute bonus from Awakening Bellow.
+    let effect = Card::AwakeningBellowR.data().play_effect.as_ref().unwrap();
+    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
+
+    // A follow-up generic (non-brute) attack — Muscle Mutt (generic, 6 power) —
+    // is seated on the chain against an undefended opponent and resolves.
+    let attacker = place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
+    assert_eq!(gs.cards[attacker].card.data().card_class, CardClass::Generic);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    // Generic attack: no +3, so just 6 damage — and the bonus stays banked for a
+    // later brute attack this turn rather than being consumed.
+    assert_eq!(gs.p2.life, life_before - 6);
+    assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
+}
+
+#[test]
+fn awakening_bellow_brute_weapon_swing_does_not_get_plus3() {
+    let mut gs = setup_rhinar_action_phase();
+
+    // Bank the +3 brute bonus from Awakening Bellow.
+    let effect = Card::AwakeningBellowR.data().play_effect.as_ref().unwrap();
+    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
+
+    // Bone Basher is a Brute, but it is a *weapon* (not an attack action card),
+    // so swinging it does not qualify for the bonus. Seat it on the chain (4
+    // power) against an undefended opponent and resolve.
+    let attacker = place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BoneBasher);
+    let data = gs.cards[attacker].card.data();
+    assert_eq!(data.card_class, CardClass::Brute);
+    assert_eq!(data.typ, CardType::Weapon);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    // Brute weapon: no +3, so just 4 damage — and the bonus stays banked for a
+    // later brute attack action this turn rather than being consumed.
+    assert_eq!(gs.p2.life, life_before - 4);
+    assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
+}

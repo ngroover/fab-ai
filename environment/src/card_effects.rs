@@ -51,6 +51,8 @@ pub enum OnPlayConditionType {
     DrawDiscardHit6,
     HasIntimidated,
     HasLessLife,
+    /// No condition: the effect always applies when the card resolves.
+    Always,
 }
 
 #[repr(u8)]
@@ -60,6 +62,10 @@ pub enum OnPlayEffectType {
     ConditionalIntimidate,
     GainLife,
     CreateQuicken,
+    /// Banks `magnitude` power for the next Brute attack the owner plays this
+    /// turn (e.g. Awakening Bellow's "+3 power to the next attack with the brute
+    /// type"). Unlike `ConditionalPower`, this only pumps a Brute attack.
+    NextBrutePower,
 }
 
 pub struct OnPlayEffect {

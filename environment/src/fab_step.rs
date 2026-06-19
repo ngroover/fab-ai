@@ -1,6 +1,6 @@
 use crate::action::{Action,ActionType};
 use crate::game_state::{Gamestate,Phase,Player,PendingCard,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
-use crate::cards::{CardData,CardType,Keyword};
+use crate::cards::{CardClass,CardData,CardType,Keyword};
 use crate::card_effects::{OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType};
 use rand::RngExt;
 
@@ -99,6 +99,10 @@ fn begin_turn(gs: &mut Gamestate) {
     // this turn's attacks.
     gs.p1.attack_go_again_bonus = false;
     gs.p2.attack_go_again_bonus = false;
+    // Likewise clear any unconsumed "next brute attack" power bonus so it cannot
+    // leak into this turn's attacks.
+    gs.p1.next_brute_attack_action_bonus = 0;
+    gs.p2.next_brute_attack_action_bonus = 0;
     gs.check_game_end();
 }
 
@@ -664,6 +668,7 @@ fn apply_discard_cost(gs: &mut Gamestate, owner: PlayerIndex) {
 fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayEffect) {
     let condition_met = match effect.condition {
         OnPlayConditionType::DrawDiscardHit6 => draw_then_discard_hit6(gs, owner),
+        OnPlayConditionType::Always => true,
         _ => false,
     };
     if !condition_met {
@@ -683,6 +688,14 @@ fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayE
         OnPlayEffectType::ConditionalGoAgain => {
             let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
             player.attack_go_again_bonus = true;
+        }
+        // The next Brute attack the owner plays this turn gains `magnitude` power
+        // (e.g. Awakening Bellow). Banked on the player and applied only when a
+        // brute attack resolves combat damage, so a non-brute attack played in
+        // between does not consume it.
+        OnPlayEffectType::NextBrutePower => {
+            let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+            player.next_brute_attack_action_bonus = player.next_brute_attack_action_bonus.saturating_add(effect.magnitude);
         }
         _ => {}
     }
@@ -922,10 +935,23 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
 
     let attacker = if attacker_id == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
     let defender = if defender_id == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    // Whether the attacking card (link 0) is a Brute *attack action card*, which
+    // gates the banked "next brute attack" power bonus (e.g. Awakening Bellow's
+    // +3): the card text targets brute attack action cards specifically, so a
+    // non-brute attack — or a brute *weapon* swing like Bone Basher — does not
+    // get it, and leaves it banked for a later brute attack action.
+    let attack_is_brute = attacker.chain_link[0]
+        .map(|idx| {
+            let data = gs.cards[idx.get()].card.data();
+            data.card_class == CardClass::Brute && data.typ == CardType::AttackAction
+        })
+        .unwrap_or(false);
+    let brute_bonus = if attack_is_brute { attacker.next_brute_attack_action_bonus } else { 0 };
     // Total attack power is the cards on the chain plus any banked on-play bonus
-    // (e.g. Bare Fangs's conditional +2 power).
+    // (e.g. Bare Fangs's conditional +2 power, Awakening Bellow's brute +3).
     let power = combat_chain_total(attacker, &gs.cards, |d| d.power)
-        .saturating_add(attacker.attack_power_bonus);
+        .saturating_add(attacker.attack_power_bonus)
+        .saturating_add(brute_bonus);
     let blocked = combat_chain_total(defender, &gs.cards, |d| d.defense);
     let damage = power.saturating_sub(blocked);
 
@@ -970,6 +996,11 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     let attacker = if attacker_id == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     attacker.attack_power_bonus = 0;
     attacker.attack_go_again_bonus = false;
+    // The brute power bonus is single-use, but only a brute attack consumes it:
+    // a non-brute attack leaves it banked for a later brute attack this turn.
+    if attack_is_brute {
+        attacker.next_brute_attack_action_bonus = 0;
+    }
 }
 
 /// Close the combat chain as the action phase ends. Every card still sitting on

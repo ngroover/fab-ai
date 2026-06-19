@@ -249,6 +249,14 @@ pub struct Player {
     /// check when combat damage resolves, and cleared afterward (and at the start
     /// of each turn) so it never leaks into a later attack.
     pub attack_go_again_bonus : bool,
+    /// Extra power banked for the *next Brute attack* this player plays this
+    /// turn, on top of the cards on the combat chain. Set by on-play effects
+    /// that pump a follow-up brute (e.g. Awakening Bellow's "+3 power to the
+    /// next attack with the brute type"). Unlike `attack_power_bonus` it is
+    /// applied only when the attacking card is a Brute, so a non-brute attack in
+    /// between does not consume it; consumed when a brute attack resolves combat
+    /// damage and cleared at the start of each turn so it never leaks.
+    pub next_brute_attack_action_bonus : u8,
     /// This player's view of the game log: what they would legitimately know,
     /// with hidden information (e.g. the identity of a card the opponent drew)
     /// redacted. `None` when logging is disabled (the default, so simulation

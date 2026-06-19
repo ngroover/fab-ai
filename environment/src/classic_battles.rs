@@ -108,7 +108,13 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             additional_cost: None,
             target_effect: None,
             play_condition: None,
-            play_effect: None,
+            // "The next attack action card you play this turn with the brute type
+            // gains +3{p}." Unconditional on play; banks +3 for the next brute.
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::Always,
+                effectType: OnPlayEffectType::NextBrutePower,
+                magnitude: 3,
+            }),
         },
         // Bare Fangs
         CardData {

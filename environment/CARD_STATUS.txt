@@ -45,11 +45,20 @@ on-play-effect helpers).
         Tests: discard_cost_card_unplayable_when_paying_leaves_no_card_to_discard,
                discard_cost_card_playable_with_a_spare_card_to_discard
 
+  [x] Awakening Bellow (Card::AwakeningBellowR)
+        Go Again, Intimidate. On play, the next attack with the brute type you
+        play this turn gets +3 power. The bonus is banked on the player and
+        applied only to a brute attack, so a non-brute attack in between does
+        not consume it.
+        Tests: awakening_bellow_has_go_again_and_intimidate,
+               awakening_bellow_banks_plus3_for_the_next_brute_attack,
+               awakening_bellow_followup_brute_attack_gets_plus3,
+               awakening_bellow_followup_generic_attack_does_not_get_plus3
+
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
-  [ ] Awakening Bellow       (Card::AwakeningBellowR)
   [ ] Beast Mode             (Card::BeastModeR)
   [ ] Pack Hunt              (Card::PackHuntR)
   [ ] Wrecking Ball          (Card::WreckingBallR)
