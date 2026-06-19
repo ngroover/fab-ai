@@ -59,7 +59,7 @@ on-play-effect helpers).
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
-  [ ] Beast Mode             (Card::BeastModeR)
+  [x] Beast Mode             (Card::BeastModeR)
   [ ] Pack Hunt              (Card::PackHuntR)
   [ ] Wrecking Ball          (Card::WreckingBallR)
   [ ] Barraging Beatdown     (Card::BarragingBeatdownY)

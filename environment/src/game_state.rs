@@ -257,6 +257,12 @@ pub struct Player {
     /// between does not consume it; consumed when a brute attack resolves combat
     /// damage and cleared at the start of each turn so it never leaks.
     pub next_brute_attack_action_bonus : u8,
+    /// Whether this player has resolved an Intimidate trigger so far this turn.
+    /// Set when this player intimidates (an attack/action with the Intimidate
+    /// keyword resolves) and read by on-play effects gated on "if you've
+    /// intimidated this turn" (e.g. Beast Mode's conditional +2 power). Cleared
+    /// at the start of each turn so it never carries into a later turn.
+    pub has_intimidated : bool,
     /// This player's view of the game log: what they would legitimately know,
     /// with hidden information (e.g. the identity of a card the opponent drew)
     /// redacted. `None` when logging is disabled (the default, so simulation

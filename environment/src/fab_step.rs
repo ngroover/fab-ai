@@ -103,6 +103,10 @@ fn begin_turn(gs: &mut Gamestate) {
     // leak into this turn's attacks.
     gs.p1.next_brute_attack_action_bonus = 0;
     gs.p2.next_brute_attack_action_bonus = 0;
+    // Clear the per-turn "has intimidated" flag so a prior turn's Intimidate
+    // can never satisfy this turn's "if you've intimidated" conditions.
+    gs.p1.has_intimidated = false;
+    gs.p2.has_intimidated = false;
     gs.check_game_end();
 }
 
@@ -596,6 +600,13 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
 fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
     let victim = attacker.opponent();
 
+    // The Intimidate trigger has resolved, so the attacker has now intimidated
+    // this turn. Record it even if the victim has no card to banish below, so
+    // that "if you've intimidated this turn" conditions key off the keyword
+    // triggering rather than off a card actually being banished.
+    let intimidator = if attacker == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    intimidator.has_intimidated = true;
+
     // Snapshot the victim's hand slots, releasing the borrow on `gs.cards`
     // before we draw from the rng and mutate the hand below.
     let hand: Vec<usize> = {
@@ -668,6 +679,12 @@ fn apply_discard_cost(gs: &mut Gamestate, owner: PlayerIndex) {
 fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayEffect) {
     let condition_met = match effect.condition {
         OnPlayConditionType::DrawDiscardHit6 => draw_then_discard_hit6(gs, owner),
+        // "If you've intimidated this turn" (e.g. Beast Mode): met when the
+        // owner has resolved an Intimidate trigger earlier this turn.
+        OnPlayConditionType::HasIntimidated => {
+            let player = if owner == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+            player.has_intimidated
+        }
         OnPlayConditionType::Always => true,
         _ => false,
     };

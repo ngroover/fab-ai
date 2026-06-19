@@ -166,7 +166,12 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             additional_cost: None,
             target_effect: None,
             play_condition: None,
-            play_effect: None,
+            // "If you've intimidated this turn, this gets +2 power."
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::HasIntimidated,
+                effectType: OnPlayEffectType::ConditionalPower,
+                magnitude: 2,
+            }),
         },
         // Pack Hunt
         CardData {

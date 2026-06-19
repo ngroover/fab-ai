@@ -516,3 +516,60 @@ fn awakening_bellow_brute_weapon_swing_does_not_get_plus3() {
     assert_eq!(gs.p2.life, life_before - 4);
     assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Beast Mode (Card::BeastModeR)
+//
+// A 6-power brute attack action whose on-play effect grants +2 power "if you've
+// intimidated this turn". The owner's `has_intimidated` flag, set whenever an
+// Intimidate trigger resolves for them, gates the bonus. The tests below verify
+// the attack lands for 8 when the owner has intimidated and for 6 when it hasn't.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn beast_mode_gets_plus2_when_player_has_intimidated() {
+    let mut gs = setup_rhinar_action_phase();
+
+    // The owner intimidated earlier this turn.
+    gs.p1.has_intimidated = true;
+
+    // Resolving Beast Mode's on-play effect banks +2 onto the resolving attack.
+    let effect = Card::BeastModeR
+        .data()
+        .play_effect
+        .as_ref()
+        .expect("Beast Mode should carry an on-play effect");
+    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    assert_eq!(gs.p1.attack_power_bonus, 2);
+
+    // Seat Beast Mode (brute, 6 power) on the chain against an undefended
+    // opponent and resolve: 6 + 2 = 8 damage, and the bonus is consumed.
+    let attacker = place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BeastModeR);
+    assert_eq!(gs.cards[attacker].card.data().card_class, CardClass::Brute);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    assert_eq!(gs.p2.life, life_before - 8);
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+}
+
+#[test]
+fn beast_mode_no_bonus_when_player_has_not_intimidated() {
+    let mut gs = setup_rhinar_action_phase();
+
+    // The owner has not intimidated this turn (the flag starts cleared).
+    assert!(!gs.p1.has_intimidated);
+
+    // Resolving Beast Mode's on-play effect does nothing: the condition fails.
+    let effect = Card::BeastModeR.data().play_effect.as_ref().unwrap();
+    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+
+    // Seat Beast Mode (brute, 6 power) on the chain against an undefended
+    // opponent and resolve: just its base 6 damage, with no bonus.
+    let attacker = place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BeastModeR);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    assert_eq!(gs.p2.life, life_before - 6);
+}
