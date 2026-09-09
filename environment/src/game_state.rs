@@ -228,10 +228,19 @@ pub struct Player {
     pub chest_idx : Option<CardIdx>,
     pub arms_idx : Option<CardIdx>,
     pub legs_idx : Option<CardIdx>,
-    /// The combat chain, link by link. Each slot holds the global `cards` index
-    /// of the card occupying that chain link, or `None` if the link is empty.
+    /// The combat chain, link by link. Each slot holds the head of the linked
+    /// list of cards occupying that chain link, or `None` if the link is empty.
     /// Sized at 5 since a single combat chain is very unlikely to grow longer
-    /// than that; the attacking card/weapon is placed at link 0.
+    /// than that; a turn that does produce a sixth attack panics rather than
+    /// reusing a link and mis-scoring the attack.
+    ///
+    /// Each attack in a turn takes a link of its own — the attacker's first
+    /// attack goes to link 0, a follow-up after Go Again to link 1, and so on —
+    /// and the cards blocking an attack join that same link on the defender's
+    /// side. Combat damage is calculated a link at a time, so an earlier attack
+    /// this turn adds nothing to a later one's power and the cards that blocked
+    /// it do not blunt it. A defender's links can therefore have gaps, where an
+    /// attack went unblocked.
     pub chain_link : [Option<CardIdx>; 5],
     pub hand_size : u8,
     pub deck_size : u8,
