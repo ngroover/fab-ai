@@ -254,10 +254,10 @@ fn close_priority_window(gs: &mut Gamestate) {
 /// Handle an action during the Defend phase. The active player is the defender
 /// (restored from the `Defend` return frame in `resolve_top_of_stack`). They may
 /// commit blockers one at a time — each chosen card moves out of their hand onto
-/// the next free link of their own combat chain, and the phase stays on Defend so
-/// further blockers can be declared. Passing finishes declaring blockers and
-/// advances to the next itinerary phase — the turn player's Reaction window,
-/// pushed onto the return stack when the attack was committed.
+/// their side of the chain link the attack occupies, and the phase stays on
+/// Defend so further blockers can be declared. Passing finishes declaring
+/// blockers and advances to the next itinerary phase — the turn player's
+/// Reaction window, pushed onto the return stack when the attack was committed.
 fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
         ActionType::Defend => commit_blocker(gs, act.card_index()),
@@ -498,6 +498,12 @@ fn commit_blocker(gs: &mut Gamestate, idx: usize) {
     if gs.logging_enabled() {
         gs.log_public(format!("{} defends with {:?}", player_name(pid), gs.cards[idx].card));
     }
+    // A blocker joins the link of the attack it is blocking — the attacker's
+    // current chain link — so that link's damage is calculated against these
+    // blockers alone and they play no part in a later attack this turn. Only the
+    // turn player attacks, so the attacker is always the turn player.
+    let attacker = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let link = current_chain_link(attacker);
     let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
 
     detach_from_current_zone(player, &mut gs.cards, idx);
@@ -505,7 +511,7 @@ fn commit_blocker(gs: &mut Gamestate, idx: usize) {
     // Declaring a blocker plays it face-up onto the combat chain, so it becomes
     // known to both players.
     gs.cards[idx].visible = CardVisibleState::BothKnow;
-    attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[0], None, None, idx);
+    attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[link], None, None, idx);
 }
 
 /// Resolve the card at the top of the stack (its most recently added card),
@@ -514,9 +520,9 @@ fn commit_blocker(gs: &mut Gamestate, idx: usize) {
 /// shared `cards` array the slot falls in. A no-op when the stack is empty.
 ///
 /// - A **played attack action card**, or a **weapon swing** (the weapon card
-///   itself), moves onto its owner's combat chain at link 0, and we advance to
-///   the next itinerary phase — the `Defend` frame banked when the attack was
-///   committed, with the defender active to declare blocks.
+///   itself), moves onto the next free link of its owner's combat chain, and we
+///   advance to the next itinerary phase — the `Defend` frame banked when the
+///   attack was committed, with the defender active to declare blocks.
 /// - Anything **else** resolves to its owner's graveyard. If the stack is now
 ///   empty the window closes and we advance to the next itinerary phase;
 ///   otherwise priority returns to the turn player and we keep responding in the
@@ -560,15 +566,28 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     // attack action card, or a weapon being swung (the weapon itself joins the
     // chain). Everything else resolves to the graveyard.
     if commits_as_attack(pending.typ, data) {
-        // The attacking card leaves the stack for link 0 of its owner's combat
-        // chain. The instant window is done; advance to the banked Defend frame
-        // (the defender declares blocks).
+        // The attacking card leaves the stack for the next free link of its
+        // owner's combat chain: every attack this turn takes a link of its own,
+        // and combat damage is calculated one link at a time (see
+        // `resolve_combat_damage`), so a follow-up attack neither inherits the
+        // power of the attack before it nor is blunted by the cards that blocked
+        // that one. With every link occupied the chain has outgrown its buffer,
+        // so it is closed and a fresh one begun rather than stacking two attacks
+        // onto a single link.
+        let attacker_ref = if owner == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+        let link = match next_free_chain_link(attacker_ref) {
+            Some(link) => link,
+            None => {
+                close_combat_chain(gs);
+                0
+            }
+        };
         gs.cards[top].location = CardLocation::combat_chain(owner);
         let attacker = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
         // Attach through the linked-list helper so the attacker's chain link is
         // well-terminated (its `next_card` points at itself), letting the chain
         // be walked the same way as the defender's blockers when combat resolves.
-        attach_to_front_of_zone(&mut gs.cards, &mut attacker.chain_link[0], None, None, top);
+        attach_to_front_of_zone(&mut gs.cards, &mut attacker.chain_link[link], None, None, top);
         gs.phase = Phase::Defend;
     } else {
         gs.cards[top].location = CardLocation::graveyard(owner);
@@ -986,24 +1005,28 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
 
     let attacker = if attacker_id == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
     let defender = if defender_id == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    // Whether the attacking card (link 0) is a Brute *attack action card*, which
-    // gates the banked "next brute attack" power bonus (e.g. Awakening Bellow's
-    // +3): the card text targets brute attack action cards specifically, so a
-    // non-brute attack — or a brute *weapon* swing like Bone Basher — does not
-    // get it, and leaves it banked for a later brute attack action.
-    let attack_is_brute = attacker.chain_link[0]
+    // The chain link this attack occupies. Damage is calculated for that link
+    // alone, so an earlier attack this turn — and the blockers that stopped it —
+    // sit on their own link and count for nothing here.
+    let link = current_chain_link(attacker);
+    // Whether the attacking card (this link's) is a Brute *attack action card*,
+    // which gates the banked "next brute attack" power bonus (e.g. Awakening
+    // Bellow's +3): the card text targets brute attack action cards specifically,
+    // so a non-brute attack — or a brute *weapon* swing like Bone Basher — does
+    // not get it, and leaves it banked for a later brute attack action.
+    let attack_is_brute = attacker.chain_link[link]
         .map(|idx| {
             let data = gs.cards[idx.get()].card.data();
             data.card_class == CardClass::Brute && data.typ == CardType::AttackAction
         })
         .unwrap_or(false);
     let brute_bonus = if attack_is_brute { attacker.next_brute_attack_action_bonus } else { 0 };
-    // Total attack power is the cards on the chain plus any banked on-play bonus
-    // (e.g. Bare Fangs's conditional +2 power, Awakening Bellow's brute +3).
-    let power = combat_chain_total(attacker, &gs.cards, |d| d.power)
+    // Total attack power is the cards on this chain link plus any banked on-play
+    // bonus (e.g. Bare Fangs's conditional +2 power, Awakening Bellow's brute +3).
+    let power = chain_link_total(attacker, &gs.cards, link, |d| d.power)
         .saturating_add(attacker.attack_power_bonus)
         .saturating_add(brute_bonus);
-    let blocked = combat_chain_total(defender, &gs.cards, |d| d.defense);
+    let blocked = chain_link_total(defender, &gs.cards, link, |d| d.defense);
     let damage = power.saturating_sub(blocked);
 
     // Whether the attacking card (link 0 of the attacker's chain) has Go Again;
@@ -1011,11 +1034,11 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // effect may have conditionally granted Go Again (e.g. Wild Ride after
     // discarding a 6-power card), banked on the player.
     let attack_has_go_again = attacker.attack_go_again_bonus
-        || attacker.chain_link[0]
+        || attacker.chain_link[link]
             .map(|idx| gs.cards[idx.get()].card.data().keyword.contains(Keyword::GoAgain))
             .unwrap_or(false);
     // The attacking card, for the damage log message.
-    let attack_card = attacker.chain_link[0].map(|idx| gs.cards[idx.get()].card);
+    let attack_card = attacker.chain_link[link].map(|idx| gs.cards[idx.get()].card);
 
     let defender = if defender_id == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     let life_before = defender.life;
@@ -1117,25 +1140,47 @@ fn spend_action_point(gs: &mut Gamestate, player: PlayerIndex) {
 /// over every card on `player`'s combat chain. Each occupied chain link is the
 /// head of a linked list — all blockers declared against one attack share a
 /// single link — walked via `next_card` until a node points at itself.
-fn combat_chain_total(
+fn chain_link_total(
     player: &Player,
     cards: &[CardState; TOTAL_CARDS],
+    link: usize,
     stat: impl Fn(&CardData) -> u8,
 ) -> u8 {
+    let Some(head) = player.chain_link[link] else {
+        return 0;
+    };
     let mut total: u8 = 0;
-    for link in player.chain_link.iter() {
-        let Some(head) = link else { continue };
-        let mut cur = head.get();
-        loop {
-            total = total.saturating_add(stat(cards[cur].card.data()));
-            let next = cards[cur].next_card.get();
-            if next == cur {
-                break;
-            }
-            cur = next;
+    let mut cur = head.get();
+    loop {
+        total = total.saturating_add(stat(cards[cur].card.data()));
+        let next = cards[cur].next_card.get();
+        if next == cur {
+            break;
         }
+        cur = next;
     }
     total
+}
+
+/// The link the attacking player's current attack occupies: the last occupied
+/// link on their chain. Links fill in order and are only ever cleared all at
+/// once (`close_combat_chain`), so an attacker's occupied links are always a
+/// prefix and the current attack is on the last of them. An empty chain answers
+/// link 0 — where the next attack will land.
+///
+/// Only meaningful for the attacking player. A defender's links may have gaps
+/// (an attack that went unblocked leaves its link empty on their side), so their
+/// occupied links are not a prefix and must not be counted this way.
+fn current_chain_link(attacker: &Player) -> usize {
+    next_free_chain_link(attacker)
+        .unwrap_or(attacker.chain_link.len())
+        .saturating_sub(1)
+}
+
+/// The link a newly resolving attack should take: the first free one on the
+/// attacking player's chain, or `None` when every link is occupied.
+fn next_free_chain_link(attacker: &Player) -> Option<usize> {
+    attacker.chain_link.iter().position(|link| link.is_none())
 }
 
 /// Resource cost of committing a card for the given action. An `Activate` (an
@@ -3572,5 +3617,133 @@ mod tests {
         assert!(get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2IntimidateBanish).is_empty());
         // The returned card is reachable again by walking p2's hand.
         assert!(gs.p2.hand_iter(&gs.cards).any(|(idx, _)| idx == banished_idx));
+    }
+
+    // ── Multiple attacks in one turn: one chain link each ──────────────────
+
+    /// Overwrite the turn player's hand with `desired`, in order, by relabelling
+    /// the cards already in it. The opening hand is four cards, so `desired` may
+    /// hold at most four.
+    fn relabel_hand(gs: &mut Gamestate, pid: PlayerIndex, desired: &[Card]) {
+        let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+        let hand: Vec<usize> = player.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+        assert!(hand.len() >= desired.len(), "hand too small to relabel");
+        for (slot, &card) in hand.iter().zip(desired) {
+            gs.cards[*slot].card = card;
+        }
+    }
+
+    /// Drive one complete attack by player 1: play `attack`, pitch `pitch` to pay
+    /// for it, resolve it onto the combat chain, let player 2 declare `blocks`,
+    /// then run the reaction window out so combat damage resolves. `go_again`
+    /// banks a conditional Go Again on the attack — the same bank Wild Ride fills
+    /// on a 6-power discard — so the attacker keeps their action point and can
+    /// attack again this turn.
+    fn run_one_attack(gs: &mut Gamestate, attack: Card, pitch: Card, blocks: &[Card], go_again: bool) {
+        let find = |gs: &Gamestate, pid: PlayerIndex, want: Card| {
+            let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+            player.hand_iter(&gs.cards)
+                .find(|(_, cs)| cs.card == want)
+                .map(|(idx, _)| idx)
+                .unwrap_or_else(|| panic!("{:?} should be in hand", want))
+        };
+
+        let attack_idx = find(gs, PlayerIndex::P1, attack);
+        step(gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(attack_idx))});
+        let pitch_idx = find(gs, PlayerIndex::P1, pitch);
+        step(gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitch_idx))});
+        step(gs, Action{ typ: ActionType::Pass, card: None});   // attacker passes
+        step(gs, Action{ typ: ActionType::Pass, card: None});   // defender passes
+        assert_eq!(gs.phase, Phase::Defend);
+
+        for &block in blocks {
+            let block_idx = find(gs, PlayerIndex::P2, block);
+            step(gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(block_idx))});
+        }
+        step(gs, Action{ typ: ActionType::Pass, card: None});   // done blocking
+
+        if go_again {
+            gs.p1.attack_go_again_bonus = true;
+        }
+        step(gs, Action{ typ: ActionType::Pass, card: None});   // attacker passes
+        step(gs, Action{ typ: ActionType::Pass, card: None});   // defender passes -> damage
+    }
+
+    #[test]
+    fn test_second_attack_does_not_inherit_the_first_attacks_power() {
+        // Two unblocked power-6 attacks in one turn, the second enabled by a
+        // banked Go Again. Each attack sits on its own chain link and deals its
+        // own 6 damage: 20 -> 14 -> 8. Were both attacks sharing a link, the
+        // second would be scored as 6 + 6 and take Dorinthea to 2.
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        relabel_hand(&mut gs, PlayerIndex::P1,
+            &[Card::MuscleMuttY, Card::ClearingBellowB, Card::MuscleMuttY, Card::ClearingBellowB]);
+
+        run_one_attack(&mut gs, Card::MuscleMuttY, Card::ClearingBellowB, &[], true);
+        assert_eq!(gs.p2.life, 14, "first attack deals its own 6");
+        // Go Again kept the action point, so a second attack is possible.
+        assert_eq!(gs.p1.action_points, 1);
+
+        run_one_attack(&mut gs, Card::MuscleMuttY, Card::ClearingBellowB, &[], false);
+        assert_eq!(gs.p2.life, 8, "second attack deals 6, not 6 + the first attack's 6");
+
+        // Each attack took a link of its own, and both are still on the chain
+        // until it closes.
+        assert!(gs.p1.chain_link[0].is_some());
+        assert!(gs.p1.chain_link[1].is_some());
+        assert_ne!(gs.p1.chain_link[0], gs.p1.chain_link[1]);
+        assert!(gs.p1.chain_link[2].is_none());
+    }
+
+    #[test]
+    fn test_second_attack_is_not_blunted_by_the_first_attacks_blockers() {
+        // The blockers that stopped one attack stay on their own chain link and
+        // do nothing against the next attack that turn. Muscle Mutt (power 6)
+        // blocked by Driving Blade (defense 3) deals 3; the follow-up Muscle
+        // Mutt is unblocked and deals its full 6: 20 -> 17 -> 11. Were the
+        // blocker still counted, the second attack would be scored as 12 power
+        // against 3 defense and take Dorinthea to 8.
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        relabel_hand(&mut gs, PlayerIndex::P1,
+            &[Card::MuscleMuttY, Card::ClearingBellowB, Card::MuscleMuttY, Card::ClearingBellowB]);
+
+        run_one_attack(&mut gs, Card::MuscleMuttY, Card::ClearingBellowB,
+            &[Card::DrivingBladeY], true);
+        assert_eq!(gs.p2.life, 17, "6 power - 3 blocked = 3 damage");
+
+        run_one_attack(&mut gs, Card::MuscleMuttY, Card::ClearingBellowB, &[], false);
+        assert_eq!(gs.p2.life, 11, "the spent blocker does not defend the second attack");
+
+        // The blocker sits on the link of the attack it blocked; the second
+        // attack's link is empty on the defender's side, having gone unblocked.
+        assert_eq!(gs.p2.chain_link[0].map(|i| gs.cards[i.get()].card), Some(Card::DrivingBladeY));
+        assert!(gs.p2.chain_link[1].is_none());
+    }
+
+    #[test]
+    fn test_closing_the_chain_clears_every_link() {
+        // Two attacks on two links: passing closes the whole chain, not just the
+        // link the last attack was on, so both attacks reach the graveyard.
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        relabel_hand(&mut gs, PlayerIndex::P1,
+            &[Card::MuscleMuttY, Card::ClearingBellowB, Card::MuscleMuttY, Card::ClearingBellowB]);
+
+        run_one_attack(&mut gs, Card::MuscleMuttY, Card::ClearingBellowB, &[], true);
+        run_one_attack(&mut gs, Card::MuscleMuttY, Card::ClearingBellowB, &[], false);
+        let first = gs.p1.chain_link[0].expect("first attack on link 0").get();
+        let second = gs.p1.chain_link[1].expect("second attack on link 1").get();
+
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        assert_eq!(gs.phase, Phase::Arsenal);
+        assert_eq!(gs.cards[first].location, CardLocation::P1Graveyard);
+        assert_eq!(gs.cards[second].location, CardLocation::P1Graveyard);
+        assert!(gs.p1.chain_link.iter().all(|l| l.is_none()));
     }
 }
