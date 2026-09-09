@@ -231,7 +231,8 @@ pub struct Player {
     /// The combat chain, link by link. Each slot holds the head of the linked
     /// list of cards occupying that chain link, or `None` if the link is empty.
     /// Sized at 5 since a single combat chain is very unlikely to grow longer
-    /// than that; a chain that does outgrow it is closed and begun afresh.
+    /// than that; a turn that does produce a sixth attack panics rather than
+    /// reusing a link and mis-scoring the attack.
     ///
     /// Each attack in a turn takes a link of its own — the attacker's first
     /// attack goes to link 0, a follow-up after Go Again to link 1, and so on —

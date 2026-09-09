@@ -571,17 +571,19 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         // and combat damage is calculated one link at a time (see
         // `resolve_combat_damage`), so a follow-up attack neither inherits the
         // power of the attack before it nor is blunted by the cards that blocked
-        // that one. With every link occupied the chain has outgrown its buffer,
-        // so it is closed and a fresh one begun rather than stacking two attacks
-        // onto a single link.
+        // that one. A turn that produces more attacks than there are links has
+        // outgrown the chain, which is a bug in the engine rather than a game
+        // state to paper over: fail loudly instead of quietly reusing a link and
+        // mis-scoring the attack.
         let attacker_ref = if owner == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-        let link = match next_free_chain_link(attacker_ref) {
-            Some(link) => link,
-            None => {
-                close_combat_chain(gs);
-                0
-            }
-        };
+        let link = next_free_chain_link(attacker_ref).unwrap_or_else(|| {
+            panic!(
+                "combat chain overflowed: {} attacks on one chain, but Player::chain_link \
+                 holds only {} links",
+                attacker_ref.chain_link.len() + 1,
+                attacker_ref.chain_link.len(),
+            )
+        });
         gs.cards[top].location = CardLocation::combat_chain(owner);
         let attacker = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
         // Attach through the linked-list helper so the attacker's chain link is
@@ -1166,7 +1168,8 @@ fn chain_link_total(
 /// link on their chain. Links fill in order and are only ever cleared all at
 /// once (`close_combat_chain`), so an attacker's occupied links are always a
 /// prefix and the current attack is on the last of them. An empty chain answers
-/// link 0 — where the next attack will land.
+/// link 0 — where the next attack will land — and a full one the last link,
+/// which is the attack being resolved when every link is taken.
 ///
 /// Only meaningful for the attacking player. A defender's links may have gaps
 /// (an attack that went unblocked leaves its link empty on their side), so their
@@ -1178,7 +1181,8 @@ fn current_chain_link(attacker: &Player) -> usize {
 }
 
 /// The link a newly resolving attack should take: the first free one on the
-/// attacking player's chain, or `None` when every link is occupied.
+/// attacking player's chain. `None` means every link is already occupied, so
+/// there is nowhere to put another attack — an engine bug the caller panics on.
 fn next_free_chain_link(attacker: &Player) -> Option<usize> {
     attacker.chain_link.iter().position(|link| link.is_none())
 }
@@ -3745,5 +3749,32 @@ mod tests {
         assert_eq!(gs.cards[first].location, CardLocation::P1Graveyard);
         assert_eq!(gs.cards[second].location, CardLocation::P1Graveyard);
         assert!(gs.p1.chain_link.iter().all(|l| l.is_none()));
+    }
+
+    #[test]
+    #[should_panic(expected = "combat chain overflowed")]
+    fn test_attacking_past_the_last_chain_link_panics() {
+        // A turn producing more attacks than the chain has links means the engine
+        // has lost track of something, so it must fail loudly rather than reuse a
+        // link and mis-score the attack. Every link is parked full here — cards
+        // pulled off the top of the deck and moved onto the chain — so the next
+        // attack has nowhere to go.
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        relabel_hand(&mut gs, PlayerIndex::P1,
+            &[Card::MuscleMuttY, Card::ClearingBellowB, Card::MuscleMuttY, Card::ClearingBellowB]);
+
+        for link in 0..gs.p1.chain_link.len() {
+            let idx = gs.p1.top_deck_idx.expect("deck should not run dry").get();
+            detach_from_current_zone(&mut gs.p1, &mut gs.cards, idx);
+            gs.cards[idx].location = CardLocation::P1CombatChain;
+            // A card alone on a link terminates its own list.
+            gs.cards[idx].next_card = CardIdx::new(idx);
+            gs.cards[idx].prev_card = CardIdx::new(idx);
+            gs.p1.chain_link[link] = Some(CardIdx::new(idx));
+        }
+
+        run_one_attack(&mut gs, Card::MuscleMuttY, Card::ClearingBellowB, &[], false);
     }
 }
