@@ -718,7 +718,7 @@ fn maybe_discard6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, discarded_p
 /// effect is a (condition, effect, magnitude) triple: the condition is evaluated
 /// first (it may itself move cards, as `DrawDiscardHit6` does), and the effect is
 /// applied only when the condition holds. `owner` is the player whose card is
-/// resolving. Conditions/effects the engine does not model yet are no-ops.
+/// resolving. Effects the engine does not model yet are no-ops.
 fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayEffect) {
     let condition_met = match effect.condition {
         OnPlayConditionType::DrawDiscardHit6 => draw_then_discard_hit6(gs, owner),
@@ -728,8 +728,17 @@ fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayE
             let player = if owner == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
             player.has_intimidated
         }
+        // "If you have less health than an opposing hero" (e.g. Wounded Bull):
+        // compared at resolution, so life changes earlier in the turn count.
+        OnPlayConditionType::HasLessLife => {
+            let (mine, theirs) = if owner == PlayerIndex::P1 {
+                (gs.p1.life, gs.p2.life)
+            } else {
+                (gs.p2.life, gs.p1.life)
+            };
+            mine < theirs
+        }
         OnPlayConditionType::Always => true,
-        _ => false,
     };
     if !condition_met {
         return;

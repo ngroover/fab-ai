@@ -431,7 +431,15 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             additional_cost: None,
             target_effect: None,
             play_condition: None,
-            play_effect: None,
+            // "When you play Wounded Bull, if you have less health than an
+            // opposing hero, it gains +1 power." The condition is checked as the
+            // card resolves; the bonus is banked on the player and folded into
+            // the chain's power when combat damage resolves.
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::HasLessLife,
+                effectType: OnPlayEffectType::ConditionalPower,
+                magnitude: 1,
+            }),
         },
         // ── RHINAR — BLUE ───────────────────────────────────────────────
         // Clearing Bellow

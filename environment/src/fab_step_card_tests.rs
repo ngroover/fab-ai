@@ -20,6 +20,7 @@
 //!   - Raging Onslaught    (`Card::RagingOnslaughtY`)
 //!   - Smash with Big Tree (`Card::SmashWithBigTreeY`)
 //!   - Clearing Bellow     (`Card::ClearingBellowB`)
+//!   - Wounded Bull        (`Card::WoundedBullY`)
 
 use super::*;
 use crate::cards::Card;
@@ -995,4 +996,101 @@ fn clearing_bellow_intimidates_on_resolve_and_keeps_the_action_point() {
     assert_eq!(gs.p1.action_points, 1);
     assert_eq!(gs.phase, Phase::Action);
     assert_eq!(gs.active_player, PlayerIndex::P1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wounded Bull (Card::WoundedBullY)
+//
+// "When you play Wounded Bull, if you have less health than an opposing hero,
+// it gains +1 power." A generic 6-power attack action whose on-play effect is
+// the `HasLessLife` condition driving the shared `ConditionalPower` payoff: the
+// life totals are compared as the card resolves, and the +1 is banked on the
+// player and folded into the chain's power when combat damage resolves. The
+// comparison is strict, so being level on life grants nothing.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Resolve Wounded Bull's on-play effect for `owner` with the two heroes on
+/// `p1_life` / `p2_life`, returning the game so the banked bonus can be checked.
+fn resolve_wounded_bull_at(owner: PlayerIndex, p1_life: u8, p2_life: u8) -> Gamestate {
+    let mut gs = setup_rhinar_action_phase();
+    gs.p1.life = p1_life;
+    gs.p2.life = p2_life;
+
+    let effect = Card::WoundedBullY
+        .data()
+        .play_effect
+        .as_ref()
+        .expect("Wounded Bull should carry an on-play effect");
+    apply_on_play_effect(&mut gs, owner, effect);
+    gs
+}
+
+#[test]
+fn wounded_bull_effect_is_conditional_power_on_less_life() {
+    use crate::card_effects::{OnPlayConditionType, OnPlayEffectType};
+    let data = Card::WoundedBullY.data();
+    assert_eq!(data.typ, CardType::AttackAction);
+    assert_eq!(data.power, 6);
+    assert_eq!(data.card_class, CardClass::Generic);
+    let effect = data.play_effect.as_ref().expect("Wounded Bull should carry an on-play effect");
+    assert!(matches!(effect.condition, OnPlayConditionType::HasLessLife));
+    assert!(matches!(effect.effectType, OnPlayEffectType::ConditionalPower));
+    assert_eq!(effect.magnitude, 1);
+}
+
+#[test]
+fn wounded_bull_banks_plus1_when_behind_on_life() {
+    let gs = resolve_wounded_bull_at(PlayerIndex::P1, 15, 20);
+    assert_eq!(gs.p1.attack_power_bonus, 1);
+    assert_eq!(gs.p2.attack_power_bonus, 0);
+}
+
+#[test]
+fn wounded_bull_banks_nothing_when_level_on_life() {
+    // "Less health" is a strict comparison: level on life grants nothing.
+    let gs = resolve_wounded_bull_at(PlayerIndex::P1, 20, 20);
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+}
+
+#[test]
+fn wounded_bull_banks_nothing_when_ahead_on_life() {
+    let gs = resolve_wounded_bull_at(PlayerIndex::P1, 20, 15);
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+}
+
+#[test]
+fn wounded_bull_condition_is_relative_to_its_owner() {
+    // The condition compares the *owner's* life against their opponent's, so the
+    // same life totals that deny p1 the bonus grant it to p2.
+    let gs = resolve_wounded_bull_at(PlayerIndex::P2, 20, 15);
+    assert_eq!(gs.p2.attack_power_bonus, 1);
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+}
+
+#[test]
+fn wounded_bull_hits_for_7_when_behind_on_life() {
+    let mut gs = resolve_wounded_bull_at(PlayerIndex::P1, 15, 20);
+    assert_eq!(gs.p1.attack_power_bonus, 1);
+
+    // Seat Wounded Bull on the chain against an undefended opponent: 6 printed
+    // power plus the banked +1.
+    place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::WoundedBullY);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    assert_eq!(gs.p2.life, life_before - 7);
+    // The on-play bonus is single-use: a follow-up attack does not inherit it.
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+}
+
+#[test]
+fn wounded_bull_hits_for_6_when_ahead_on_life() {
+    let mut gs = resolve_wounded_bull_at(PlayerIndex::P1, 20, 15);
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+
+    place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::WoundedBullY);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    assert_eq!(gs.p2.life, life_before - 6);
 }

@@ -117,6 +117,22 @@ on-play-effect helpers).
         Tests: clearing_bellow_has_go_again_and_intimidate,
                clearing_bellow_intimidates_on_resolve_and_keeps_the_action_point
 
+  [x] Wounded Bull (Card::WoundedBullY)
+        On play, if you have less health than an opposing hero, it gains +1
+        power. The HasLessLife condition drives the shared ConditionalPower
+        payoff: life totals are compared as the card resolves, and the +1 is
+        banked on the player and folded into the chain's power at combat damage.
+        The comparison is strict (level on life grants nothing) and owner-
+        relative, so the same totals that deny one player the bonus grant it to
+        the other.
+        Tests: wounded_bull_effect_is_conditional_power_on_less_life,
+               wounded_bull_banks_plus1_when_behind_on_life,
+               wounded_bull_banks_nothing_when_level_on_life,
+               wounded_bull_banks_nothing_when_ahead_on_life,
+               wounded_bull_condition_is_relative_to_its_owner,
+               wounded_bull_hits_for_7_when_behind_on_life,
+               wounded_bull_hits_for_6_when_ahead_on_life
+
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
@@ -130,7 +146,7 @@ on-play-effect helpers).
   [x] Raging Onslaught       (Card::RagingOnslaughtY)  — see COMPLETE section above
   [x] Smash Instinct         (Card::SmashInstinctY)  — see COMPLETE section above
   [x] Smash With Big Tree    (Card::SmashWithBigTreeY)  — see COMPLETE section above
-  [ ] Wounded Bull           (Card::WoundedBullY)
+  [x] Wounded Bull           (Card::WoundedBullY)  — see COMPLETE section above
   [x] Clearing Bellow        (Card::ClearingBellowB)  — see COMPLETE section above
   [ ] Come to Fight          (Card::ComeToFightB)
   [ ] Dodge                  (Card::DodgeB)
