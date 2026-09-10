@@ -93,6 +93,30 @@ on-play-effect helpers).
         Tests: wrecking_ball_discarding_power6_intimidates_twice_under_rhinar,
                wrecking_ball_discarding_below_power6_does_not_intimidate
 
+  [x] Muscle Mutt  (Card::MuscleMuttY)
+        Vanilla generic attack action (cost 3, 6 power, 2 defense). No rules
+        text: the tests pin down that it is deliberately effectless and that it
+        hits for exactly its printed power.
+        Tests: muscle_mutt_is_a_vanilla_6_power_generic_attack
+
+  [x] Raging Onslaught (Card::RagingOnslaughtY)
+        Vanilla generic attack action (cost 3, 6 power, 3 defense). As above.
+        Tests: raging_onslaught_is_a_vanilla_6_power_generic_attack
+
+  [x] Smash with Big Tree (Card::SmashWithBigTreeY)
+        Vanilla brute attack action (cost 2, 6 power, 0 defense) with no_block,
+        so it cannot be used to block even while sitting in the defender's hand.
+        Tests: smash_with_big_tree_is_a_vanilla_6_power_brute_attack,
+               smash_with_big_tree_cannot_be_used_to_block
+
+  [x] Clearing Bellow (Card::ClearingBellowB)
+        0-cost brute action with Intimidate and Go Again. No on-play effect:
+        both halves of the text are keywords the engine applies generically —
+        Intimidate fires as the card resolves (here on its way to the graveyard
+        rather than the combat chain) and Go Again spares the action point.
+        Tests: clearing_bellow_has_go_again_and_intimidate,
+               clearing_bellow_intimidates_on_resolve_and_keeps_the_action_point
+
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
@@ -101,13 +125,13 @@ on-play-effect helpers).
   [x] Pack Hunt              (Card::PackHuntR)  — see COMPLETE section above
   [x] Wrecking Ball          (Card::WreckingBallR)  — see COMPLETE section above
   [ ] Barraging Beatdown     (Card::BarragingBeatdownY)
-  [ ] Muscle Mutt            (Card::MuscleMuttY)
+  [x] Muscle Mutt            (Card::MuscleMuttY)  — see COMPLETE section above
   [ ] Pack Call              (Card::PackCallY)
-  [ ] Raging Onslaught       (Card::RagingOnslaughtY)
+  [x] Raging Onslaught       (Card::RagingOnslaughtY)  — see COMPLETE section above
   [x] Smash Instinct         (Card::SmashInstinctY)  — see COMPLETE section above
-  [ ] Smash With Big Tree    (Card::SmashWithBigTreeY)
+  [x] Smash With Big Tree    (Card::SmashWithBigTreeY)  — see COMPLETE section above
   [ ] Wounded Bull           (Card::WoundedBullY)
-  [ ] Clearing Bellow        (Card::ClearingBellowB)
+  [x] Clearing Bellow        (Card::ClearingBellowB)  — see COMPLETE section above
   [ ] Come to Fight          (Card::ComeToFightB)
   [ ] Dodge                  (Card::DodgeB)
   [ ] Rally the Rearguard    (Card::RallyTheRearguardB)

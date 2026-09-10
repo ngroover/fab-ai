@@ -6,10 +6,20 @@
 //! `attach_to_front_of_zone` — exactly as the main `tests` module does.
 //!
 //! Cards covered here:
-//!   - Bare Fangs     (`Card::BareFangsR`)
-//!   - Wild Ride      (`Card::WildRideR`)
-//!   - Alpha Rampage  (`Card::AlphaRampageR`)
-//!   - Wrecker Romp   (`Card::WreckerRompB`)
+//!   - Bare Fangs          (`Card::BareFangsR`)
+//!   - Wild Ride           (`Card::WildRideR`)
+//!   - Alpha Rampage       (`Card::AlphaRampageR`)
+//!   - Wrecker Romp        (`Card::WreckerRompB`)
+//!   - Awakening Bellow    (`Card::AwakeningBellowR`)
+//!   - Beast Mode          (`Card::BeastModeR`)
+//!   - Rhinar (hero)       (`Card::Rhinar`)
+//!   - Pack Hunt           (`Card::PackHuntR`)
+//!   - Smash Instinct      (`Card::SmashInstinctY`)
+//!   - Wrecking Ball       (`Card::WreckingBallR`)
+//!   - Muscle Mutt         (`Card::MuscleMuttY`)
+//!   - Raging Onslaught    (`Card::RagingOnslaughtY`)
+//!   - Smash with Big Tree (`Card::SmashWithBigTreeY`)
+//!   - Clearing Bellow     (`Card::ClearingBellowB`)
 
 use super::*;
 use crate::cards::Card;
@@ -846,4 +856,143 @@ fn wrecking_ball_discarding_below_power6_does_not_intimidate() {
     // graveyard.
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
     assert_eq!(gs.cards[pick].location, CardLocation::P1Graveyard);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vanilla cards: Muscle Mutt (Card::MuscleMuttY), Raging Onslaught
+// (Card::RagingOnslaughtY) and Smash with Big Tree (Card::SmashWithBigTreeY)
+//
+// None of the three has rules text. They are covered here to pin down that they
+// are *deliberately* effectless — a later card that adds a shared mechanic must
+// not quietly give them one — and that each hits for exactly its printed power.
+// Smash with Big Tree additionally carries `no_block`, so it cannot be used to
+// block even though it sits in hand like any other card.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Assert `card` is an attack action with the given printed stats and class and
+/// carries no rules text at all: no keywords, no on-play effect, no additional
+/// cost, no activated ability, and no defend / next-attack / target effect.
+fn assert_vanilla_attack(card: Card, cost: u8, power: u8, defense: u8, class: CardClass) {
+    let data = card.data();
+    assert_eq!(data.typ, CardType::AttackAction);
+    assert_eq!(data.cost, cost);
+    assert_eq!(data.power, power);
+    assert_eq!(data.defense, defense);
+    assert_eq!(data.card_class, class);
+    assert!(data.keyword.is_empty(), "{:?} should carry no keywords", card);
+    assert!(data.play_effect.is_none(), "{:?} should have no on-play effect", card);
+    assert!(data.additional_cost.is_none(), "{:?} should have no additional cost", card);
+    assert!(data.ability.is_none(), "{:?} should have no activated ability", card);
+    assert!(data.defend_effect.is_none(), "{:?} should have no defend effect", card);
+    assert!(data.next_attack_effect.is_none(), "{:?} should have no next-attack effect", card);
+    assert!(data.target_effect.is_none(), "{:?} should have no target effect", card);
+}
+
+/// Seat `card` on p1's combat chain against an undefended opponent and resolve
+/// combat damage, asserting the opponent lost exactly `expected` life and that
+/// nothing was intimidated along the way.
+fn assert_undefended_hit(card: Card, expected: u8) {
+    let mut gs = setup_rhinar_action_phase();
+    place_attacker_on_chain(&mut gs, PlayerIndex::P1, card);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+    assert_eq!(gs.p2.life, life_before - expected);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
+}
+
+#[test]
+fn muscle_mutt_is_a_vanilla_6_power_generic_attack() {
+    assert_vanilla_attack(Card::MuscleMuttY, 3, 6, 2, CardClass::Generic);
+    assert_undefended_hit(Card::MuscleMuttY, 6);
+}
+
+#[test]
+fn raging_onslaught_is_a_vanilla_6_power_generic_attack() {
+    assert_vanilla_attack(Card::RagingOnslaughtY, 3, 6, 3, CardClass::Generic);
+    assert_undefended_hit(Card::RagingOnslaughtY, 6);
+}
+
+#[test]
+fn smash_with_big_tree_is_a_vanilla_6_power_brute_attack() {
+    assert_vanilla_attack(Card::SmashWithBigTreeY, 2, 6, 0, CardClass::Brute);
+    assert_undefended_hit(Card::SmashWithBigTreeY, 6);
+}
+
+#[test]
+fn smash_with_big_tree_cannot_be_used_to_block() {
+    // Smash with Big Tree has 0 defense and `no_block`, so it must not be
+    // offered as a Defend action even while sitting in the defender's hand.
+    let (mut gs, _) = play_and_resolve_attack(Card::MuscleMuttY);
+    assert_eq!(gs.phase, Phase::Defend);
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+
+    let blocker = gs.p2.hand_idx.expect("defender should have a hand card").get();
+    gs.cards[blocker].card = Card::SmashWithBigTreeY;
+    assert!(Card::SmashWithBigTreeY.data().no_block);
+
+    let defends: Vec<Card> = legal_actions(&gs).iter()
+        .filter(|a| a.typ == ActionType::Defend)
+        .map(|a| gs.cards[a.card_index()].card)
+        .collect();
+    assert!(!defends.contains(&Card::SmashWithBigTreeY),
+        "a no_block card must not be offered as a block");
+    // The rest of the hand is still blockable, so the exclusion is card-specific
+    // rather than the defend options having gone empty.
+    assert!(!defends.is_empty());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Clearing Bellow (Card::ClearingBellowB)
+//
+// A 0-cost brute *action* (not an attack) with Intimidate and Go Again. It has
+// no on-play effect: both halves of its text are keywords the engine already
+// applies generically — Intimidate fires as the card resolves, whether it goes
+// on to the combat chain or, as here, straight to the graveyard, and Go Again
+// spares the owner's action point.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Play the 0-cost action `card` from the head of p1's hand and resolve it. A
+/// 0-cost card is affordable outright, so it commits straight to the stack with
+/// no pitching; both players then pass so it resolves. Returns the game and the
+/// played card's global index.
+fn play_and_resolve_zero_cost_action(card: Card) -> (Gamestate, usize) {
+    let mut gs = setup_rhinar_action_phase();
+    assert_eq!(card.data().cost, 0, "helper only plays 0-cost cards");
+
+    let idx = gs.p1.hand_idx.expect("hand should have a card to relabel").get();
+    gs.cards[idx].card = card;
+
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(idx))});
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    (gs, idx)
+}
+
+#[test]
+fn clearing_bellow_has_go_again_and_intimidate() {
+    use crate::cards::Keyword;
+    let data = Card::ClearingBellowB.data();
+    assert_eq!(data.typ, CardType::Action);
+    assert_eq!(data.card_class, CardClass::Brute);
+    assert!(data.keyword.contains(Keyword::GoAgain));
+    assert!(data.keyword.contains(Keyword::Intimidate));
+    // Both halves of the text are keywords: there is no on-play effect.
+    assert!(data.play_effect.is_none());
+}
+
+#[test]
+fn clearing_bellow_intimidates_on_resolve_and_keeps_the_action_point() {
+    let (gs, idx) = play_and_resolve_zero_cost_action(Card::ClearingBellowB);
+
+    // A non-attack action resolves to the graveyard rather than the chain, and
+    // its Intimidate still fires on the way there.
+    assert_eq!(gs.cards[idx].location, CardLocation::P1Graveyard);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
+    assert!(gs.p1.has_intimidated);
+
+    // Go Again: the action point is not spent, so Rhinar may act again.
+    assert_eq!(gs.p1.action_points, 1);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
 }
