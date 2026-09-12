@@ -66,6 +66,11 @@ pub enum OnPlayEffectType {
     /// turn (e.g. Awakening Bellow's "+3 power to the next attack with the brute
     /// type"). Unlike `ConditionalPower`, this only pumps a Brute attack.
     NextBrutePower,
+    /// Banks `magnitude` power for the next attack action card the owner plays
+    /// this turn, whatever its class (e.g. Come to Fight's "+1 power to your
+    /// next attack action card"). The class-agnostic sibling of
+    /// `NextBrutePower`; like it, a weapon swing neither takes nor spends it.
+    NextAttackPower,
 }
 
 pub struct OnPlayEffect {

@@ -266,6 +266,15 @@ pub struct Player {
     /// between does not consume it; consumed when a brute attack resolves combat
     /// damage and cleared at the start of each turn so it never leaks.
     pub next_brute_attack_action_bonus : u8,
+    /// Extra power banked for the *next attack action card* this player plays
+    /// this turn, on top of the cards on the combat chain. Set by on-play
+    /// effects that pump a follow-up attack regardless of its class (e.g. Come
+    /// to Fight's "+1 power to your next attack action card"). The generic
+    /// sibling of `next_brute_attack_action_bonus`: it is applied to any attack
+    /// action card rather than only a Brute one, but is likewise left banked by
+    /// a weapon swing, consumed when an attack action card resolves combat
+    /// damage, and cleared at the start of each turn so it never leaks.
+    pub next_attack_action_bonus : u8,
     /// Whether this player has resolved an Intimidate trigger so far this turn.
     /// Set when this player intimidates (an attack/action with the Intimidate
     /// keyword resolves) and read by on-play effects gated on "if you've

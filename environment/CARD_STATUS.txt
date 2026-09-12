@@ -133,6 +133,30 @@ on-play-effect helpers).
                wounded_bull_hits_for_7_when_behind_on_life,
                wounded_bull_hits_for_6_when_ahead_on_life
 
+  [x] Come to Fight (Card::ComeToFightB)
+        Go Again. On play, the next attack action card you play this turn gets
+        +1 power. The new NextAttackPower effect banks the bonus on the player
+        as `next_attack_action_bonus`; it is the class-agnostic sibling of
+        Awakening Bellow's brute-only bank, so an attack action card of any
+        class takes it, while a weapon swing — not an attack action card —
+        leaves it banked for a later attack action that turn.
+        Tests: come_to_fight_effect_is_next_attack_power,
+               come_to_fight_banks_plus1_for_the_next_attack,
+               come_to_fight_followup_generic_attack_gets_plus1,
+               come_to_fight_followup_brute_attack_also_gets_plus1,
+               come_to_fight_weapon_swing_does_not_get_plus1,
+               come_to_fight_bonus_does_not_survive_the_turn,
+               come_to_fight_played_from_hand_banks_the_bonus_and_keeps_the_action_point
+
+  [x] Sigil of Solace (Card::SigilofSolaceB)
+        "Gain 1 life." A 0-cost instant with no power or defense, so it never
+        attacks or blocks — it resolves to the graveyard, healing its owner on
+        the way, and as an instant costs no action point. There is no maximum
+        life total, so the gain applies even at full health.
+        Tests: sigil_of_solace_effect_is_gain_1_life,
+               sigil_of_solace_gains_1_life_on_resolve,
+               sigil_of_solace_heals_only_its_owner
+
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
@@ -148,7 +172,7 @@ on-play-effect helpers).
   [x] Smash With Big Tree    (Card::SmashWithBigTreeY)  — see COMPLETE section above
   [x] Wounded Bull           (Card::WoundedBullY)  — see COMPLETE section above
   [x] Clearing Bellow        (Card::ClearingBellowB)  — see COMPLETE section above
-  [ ] Come to Fight          (Card::ComeToFightB)
+  [x] Come to Fight          (Card::ComeToFightB)  — see COMPLETE section above
   [ ] Dodge                  (Card::DodgeB)
   [ ] Rally the Rearguard    (Card::RallyTheRearguardB)
   [ ] Titanium Bauble        (Card::TitaniumBaubleB)
@@ -185,7 +209,7 @@ on-play-effect helpers).
   [ ] Slice and Dice                 (Card::SliceAndDiceY)
   [ ] Blade Flash                    (Card::BladeFlashB)
   [ ] Hit and Run                    (Card::HitAndRunB)
-  [ ] Sigil of Solace                (Card::SigilofSolaceB)
+  [x] Sigil of Solace                (Card::SigilofSolaceB)  — see COMPLETE section above
   [ ] Toughen Up                     (Card::ToughenUpB)
   [ ] Visit the Blacksmith           (Card::VisitTheBlacksmithB)
 

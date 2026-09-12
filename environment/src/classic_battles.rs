@@ -488,7 +488,14 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             additional_cost: None,
             target_effect: None,
             play_condition: None,
-            play_effect: None,
+            // "Your next attack action card you play this turn gains +1 power.
+            // Go again." Go again is the keyword above; the +1 is banked here
+            // for the next attack action card of any class.
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::Always,
+                effectType: OnPlayEffectType::NextAttackPower,
+                magnitude: 1,
+            }),
         },
         // Dodge
         CardData {
@@ -1142,7 +1149,13 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             additional_cost: None,
             target_effect: None,
             play_condition: None,
-            play_effect: None,
+            // "Gain 1 life." Unconditional on play; an instant, so it can be
+            // played in any priority window the owner holds.
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::Always,
+                effectType: OnPlayEffectType::GainLife,
+                magnitude: 1,
+            }),
         },
         // Toughen Up
         CardData {
