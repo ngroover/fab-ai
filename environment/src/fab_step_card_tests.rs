@@ -21,6 +21,8 @@
 //!   - Smash with Big Tree (`Card::SmashWithBigTreeY`)
 //!   - Clearing Bellow     (`Card::ClearingBellowB`)
 //!   - Wounded Bull        (`Card::WoundedBullY`)
+//!   - Sigil of Solace     (`Card::SigilofSolaceB`)
+//!   - Come to Fight       (`Card::ComeToFightB`)
 
 use super::*;
 use crate::cards::Card;
@@ -1093,4 +1095,224 @@ fn wounded_bull_hits_for_6_when_ahead_on_life() {
     resolve_combat_damage(&mut gs);
 
     assert_eq!(gs.p2.life, life_before - 6);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sigil of Solace (Card::SigilofSolaceB)
+//
+// "Gain 1 life." A 0-cost blue *instant* with no power or defense, so it never
+// blocks and never attacks — it simply resolves to the graveyard, healing its
+// owner on the way. Being an instant it costs no action point, and there is no
+// maximum life total, so the gain applies even at full health.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn sigil_of_solace_effect_is_gain_1_life() {
+    use crate::card_effects::{OnPlayConditionType, OnPlayEffectType};
+    let data = Card::SigilofSolaceB.data();
+    assert_eq!(data.typ, CardType::Instant);
+    assert_eq!(data.cost, 0);
+    assert_eq!(data.pitch, 3);
+    assert_eq!(data.power, 0);
+    // No defense and flagged no_block: it cannot be used to block.
+    assert_eq!(data.defense, 0);
+    assert!(data.no_block);
+
+    let effect = data.play_effect.as_ref().expect("Sigil of Solace should carry an on-play effect");
+    // Unconditional: the life is gained whenever it resolves.
+    assert!(matches!(effect.condition, OnPlayConditionType::Always));
+    assert!(matches!(effect.effectType, OnPlayEffectType::GainLife));
+    assert_eq!(effect.magnitude, 1);
+}
+
+#[test]
+fn sigil_of_solace_gains_1_life_on_resolve() {
+    let mut gs = setup_rhinar_action_phase();
+    let idx = gs.p1.hand_idx.expect("hand should have a card to relabel").get();
+    gs.cards[idx].card = Card::SigilofSolaceB;
+
+    // An instant is playable at action speed, so it is offered here.
+    assert!(playable_cards(&gs).contains(&Card::SigilofSolaceB));
+
+    let life_before = gs.p1.life;
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(idx))});
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+    // Resolved to the graveyard, one life richer. Rhinar starts at his full 20,
+    // so this also pins down that there is no maximum life total to cap at.
+    assert_eq!(gs.cards[idx].location, CardLocation::P1Graveyard);
+    assert_eq!(life_before, 20);
+    assert_eq!(gs.p1.life, life_before + 1);
+
+    // An instant costs no action point, so Rhinar may still act.
+    assert_eq!(gs.p1.action_points, 1);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+}
+
+#[test]
+fn sigil_of_solace_heals_only_its_owner() {
+    let mut gs = setup_rhinar_action_phase();
+    let (p1_before, p2_before) = (gs.p1.life, gs.p2.life);
+
+    let effect = Card::SigilofSolaceB.data().play_effect.as_ref().unwrap();
+    apply_on_play_effect(&mut gs, PlayerIndex::P2, effect);
+
+    // The gain follows the resolving card's owner, leaving the opponent alone.
+    assert_eq!(gs.p2.life, p2_before + 1);
+    assert_eq!(gs.p1.life, p1_before);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Come to Fight (Card::ComeToFightB)
+//
+// "Your next attack action card you play this turn gains +1 power. Go again."
+// A 1-cost blue action. Go again is the keyword; the +1 is banked on the player
+// as `next_attack_action_bonus` and folded into the chain's power when an attack
+// action card resolves combat damage. It is the class-agnostic sibling of
+// Awakening Bellow's brute-only bonus: any attack action card takes it, but a
+// weapon swing — not an attack action card — leaves it banked.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Bank Come to Fight's +1 for p1 by resolving its on-play effect directly.
+fn bank_come_to_fight_bonus() -> Gamestate {
+    let mut gs = setup_rhinar_action_phase();
+    let effect = Card::ComeToFightB
+        .data()
+        .play_effect
+        .as_ref()
+        .expect("Come to Fight should carry an on-play effect");
+    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    assert_eq!(gs.p1.next_attack_action_bonus, 1);
+    gs
+}
+
+#[test]
+fn come_to_fight_effect_is_next_attack_power() {
+    use crate::card_effects::{OnPlayConditionType, OnPlayEffectType};
+    use crate::cards::Keyword;
+    let data = Card::ComeToFightB.data();
+    assert_eq!(data.typ, CardType::Action);
+    assert_eq!(data.cost, 1);
+    assert_eq!(data.pitch, 3);
+    assert_eq!(data.defense, 3);
+    // "Go again" is the keyword half of the text.
+    assert!(data.keyword.contains(Keyword::GoAgain));
+
+    let effect = data.play_effect.as_ref().expect("Come to Fight should carry an on-play effect");
+    assert!(matches!(effect.condition, OnPlayConditionType::Always));
+    assert!(matches!(effect.effectType, OnPlayEffectType::NextAttackPower));
+    assert_eq!(effect.magnitude, 1);
+}
+
+#[test]
+fn come_to_fight_banks_plus1_for_the_next_attack() {
+    let gs = bank_come_to_fight_bonus();
+    assert_eq!(gs.p1.next_attack_action_bonus, 1);
+    assert_eq!(gs.p2.next_attack_action_bonus, 0);
+    // The brute-only bank is a separate pot and stays untouched.
+    assert_eq!(gs.p1.next_brute_attack_action_bonus, 0);
+}
+
+#[test]
+fn come_to_fight_followup_generic_attack_gets_plus1() {
+    let mut gs = bank_come_to_fight_bonus();
+
+    // Muscle Mutt (generic, 6 power) against an undefended opponent.
+    let attacker = place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
+    assert_eq!(gs.cards[attacker].card.data().card_class, CardClass::Generic);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    // 6 + 1 = 7 damage, and the bonus is spent.
+    assert_eq!(gs.p2.life, life_before - 7);
+    assert_eq!(gs.p1.next_attack_action_bonus, 0);
+}
+
+#[test]
+fn come_to_fight_followup_brute_attack_also_gets_plus1() {
+    let mut gs = bank_come_to_fight_bonus();
+
+    // Unlike Awakening Bellow's brute-only +3, this bonus is class-agnostic: a
+    // brute attack action card takes it just the same.
+    let attacker = place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BareFangsR);
+    assert_eq!(gs.cards[attacker].card.data().card_class, CardClass::Brute);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    assert_eq!(gs.p2.life, life_before - 7);
+    assert_eq!(gs.p1.next_attack_action_bonus, 0);
+}
+
+#[test]
+fn come_to_fight_weapon_swing_does_not_get_plus1() {
+    let mut gs = bank_come_to_fight_bonus();
+
+    // Bone Basher is an attack, but a *weapon* rather than an attack action
+    // card, so the text does not cover it. Seat it (4 power) and resolve.
+    let attacker = place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BoneBasher);
+    assert_eq!(gs.cards[attacker].card.data().typ, CardType::Weapon);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    // 4 damage, and the bonus stays banked for a later attack action this turn.
+    assert_eq!(gs.p2.life, life_before - 4);
+    assert_eq!(gs.p1.next_attack_action_bonus, 1);
+}
+
+#[test]
+fn come_to_fight_bonus_does_not_survive_the_turn() {
+    let mut gs = bank_come_to_fight_bonus();
+
+    // "This turn": an unspent bonus is cleared at the turn boundary rather than
+    // leaking into a later turn's attacks.
+    begin_turn(&mut gs);
+    assert_eq!(gs.p1.next_attack_action_bonus, 0);
+    assert_eq!(gs.p2.next_attack_action_bonus, 0);
+}
+
+#[test]
+fn come_to_fight_played_from_hand_banks_the_bonus_and_keeps_the_action_point() {
+    let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+    reset(&mut gs, false);
+    step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+    // Relabel Muscle Mutt to Come to Fight (cost 1); Rhinar's seed-42 opening
+    // hand is then Come to Fight, Pack Call, Raging Onslaught, Clearing Bellow.
+    let ctf_idx = gs.p1.hand_iter(&gs.cards)
+            .find(|(_, cs)| cs.card == Card::MuscleMuttY)
+            .map(|(idx, _)| idx)
+            .expect("Muscle Mutt should be in the opening hand");
+    gs.cards[ctf_idx].card = Card::ComeToFightB;
+
+    // Cost 1 isn't covered outright, so it waits on a pitch.
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(ctf_idx))});
+    assert_eq!(gs.phase, Phase::ActionPitch);
+
+    // Clearing Bellow (pitch 3) covers it, committing Come to Fight to the stack.
+    let cb_idx = gs.p1.hand_iter(&gs.cards)
+            .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+            .map(|(idx, _)| idx)
+            .expect("Clearing Bellow should be in the opening hand");
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+    assert_eq!(gs.phase, Phase::ActionInstant);
+
+    // Both pass: it resolves to the graveyard and banks the +1.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.cards[ctf_idx].location, CardLocation::P1Graveyard);
+    assert_eq!(gs.p1.next_attack_action_bonus, 1);
+
+    // Go Again: the action point survives, so the pumped attack can follow.
+    assert_eq!(gs.p1.action_points, 1);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+
+    // Raging Onslaught (generic, 6 power) then lands for 6 + 1 = 7.
+    place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::RagingOnslaughtY);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+    assert_eq!(gs.p2.life, life_before - 7);
 }

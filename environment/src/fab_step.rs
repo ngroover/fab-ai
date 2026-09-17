@@ -103,6 +103,10 @@ fn begin_turn(gs: &mut Gamestate) {
     // leak into this turn's attacks.
     gs.p1.next_brute_attack_action_bonus = 0;
     gs.p2.next_brute_attack_action_bonus = 0;
+    // Likewise clear any unconsumed "next attack action card" power bonus so it
+    // cannot leak into this turn's attacks.
+    gs.p1.next_attack_action_bonus = 0;
+    gs.p2.next_attack_action_bonus = 0;
     // Clear the per-turn "has intimidated" flag so a prior turn's Intimidate
     // can never satisfy this turn's "if you've intimidated" conditions.
     gs.p1.has_intimidated = false;
@@ -766,6 +770,14 @@ fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayE
             let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
             player.next_brute_attack_action_bonus = player.next_brute_attack_action_bonus.saturating_add(effect.magnitude);
         }
+        // The next attack action card the owner plays this turn gains `magnitude`
+        // power, whatever its class (e.g. Come to Fight). Banked like the brute
+        // bonus above and applied only when an attack action card resolves combat
+        // damage, so a weapon swing in between neither takes nor spends it.
+        OnPlayEffectType::NextAttackPower => {
+            let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+            player.next_attack_action_bonus = player.next_attack_action_bonus.saturating_add(effect.magnitude);
+        }
         // The owner Intimidates: their opponent banishes a random card from hand
         // (e.g. Wrecking Ball, whose `DrawDiscardHit6` condition Intimidates on a
         // 6-power discard). This is separate from Rhinar's `OnDiscard6Intimidate`
@@ -774,7 +786,25 @@ fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayE
         OnPlayEffectType::ConditionalIntimidate => {
             apply_intimidate(gs, owner);
         }
-        _ => {}
+        // The owner gains `magnitude` life (e.g. Sigil of Solace's "Gain 1
+        // life."). There is no maximum life total, so this only ever adds.
+        OnPlayEffectType::GainLife => {
+            let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+            let before = player.life;
+            player.life = player.life.saturating_add(effect.magnitude);
+            let after = player.life;
+            if gs.logging_enabled() {
+                gs.log_public(format!(
+                    "{} gains {} life (life: {}->{})",
+                    player_name(owner), effect.magnitude, before, after
+                ));
+            }
+        }
+        // Quicken tokens (Flock of the Feather Walkers) need a token zone the
+        // engine does not have yet, so this is still a no-op. Listed explicitly
+        // rather than caught by a wildcard so a new effect type fails to compile
+        // here until it is handled.
+        OnPlayEffectType::CreateQuicken => {}
     }
 }
 
@@ -1032,11 +1062,21 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         })
         .unwrap_or(false);
     let brute_bonus = if attack_is_brute { attacker.next_brute_attack_action_bonus } else { 0 };
+    // Whether the attacking card is an attack action card of any class, which
+    // gates the banked "next attack action card" bonus (e.g. Come to Fight's +1).
+    // A weapon swing is not an attack action card, so it leaves the bonus banked
+    // for a later attack action this turn.
+    let attack_is_attack_action = attacker.chain_link[link]
+        .map(|idx| gs.cards[idx.get()].card.data().typ == CardType::AttackAction)
+        .unwrap_or(false);
+    let attack_action_bonus = if attack_is_attack_action { attacker.next_attack_action_bonus } else { 0 };
     // Total attack power is the cards on this chain link plus any banked on-play
-    // bonus (e.g. Bare Fangs's conditional +2 power, Awakening Bellow's brute +3).
+    // bonus (e.g. Bare Fangs's conditional +2 power, Awakening Bellow's brute +3,
+    // Come to Fight's +1).
     let power = chain_link_total(attacker, &gs.cards, link, |d| d.power)
         .saturating_add(attacker.attack_power_bonus)
-        .saturating_add(brute_bonus);
+        .saturating_add(brute_bonus)
+        .saturating_add(attack_action_bonus);
     let blocked = chain_link_total(defender, &gs.cards, link, |d| d.defense);
     let damage = power.saturating_sub(blocked);
 
@@ -1085,6 +1125,11 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // a non-brute attack leaves it banked for a later brute attack this turn.
     if attack_is_brute {
         attacker.next_brute_attack_action_bonus = 0;
+    }
+    // Likewise the attack-action bonus: only an attack action card consumes it,
+    // so a weapon swing leaves it banked for a later attack action this turn.
+    if attack_is_attack_action {
+        attacker.next_attack_action_bonus = 0;
     }
 }
 
