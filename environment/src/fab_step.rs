@@ -3882,4 +3882,75 @@ mod tests {
 
         run_one_attack(&mut gs, Card::MuscleMuttY, Card::ClearingBellowB, &[], false);
     }
+
+    /// Seat `card` in `pid`'s empty arsenal, taken from the head of their hand.
+    fn seat_in_arsenal(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
+        let idx = {
+            let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+            assert!(player.arsenal_idx.is_none(), "the arsenal slot should be free");
+            player.hand_idx.expect("hand should hold a card to arsenal").get()
+        };
+        gs.cards[idx].card = card;
+        let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+        detach_from_current_zone(player, &mut gs.cards, idx);
+        gs.cards[idx].location = CardLocation::arsenal(pid);
+        player.arsenal_idx = Some(CardIdx::new(idx));
+        idx
+    }
+
+    #[test]
+    fn test_attack_action_played_from_arsenal_resolves_to_the_chain() {
+        let mut gs = fresh_game();
+
+        // Muscle Mutt (cost 3) waits in the arsenal; Clearing Bellow (pitch 3)
+        // in hand pays for it, since the arsenal card can't pitch for itself.
+        let mm_idx = seat_in_arsenal(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
+        let cb_idx = gs.p1.hand_idx.expect("hand should not be empty").get();
+        gs.cards[cb_idx].card = Card::ClearingBellowB;
+
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        assert_eq!(gs.phase, Phase::ActionPitch);
+        // Still in the arsenal while it is only pending.
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Arsenal);
+        assert_eq!(gs.p1.arsenal_idx, Some(CardIdx::new(mm_idx)));
+
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        assert_eq!(gs.phase, Phase::ActionInstant);
+        // Paid for: it leaves the arsenal for the stack, freeing the slot.
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
+        assert_eq!(gs.p1.arsenal_idx, None);
+
+        // Both pass and it resolves onto the chain like any other attack,
+        // sending the defender to the Defend phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
+        assert_eq!(gs.p1.chain_link[0], Some(CardIdx::new(mm_idx)));
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+    }
+
+    #[test]
+    fn test_arsenal_slot_freed_by_playing_can_be_refilled_the_same_turn() {
+        let mut gs = fresh_game();
+
+        // Play the 0-cost action out of the arsenal, emptying the slot.
+        let cb_idx = seat_in_arsenal(&mut gs, PlayerIndex::P1, Card::ClearingBellowB);
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(cb_idx))});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.p1.arsenal_idx, None);
+        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Graveyard);
+
+        // Clearing Bellow has Go Again, so the action phase continues; passing
+        // it out reaches the Arsenal phase, where the freed slot means a card
+        // can be set aside again this turn.
+        assert_eq!(gs.phase, Phase::Action);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Arsenal);
+        let arsenal_choices = legal_actions(&gs).iter()
+            .filter(|a| a.typ == ActionType::Arsenal)
+            .count();
+        assert!(arsenal_choices > 0, "the freed slot should accept a card again");
+    }
 }

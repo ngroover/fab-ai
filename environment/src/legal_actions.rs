@@ -101,8 +101,10 @@ fn legal_pitch_order_phase(gs: &Gamestate) -> Vec<Action> {
 fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
     let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
 
-    // The card being paid for is held pending in the hand; it can't pitch for
-    // itself, so exclude it from the options.
+    // The card being paid for is held pending in the zone it is played from —
+    // the hand, or the arsenal. A pending hand card can't pitch for itself, so
+    // exclude it from the options; a pending arsenal card isn't in hand at all,
+    // leaving the whole hand free to pay for it.
     let pending_index = gs.pending_card.map(|p| p.index.get());
 
     // A pending card with a "discard a card" additional cost must leave a card
@@ -305,15 +307,7 @@ fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_p
         let card = cardstate.card;
         let data = card.data();
 
-        // Only cards playable in the current phase
-        if !is_playable(data.typ) {
-            continue;
-        }
-
-        // Action cards (attack actions and non-attack actions) cost an action
-        // point to play; with none left they drop out of the options. Instants
-        // are free, so they remain playable.
-        if uses_action_point(ActionType::PlayCard, data) && player.action_points == 0 {
+        if !is_playable_now(player, data, is_playable) {
             continue;
         }
 
@@ -323,29 +317,7 @@ fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_p
         }
         seen.push(card);
 
-        // Cost still owed after spending banked resource points.
-        let needed = data.cost.saturating_sub(player.resources);
-
-        // Pitch available from the rest of the hand to pay this card's cost.
-        // `total_pitch` summed the whole hand including this card, so subtracting
-        // this card's own pitch can't underflow; `saturating_sub` makes that
-        // explicit rather than relying on the invariant holding.
-        let mut other_pitch = total_pitch.saturating_sub(data.pitch);
-
-        // A "discard a card" additional cost reserves one card in hand to be
-        // discarded — it can't also be pitched. Set aside the lowest-pitch card
-        // among the rest of the hand (the cheapest to give up) for the discard,
-        // so only what remains can pay the cost. With no other card to discard,
-        // the additional cost can't be paid and the card isn't playable.
-        if matches!(data.additional_cost, Some(AdditionalCostType::DiscardCard)) {
-            match min_other_hand_pitch(player, cards, idx) {
-                Some(reserved) => other_pitch = other_pitch.saturating_sub(reserved),
-                None => continue,
-            }
-        }
-
-        // Free to play, or the remaining hand can pitch enough to cover it.
-        if other_pitch >= needed {
+        if can_pay_for_card(player, cards, total_pitch, idx, PlayedFrom::Hand) {
             actions.push(Action {
                 typ: ActionType::PlayCard,
                 card: Some(CardIdx::new(idx)),
@@ -353,7 +325,88 @@ fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_p
         }
     }
 
+    // The arsenal card is played as though it were in hand: the same speeds, the
+    // same action-point cost, and paid for by pitching from hand. It is offered
+    // independently of the hand dedup above — playing the copy in the arsenal
+    // empties the arsenal, so it stays a distinct choice from playing a copy
+    // held in hand.
+    if let Some(arsenal_idx) = player.arsenal_idx {
+        let idx = arsenal_idx.get();
+        let data = cards[idx].card.data();
+        if is_playable_now(player, data, is_playable)
+            && can_pay_for_card(player, cards, total_pitch, idx, PlayedFrom::Arsenal) {
+            actions.push(Action {
+                typ: ActionType::PlayCard,
+                card: Some(arsenal_idx),
+            });
+        }
+    }
+
     actions
+}
+
+/// Whether the card can be played at all right now, before any question of
+/// paying for it: it must be playable at the current phase's speed, and — if it
+/// is an action, which costs an action point — the player must have a point
+/// left. Instants and reactions are free, so they stay playable with none.
+/// Applies to a card in hand and to the arsenal card alike.
+fn is_playable_now(player: &Player, data: &CardData, is_playable: fn(CardType) -> bool) -> bool {
+    is_playable(data.typ)
+        && !(uses_action_point(ActionType::PlayCard, data) && player.action_points == 0)
+}
+
+/// The zone a card is being played from, which decides whether its own pitch
+/// value is part of the pool that pays for it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PlayedFrom {
+    Hand,
+    Arsenal,
+}
+
+/// Whether the player can cover the cost of playing the card at `idx`, given
+/// `total_pitch` — the pitch available across their whole hand.
+///
+/// A card played from hand cannot pitch for itself, so its own pitch comes out
+/// of the pool. A card played from the arsenal was never in that pool, so the
+/// whole hand pays for it. Only hand cards are ever pitched, so the arsenal
+/// card itself never adds to the pool either way.
+fn can_pay_for_card(
+    player: &Player,
+    cards: &[CardState; TOTAL_CARDS],
+    total_pitch: u8,
+    idx: usize,
+    played_from: PlayedFrom,
+) -> bool {
+    let data = cards[idx].card.data();
+
+    // Cost still owed after spending banked resource points.
+    let needed = data.cost.saturating_sub(player.resources);
+
+    // Pitch available to pay this card's cost. `total_pitch` summed the whole
+    // hand, so subtracting a hand card's own pitch can't underflow;
+    // `saturating_sub` makes that explicit rather than relying on the invariant
+    // holding.
+    let mut pitch_pool = match played_from {
+        PlayedFrom::Hand => total_pitch.saturating_sub(data.pitch),
+        PlayedFrom::Arsenal => total_pitch,
+    };
+
+    // A "discard a card" additional cost reserves one card in hand to be
+    // discarded — it can't also be pitched. Set aside the lowest-pitch card of
+    // those available (the cheapest to give up) for the discard, so only what
+    // remains can pay the cost. With no card in hand to discard, the additional
+    // cost can't be paid and the card isn't playable. For an arsenal card every
+    // hand card is available to discard, since none of them is the card being
+    // played.
+    if matches!(data.additional_cost, Some(AdditionalCostType::DiscardCard)) {
+        match min_other_hand_pitch(player, cards, idx) {
+            Some(reserved) => pitch_pool = pitch_pool.saturating_sub(reserved),
+            None => return false,
+        }
+    }
+
+    // Free to play, or the hand can pitch enough to cover it.
+    pitch_pool >= needed
 }
 
 /// The pitch value of the lowest-pitch card in `player`'s hand other than the
@@ -1009,4 +1062,127 @@ mod tests {
         }
     }
 
+    /// Move the head of `pid`'s hand into their (empty) arsenal, relabelled as
+    /// `card`, and return its global index. Mirrors what the Arsenal phase does
+    /// at the end of a turn, without having to play one out.
+    fn put_in_arsenal(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
+        let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+        assert!(player.arsenal_idx.is_none(), "the arsenal slot should be free");
+        let head = player.hand_idx.expect("hand should hold a card to arsenal").get();
+        // The hand is a singly-linked list whose tail points at itself, so
+        // advancing past the head drops it, as the engine's own detach does.
+        let next = gs.cards[head].next_card.get();
+        player.hand_idx = if next == head { None } else { Some(CardIdx::new(next)) };
+        player.hand_size -= 1;
+        player.arsenal_idx = Some(CardIdx::new(head));
+        gs.cards[head].card = card;
+        gs.cards[head].location = CardLocation::arsenal(pid);
+        head
+    }
+
+    /// Relabel every card in `pid`'s hand as `card`.
+    fn relabel_hand(gs: &mut Gamestate, pid: PlayerIndex, card: Card) {
+        let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+        let hand: Vec<usize> = player.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+        for idx in hand {
+            gs.cards[idx].card = card;
+        }
+    }
+
+    /// The cards offered to the active player as `PlayCard` actions.
+    fn playable_cards(gs: &Gamestate) -> HashSet<Card> {
+        legal_actions(gs).iter()
+            .filter(|a| a.typ == ActionType::PlayCard)
+            .map(|a| gs.cards[a.card_index()].card)
+            .collect()
+    }
+
+    #[test]
+    fn legal_actions_in_action_phase_offers_the_arsenal_card() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        // A 0-cost action in the arsenal is playable exactly as it would be
+        // from hand: the arsenal card is played as though it were in hand.
+        let arsenal_idx = put_in_arsenal(&mut gs, PlayerIndex::P1, Card::ClearingBellowB);
+
+        let offered: Vec<usize> = legal_actions(&gs).iter()
+            .filter(|a| a.typ == ActionType::PlayCard)
+            .map(|a| a.card_index())
+            .collect();
+        assert!(offered.contains(&arsenal_idx),
+            "the arsenal card should be offered as a play");
+        assert_eq!(gs.cards[arsenal_idx].location, CardLocation::P1Arsenal,
+            "it is still in the arsenal until it is actually played");
+    }
+
+    #[test]
+    fn legal_actions_in_action_phase_excludes_an_arsenal_card_of_the_wrong_speed() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        // A defense reaction is not playable at action speed, in hand or in the
+        // arsenal: the same phase predicate gates both.
+        put_in_arsenal(&mut gs, PlayerIndex::P1, Card::DodgeB);
+
+        assert!(!playable_cards(&gs).contains(&Card::DodgeB));
+    }
+
+    #[test]
+    fn legal_actions_in_action_phase_pays_for_the_arsenal_card_out_of_hand() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        // Muscle Mutt costs 3 and the arsenal card cannot pitch for itself, so
+        // the cost has to come out of hand. With a hand that pitches for
+        // nothing, it is unaffordable and drops out of the options.
+        let arsenal_idx = put_in_arsenal(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
+        assert_eq!(Card::MuscleMuttY.data().cost, 3);
+        relabel_hand(&mut gs, PlayerIndex::P1, Card::BoneBasher); // pitch 0
+        assert_eq!(Card::BoneBasher.data().pitch, 0);
+        let offered: Vec<usize> = legal_actions(&gs).iter()
+            .filter(|a| a.typ == ActionType::PlayCard)
+            .map(|a| a.card_index())
+            .collect();
+        assert!(!offered.contains(&arsenal_idx),
+            "an arsenal card the hand cannot pay for must not be offered");
+
+        // Give the hand a single pitch-3 card and it becomes affordable — the
+        // whole hand pays, since none of it is the card being played.
+        let hand_head = gs.p1.hand_idx.expect("hand should not be empty").get();
+        gs.cards[hand_head].card = Card::ClearingBellowB; // pitch 3
+        assert_eq!(Card::ClearingBellowB.data().pitch, 3);
+        let offered: Vec<usize> = legal_actions(&gs).iter()
+            .filter(|a| a.typ == ActionType::PlayCard)
+            .map(|a| a.card_index())
+            .collect();
+        assert!(offered.contains(&arsenal_idx));
+    }
+
+    #[test]
+    fn legal_actions_in_reaction_phase_offers_the_arsenal_card_to_the_defender_only() {
+        let mut gs = step_to_dorinthea_defending();
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // no blockers
+        assert_eq!(gs.phase, Phase::Reaction);
+
+        // The attacker holds priority first: a defense reaction in *his*
+        // arsenal is no more playable than one in his hand.
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+        put_in_arsenal(&mut gs, PlayerIndex::P1, Card::DodgeB);
+        assert!(!playable_cards(&gs).contains(&Card::DodgeB),
+            "the attacking player must not be offered a defense reaction from arsenal");
+
+        // Priority passes to the defender, who may play hers.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        let arsenal_idx = put_in_arsenal(&mut gs, PlayerIndex::P2, Card::DodgeB);
+        let offered: Vec<usize> = legal_actions(&gs).iter()
+            .filter(|a| a.typ == ActionType::PlayCard)
+            .map(|a| a.card_index())
+            .collect();
+        assert!(offered.contains(&arsenal_idx));
+    }
 }

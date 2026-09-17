@@ -174,7 +174,9 @@ on-play-effect helpers).
           * as the reaction resolves it joins the chain link the attack sits on
             (`commit_defense_reaction`) instead of going to the graveyard, so
             its block adds to whatever was declared in the defend step, and it
-            leaves for the graveyard with the blockers when the chain closes.
+            leaves for the graveyard with the blockers when the chain closes;
+          * either can be played from the arsenal as well as from hand, on the
+            same terms (see the NOTES on arsenal plays below).
         Tests: dodge_is_a_vanilla_0_cost_2_block_defense_reaction,
                toughen_up_is_a_vanilla_2_cost_4_block_defense_reaction,
                defense_reactions_cannot_be_declared_as_blockers,
@@ -185,6 +187,8 @@ on-play-effect helpers).
                toughen_up_adds_its_block_to_the_combat_chain,
                a_defense_reaction_stacks_with_a_declared_blocker,
                a_defense_reaction_leaves_the_chain_for_the_graveyard_when_it_closes,
+               dodge_can_be_played_from_the_arsenal,
+               toughen_up_from_the_arsenal_is_paid_for_by_pitching_the_whole_hand,
                can_be_declared_as_blocker_excludes_defense_reactions_and_no_block
                (the last in `legal_actions::tests`)
 
@@ -272,6 +276,19 @@ on-play-effect helpers).
   already have coverage in the general `fab_step::tests` module, but the cards
   above are not yet considered fully implemented + dedicated-card-tested and so
   remain on the TODO list.
+- Arsenal plays: a card in the arsenal is offered as a play in the same windows
+  a hand card would be (action, instant and reaction), gated by the same speed
+  and action-point rules. It is paid for by pitching from hand, and because the
+  arsenal card is not part of the hand's pitch pool, the whole hand can pay for
+  it; it leaves the arsenal only once the cost is covered, freeing the slot to
+  be refilled that turn. Tests: legal_actions_in_action_phase_offers_the_arsenal_card,
+  legal_actions_in_action_phase_excludes_an_arsenal_card_of_the_wrong_speed,
+  legal_actions_in_action_phase_pays_for_the_arsenal_card_out_of_hand,
+  legal_actions_in_reaction_phase_offers_the_arsenal_card_to_the_defender_only
+  (in `legal_actions::tests`), test_attack_action_played_from_arsenal_resolves_to_the_chain,
+  test_arsenal_slot_freed_by_playing_can_be_refilled_the_same_turn
+  (in `fab_step::tests`).
+
 - When a card is finished, add its dedicated test(s) to
   environment/src/fab_step_card_tests.rs and move it up to the COMPLETE
   section.

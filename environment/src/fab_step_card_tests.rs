@@ -1589,3 +1589,89 @@ fn a_defense_reaction_leaves_the_chain_for_the_graveyard_when_it_closes() {
     assert_eq!(gs.cards[dodge_idx].location, CardLocation::P2Graveyard);
     assert_eq!(gs.p2.chain_link[0], None);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Defense reactions played from the arsenal
+//
+// A card in the arsenal is played as though it were in hand, so a defense
+// reaction sitting there is available to the defender in the defend reaction
+// step exactly as one in hand would be — paid for by pitching from hand (the
+// arsenal card is not in the hand pool, so all of it can pay), and resolving
+// onto the chain link the attack sits on.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Move the head of `pid`'s hand into their (empty) arsenal, relabelled as
+/// `card`, and return its global index. Mirrors what the Arsenal phase does at
+/// the end of a turn, without having to play one out.
+fn put_in_arsenal(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
+    let idx = {
+        let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+        assert!(player.arsenal_idx.is_none(), "the arsenal slot should be free");
+        player.hand_idx.expect("hand should hold a card to arsenal").get()
+    };
+    gs.cards[idx].card = card;
+    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    detach_from_current_zone(player, &mut gs.cards, idx);
+    gs.cards[idx].location = CardLocation::arsenal(pid);
+    player.arsenal_idx = Some(CardIdx::new(idx));
+    idx
+}
+
+#[test]
+fn dodge_can_be_played_from_the_arsenal() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    pass_to_defender_reaction(&mut gs);
+
+    // Dodge waits in the arsenal rather than the hand, and is free to play.
+    let dodge_idx = put_in_arsenal(&mut gs, PlayerIndex::P2, Card::DodgeB);
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(dodge_idx))});
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.cards[dodge_idx].location, CardLocation::Stack);
+    assert_eq!(gs.p2.arsenal_idx, None, "playing it empties the arsenal slot");
+
+    // It blocks from the chain just as it would played from hand: 6 - 2 = 4.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.cards[dodge_idx].location, CardLocation::P2CombatChain);
+    assert_eq!(gs.p2.chain_link[0], Some(CardIdx::new(dodge_idx)));
+    assert_eq!(gs.p2.life, 20 - 4);
+}
+
+#[test]
+fn toughen_up_from_the_arsenal_is_paid_for_by_pitching_the_whole_hand() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    pass_to_defender_reaction(&mut gs);
+
+    // Two pitch-1 reds in hand, Toughen Up (cost 2) in the arsenal. The arsenal
+    // card is not part of the hand's pitch pool, so both hand cards are free to
+    // pay for it.
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::SharpenSteelR, Card::SharpenSteelR]);
+    let tu_idx = put_in_arsenal(&mut gs, PlayerIndex::P2, Card::ToughenUpB);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    assert_eq!(hand.len(), 1, "one of the two reds went to the arsenal slot");
+
+    // One pitch-1 card can't cover a cost of 2, so it isn't offered yet.
+    let offered: Vec<usize> = legal_actions(&gs).iter()
+        .filter(|a| a.typ == ActionType::PlayCard)
+        .map(|a| a.card_index())
+        .collect();
+    assert!(!offered.contains(&tu_idx));
+
+    // Bank a resource and it becomes payable with the single card in hand.
+    gs.p2.resources = 1;
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(tu_idx))});
+    assert_eq!(gs.phase, Phase::ReactionPitch);
+    assert_eq!(gs.cards[tu_idx].location, CardLocation::P2Arsenal,
+        "it stays in the arsenal until the cost is covered");
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(hand[0]))});
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.cards[tu_idx].location, CardLocation::Stack);
+    assert_eq!(gs.p2.arsenal_idx, None);
+    assert_eq!(gs.p2.resources, 0);
+
+    // 4 block against Muscle Mutt's 6 power leaves 2 damage.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.cards[tu_idx].location, CardLocation::P2CombatChain);
+    assert_eq!(gs.p2.life, 20 - 2);
+}
