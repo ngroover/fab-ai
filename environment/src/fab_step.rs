@@ -518,6 +518,26 @@ fn commit_blocker(gs: &mut Gamestate, idx: usize) {
     attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[link], None, None, idx);
 }
 
+/// Move a defense reaction that has just resolved off the stack onto the
+/// defender's side of the combat chain. It joins the very link the blockers
+/// declared in the defend step sit on — the attacker's current link — so its
+/// block is summed with theirs against this attack alone. Unlike `commit_blocker`
+/// the card comes from the stack, which `resolve_top_of_stack` has already popped
+/// it from, so there is no zone to detach it from first.
+fn commit_defense_reaction(gs: &mut Gamestate, owner: PlayerIndex, idx: usize) {
+    // Only the turn player attacks, so the link being defended is the current
+    // link of the turn player's chain.
+    let attacker = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let link = current_chain_link(attacker);
+
+    gs.cards[idx].location = CardLocation::combat_chain(owner);
+    // The reaction is played face-up onto the chain, so it is known to both.
+    gs.cards[idx].visible = CardVisibleState::BothKnow;
+
+    let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[link], None, None, idx);
+}
+
 /// Resolve the card at the top of the stack (its most recently added card),
 /// detaching it from the stack and routing it by the action that committed it
 /// (carried on the `PendingCard`). The owner is implied by which half of the
@@ -595,6 +615,18 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         // be walked the same way as the defender's blockers when combat resolves.
         attach_to_front_of_zone(&mut gs.cards, &mut attacker.chain_link[link], None, None, top);
         gs.phase = Phase::Defend;
+    } else if commits_as_defense(pending.typ, data, owner, gs.turn_player) {
+        // A defense reaction resolving in the defender's reaction window joins
+        // the blockers already declared against the attack instead of heading
+        // for the graveyard, so its block counts towards stopping this attack
+        // (see `resolve_combat_damage`). It leaves for the graveyard with the
+        // rest of the link when the chain closes.
+        commit_defense_reaction(gs, owner, top);
+        if gs.stack_is_empty() {
+            close_priority_window(gs);
+        } else {
+            gs.active_player = gs.turn_player;
+        }
     } else {
         gs.cards[top].location = CardLocation::graveyard(owner);
         // A resolved card sits face-up in the graveyard, known to both players.
@@ -920,6 +952,24 @@ fn commits_as_attack(typ: ActionType, data: &CardData) -> bool {
             .unwrap_or(false),
         _ => false,
     }
+}
+
+/// Whether committing `typ` on `data` puts a defense reaction on the stack that
+/// should resolve onto the combat chain: a defense reaction card played from
+/// hand by the defender (`owner` is not the `turn_player`, since only the turn
+/// player attacks). Such a card blocks the attack it was played against rather
+/// than resolving to the graveyard. The defender check is belt-and-braces — the
+/// reaction window only ever offers a defense reaction to the defender — and
+/// keeps a defense reaction that somehow resolved outside combat off the chain.
+fn commits_as_defense(
+    typ: ActionType,
+    data: &CardData,
+    owner: PlayerIndex,
+    turn_player: PlayerIndex,
+) -> bool {
+    typ == ActionType::PlayCard
+        && data.typ == CardType::DefenseReaction
+        && owner != turn_player
 }
 
 /// Whether committing `typ` on `data` spends an action point — i.e. it is an
@@ -2936,8 +2986,9 @@ mod tests {
         step(gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(hand[2]))});
         assert_eq!(gs.phase, Phase::Reaction);
 
-        // Both pass: Toughen Up resolves to the graveyard, the window closes,
-        // combat damage resolves, and play returns to the Action phase.
+        // Both pass: Toughen Up resolves onto the defender's side of the combat
+        // chain (a defense reaction blocks with its printed defense), the window
+        // closes, combat damage resolves, and play returns to the Action phase.
         step(gs, Action{ typ: ActionType::Pass, card: None});
         step(gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Action);

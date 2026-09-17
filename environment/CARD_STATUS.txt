@@ -148,6 +148,46 @@ on-play-effect helpers).
                come_to_fight_bonus_does_not_survive_the_turn,
                come_to_fight_played_from_hand_banks_the_bonus_and_keeps_the_action_point
 
+  [x] Beast Mode   (Card::BeastModeR)
+        On play, if you have intimidated this turn, this attack gets +2 power.
+        The HasIntimidated condition drives the shared ConditionalPower payoff:
+        the flag is set when an Intimidate trigger resolves (whether or not the
+        opponent had a card to banish) and lasts the turn.
+        Tests: beast_mode_gets_plus2_when_player_has_intimidated,
+               beast_mode_no_bonus_when_player_has_not_intimidated
+
+  [x] Dodge       (Card::DodgeB)
+  [x] Toughen Up  (Card::ToughenUpB)
+        Text-free blue defense reactions — Dodge blocks 2 for 0, Toughen Up
+        blocks 4 for 2 — implemented together because what makes them work is
+        the defense-reaction rules rather than any card-specific effect:
+          * they are never declared as blockers in the defend step, whatever
+            their printed defense (`can_be_declared_as_blocker` excludes the
+            card type, not just the `no_block` flag, so the rule holds for a
+            future defense reaction that doesn't carry it);
+          * only the defender is offered them, and only in the defend reaction
+            step, where they go on the stack like an instant and can be
+            responded to before they resolve;
+          * a cost is paid by pitching in the reaction window's own pitch phase
+            (ReactionPitch) — Dodge is free and commits straight to the stack,
+            Toughen Up's 2 has to be pitched for;
+          * as the reaction resolves it joins the chain link the attack sits on
+            (`commit_defense_reaction`) instead of going to the graveyard, so
+            its block adds to whatever was declared in the defend step, and it
+            leaves for the graveyard with the blockers when the chain closes.
+        Tests: dodge_is_a_vanilla_0_cost_2_block_defense_reaction,
+               toughen_up_is_a_vanilla_2_cost_4_block_defense_reaction,
+               defense_reactions_cannot_be_declared_as_blockers,
+               only_the_defender_is_offered_defense_reactions_in_the_reaction_step,
+               dodge_is_free_and_commits_straight_to_the_stack,
+               toughen_up_is_paid_for_by_pitching_in_the_reaction_window,
+               dodge_adds_its_block_to_the_combat_chain,
+               toughen_up_adds_its_block_to_the_combat_chain,
+               a_defense_reaction_stacks_with_a_declared_blocker,
+               a_defense_reaction_leaves_the_chain_for_the_graveyard_when_it_closes,
+               can_be_declared_as_blocker_excludes_defense_reactions_and_no_block
+               (the last in `legal_actions::tests`)
+
   [x] Sigil of Solace (Card::SigilofSolaceB)
         "Gain 1 life." A 0-cost instant with no power or defense, so it never
         attacks or blocks — it resolves to the graveyard, healing its owner on
@@ -161,7 +201,7 @@ on-play-effect helpers).
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
-  [x] Beast Mode             (Card::BeastModeR)
+  [x] Beast Mode             (Card::BeastModeR)  — see COMPLETE section above
   [x] Pack Hunt              (Card::PackHuntR)  — see COMPLETE section above
   [x] Wrecking Ball          (Card::WreckingBallR)  — see COMPLETE section above
   [ ] Barraging Beatdown     (Card::BarragingBeatdownY)
@@ -173,7 +213,7 @@ on-play-effect helpers).
   [x] Wounded Bull           (Card::WoundedBullY)  — see COMPLETE section above
   [x] Clearing Bellow        (Card::ClearingBellowB)  — see COMPLETE section above
   [x] Come to Fight          (Card::ComeToFightB)  — see COMPLETE section above
-  [ ] Dodge                  (Card::DodgeB)
+  [x] Dodge                  (Card::DodgeB)  — see COMPLETE section above
   [ ] Rally the Rearguard    (Card::RallyTheRearguardB)
   [ ] Titanium Bauble        (Card::TitaniumBaubleB)
 
@@ -210,7 +250,7 @@ on-play-effect helpers).
   [ ] Blade Flash                    (Card::BladeFlashB)
   [ ] Hit and Run                    (Card::HitAndRunB)
   [x] Sigil of Solace                (Card::SigilofSolaceB)  — see COMPLETE section above
-  [ ] Toughen Up                     (Card::ToughenUpB)
+  [x] Toughen Up                     (Card::ToughenUpB)  — see COMPLETE section above
   [ ] Visit the Blacksmith           (Card::VisitTheBlacksmithB)
 
 
