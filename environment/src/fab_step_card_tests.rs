@@ -1316,3 +1316,362 @@ fn come_to_fight_played_from_hand_banks_the_bonus_and_keeps_the_action_point() {
     resolve_combat_damage(&mut gs);
     assert_eq!(gs.p2.life, life_before - 7);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dodge (Card::DodgeB) and Toughen Up (Card::ToughenUpB)
+//
+// Both are text-free blue defense reactions — Dodge blocks 2 for 0, Toughen Up
+// blocks 4 for 2 — and both are covered here as a pair because everything that
+// makes them work is the defense-reaction rules rather than card-specific
+// effects:
+//
+//   * they are never declared as blockers in the defend step, whatever their
+//     defense value (`legal_defend_phase` filters the card type out);
+//   * only the defender is offered them, and only in the defend reaction step
+//     (`is_defender_reaction_playable`), where they go on the stack like an
+//     instant and can be responded to;
+//   * a cost is paid by pitching, in the reaction window's own pitch phase —
+//     Dodge is free and commits straight to the stack, Toughen Up's 2 has to be
+//     pitched for;
+//   * as the reaction resolves it joins the chain link the attack is on, so its
+//     block adds to whatever was declared in the defend step, and it leaves for
+//     the graveyard with the blockers when the chain closes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Assert `card` is a defense reaction with the given printed cost and defense
+/// and carries no rules text at all: no keywords, no on-play effect, no
+/// additional cost, no activated ability, and no defend / next-attack / target
+/// effect. It blocks with its printed defense and nothing more.
+fn assert_vanilla_defense_reaction(card: Card, cost: u8, defense: u8) {
+    let data = card.data();
+    assert_eq!(data.typ, CardType::DefenseReaction);
+    assert_eq!(data.cost, cost);
+    assert_eq!(data.defense, defense);
+    assert_eq!(data.power, 0);
+    assert!(data.keyword.is_empty(), "{:?} should carry no keywords", card);
+    assert!(data.play_effect.is_none(), "{:?} should have no on-play effect", card);
+    assert!(data.additional_cost.is_none(), "{:?} should have no additional cost", card);
+    assert!(data.ability.is_none(), "{:?} should have no activated ability", card);
+    assert!(data.defend_effect.is_none(), "{:?} should have no defend effect", card);
+    assert!(data.next_attack_effect.is_none(), "{:?} should have no next-attack effect", card);
+    assert!(data.target_effect.is_none(), "{:?} should have no target effect", card);
+}
+
+/// Rhinar (p1) attacks with Muscle Mutt (a vanilla 6-power generic attack) and
+/// Dorinthea (p2) is on defense, in the Defend phase with the attack on link 0
+/// of p1's chain. The starting point for every defense-reaction test below: 6
+/// power against an untouched 20 life makes the arithmetic of a block obvious.
+fn dorinthea_defending_muscle_mutt() -> Gamestate {
+    let (gs, _) = play_and_resolve_attack(Card::MuscleMuttY);
+    assert_eq!(gs.phase, Phase::Defend);
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    assert_eq!(gs.p2.life, 20);
+    gs
+}
+
+/// Step from the Defend phase into the defend reaction step with the defender
+/// (p2) holding priority: she declares no blockers, then the attacker passes
+/// his first crack at the reaction window.
+fn pass_to_defender_reaction(gs: &mut Gamestate) {
+    step(gs, Action{ typ: ActionType::Pass, card: None}); // no blockers declared
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    step(gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes priority
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+}
+
+/// The cards offered to the active player as `Defend` actions (blockers).
+fn blockable_cards(gs: &Gamestate) -> HashSet<Card> {
+    legal_actions(gs).iter()
+        .filter(|a| a.typ == ActionType::Defend)
+        .map(|a| gs.cards[a.card_index()].card)
+        .collect()
+}
+
+#[test]
+fn dodge_is_a_vanilla_0_cost_2_block_defense_reaction() {
+    assert_vanilla_defense_reaction(Card::DodgeB, 0, 2);
+}
+
+#[test]
+fn toughen_up_is_a_vanilla_2_cost_4_block_defense_reaction() {
+    assert_vanilla_defense_reaction(Card::ToughenUpB, 2, 4);
+}
+
+#[test]
+fn defense_reactions_cannot_be_declared_as_blockers() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+
+    // Dorinthea holds both defense reactions and one ordinary blocker.
+    set_hand(&mut gs, PlayerIndex::P2,
+        &[Card::DodgeB, Card::ToughenUpB, Card::DrivingBladeY]);
+
+    // Neither reaction is a legal block, however much defense it prints: a
+    // defense reaction is played in the reaction step, never declared here.
+    let blocks = blockable_cards(&gs);
+    assert!(!blocks.contains(&Card::DodgeB),
+        "Dodge is a defense reaction and must not be offered as a block");
+    assert!(!blocks.contains(&Card::ToughenUpB),
+        "Toughen Up is a defense reaction and must not be offered as a block");
+    // The ordinary attack action in the same hand still blocks, so the two are
+    // excluded by their card type rather than the defend options having gone
+    // empty.
+    assert!(blocks.contains(&Card::DrivingBladeY));
+}
+
+#[test]
+fn only_the_defender_is_offered_defense_reactions_in_the_reaction_step() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // no blockers
+    assert_eq!(gs.phase, Phase::Reaction);
+
+    // The attacker (p1) holds priority first. Hand him a defense reaction and
+    // an attack reaction: only the attack reaction is his to play.
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::DodgeB, Card::InTheSwingR]);
+    let attacker_options = playable_cards(&gs);
+    assert!(!attacker_options.contains(&Card::DodgeB),
+        "the attacking player must not be offered a defense reaction");
+    assert!(attacker_options.contains(&Card::InTheSwingR),
+        "the attacking player keeps his own attack reactions");
+
+    // Priority passes to the defender, who is offered both of hers.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::DodgeB, Card::ToughenUpB]);
+    let defender_options = playable_cards(&gs);
+    assert!(defender_options.contains(&Card::DodgeB));
+    assert!(defender_options.contains(&Card::ToughenUpB));
+}
+
+#[test]
+fn dodge_is_free_and_commits_straight_to_the_stack() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    pass_to_defender_reaction(&mut gs);
+
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::DodgeB]);
+    let dodge_idx = gs.p2.hand_idx.expect("Dodge should be the defender's only card").get();
+
+    // Cost 0: nothing to pitch for, so it goes on the stack and the window
+    // stays open for a response rather than dropping into a pitch phase.
+    assert_eq!(Card::DodgeB.data().cost, 0);
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(dodge_idx))});
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.cards[dodge_idx].location, CardLocation::Stack);
+    assert!(!gs.stack_is_empty());
+    assert_eq!(gs.p2.pitch_idx, None, "a free reaction pitches nothing");
+}
+
+#[test]
+fn toughen_up_is_paid_for_by_pitching_in_the_reaction_window() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    pass_to_defender_reaction(&mut gs);
+
+    // Two pitch-1 reds pay Toughen Up's cost of 2.
+    assert_eq!(Card::ToughenUpB.data().cost, 2);
+    assert_eq!(Card::SharpenSteelR.data().pitch, 1);
+    set_hand(&mut gs, PlayerIndex::P2,
+        &[Card::ToughenUpB, Card::SharpenSteelR, Card::SharpenSteelR]);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+
+    // Playing it drops into the reaction window's own pitch phase; it is still
+    // in hand (pending, not on the stack) until the cost is covered.
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(hand[0]))});
+    assert_eq!(gs.phase, Phase::ReactionPitch);
+    assert_eq!(gs.cards[hand[0]].location, CardLocation::P2Hand);
+
+    // One pitch leaves a resource short, the second covers it and returns to
+    // the reaction window with the card on the stack and the cost spent.
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(hand[1]))});
+    assert_eq!(gs.phase, Phase::ReactionPitch);
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(hand[2]))});
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.cards[hand[0]].location, CardLocation::Stack);
+    assert_eq!(gs.p2.resources, 0);
+    assert_eq!(gs.cards[hand[1]].location, CardLocation::P2Pitch);
+    assert_eq!(gs.cards[hand[2]].location, CardLocation::P2Pitch);
+}
+
+/// Play `card` (a 0-cost defense reaction) from the defender's hand in the
+/// defend reaction step and resolve the window out: both players pass, so the
+/// reaction resolves and, with the stack empty again, the window closes and
+/// combat damage is dealt. Returns the game and the reaction's global index.
+fn defender_reacts_with(gs: &mut Gamestate, card: Card) -> usize {
+    assert_eq!(card.data().cost, 0, "helper only plays a free reaction");
+    set_hand(gs, PlayerIndex::P2, &[card]);
+    let idx = gs.p2.hand_idx.expect("the reaction should be the only card in hand").get();
+    step(gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(idx))});
+    step(gs, Action{ typ: ActionType::Pass, card: None});
+    step(gs, Action{ typ: ActionType::Pass, card: None});
+    idx
+}
+
+#[test]
+fn dodge_adds_its_block_to_the_combat_chain() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    pass_to_defender_reaction(&mut gs);
+    let dodge_idx = defender_reacts_with(&mut gs, Card::DodgeB);
+
+    // Dodge resolved onto the defender's side of the link the attack is on,
+    // rather than to her graveyard.
+    assert_eq!(gs.cards[dodge_idx].location, CardLocation::P2CombatChain);
+    assert_eq!(gs.p2.chain_link[0], Some(CardIdx::new(dodge_idx)));
+
+    // Its 2 block came off Muscle Mutt's 6 power: 4 damage, not 6.
+    assert_eq!(gs.p2.life, 20 - 4);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+}
+
+#[test]
+fn toughen_up_adds_its_block_to_the_combat_chain() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    pass_to_defender_reaction(&mut gs);
+
+    // Give the defender the two resources up front so the reaction commits
+    // straight to the stack; the pitching path is covered above.
+    gs.p2.resources = 2;
+    let tu_idx = {
+        set_hand(&mut gs, PlayerIndex::P2, &[Card::ToughenUpB]);
+        let idx = gs.p2.hand_idx.expect("Toughen Up should be the only card in hand").get();
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(idx))});
+        assert_eq!(gs.phase, Phase::Reaction);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        idx
+    };
+
+    // 4 block against 6 power leaves 2 damage.
+    assert_eq!(gs.cards[tu_idx].location, CardLocation::P2CombatChain);
+    assert_eq!(gs.p2.chain_link[0], Some(CardIdx::new(tu_idx)));
+    assert_eq!(gs.p2.life, 20 - 2);
+}
+
+#[test]
+fn a_defense_reaction_stacks_with_a_declared_blocker() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+
+    // Declare Driving Blade (defense 3) as a blocker in the defend step...
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::DrivingBladeY, Card::DodgeB]);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    let (blocker_idx, dodge_idx) = (hand[0], hand[1]);
+    assert_eq!(Card::DrivingBladeY.data().defense, 3);
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(blocker_idx))});
+    assert_eq!(gs.cards[blocker_idx].location, CardLocation::P2CombatChain);
+
+    // ...then add Dodge (2) from the same hand in the reaction step.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(dodge_idx))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+    // Both sit on the same chain link — the reaction on top of the blocker —
+    // so their defense is summed: 3 + 2 = 5 against 6 power leaves 1 damage.
+    assert_eq!(gs.p2.chain_link[0], Some(CardIdx::new(dodge_idx)));
+    assert_eq!(gs.cards[dodge_idx].next_card, CardIdx::new(blocker_idx));
+    assert_eq!(gs.p2.life, 20 - 1);
+}
+
+#[test]
+fn a_defense_reaction_leaves_the_chain_for_the_graveyard_when_it_closes() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    pass_to_defender_reaction(&mut gs);
+    let dodge_idx = defender_reacts_with(&mut gs, Card::DodgeB);
+    assert_eq!(gs.cards[dodge_idx].location, CardLocation::P2CombatChain);
+
+    // The turn player passes his action phase: the combat chain closes and
+    // every card on it goes to its owner's graveyard, the reaction included.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.phase, Phase::Arsenal);
+    assert_eq!(gs.cards[dodge_idx].location, CardLocation::P2Graveyard);
+    assert_eq!(gs.p2.chain_link[0], None);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Defense reactions played from the arsenal
+//
+// A card in the arsenal is played as though it were in hand, so a defense
+// reaction sitting there is available to the defender in the defend reaction
+// step exactly as one in hand would be — paid for by pitching from hand (the
+// arsenal card is not in the hand pool, so all of it can pay), and resolving
+// onto the chain link the attack sits on.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Move the head of `pid`'s hand into their (empty) arsenal, relabelled as
+/// `card`, and return its global index. Mirrors what the Arsenal phase does at
+/// the end of a turn, without having to play one out.
+fn put_in_arsenal(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
+    let idx = {
+        let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+        assert!(player.arsenal_idx.is_none(), "the arsenal slot should be free");
+        player.hand_idx.expect("hand should hold a card to arsenal").get()
+    };
+    gs.cards[idx].card = card;
+    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    detach_from_current_zone(player, &mut gs.cards, idx);
+    gs.cards[idx].location = CardLocation::arsenal(pid);
+    player.arsenal_idx = Some(CardIdx::new(idx));
+    idx
+}
+
+#[test]
+fn dodge_can_be_played_from_the_arsenal() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    pass_to_defender_reaction(&mut gs);
+
+    // Dodge waits in the arsenal rather than the hand, and is free to play.
+    let dodge_idx = put_in_arsenal(&mut gs, PlayerIndex::P2, Card::DodgeB);
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(dodge_idx))});
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.cards[dodge_idx].location, CardLocation::Stack);
+    assert_eq!(gs.p2.arsenal_idx, None, "playing it empties the arsenal slot");
+
+    // It blocks from the chain just as it would played from hand: 6 - 2 = 4.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.cards[dodge_idx].location, CardLocation::P2CombatChain);
+    assert_eq!(gs.p2.chain_link[0], Some(CardIdx::new(dodge_idx)));
+    assert_eq!(gs.p2.life, 20 - 4);
+}
+
+#[test]
+fn toughen_up_from_the_arsenal_is_paid_for_by_pitching_the_whole_hand() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    pass_to_defender_reaction(&mut gs);
+
+    // Two pitch-1 reds in hand, Toughen Up (cost 2) in the arsenal. The arsenal
+    // card is not part of the hand's pitch pool, so both hand cards are free to
+    // pay for it.
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::SharpenSteelR, Card::SharpenSteelR]);
+    let tu_idx = put_in_arsenal(&mut gs, PlayerIndex::P2, Card::ToughenUpB);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    assert_eq!(hand.len(), 1, "one of the two reds went to the arsenal slot");
+
+    // One pitch-1 card can't cover a cost of 2, so it isn't offered yet.
+    let offered: Vec<usize> = legal_actions(&gs).iter()
+        .filter(|a| a.typ == ActionType::PlayCard)
+        .map(|a| a.card_index())
+        .collect();
+    assert!(!offered.contains(&tu_idx));
+
+    // Bank a resource and it becomes payable with the single card in hand.
+    gs.p2.resources = 1;
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(tu_idx))});
+    assert_eq!(gs.phase, Phase::ReactionPitch);
+    assert_eq!(gs.cards[tu_idx].location, CardLocation::P2Arsenal,
+        "it stays in the arsenal until the cost is covered");
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(hand[0]))});
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.cards[tu_idx].location, CardLocation::Stack);
+    assert_eq!(gs.p2.arsenal_idx, None);
+    assert_eq!(gs.p2.resources, 0);
+
+    // 4 block against Muscle Mutt's 6 power leaves 2 damage.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.cards[tu_idx].location, CardLocation::P2CombatChain);
+    assert_eq!(gs.p2.life, 20 - 2);
+}

@@ -148,6 +148,50 @@ on-play-effect helpers).
                come_to_fight_bonus_does_not_survive_the_turn,
                come_to_fight_played_from_hand_banks_the_bonus_and_keeps_the_action_point
 
+  [x] Beast Mode   (Card::BeastModeR)
+        On play, if you have intimidated this turn, this attack gets +2 power.
+        The HasIntimidated condition drives the shared ConditionalPower payoff:
+        the flag is set when an Intimidate trigger resolves (whether or not the
+        opponent had a card to banish) and lasts the turn.
+        Tests: beast_mode_gets_plus2_when_player_has_intimidated,
+               beast_mode_no_bonus_when_player_has_not_intimidated
+
+  [x] Dodge       (Card::DodgeB)
+  [x] Toughen Up  (Card::ToughenUpB)
+        Text-free blue defense reactions — Dodge blocks 2 for 0, Toughen Up
+        blocks 4 for 2 — implemented together because what makes them work is
+        the defense-reaction rules rather than any card-specific effect:
+          * they are never declared as blockers in the defend step, whatever
+            their printed defense (`can_be_declared_as_blocker` excludes the
+            card type, not just the `no_block` flag, so the rule holds for a
+            future defense reaction that doesn't carry it);
+          * only the defender is offered them, and only in the defend reaction
+            step, where they go on the stack like an instant and can be
+            responded to before they resolve;
+          * a cost is paid by pitching in the reaction window's own pitch phase
+            (ReactionPitch) — Dodge is free and commits straight to the stack,
+            Toughen Up's 2 has to be pitched for;
+          * as the reaction resolves it joins the chain link the attack sits on
+            (`commit_defense_reaction`) instead of going to the graveyard, so
+            its block adds to whatever was declared in the defend step, and it
+            leaves for the graveyard with the blockers when the chain closes;
+          * either can be played from the arsenal as well as from hand, on the
+            same terms (see the NOTES on arsenal plays below).
+        Tests: dodge_is_a_vanilla_0_cost_2_block_defense_reaction,
+               toughen_up_is_a_vanilla_2_cost_4_block_defense_reaction,
+               defense_reactions_cannot_be_declared_as_blockers,
+               only_the_defender_is_offered_defense_reactions_in_the_reaction_step,
+               dodge_is_free_and_commits_straight_to_the_stack,
+               toughen_up_is_paid_for_by_pitching_in_the_reaction_window,
+               dodge_adds_its_block_to_the_combat_chain,
+               toughen_up_adds_its_block_to_the_combat_chain,
+               a_defense_reaction_stacks_with_a_declared_blocker,
+               a_defense_reaction_leaves_the_chain_for_the_graveyard_when_it_closes,
+               dodge_can_be_played_from_the_arsenal,
+               toughen_up_from_the_arsenal_is_paid_for_by_pitching_the_whole_hand,
+               can_be_declared_as_blocker_excludes_defense_reactions_and_no_block
+               (the last in `legal_actions::tests`)
+
   [x] Sigil of Solace (Card::SigilofSolaceB)
         "Gain 1 life." A 0-cost instant with no power or defense, so it never
         attacks or blocks — it resolves to the graveyard, healing its owner on
@@ -161,7 +205,7 @@ on-play-effect helpers).
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
-  [x] Beast Mode             (Card::BeastModeR)
+  [x] Beast Mode             (Card::BeastModeR)  — see COMPLETE section above
   [x] Pack Hunt              (Card::PackHuntR)  — see COMPLETE section above
   [x] Wrecking Ball          (Card::WreckingBallR)  — see COMPLETE section above
   [ ] Barraging Beatdown     (Card::BarragingBeatdownY)
@@ -173,7 +217,7 @@ on-play-effect helpers).
   [x] Wounded Bull           (Card::WoundedBullY)  — see COMPLETE section above
   [x] Clearing Bellow        (Card::ClearingBellowB)  — see COMPLETE section above
   [x] Come to Fight          (Card::ComeToFightB)  — see COMPLETE section above
-  [ ] Dodge                  (Card::DodgeB)
+  [x] Dodge                  (Card::DodgeB)  — see COMPLETE section above
   [ ] Rally the Rearguard    (Card::RallyTheRearguardB)
   [ ] Titanium Bauble        (Card::TitaniumBaubleB)
 
@@ -210,7 +254,7 @@ on-play-effect helpers).
   [ ] Blade Flash                    (Card::BladeFlashB)
   [ ] Hit and Run                    (Card::HitAndRunB)
   [x] Sigil of Solace                (Card::SigilofSolaceB)  — see COMPLETE section above
-  [ ] Toughen Up                     (Card::ToughenUpB)
+  [x] Toughen Up                     (Card::ToughenUpB)  — see COMPLETE section above
   [ ] Visit the Blacksmith           (Card::VisitTheBlacksmithB)
 
 
@@ -232,6 +276,19 @@ on-play-effect helpers).
   already have coverage in the general `fab_step::tests` module, but the cards
   above are not yet considered fully implemented + dedicated-card-tested and so
   remain on the TODO list.
+- Arsenal plays: a card in the arsenal is offered as a play in the same windows
+  a hand card would be (action, instant and reaction), gated by the same speed
+  and action-point rules. It is paid for by pitching from hand, and because the
+  arsenal card is not part of the hand's pitch pool, the whole hand can pay for
+  it; it leaves the arsenal only once the cost is covered, freeing the slot to
+  be refilled that turn. Tests: legal_actions_in_action_phase_offers_the_arsenal_card,
+  legal_actions_in_action_phase_excludes_an_arsenal_card_of_the_wrong_speed,
+  legal_actions_in_action_phase_pays_for_the_arsenal_card_out_of_hand,
+  legal_actions_in_reaction_phase_offers_the_arsenal_card_to_the_defender_only
+  (in `legal_actions::tests`), test_attack_action_played_from_arsenal_resolves_to_the_chain,
+  test_arsenal_slot_freed_by_playing_can_be_refilled_the_same_turn
+  (in `fab_step::tests`).
+
 - When a card is finished, add its dedicated test(s) to
   environment/src/fab_step_card_tests.rs and move it up to the COMPLETE
   section.

@@ -518,6 +518,26 @@ fn commit_blocker(gs: &mut Gamestate, idx: usize) {
     attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[link], None, None, idx);
 }
 
+/// Move a defense reaction that has just resolved off the stack onto the
+/// defender's side of the combat chain. It joins the very link the blockers
+/// declared in the defend step sit on — the attacker's current link — so its
+/// block is summed with theirs against this attack alone. Unlike `commit_blocker`
+/// the card comes from the stack, which `resolve_top_of_stack` has already popped
+/// it from, so there is no zone to detach it from first.
+fn commit_defense_reaction(gs: &mut Gamestate, owner: PlayerIndex, idx: usize) {
+    // Only the turn player attacks, so the link being defended is the current
+    // link of the turn player's chain.
+    let attacker = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let link = current_chain_link(attacker);
+
+    gs.cards[idx].location = CardLocation::combat_chain(owner);
+    // The reaction is played face-up onto the chain, so it is known to both.
+    gs.cards[idx].visible = CardVisibleState::BothKnow;
+
+    let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[link], None, None, idx);
+}
+
 /// Resolve the card at the top of the stack (its most recently added card),
 /// detaching it from the stack and routing it by the action that committed it
 /// (carried on the `PendingCard`). The owner is implied by which half of the
@@ -595,6 +615,18 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         // be walked the same way as the defender's blockers when combat resolves.
         attach_to_front_of_zone(&mut gs.cards, &mut attacker.chain_link[link], None, None, top);
         gs.phase = Phase::Defend;
+    } else if commits_as_defense(pending.typ, data, owner, gs.turn_player) {
+        // A defense reaction resolving in the defender's reaction window joins
+        // the blockers already declared against the attack instead of heading
+        // for the graveyard, so its block counts towards stopping this attack
+        // (see `resolve_combat_damage`). It leaves for the graveyard with the
+        // rest of the link when the chain closes.
+        commit_defense_reaction(gs, owner, top);
+        if gs.stack_is_empty() {
+            close_priority_window(gs);
+        } else {
+            gs.active_player = gs.turn_player;
+        }
     } else {
         gs.cards[top].location = CardLocation::graveyard(owner);
         // A resolved card sits face-up in the graveyard, known to both players.
@@ -920,6 +952,24 @@ fn commits_as_attack(typ: ActionType, data: &CardData) -> bool {
             .unwrap_or(false),
         _ => false,
     }
+}
+
+/// Whether committing `typ` on `data` puts a defense reaction on the stack that
+/// should resolve onto the combat chain: a defense reaction card played from
+/// hand by the defender (`owner` is not the `turn_player`, since only the turn
+/// player attacks). Such a card blocks the attack it was played against rather
+/// than resolving to the graveyard. The defender check is belt-and-braces — the
+/// reaction window only ever offers a defense reaction to the defender — and
+/// keeps a defense reaction that somehow resolved outside combat off the chain.
+fn commits_as_defense(
+    typ: ActionType,
+    data: &CardData,
+    owner: PlayerIndex,
+    turn_player: PlayerIndex,
+) -> bool {
+    typ == ActionType::PlayCard
+        && data.typ == CardType::DefenseReaction
+        && owner != turn_player
 }
 
 /// Whether committing `typ` on `data` spends an action point — i.e. it is an
@@ -2936,8 +2986,9 @@ mod tests {
         step(gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(hand[2]))});
         assert_eq!(gs.phase, Phase::Reaction);
 
-        // Both pass: Toughen Up resolves to the graveyard, the window closes,
-        // combat damage resolves, and play returns to the Action phase.
+        // Both pass: Toughen Up resolves onto the defender's side of the combat
+        // chain (a defense reaction blocks with its printed defense), the window
+        // closes, combat damage resolves, and play returns to the Action phase.
         step(gs, Action{ typ: ActionType::Pass, card: None});
         step(gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Action);
@@ -3830,5 +3881,76 @@ mod tests {
         }
 
         run_one_attack(&mut gs, Card::MuscleMuttY, Card::ClearingBellowB, &[], false);
+    }
+
+    /// Seat `card` in `pid`'s empty arsenal, taken from the head of their hand.
+    fn seat_in_arsenal(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
+        let idx = {
+            let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+            assert!(player.arsenal_idx.is_none(), "the arsenal slot should be free");
+            player.hand_idx.expect("hand should hold a card to arsenal").get()
+        };
+        gs.cards[idx].card = card;
+        let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+        detach_from_current_zone(player, &mut gs.cards, idx);
+        gs.cards[idx].location = CardLocation::arsenal(pid);
+        player.arsenal_idx = Some(CardIdx::new(idx));
+        idx
+    }
+
+    #[test]
+    fn test_attack_action_played_from_arsenal_resolves_to_the_chain() {
+        let mut gs = fresh_game();
+
+        // Muscle Mutt (cost 3) waits in the arsenal; Clearing Bellow (pitch 3)
+        // in hand pays for it, since the arsenal card can't pitch for itself.
+        let mm_idx = seat_in_arsenal(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
+        let cb_idx = gs.p1.hand_idx.expect("hand should not be empty").get();
+        gs.cards[cb_idx].card = Card::ClearingBellowB;
+
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        assert_eq!(gs.phase, Phase::ActionPitch);
+        // Still in the arsenal while it is only pending.
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Arsenal);
+        assert_eq!(gs.p1.arsenal_idx, Some(CardIdx::new(mm_idx)));
+
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        assert_eq!(gs.phase, Phase::ActionInstant);
+        // Paid for: it leaves the arsenal for the stack, freeing the slot.
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
+        assert_eq!(gs.p1.arsenal_idx, None);
+
+        // Both pass and it resolves onto the chain like any other attack,
+        // sending the defender to the Defend phase.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
+        assert_eq!(gs.p1.chain_link[0], Some(CardIdx::new(mm_idx)));
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+    }
+
+    #[test]
+    fn test_arsenal_slot_freed_by_playing_can_be_refilled_the_same_turn() {
+        let mut gs = fresh_game();
+
+        // Play the 0-cost action out of the arsenal, emptying the slot.
+        let cb_idx = seat_in_arsenal(&mut gs, PlayerIndex::P1, Card::ClearingBellowB);
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(cb_idx))});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.p1.arsenal_idx, None);
+        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Graveyard);
+
+        // Clearing Bellow has Go Again, so the action phase continues; passing
+        // it out reaches the Arsenal phase, where the freed slot means a card
+        // can be set aside again this turn.
+        assert_eq!(gs.phase, Phase::Action);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Arsenal);
+        let arsenal_choices = legal_actions(&gs).iter()
+            .filter(|a| a.typ == ActionType::Arsenal)
+            .count();
+        assert!(arsenal_choices > 0, "the freed slot should accept a card again");
     }
 }
