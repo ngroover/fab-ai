@@ -269,6 +269,10 @@ fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
             if gs.logging_enabled() {
                 gs.log_public(format!("{} passes", player_name(gs.active_player)));
             }
+            // Blockers are all declared now, so every "when you defend with"
+            // trigger for this attack goes on the stack together, to resolve in
+            // the reaction window below.
+            push_defend_triggers(gs);
             gs.phase = Phase::Reaction;
             gs.active_player = gs.turn_player;
         }
@@ -516,15 +520,64 @@ fn commit_blocker(gs: &mut Gamestate, idx: usize) {
     // known to both players.
     gs.cards[idx].visible = CardVisibleState::BothKnow;
     attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[link], None, None, idx);
-
-    // "When you defend with ..." triggers fire as the card is declared, not at
-    // damage. Declaring several blockers fires each in declaration order.
-    apply_defend_effect(gs, pid, idx);
 }
 
-/// Fire the "when you defend with this" trigger of a card just declared as a
-/// blocker by `pid`. Cards without a `defend_effect` — nearly all of them — do
-/// nothing.
+/// The global indices of the cards on `player`'s chain link `link`, head first.
+/// The link is built by `attach_to_front_of_zone`, so the head is the most
+/// recently added card and this walks *back* through declaration order.
+fn chain_link_indices(player: &Player, cards: &[CardState; TOTAL_CARDS], link: usize) -> Vec<usize> {
+    let mut out = Vec::new();
+    let Some(head) = player.chain_link[link] else {
+        return out;
+    };
+    let mut cur = head.get();
+    loop {
+        out.push(cur);
+        let next = cards[cur].next_card.get();
+        if next == cur {
+            break;
+        }
+        cur = next;
+    }
+    out
+}
+
+/// Put a `DefendTrigger` on the stack for each declared blocker carrying a
+/// "when you defend with this" trigger. Called once the defender has finished
+/// declaring blockers, so every trigger for this attack goes on the stack
+/// together and each is then open to responses in the reaction window that
+/// follows, resolving one layer at a time like any other stack entry.
+///
+/// Blockers without a `defend_effect` — nearly all of them — put nothing on the
+/// stack, so an ordinary block still costs no extra priority rounds.
+///
+/// The stack resolves top-down, and `chain_link_indices` walks back through
+/// declaration order, so pushing in that order leaves the *first* blocker
+/// declared on top: simultaneous triggers resolve in the order their cards were
+/// declared. Real FaB lets their controller order them; the engine has no
+/// choice phase for that, and declaration order is the one the player already
+/// expressed.
+fn push_defend_triggers(gs: &mut Gamestate) {
+    let defender = gs.active_player;
+    // Only the turn player attacks, so the link being defended is the current
+    // link of the turn player's chain.
+    let attacker = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let link = current_chain_link(attacker);
+    let player = if defender == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+
+    for idx in chain_link_indices(player, &gs.cards, link) {
+        if gs.cards[idx].card.data().defend_effect.is_some() {
+            gs.push_to_stack(PendingCard {
+                index: CardIdx::new(idx),
+                typ: ActionType::DefendTrigger,
+            });
+        }
+    }
+}
+
+/// Fire the "when you defend with this" trigger of `idx`, a blocker declared by
+/// `pid`, as that trigger resolves off the stack. Cards without a
+/// `defend_effect` never get a trigger pushed in the first place.
 fn apply_defend_effect(gs: &mut Gamestate, pid: PlayerIndex, idx: usize) {
     match gs.cards[idx].card.data().defend_effect {
         Some(DefendEffect::Reveal6BottomOtherwise) => reveal_top_keep_6(gs, pid),
@@ -613,6 +666,27 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     let owner = if top < PLAYER_CARDS { PlayerIndex::P1 } else { PlayerIndex::P2 };
 
     let data = gs.cards[top].card.data();
+
+    // A "when you defend with" trigger: only the effect resolves. The card
+    // itself was put on the combat chain when it was declared as a blocker and
+    // stays there, so — unlike every branch below — nothing moves zones, no
+    // action point is spent, and the card's own keywords and on-play effect are
+    // not re-fired.
+    if pending.typ == ActionType::DefendTrigger {
+        if gs.logging_enabled() {
+            let card = gs.cards[top].card;
+            gs.log_public(format!("{}'s {:?} defend trigger resolves", player_name(owner), card));
+        }
+        apply_defend_effect(gs, owner, top);
+        if gs.stack_is_empty() {
+            close_priority_window(gs);
+        } else {
+            // More triggers (or responses) still to resolve: priority returns to
+            // the turn player for a fresh round in the same window.
+            gs.active_player = gs.turn_player;
+        }
+        return;
+    }
 
     if gs.logging_enabled() {
         let card = gs.cards[top].card;

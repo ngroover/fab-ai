@@ -232,11 +232,28 @@ on-play-effect helpers).
         on the bottom." A 6-power brute attack action that also carries the
         catalog's first `defend_effect`, wiring up the previously unused
         `DefendEffect::Reveal6BottomOtherwise`.
-          * The trigger fires as the card is *declared* as a blocker —
-            `apply_defend_effect` at the end of `commit_blocker` — rather than
-            at damage, so declaring several blockers fires each in declaration
-            order. `apply_defend_effect` is the general hook: a card with no
-            `defend_effect`, which is nearly all of them, does nothing.
+          * The trigger is not applied where the card is committed. Blockers
+            are declared first; when the defender finishes the defend step,
+            `push_defend_triggers` puts a trigger on the stack for every
+            declared blocker carrying a `defend_effect`, as one batch. Each
+            then resolves as its own stack layer in the reaction window that
+            follows, so a trigger can be responded to like a played card.
+          * The stack entry is a `PendingCard` typed `ActionType::DefendTrigger`
+            — a pseudo-action the engine pushes and `legal_actions` never
+            offers. `resolve_top_of_stack` recognises it and resolves the
+            effect alone: the card is already on the combat chain from when it
+            was declared and stays there, so nothing changes zones, no action
+            point is spent, and the card's keywords and on-play effect are not
+            re-fired.
+          * Simultaneous triggers resolve in the order their blockers were
+            declared. The stack resolves top-down and `chain_link_indices`
+            walks back through declaration order, so pushing in that order
+            leaves the first-declared blocker's trigger on top. Real FaB lets
+            the controller order them; there is no choice phase for that, and
+            declaration order is one the player already expressed.
+          * A blocker with no `defend_effect` — nearly all of them — puts
+            nothing on the stack, so an ordinary block still costs no extra
+            round of priority.
           * "Your deck" is the deck of whoever defends with it, which is never
             the turn player. `reveal_top_keep_6` therefore works off the
             declaring player, and the attacker's deck is left alone.
@@ -246,16 +263,19 @@ on-play-effect helpers).
           * The reveal is public either way, so the card is left BothKnow — on
             the bottom that mirrors a face-up pitched card being bottomed (see
             `bottom_pitch_card`).
-          * An empty deck is a legal state to trigger in (a decked player can
+          * An empty deck is a legal state to resolve in (a decked player can
             still declare blockers), so it is a no-op rather than a panic.
         Tests: pack_call_is_a_6_power_brute_attack_with_a_defend_trigger,
+               pack_call_trigger_waits_on_the_stack_instead_of_firing_on_declaration,
+               pack_call_trigger_resolves_leaving_the_card_on_the_combat_chain,
                pack_call_keeps_a_power6_card_on_top,
                pack_call_bottoms_a_sub_power6_card,
                pack_call_reveals_its_own_controllers_deck,
                pack_call_reveal_is_public_whichever_way_it_goes,
                pack_call_on_an_empty_deck_does_nothing,
-               a_blocker_without_a_defend_trigger_leaves_the_deck_alone,
-               pack_call_fires_once_for_each_declared_blocker,
+               a_blocker_without_a_defend_trigger_puts_nothing_on_the_stack,
+               defending_with_two_pack_calls_fires_the_effect_twice,
+               a_defense_reaction_can_be_played_in_response_to_a_defend_trigger,
                pack_call_still_blocks_for_3
 
 

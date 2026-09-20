@@ -13,6 +13,13 @@ pub enum ActionType {
     BottomPitch,
     Defend,
     Arsenal,
+    /// A "when you defend with this" trigger waiting on the stack, e.g. Pack
+    /// Call's reveal. Never a choice a player makes and never returned by
+    /// `legal_actions`: the engine pushes it once blockers are declared (see
+    /// `push_defend_triggers`) and it exists only as a `PendingCard::typ`, to
+    /// tell `resolve_top_of_stack` that what is resolving is the card's trigger
+    /// rather than the card itself — which is already on the combat chain.
+    DefendTrigger,
     Pass
 }
 
