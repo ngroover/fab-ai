@@ -2115,38 +2115,107 @@ fn defending_with_two_pack_calls_fires_the_effect_twice() {
 }
 
 #[test]
-fn a_defense_reaction_can_be_played_in_response_to_a_defend_trigger() {
+fn only_instants_are_offered_while_a_defend_trigger_is_on_the_stack() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+
+    // Pack Call blocks, leaving the defender a defense reaction and an instant.
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::PackCallY, Card::DodgeB, Card::SigilofSolaceB]);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(hand[0]))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY]);
+
+    // The attacker holds an instant and an attack reaction; only the instant is
+    // offered while the trigger is pending.
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::SigilofSolaceB, Card::BladeFlashB]);
+    gs.p1.resources = 5; // affordability is not what rules the reaction out
+    assert_eq!(Card::BladeFlashB.data().typ, CardType::AttackReaction);
+    let attacker = playable_cards(&gs);
+    assert!(attacker.contains(&Card::SigilofSolaceB),
+        "an instant may be played above a pending defend trigger");
+    assert!(!attacker.contains(&Card::BladeFlashB),
+        "an attack reaction may not");
+
+    // Same for the defender: her instant, not her defense reaction.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    gs.p2.resources = 5;
+    let defender = playable_cards(&gs);
+    assert!(defender.contains(&Card::SigilofSolaceB),
+        "an instant may be played above a pending defend trigger");
+    assert!(!defender.contains(&Card::DodgeB),
+        "a defense reaction may not");
+
+    // Playing that instant does not reopen the window. The trigger is no longer
+    // the *top* of the stack, but it is still on it, and the gate asks whether
+    // one is pending anywhere rather than whether it is next to resolve.
+    let sigil_idx = gs.p2.hand_iter(&gs.cards)
+        .find(|(_, cs)| cs.card == Card::SigilofSolaceB)
+        .expect("Sigil of Solace should still be in hand").0;
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
+    assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
+    assert_eq!(gs.active_player, PlayerIndex::P2, "playing a card keeps priority");
+    assert_ne!(gs.stack_top().map(|p| p.typ), Some(ActionType::DefendTrigger),
+        "the instant is on top now, the trigger underneath");
+    assert!(!playable_cards(&gs).contains(&Card::DodgeB),
+        "a reaction stays shut out while a trigger is anywhere on the stack");
+}
+
+#[test]
+fn reactions_are_offered_again_when_no_defend_trigger_is_pending() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+
+    // An ordinary blocker puts no trigger on the stack, so the reaction window
+    // is the usual one — the narrowing above is specific to a pending trigger.
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::DrivingBladeY, Card::DodgeB]);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(hand[0]))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    assert!(gs.stack_is_empty());
+
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    assert!(playable_cards(&gs).contains(&Card::DodgeB),
+        "with no trigger pending, a defense reaction is offered as before");
+}
+
+#[test]
+fn an_instant_resolves_above_a_defend_trigger_without_closing_the_window() {
     let mut gs = dorinthea_defending_muscle_mutt();
     let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
 
     // Pack Call blocks; its trigger is on the stack, not yet resolved.
-    set_hand(&mut gs, PlayerIndex::P2, &[Card::PackCallY, Card::DodgeB]);
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::PackCallY, Card::SigilofSolaceB]);
     let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
-    let (pc_idx, dodge_idx) = (hand[0], hand[1]);
+    let (pc_idx, sigil_idx) = (hand[0], hand[1]);
     step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(pc_idx))});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
     assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY]);
 
-    // The defender responds to it with a free defense reaction, which goes on
-    // the stack above the trigger.
-    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
-    assert_eq!(gs.active_player, PlayerIndex::P2);
-    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(dodge_idx))});
-    assert_eq!(gs.cards[dodge_idx].location, CardLocation::Stack);
+    // The defender answers the trigger with a free instant.
+    let life_before = gs.p2.life;
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
+    assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
 
-    // Last on is first off: Dodge resolves before the trigger it answered.
+    // Last on, first off: the instant resolves while the trigger waits below,
+    // and the window stays open instead of closing into combat damage.
     pass_once_each(&mut gs);
-    assert_eq!(gs.cards[dodge_idx].location, CardLocation::P2CombatChain);
+    assert_eq!(gs.p2.life, life_before + 1, "Sigil of Solace resolved");
+    assert_eq!(gs.cards[sigil_idx].location, CardLocation::P2Graveyard);
     assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY],
         "the trigger is still waiting underneath");
-    assert_ne!(*deck_order(&gs, PlayerIndex::P2).last().unwrap(), top);
+    assert_eq!(gs.phase, Phase::Reaction, "the window must not close early");
+    assert_ne!(*deck_order(&gs, PlayerIndex::P2).last().unwrap(), top,
+        "the trigger has not resolved yet");
 
-    // Then the trigger resolves, and the window closes into combat damage:
-    // Pack Call's 3 block plus Dodge's 2 against Muscle Mutt's 6 leaves 1.
+    // Then the trigger resolves and, the stack now empty, the window closes
+    // into combat damage: Pack Call's 3 block against Muscle Mutt's 6 leaves 3.
     pass_once_each(&mut gs);
     assert!(gs.stack_is_empty());
     assert_eq!(*deck_order(&gs, PlayerIndex::P2).last().unwrap(), top);
-    assert_eq!(gs.p2.life, 20 - 1);
+    assert_eq!(gs.p2.life, life_before + 1 - 3);
 }
 
 #[test]
@@ -2156,11 +2225,12 @@ fn pack_call_still_blocks_for_3() {
     let pc_idx = declare_blockers(&mut gs, &[Card::PackCallY])[0];
     assert_eq!(gs.cards[pc_idx].location, CardLocation::P2CombatChain);
 
-    pass_once_each(&mut gs); // the trigger resolves
+    // Resolving the last trigger empties the stack, which closes the window and
+    // deals combat damage in the same step — there is no further round of
+    // passes. Its 3 block comes off Muscle Mutt's 6 power: 3 damage, not 6. The
+    // trigger is a bonus on top of an ordinary block, not a replacement for it.
+    pass_once_each(&mut gs);
     assert!(gs.stack_is_empty());
-    pass_once_each(&mut gs); // the window closes: combat damage
-
-    // Its 3 block comes off Muscle Mutt's 6 power: 3 damage, not 6. The trigger
-    // is a bonus on top of an ordinary block, not a replacement for it.
+    assert_eq!(gs.phase, Phase::Action, "the window closed as the trigger resolved");
     assert_eq!(gs.p2.life, 20 - 3);
 }

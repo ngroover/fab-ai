@@ -210,11 +210,27 @@ fn legal_reaction_phase(gs: &Gamestate) -> Vec<Action> {
     // reactions. Activated abilities of those same speeds — e.g. an
     // instant-speed equipment ability — are offered too, gated by the same
     // predicate inside `get_equipment_activations`.
+    // While a "when you defend with" trigger is still waiting on the stack the
+    // window narrows to instants, for both players alike: an instant may be
+    // played and resolved above a pending trigger, a reaction may not.
+    if has_pending_defend_trigger(gs) {
+        return legal_play_phase(gs, is_instant_phase_playable);
+    }
     if gs.active_player == gs.turn_player {
         legal_play_phase(gs, is_attacker_reaction_playable)
     } else {
         legal_play_phase(gs, is_defender_reaction_playable)
     }
+}
+
+/// Whether any defend trigger is still waiting on the stack.
+///
+/// The test is "anywhere on the stack", not "on top of it": once an instant is
+/// played in response, the trigger is no longer the top entry, and reactions
+/// stay shut out until every trigger has resolved rather than reopening under
+/// the instant.
+fn has_pending_defend_trigger(gs: &Gamestate) -> bool {
+    gs.stack.iter().flatten().any(|p| p.typ == ActionType::DefendTrigger)
 }
 
 /// Shared body for the action and instant phases. They differ only in which

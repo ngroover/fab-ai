@@ -254,6 +254,22 @@ on-play-effect helpers).
           * A blocker with no `defend_effect` — nearly all of them — puts
             nothing on the stack, so an ordinary block still costs no extra
             round of priority.
+          * While a trigger is pending the reaction window narrows to instants
+            for both players: an instant may be played and resolved above a
+            trigger, a reaction — attack or defense — may not
+            (`has_pending_defend_trigger` in `legal_reaction_phase`). The test
+            is "anywhere on the stack", not "on top of it", so playing an
+            instant in response does not reopen the window underneath itself.
+            Enforced where the engine enforces every other such rule, in
+            `legal_actions`; `step` executes whatever it is handed.
+          * KNOWN CONSEQUENCE: resolving the last trigger empties the stack,
+            which closes the window and deals combat damage in the same step —
+            there is no priority round afterwards. Combined with the narrowing
+            above, a defender who blocks with Pack Call gets no opportunity to
+            play a defense reaction against that attack at all, since the only
+            reaction window is the one the trigger occupies. Giving them one
+            back would mean opening a fresh window once the stack empties,
+            rather than closing it from `resolve_top_of_stack`.
           * "Your deck" is the deck of whoever defends with it, which is never
             the turn player. `reveal_top_keep_6` therefore works off the
             declaring player, and the attacker's deck is left alone.
@@ -275,7 +291,9 @@ on-play-effect helpers).
                pack_call_on_an_empty_deck_does_nothing,
                a_blocker_without_a_defend_trigger_puts_nothing_on_the_stack,
                defending_with_two_pack_calls_fires_the_effect_twice,
-               a_defense_reaction_can_be_played_in_response_to_a_defend_trigger,
+               only_instants_are_offered_while_a_defend_trigger_is_on_the_stack,
+               reactions_are_offered_again_when_no_defend_trigger_is_pending,
+               an_instant_resolves_above_a_defend_trigger_without_closing_the_window,
                pack_call_still_blocks_for_3
 
 
