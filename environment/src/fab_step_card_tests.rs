@@ -24,6 +24,7 @@
 //!   - Sigil of Solace     (`Card::SigilofSolaceB`)
 //!   - Come to Fight       (`Card::ComeToFightB`)
 //!   - Titanium Bauble     (`Card::TitaniumBaubleB`)
+//!   - Pack Call           (`Card::PackCallY`)
 
 use super::*;
 use crate::cards::Card;
@@ -1801,6 +1802,219 @@ fn titanium_bauble_blocks_for_3() {
     assert_eq!(gs.cards[bauble_idx].location, CardLocation::P2CombatChain);
 
     // Its 3 block came off Muscle Mutt's 6 power: 3 damage, not 6.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // defender passes
+    assert_eq!(gs.p2.life, 20 - 3);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pack Call (Card::PackCallY)
+//
+// "When you defend with Pack Call, reveal the top card of your deck. If it has
+// 6 or more power, put it on top of your deck. Otherwise, put it on the
+// bottom." A 6-power brute attack action that also carries the catalog's first
+// `defend_effect`: a trigger that fires as the card is *declared* as a blocker
+// (`apply_defend_effect` in `commit_blocker`), not at damage.
+//
+// "Your deck" is the deck of whoever defends with it — which is never the turn
+// player, so the tests below block with it as p2 and check that p1's deck is
+// left alone.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The order of `pid`'s deck, top first, as global card indices. Walks the
+/// linked list to its tail terminator (a node whose `next_card` points at
+/// itself), the convention `attach_to_bottom_of_deck` maintains.
+fn deck_order(gs: &Gamestate, pid: PlayerIndex) -> Vec<usize> {
+    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let mut out = Vec::new();
+    let mut cur = player.top_deck_idx.map(|i| i.get());
+    while let Some(idx) = cur {
+        out.push(idx);
+        let next = gs.cards[idx].next_card.get();
+        cur = if next == idx { None } else { Some(next) };
+    }
+    out
+}
+
+/// Relabel the card on top of `pid`'s deck to `card`, returning its index. The
+/// deck is left in place — only the identity of its top card changes.
+fn set_top_of_deck(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
+    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let idx = player.top_deck_idx.expect("deck should not be empty").get();
+    gs.cards[idx].card = card;
+    idx
+}
+
+/// Declare `card` as p2's sole blocker in the Defend phase, returning its index.
+fn declare_sole_blocker(gs: &mut Gamestate, card: Card) -> usize {
+    set_hand(gs, PlayerIndex::P2, &[card]);
+    let idx = gs.p2.hand_idx.expect("the blocker should be the only card in hand").get();
+    step(gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(idx))});
+    idx
+}
+
+#[test]
+fn pack_call_is_a_6_power_brute_attack_with_a_defend_trigger() {
+    let data = Card::PackCallY.data();
+    assert_eq!(data.typ, CardType::AttackAction);
+    assert_eq!(data.cost, 3);
+    assert_eq!(data.power, 6);
+    assert_eq!(data.defense, 3);
+    assert_eq!(data.card_class, CardClass::Brute);
+    assert!(data.keyword.is_empty(), "Pack Call should carry no keywords");
+    // Its whole text is the defend trigger — nothing happens when it is played.
+    assert!(matches!(data.defend_effect, Some(DefendEffect::Reveal6BottomOtherwise)));
+    assert!(data.play_effect.is_none(), "Pack Call should have no on-play effect");
+    assert!(data.additional_cost.is_none(), "Pack Call should have no additional cost");
+    assert!(data.ability.is_none(), "Pack Call should have no activated ability");
+}
+
+#[test]
+fn pack_call_keeps_a_power6_card_on_top() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    // Wounded Bull sits exactly on the 6-power boundary, which is inclusive.
+    let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::WoundedBullY);
+    assert_eq!(Card::WoundedBullY.data().power, 6);
+    let before = deck_order(&gs, PlayerIndex::P2);
+
+    declare_sole_blocker(&mut gs, Card::PackCallY);
+
+    assert_eq!(gs.p2.top_deck_idx, Some(CardIdx::new(top)),
+        "a 6-power card stays on top");
+    assert_eq!(deck_order(&gs, PlayerIndex::P2), before,
+        "the deck order is untouched when the top card has 6 or more power");
+}
+
+#[test]
+fn pack_call_bottoms_a_sub_power6_card() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    // Rally the Rearguard has 4 power — under the line, so it is bottomed.
+    let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+    assert_eq!(Card::RallyTheRearguardB.data().power, 4);
+    let before = deck_order(&gs, PlayerIndex::P2);
+    let size_before = gs.p2.deck_size;
+
+    declare_sole_blocker(&mut gs, Card::PackCallY);
+
+    let after = deck_order(&gs, PlayerIndex::P2);
+    assert_eq!(*after.last().expect("deck is non-empty"), top,
+        "a sub-6-power card goes to the bottom");
+    assert_eq!(gs.p2.bottom_deck_idx, Some(CardIdx::new(top)),
+        "the bottom pointer follows it");
+    assert_ne!(gs.p2.top_deck_idx, Some(CardIdx::new(top)));
+
+    // The deck was reordered, not resized: the rest keeps its order, with the
+    // old top moved from the front to the back.
+    assert_eq!(gs.p2.deck_size, size_before);
+    assert_eq!(after.len(), before.len());
+    let mut expected = before[1..].to_vec();
+    expected.push(top);
+    assert_eq!(after, expected);
+}
+
+#[test]
+fn pack_call_reveals_its_own_controllers_deck() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    // The defender (p2) is not the turn player, so wiring the reveal to the
+    // wrong side would show up here.
+    set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+    let attacker_deck_before = deck_order(&gs, PlayerIndex::P1);
+    let defender_deck_before = deck_order(&gs, PlayerIndex::P2);
+
+    declare_sole_blocker(&mut gs, Card::PackCallY);
+
+    assert_eq!(deck_order(&gs, PlayerIndex::P1), attacker_deck_before,
+        "the attacker's deck must not be touched");
+    assert_ne!(deck_order(&gs, PlayerIndex::P2), defender_deck_before,
+        "the defender's own deck is the one revealed from");
+}
+
+#[test]
+fn pack_call_reveal_is_public_whichever_way_it_goes() {
+    // Kept on top: revealing it tells both players what is there.
+    let mut gs = dorinthea_defending_muscle_mutt();
+    let kept = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::WoundedBullY);
+    gs.cards[kept].visible = CardVisibleState::Hidden;
+    declare_sole_blocker(&mut gs, Card::PackCallY);
+    assert_eq!(gs.cards[kept].visible, CardVisibleState::BothKnow);
+
+    // Bottomed: it stays known there, as a face-up pitched card does.
+    let mut gs = dorinthea_defending_muscle_mutt();
+    let bottomed = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+    gs.cards[bottomed].visible = CardVisibleState::Hidden;
+    declare_sole_blocker(&mut gs, Card::PackCallY);
+    assert_eq!(gs.cards[bottomed].visible, CardVisibleState::BothKnow);
+}
+
+#[test]
+fn pack_call_on_an_empty_deck_does_nothing() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    // A decked player can still declare blockers, so an empty deck is a legal
+    // state for the trigger to fire in — it must no-op rather than panic.
+    gs.p2.top_deck_idx = None;
+    gs.p2.bottom_deck_idx = None;
+    gs.p2.deck_size = 0;
+
+    let pc_idx = declare_sole_blocker(&mut gs, Card::PackCallY);
+
+    assert_eq!(gs.p2.deck_size, 0);
+    assert_eq!(gs.p2.top_deck_idx, None);
+    assert_eq!(gs.p2.bottom_deck_idx, None);
+    // The block itself still happened.
+    assert_eq!(gs.cards[pc_idx].location, CardLocation::P2CombatChain);
+}
+
+#[test]
+fn a_blocker_without_a_defend_trigger_leaves_the_deck_alone() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    // The same sub-6-power top card that Pack Call would bottom.
+    set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+    let before = deck_order(&gs, PlayerIndex::P2);
+
+    // Driving Blade has no defend effect, so declaring it changes nothing.
+    assert!(Card::DrivingBladeY.data().defend_effect.is_none());
+    declare_sole_blocker(&mut gs, Card::DrivingBladeY);
+
+    assert_eq!(deck_order(&gs, PlayerIndex::P2), before,
+        "only a card with a defend trigger disturbs the deck");
+}
+
+#[test]
+fn pack_call_fires_once_for_each_declared_blocker() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+
+    // Two sub-6-power cards on top, so each Pack Call bottoms one in turn.
+    let order = deck_order(&gs, PlayerIndex::P2);
+    let (first, second) = (order[0], order[1]);
+    gs.cards[first].card = Card::RallyTheRearguardB;
+    gs.cards[second].card = Card::RallyTheRearguardB;
+
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::PackCallY, Card::PackCallY]);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(hand[0]))});
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(hand[1]))});
+
+    // Each declaration fired its own trigger, in declaration order: the deck
+    // has rotated by two, both revealed cards now at the bottom in that order.
+    let after = deck_order(&gs, PlayerIndex::P2);
+    assert_eq!(after[after.len() - 2], first);
+    assert_eq!(after[after.len() - 1], second);
+    let mut expected = order[2..].to_vec();
+    expected.push(first);
+    expected.push(second);
+    assert_eq!(after, expected);
+}
+
+#[test]
+fn pack_call_still_blocks_for_3() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+    let pc_idx = declare_sole_blocker(&mut gs, Card::PackCallY);
+    assert_eq!(gs.cards[pc_idx].location, CardLocation::P2CombatChain);
+
+    // Its 3 block comes off Muscle Mutt's 6 power: 3 damage, not 6. The trigger
+    // is a bonus on top of an ordinary block, not a replacement for it.
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // defender passes

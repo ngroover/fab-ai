@@ -226,6 +226,38 @@ on-play-effect helpers).
                can_ever_be_played_excludes_resources
                (the last in `legal_actions::tests`)
 
+  [x] Pack Call (Card::PackCallY)
+        "When you defend with Pack Call, reveal the top card of your deck. If
+        it has 6 or more power, put it on top of your deck. Otherwise, put it
+        on the bottom." A 6-power brute attack action that also carries the
+        catalog's first `defend_effect`, wiring up the previously unused
+        `DefendEffect::Reveal6BottomOtherwise`.
+          * The trigger fires as the card is *declared* as a blocker —
+            `apply_defend_effect` at the end of `commit_blocker` — rather than
+            at damage, so declaring several blockers fires each in declaration
+            order. `apply_defend_effect` is the general hook: a card with no
+            `defend_effect`, which is nearly all of them, does nothing.
+          * "Your deck" is the deck of whoever defends with it, which is never
+            the turn player. `reveal_top_keep_6` therefore works off the
+            declaring player, and the attacker's deck is left alone.
+          * The 6-power boundary is inclusive: exactly 6 stays on top. Below
+            it, the card is detached and re-attached at the bottom, so the deck
+            is reordered and never resized.
+          * The reveal is public either way, so the card is left BothKnow — on
+            the bottom that mirrors a face-up pitched card being bottomed (see
+            `bottom_pitch_card`).
+          * An empty deck is a legal state to trigger in (a decked player can
+            still declare blockers), so it is a no-op rather than a panic.
+        Tests: pack_call_is_a_6_power_brute_attack_with_a_defend_trigger,
+               pack_call_keeps_a_power6_card_on_top,
+               pack_call_bottoms_a_sub_power6_card,
+               pack_call_reveals_its_own_controllers_deck,
+               pack_call_reveal_is_public_whichever_way_it_goes,
+               pack_call_on_an_empty_deck_does_nothing,
+               a_blocker_without_a_defend_trigger_leaves_the_deck_alone,
+               pack_call_fires_once_for_each_declared_blocker,
+               pack_call_still_blocks_for_3
+
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
@@ -235,7 +267,7 @@ on-play-effect helpers).
   [x] Wrecking Ball          (Card::WreckingBallR)  — see COMPLETE section above
   [ ] Barraging Beatdown     (Card::BarragingBeatdownY)
   [x] Muscle Mutt            (Card::MuscleMuttY)  — see COMPLETE section above
-  [ ] Pack Call              (Card::PackCallY)
+  [x] Pack Call              (Card::PackCallY)  — see COMPLETE section above
   [x] Raging Onslaught       (Card::RagingOnslaughtY)  — see COMPLETE section above
   [x] Smash Instinct         (Card::SmashInstinctY)  — see COMPLETE section above
   [x] Smash With Big Tree    (Card::SmashWithBigTreeY)  — see COMPLETE section above
@@ -297,10 +329,12 @@ on-play-effect helpers).
 ==============================================================================
  NOTES
 ==============================================================================
-- Some shared combat mechanics (e.g. Intimidate, Pack Call token generation)
-  already have coverage in the general `fab_step::tests` module, but the cards
-  above are not yet considered fully implemented + dedicated-card-tested and so
-  remain on the TODO list.
+- Some shared combat mechanics (e.g. Intimidate) already have coverage in the
+  general `fab_step::tests` module, but the cards above are not yet considered
+  fully implemented + dedicated-card-tested and so remain on the TODO list.
+  (This note used to cite "Pack Call token generation" as a second example.
+  Pack Call is now complete, and its text in this catalog generates no tokens,
+  so the example is gone rather than moved.)
 - Arsenal plays: a card in the arsenal is offered as a play in the same windows
   a hand card would be (action, instant and reaction), gated by the same speed
   and action-point rules. It is paid for by pitching from hand, and because the

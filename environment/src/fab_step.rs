@@ -1,7 +1,7 @@
 use crate::action::{Action,ActionType};
 use crate::game_state::{Gamestate,Phase,Player,PendingCard,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
 use crate::cards::{CardClass,CardData,CardType,Keyword};
-use crate::card_effects::{OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect};
+use crate::card_effects::{OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect};
 use rand::RngExt;
 
 pub fn step(gs: &mut Gamestate, act: Action) {
@@ -516,6 +516,60 @@ fn commit_blocker(gs: &mut Gamestate, idx: usize) {
     // known to both players.
     gs.cards[idx].visible = CardVisibleState::BothKnow;
     attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[link], None, None, idx);
+
+    // "When you defend with ..." triggers fire as the card is declared, not at
+    // damage. Declaring several blockers fires each in declaration order.
+    apply_defend_effect(gs, pid, idx);
+}
+
+/// Fire the "when you defend with this" trigger of a card just declared as a
+/// blocker by `pid`. Cards without a `defend_effect` — nearly all of them — do
+/// nothing.
+fn apply_defend_effect(gs: &mut Gamestate, pid: PlayerIndex, idx: usize) {
+    match gs.cards[idx].card.data().defend_effect {
+        Some(DefendEffect::Reveal6BottomOtherwise) => reveal_top_keep_6(gs, pid),
+        // Rally the Rearguard's PitchToBlock is an activated ability, not a
+        // trigger; it is not wired up yet.
+        Some(DefendEffect::PitchToBlock) | None => {}
+    }
+}
+
+/// Pack Call's trigger: reveal the top card of `pid`'s own deck. A card with 6
+/// or more power stays where it is; anything less goes to the bottom. Either way
+/// the reveal is public, so the card stays known to both players — on the bottom
+/// that mirrors a face-up pitched card being bottomed (see `bottom_pitch_card`).
+///
+/// Revealing nothing is a legal outcome: an empty deck is a no-op rather than a
+/// panic, since a player can be decked and still declare blockers.
+fn reveal_top_keep_6(gs: &mut Gamestate, pid: PlayerIndex) {
+    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let Some(top) = player.top_deck_idx else {
+        return;
+    };
+    let top = top.get();
+    let card = gs.cards[top].card;
+    let keeps_top = card.data().power >= 6;
+
+    gs.cards[top].visible = CardVisibleState::BothKnow;
+    if gs.logging_enabled() {
+        gs.log_public(format!(
+            "{} reveals {:?} ({} power) from the top of their deck and puts it on the {}",
+            player_name(pid),
+            card,
+            card.data().power,
+            if keeps_top { "top" } else { "bottom" },
+        ));
+    }
+
+    if keeps_top {
+        return;
+    }
+
+    // Detaching fixes up both ends of the deck and its count; re-attaching at
+    // the bottom restores the count, so the deck is reordered, never resized.
+    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    detach_from_current_zone(player, &mut gs.cards, top);
+    attach_to_bottom_of_deck(player, &mut gs.cards, top);
 }
 
 /// Move a defense reaction that has just resolved off the stack onto the
