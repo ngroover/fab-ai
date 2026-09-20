@@ -201,6 +201,31 @@ on-play-effect helpers).
                sigil_of_solace_gains_1_life_on_resolve,
                sigil_of_solace_heals_only_its_owner
 
+  [x] Titanium Bauble (Card::TitaniumBaubleB)
+        A blue resource card — cost 0, pitch 3, 0 power, 3 defense — with no
+        rules text, and the catalog's only `CardType::Resource`. What makes it
+        work is a rule rather than an effect: a resource is never played. It
+        contributes the two ways any card can without going on the stack —
+        pitched from hand for its 3 resources, or declared as an ordinary
+        blocker (not a defense reaction) for its 3 defense.
+          * `can_ever_be_played` rules the type out inside `is_playable_now`,
+            which both the hand and the arsenal paths pass through, so it is
+            offered in no window: action, instant or reaction. The four speed
+            gates are allowlists that already omit Resource, so the check is
+            redundant today; it is stated so the rule survives a gate gaining a
+            broader type, for the same reason `can_be_declared_as_blocker`
+            tests the card type rather than leaning on `no_block`.
+          * Nothing else needed changing — pitching and blocking already work
+            off the printed pitch and defense, and the tests pin that they do.
+        Tests: titanium_bauble_is_a_vanilla_3_pitch_3_block_resource,
+               titanium_bauble_is_never_offered_as_a_play_from_hand,
+               titanium_bauble_is_never_offered_as_a_play_from_the_arsenal,
+               titanium_bauble_is_not_offered_in_the_defender_reaction_window,
+               titanium_bauble_pitches_for_3,
+               titanium_bauble_blocks_for_3,
+               can_ever_be_played_excludes_resources
+               (the last in `legal_actions::tests`)
+
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
@@ -219,7 +244,7 @@ on-play-effect helpers).
   [x] Come to Fight          (Card::ComeToFightB)  — see COMPLETE section above
   [x] Dodge                  (Card::DodgeB)  — see COMPLETE section above
   [ ] Rally the Rearguard    (Card::RallyTheRearguardB)
-  [ ] Titanium Bauble        (Card::TitaniumBaubleB)
+  [x] Titanium Bauble        (Card::TitaniumBaubleB)  — see COMPLETE section above
 
 
 ------------------------------------------------------------------------------

@@ -23,6 +23,7 @@
 //!   - Wounded Bull        (`Card::WoundedBullY`)
 //!   - Sigil of Solace     (`Card::SigilofSolaceB`)
 //!   - Come to Fight       (`Card::ComeToFightB`)
+//!   - Titanium Bauble     (`Card::TitaniumBaubleB`)
 
 use super::*;
 use crate::cards::Card;
@@ -1674,4 +1675,134 @@ fn toughen_up_from_the_arsenal_is_paid_for_by_pitching_the_whole_hand() {
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     assert_eq!(gs.cards[tu_idx].location, CardLocation::P2CombatChain);
     assert_eq!(gs.p2.life, 20 - 2);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Titanium Bauble (Card::TitaniumBaubleB)
+//
+// A blue *resource* card: cost 0, pitch 3, 0 power, 3 defense, no rules text.
+// It is the catalog's only `CardType::Resource`, and what makes it work is a
+// rule rather than an effect — a resource is never played. It contributes the
+// two ways any card can without being put on the stack: pitched from hand for
+// its 3 resources, or declared as a blocker for its 3 defense. The tests below
+// pin both halves: that it is offered in neither the action, instant nor
+// reaction window, from hand or from the arsenal (`can_ever_be_played`), and
+// that it still pitches and blocks for its printed 3.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn titanium_bauble_is_a_vanilla_3_pitch_3_block_resource() {
+    use crate::cards::Color;
+    let data = Card::TitaniumBaubleB.data();
+    assert_eq!(data.typ, CardType::Resource);
+    assert_eq!(data.cost, 0);
+    assert_eq!(data.pitch, 3);
+    assert_eq!(data.power, 0);
+    assert_eq!(data.defense, 3);
+    assert_eq!(data.card_class, CardClass::Generic);
+    assert!(matches!(data.color, Some(Color::Blue)));
+    // Nothing about it is an effect — it has no text at all.
+    assert!(!data.no_block, "a resource with defense still blocks");
+    assert!(data.keyword.is_empty(), "Titanium Bauble should carry no keywords");
+    assert!(data.play_effect.is_none(), "Titanium Bauble should have no on-play effect");
+    assert!(data.additional_cost.is_none(), "Titanium Bauble should have no additional cost");
+    assert!(data.ability.is_none(), "Titanium Bauble should have no activated ability");
+    assert!(data.defend_effect.is_none(), "Titanium Bauble should have no defend effect");
+    assert!(data.next_attack_effect.is_none(), "Titanium Bauble should have no next-attack effect");
+    assert!(data.target_effect.is_none(), "Titanium Bauble should have no target effect");
+    assert!(data.constant_effect.is_none(), "Titanium Bauble should have no constant effect");
+}
+
+#[test]
+fn titanium_bauble_is_never_offered_as_a_play_from_hand() {
+    let mut gs = setup_rhinar_action_phase();
+    // A 0-cost action alongside it, so the action window is demonstrably live
+    // and affordability is not what rules the bauble out.
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::TitaniumBaubleB, Card::ClearingBellowB]);
+    assert_eq!(gs.p1.action_points, 1);
+
+    let playable = playable_cards(&gs);
+    assert!(playable.contains(&Card::ClearingBellowB),
+        "the action window should be offering the 0-cost action next to it");
+    assert!(!playable.contains(&Card::TitaniumBaubleB),
+        "a resource card must never be offered as a play");
+}
+
+#[test]
+fn titanium_bauble_is_never_offered_as_a_play_from_the_arsenal() {
+    let mut gs = setup_rhinar_action_phase();
+
+    // Park a 0-cost action in the arsenal: it is offered from there, exactly as
+    // Dodge is in the reaction tests above.
+    let idx = put_in_arsenal(&mut gs, PlayerIndex::P1, Card::ClearingBellowB);
+    let offered: Vec<usize> = legal_actions(&gs).iter()
+        .filter(|a| a.typ == ActionType::PlayCard)
+        .map(|a| a.card_index())
+        .collect();
+    assert!(offered.contains(&idx), "an arsenal card of the right speed is offered");
+
+    // Relabel that same arsenal slot to Titanium Bauble — nothing else about the
+    // game changes — and the offer disappears. The type is what rules it out.
+    gs.cards[idx].card = Card::TitaniumBaubleB;
+    let offered: Vec<usize> = legal_actions(&gs).iter()
+        .filter(|a| a.typ == ActionType::PlayCard)
+        .map(|a| a.card_index())
+        .collect();
+    assert!(!offered.contains(&idx),
+        "a resource card must never be offered as a play from the arsenal either");
+}
+
+#[test]
+fn titanium_bauble_is_not_offered_in_the_defender_reaction_window() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    pass_to_defender_reaction(&mut gs);
+
+    // Dodge is free and legal here, so the reaction window is live.
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::TitaniumBaubleB, Card::DodgeB]);
+    let playable = playable_cards(&gs);
+    assert!(playable.contains(&Card::DodgeB),
+        "the defender's reaction window should be offering Dodge next to it");
+    assert!(!playable.contains(&Card::TitaniumBaubleB),
+        "a resource card is not a reaction and must not be offered in the reaction step");
+}
+
+#[test]
+fn titanium_bauble_pitches_for_3() {
+    let mut gs = setup_rhinar_action_phase();
+    // Muscle Mutt costs exactly 3, so the bauble's pitch covers it on its own.
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::MuscleMuttY, Card::TitaniumBaubleB]);
+    let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    let (mutt_idx, bauble_idx) = (hand[0], hand[1]);
+    assert_eq!(Card::MuscleMuttY.data().cost, 3);
+
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mutt_idx))});
+    assert_eq!(gs.phase, Phase::ActionPitch);
+
+    // Pitching the bauble pays the whole cost in one card: the attack leaves the
+    // stack for the reaction window with nothing left over.
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(bauble_idx))});
+    assert_eq!(gs.phase, Phase::ActionInstant,
+        "3 pitch covers a cost of 3, so no further pitching is asked for");
+    assert_eq!(gs.cards[bauble_idx].location, CardLocation::P1Pitch);
+    assert_eq!(gs.p1.resources, 0, "all 3 went into the cost, none floats");
+}
+
+#[test]
+fn titanium_bauble_blocks_for_3() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::TitaniumBaubleB]);
+    let bauble_idx = gs.p2.hand_idx.expect("the bauble should be the only card in hand").get();
+
+    // Unlike a defense reaction, a resource is declared as an ordinary blocker
+    // in the defend step.
+    assert!(blockable_cards(&gs).contains(&Card::TitaniumBaubleB),
+        "a resource with defense is a legal blocker");
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(bauble_idx))});
+    assert_eq!(gs.cards[bauble_idx].location, CardLocation::P2CombatChain);
+
+    // Its 3 block came off Muscle Mutt's 6 power: 3 damage, not 6.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // defender passes
+    assert_eq!(gs.p2.life, 20 - 3);
 }
