@@ -163,6 +163,19 @@ pub enum Phase {
     ActionPitch,
     ActionInstant,
     Defend,
+    /// The defend-trigger window: the defender has finished declaring blockers
+    /// and every "when you defend with" trigger for the attack is on the stack
+    /// (see `push_defend_triggers`). Entered only when there is at least one
+    /// trigger to resolve. Only instants may be played here — a reaction waits
+    /// for the `Reaction` window — and the triggers resolve one layer at a time
+    /// like any other stack entry. When the stack empties this window hands over
+    /// to `Reaction` rather than dealing combat damage, so the ordinary reaction
+    /// window still happens.
+    DefendReaction,
+    /// Pitching to pay for a card played during the `DefendReaction` window,
+    /// returning there once the cost is covered. The `DefendReaction` sibling of
+    /// `ReactionPitch`.
+    DefendReactionPitch,
     Reaction,
     ReactionPitch,
     /// The end of the turn player's action phase: they have passed, the combat

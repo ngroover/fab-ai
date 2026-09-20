@@ -18,9 +18,10 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
             actions
         },
         Phase::Action => legal_action_phase(gs),
-        Phase::ActionPitch | Phase::ReactionPitch => legal_pitch_phase(gs),
+        Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendReactionPitch => legal_pitch_phase(gs),
         Phase::ActionInstant => legal_instant_phase(gs),
         Phase::Defend => legal_defend_phase(gs),
+        Phase::DefendReaction => legal_defend_reaction_phase(gs),
         Phase::Reaction => legal_reaction_phase(gs),
         Phase::Arsenal => legal_arsenal_phase(gs),
         Phase::PitchOrder => legal_pitch_order_phase(gs),
@@ -210,12 +211,6 @@ fn legal_reaction_phase(gs: &Gamestate) -> Vec<Action> {
     // reactions. Activated abilities of those same speeds — e.g. an
     // instant-speed equipment ability — are offered too, gated by the same
     // predicate inside `get_equipment_activations`.
-    // While a "when you defend with" trigger is still waiting on the stack the
-    // window narrows to instants, for both players alike: an instant may be
-    // played and resolved above a pending trigger, a reaction may not.
-    if has_pending_defend_trigger(gs) {
-        return legal_play_phase(gs, is_instant_phase_playable);
-    }
     if gs.active_player == gs.turn_player {
         legal_play_phase(gs, is_attacker_reaction_playable)
     } else {
@@ -223,14 +218,18 @@ fn legal_reaction_phase(gs: &Gamestate) -> Vec<Action> {
     }
 }
 
-/// Whether any defend trigger is still waiting on the stack.
+/// The defend-trigger window (`Phase::DefendReaction`): the defender has
+/// finished declaring blockers and their "when you defend with" triggers are on
+/// the stack. Both players hold priority in turn, but the window is narrowed to
+/// instants — an instant may be played and resolved above a pending trigger, a
+/// reaction may not. Reactions become legal again in the `Reaction` window this
+/// one hands over to once its stack empties (see `close_priority_window`).
 ///
-/// The test is "anywhere on the stack", not "on top of it": once an instant is
-/// played in response, the trigger is no longer the top entry, and reactions
-/// stay shut out until every trigger has resolved rather than reopening under
-/// the instant.
-fn has_pending_defend_trigger(gs: &Gamestate) -> bool {
-    gs.stack.iter().flatten().any(|p| p.typ == ActionType::DefendTrigger)
+/// Narrowing by phase rather than by scanning the stack means playing an instant
+/// in response cannot reopen the window underneath itself: the phase holds until
+/// every trigger has resolved.
+fn legal_defend_reaction_phase(gs: &Gamestate) -> Vec<Action> {
+    legal_play_phase(gs, is_instant_phase_playable)
 }
 
 /// Shared body for the action and instant phases. They differ only in which

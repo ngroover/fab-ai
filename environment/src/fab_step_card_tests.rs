@@ -1864,7 +1864,9 @@ fn declare_blockers(gs: &mut Gamestate, cards: &[Card]) -> Vec<usize> {
         step(gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(idx))});
     }
     step(gs, Action{ typ: ActionType::Pass, card: None}); // done declaring blockers
-    assert_eq!(gs.phase, Phase::Reaction);
+    // With triggers to resolve we land in their own window; with none, straight
+    // into the ordinary reaction window.
+    assert!(matches!(gs.phase, Phase::DefendReaction | Phase::Reaction));
     hand
 }
 
@@ -1923,9 +1925,10 @@ fn pack_call_trigger_waits_on_the_stack_instead_of_firing_on_declaration() {
     assert!(gs.stack_is_empty(), "nothing goes on the stack until blockers are all declared");
     assert_eq!(deck_order(&gs, PlayerIndex::P2), before);
 
-    // Finishing the defend step puts the trigger on the stack — still unresolved.
+    // Finishing the defend step opens the trigger window with the trigger on
+    // the stack — still unresolved.
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.phase, Phase::DefendReaction);
     assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY]);
     assert_eq!(gs.stack_top().map(|p| p.typ), Some(ActionType::DefendTrigger));
     assert_eq!(deck_order(&gs, PlayerIndex::P2), before,
@@ -2206,15 +2209,20 @@ fn an_instant_resolves_above_a_defend_trigger_without_closing_the_window() {
     assert_eq!(gs.cards[sigil_idx].location, CardLocation::P2Graveyard);
     assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY],
         "the trigger is still waiting underneath");
-    assert_eq!(gs.phase, Phase::Reaction, "the window must not close early");
+    assert_eq!(gs.phase, Phase::DefendReaction, "the window must not close early");
     assert_ne!(*deck_order(&gs, PlayerIndex::P2).last().unwrap(), top,
         "the trigger has not resolved yet");
 
-    // Then the trigger resolves and, the stack now empty, the window closes
-    // into combat damage: Pack Call's 3 block against Muscle Mutt's 6 leaves 3.
+    // Then the trigger resolves and its window hands over to the reaction
+    // window — still no damage.
     pass_once_each(&mut gs);
     assert!(gs.stack_is_empty());
+    assert_eq!(gs.phase, Phase::Reaction);
     assert_eq!(*deck_order(&gs, PlayerIndex::P2).last().unwrap(), top);
+    assert_eq!(gs.p2.life, life_before + 1, "damage waits for the reaction window");
+
+    // Closing that window deals it: Pack Call's 3 block against 6 power.
+    pass_once_each(&mut gs);
     assert_eq!(gs.p2.life, life_before + 1 - 3);
 }
 
@@ -2225,12 +2233,111 @@ fn pack_call_still_blocks_for_3() {
     let pc_idx = declare_blockers(&mut gs, &[Card::PackCallY])[0];
     assert_eq!(gs.cards[pc_idx].location, CardLocation::P2CombatChain);
 
-    // Resolving the last trigger empties the stack, which closes the window and
-    // deals combat damage in the same step — there is no further round of
-    // passes. Its 3 block comes off Muscle Mutt's 6 power: 3 damage, not 6. The
-    // trigger is a bonus on top of an ordinary block, not a replacement for it.
+    // Resolving the last trigger empties the stack, which hands the
+    // defend-trigger window over to the ordinary reaction window — not to
+    // damage.
     pass_once_each(&mut gs);
     assert!(gs.stack_is_empty());
-    assert_eq!(gs.phase, Phase::Action, "the window closed as the trigger resolved");
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.p2.life, 20, "no damage until the reaction window closes");
+
+    // Closing that window deals it. Its 3 block comes off Muscle Mutt's 6
+    // power: 3 damage, not 6 — the trigger is a bonus on top of an ordinary
+    // block, not a replacement for it.
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Action);
     assert_eq!(gs.p2.life, 20 - 3);
+}
+
+#[test]
+fn the_defend_trigger_window_hands_over_to_the_reaction_window_not_to_damage() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+
+    // Pack Call blocks, and the defender keeps a defense reaction in hand — one
+    // the trigger window will not let her play.
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::PackCallY, Card::DodgeB]);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    let dodge_idx = hand[1];
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(hand[0]))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    assert_eq!(gs.phase, Phase::DefendReaction);
+
+    // The trigger resolves. Its window then hands over to the ordinary reaction
+    // window rather than dealing combat damage.
+    pass_once_each(&mut gs);
+    assert!(gs.stack_is_empty());
+    assert_eq!(gs.phase, Phase::Reaction, "the reaction window comes next");
+    assert_eq!(*deck_order(&gs, PlayerIndex::P2).last().unwrap(), top,
+        "the trigger did resolve");
+    assert_eq!(gs.p2.life, 20, "damage waits for the reaction window to close");
+    assert_eq!(gs.active_player, gs.turn_player, "which opens on the turn player");
+
+    // Reactions are legal again here, so blocking with Pack Call no longer costs
+    // the defender her reaction window.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    assert!(playable_cards(&gs).contains(&Card::DodgeB),
+        "the defense reaction the trigger window shut out is playable again");
+
+    // She plays it, and it blocks as usual: Pack Call's 3 plus Dodge's 2 against
+    // Muscle Mutt's 6 leaves 1.
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(dodge_idx))});
+    pass_once_each(&mut gs);
+    assert_eq!(gs.cards[dodge_idx].location, CardLocation::P2CombatChain);
+    assert_eq!(gs.p2.life, 20 - 1);
+}
+
+#[test]
+fn an_ordinary_block_skips_the_defend_trigger_window_entirely() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+
+    // No blocker carries a trigger, so there is nothing to open a trigger window
+    // for: the defend step goes straight to the reaction window, and an ordinary
+    // block costs no extra round of priority.
+    declare_blockers(&mut gs, &[Card::DrivingBladeY]);
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert!(gs.stack_is_empty());
+
+    // One round of passes closes it into damage: 6 power less 3 block.
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.p2.life, 20 - 3);
+}
+
+#[test]
+fn pitching_inside_the_defend_trigger_window_returns_to_it() {
+    // Nothing playable in this window currently costs anything — Sigil of
+    // Solace is the catalog's only instant and is free, as is its only
+    // instant-speed ability — so the legal-action gate cannot produce this
+    // state yet. A costed card is driven through `step` directly to pin the
+    // phase plumbing for the first costed instant that comes along: without
+    // `DefendReactionPitch`, pitching here would fall through to `ActionPitch`
+    // and return to the wrong window.
+    let mut gs = dorinthea_defending_muscle_mutt();
+    set_hand(&mut gs, PlayerIndex::P2,
+        &[Card::PackCallY, Card::MuscleMuttY, Card::ClearingBellowB]);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    let (costed, pitcher) = (hand[1], hand[2]);
+
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(hand[0]))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    assert_eq!(gs.phase, Phase::DefendReaction);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // priority to the defender
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+
+    assert_eq!(Card::MuscleMuttY.data().cost, 3);
+    assert_eq!(Card::ClearingBellowB.data().pitch, 3);
+    assert_eq!(gs.p2.resources, 0, "the cost is not already covered");
+
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(costed))});
+    assert_eq!(gs.phase, Phase::DefendReactionPitch,
+        "pitching drops into this window's own pitch phase");
+
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitcher))});
+    assert_eq!(gs.phase, Phase::DefendReaction,
+        "and returns to the window it interrupted, not to the reaction window");
+    assert_eq!(gs.cards[costed].location, CardLocation::Stack);
+    assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY],
+        "the trigger is still underneath, waiting");
 }

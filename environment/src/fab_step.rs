@@ -13,10 +13,10 @@ pub fn step(gs: &mut Gamestate, act: Action) {
     match gs.phase {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::Action => handle_action_phase(gs, act),
-        Phase::ActionPitch | Phase::ReactionPitch => handle_pitch_phase(gs, act),
+        Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendReactionPitch => handle_pitch_phase(gs, act),
         Phase::ActionInstant => handle_action_instant_phase(gs, act),
         Phase::Defend => handle_defend_phase(gs, act),
-        Phase::Reaction => handle_reaction_phase(gs, act),
+        Phase::DefendReaction | Phase::Reaction => handle_reaction_phase(gs, act),
         Phase::Arsenal => handle_arsenal_phase(gs, act),
         Phase::PitchOrder => handle_pitch_order_phase(gs, act),
         _ => {}
@@ -193,13 +193,14 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     if already_paid {
         commit_pending_to_stack(gs);
     } else {
-        // Pitching during the Reaction window stays within that window: drop
-        // into ReactionPitch so we return to Reaction once paid. Every other
-        // caller (the Action and ActionInstant phases) uses ActionPitch.
-        gs.phase = if gs.phase == Phase::Reaction {
-            Phase::ReactionPitch
-        } else {
-            Phase::ActionPitch
+        // Pitching during a reaction window stays within that window: each has
+        // a pitch phase of its own so we return to the window we interrupted
+        // once the cost is paid, rather than to whichever came later. Every
+        // other caller (the Action and ActionInstant phases) uses ActionPitch.
+        gs.phase = match gs.phase {
+            Phase::Reaction => Phase::ReactionPitch,
+            Phase::DefendReaction => Phase::DefendReactionPitch,
+            _ => Phase::ActionPitch,
         };
     }
 }
@@ -243,6 +244,13 @@ fn close_priority_window(gs: &mut Gamestate) {
         gs.phase = Phase::Action;
         gs.active_player = gs.turn_player;
     }
+    else if gs.phase == Phase::DefendReaction {
+        // The defend-trigger window is over, but combat is not: hand over to the
+        // ordinary reaction window, where reactions are legal again and the
+        // stack starts empty. Damage waits for that window to close.
+        gs.phase = Phase::Reaction;
+        gs.active_player = gs.turn_player;
+    }
     else if ( gs.phase == Phase::Reaction ) {
         resolve_combat_damage(gs);
         // Combat damage may have reduced a hero to 0 and ended the game; if so,
@@ -270,10 +278,15 @@ fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
                 gs.log_public(format!("{} passes", player_name(gs.active_player)));
             }
             // Blockers are all declared now, so every "when you defend with"
-            // trigger for this attack goes on the stack together, to resolve in
-            // the reaction window below.
-            push_defend_triggers(gs);
-            gs.phase = Phase::Reaction;
+            // trigger for this attack goes on the stack together. They resolve
+            // in a window of their own; with none to resolve there is nothing
+            // to open it for, so we go straight to the reaction window and an
+            // ordinary block costs no extra round of priority.
+            gs.phase = if push_defend_triggers(gs) {
+                Phase::DefendReaction
+            } else {
+                Phase::Reaction
+            };
             gs.active_player = gs.turn_player;
         }
         _ => {}
@@ -543,10 +556,12 @@ fn chain_link_indices(player: &Player, cards: &[CardState; TOTAL_CARDS], link: u
 }
 
 /// Put a `DefendTrigger` on the stack for each declared blocker carrying a
-/// "when you defend with this" trigger. Called once the defender has finished
-/// declaring blockers, so every trigger for this attack goes on the stack
-/// together and each is then open to responses in the reaction window that
-/// follows, resolving one layer at a time like any other stack entry.
+/// "when you defend with this" trigger, returning whether any were pushed.
+/// Called once the defender has finished declaring blockers, so every trigger
+/// for this attack goes on the stack together and each is then open to
+/// responses in the `DefendReaction` window that follows, resolving one layer
+/// at a time like any other stack entry. The caller opens that window only when
+/// this returns true.
 ///
 /// Blockers without a `defend_effect` — nearly all of them — put nothing on the
 /// stack, so an ordinary block still costs no extra priority rounds.
@@ -557,7 +572,8 @@ fn chain_link_indices(player: &Player, cards: &[CardState; TOTAL_CARDS], link: u
 /// declared. Real FaB lets their controller order them; the engine has no
 /// choice phase for that, and declaration order is the one the player already
 /// expressed.
-fn push_defend_triggers(gs: &mut Gamestate) {
+fn push_defend_triggers(gs: &mut Gamestate) -> bool {
+    let mut pushed = false;
     let defender = gs.active_player;
     // Only the turn player attacks, so the link being defended is the current
     // link of the turn player's chain.
@@ -571,8 +587,10 @@ fn push_defend_triggers(gs: &mut Gamestate) {
                 index: CardIdx::new(idx),
                 typ: ActionType::DefendTrigger,
             });
+            pushed = true;
         }
     }
+    pushed
 }
 
 /// Fire the "when you defend with this" trigger of `idx`, a blocker declared by
@@ -1210,6 +1228,8 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
         gs.phase = Phase::ActionInstant;
     } else if gs.phase == Phase::ReactionPitch {
         gs.phase = Phase::Reaction;
+    } else if gs.phase == Phase::DefendReactionPitch {
+        gs.phase = Phase::DefendReaction;
     }
 }
 
