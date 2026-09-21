@@ -245,7 +245,7 @@ on-play-effect helpers).
             reaction window still happens and damage waits for *it* to close.
             The window is only entered when there is at least one trigger to
             resolve, so an ordinary block costs no extra round of priority.
-            `DefendReactionPitch` is its pitch phase, returning there once a
+            `DefendPitch` is its pitch phase, returning there once a
             cost is covered — currently unreachable, since nothing playable in
             the window costs anything, but pinned by a test so the first costed
             instant does not land in the wrong window.

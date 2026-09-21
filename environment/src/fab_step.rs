@@ -13,7 +13,7 @@ pub fn step(gs: &mut Gamestate, act: Action) {
     match gs.phase {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::Action => handle_action_phase(gs, act),
-        Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendReactionPitch => handle_pitch_phase(gs, act),
+        Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch => handle_pitch_phase(gs, act),
         Phase::ActionInstant => handle_action_instant_phase(gs, act),
         Phase::Defend => handle_defend_phase(gs, act),
         Phase::DefendReaction | Phase::Reaction => handle_reaction_phase(gs, act),
@@ -199,7 +199,7 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
         // other caller (the Action and ActionInstant phases) uses ActionPitch.
         gs.phase = match gs.phase {
             Phase::Reaction => Phase::ReactionPitch,
-            Phase::DefendReaction => Phase::DefendReactionPitch,
+            Phase::DefendReaction => Phase::DefendPitch,
             _ => Phase::ActionPitch,
         };
     }
@@ -1228,7 +1228,7 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
         gs.phase = Phase::ActionInstant;
     } else if gs.phase == Phase::ReactionPitch {
         gs.phase = Phase::Reaction;
-    } else if gs.phase == Phase::DefendReactionPitch {
+    } else if gs.phase == Phase::DefendPitch {
         gs.phase = Phase::DefendReaction;
     }
 }

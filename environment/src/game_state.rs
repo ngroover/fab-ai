@@ -173,9 +173,12 @@ pub enum Phase {
     /// window still happens.
     DefendReaction,
     /// Pitching to pay for a card played during the `DefendReaction` window,
-    /// returning there once the cost is covered. The `DefendReaction` sibling of
-    /// `ReactionPitch`.
-    DefendReactionPitch,
+    /// returning there once the cost is covered — what `ActionPitch` is to the
+    /// action phase and `ReactionPitch` to the reaction window. Named for the
+    /// defend step rather than after its window, since "defend reaction pitch"
+    /// reads as pitching for a *defense reaction*, which is the one thing that
+    /// cannot be played here.
+    DefendPitch,
     Reaction,
     ReactionPitch,
     /// The end of the turn player's action phase: they have passed, the combat

@@ -18,7 +18,7 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
             actions
         },
         Phase::Action => legal_action_phase(gs),
-        Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendReactionPitch => legal_pitch_phase(gs),
+        Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch => legal_pitch_phase(gs),
         Phase::ActionInstant => legal_instant_phase(gs),
         Phase::Defend => legal_defend_phase(gs),
         Phase::DefendReaction => legal_defend_reaction_phase(gs),

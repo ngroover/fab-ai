@@ -2312,7 +2312,7 @@ fn pitching_inside_the_defend_trigger_window_returns_to_it() {
     // instant-speed ability — so the legal-action gate cannot produce this
     // state yet. A costed card is driven through `step` directly to pin the
     // phase plumbing for the first costed instant that comes along: without
-    // `DefendReactionPitch`, pitching here would fall through to `ActionPitch`
+    // `DefendPitch`, pitching here would fall through to `ActionPitch`
     // and return to the wrong window.
     let mut gs = dorinthea_defending_muscle_mutt();
     set_hand(&mut gs, PlayerIndex::P2,
@@ -2331,7 +2331,7 @@ fn pitching_inside_the_defend_trigger_window_returns_to_it() {
     assert_eq!(gs.p2.resources, 0, "the cost is not already covered");
 
     step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(costed))});
-    assert_eq!(gs.phase, Phase::DefendReactionPitch,
+    assert_eq!(gs.phase, Phase::DefendPitch,
         "pitching drops into this window's own pitch phase");
 
     step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitcher))});
