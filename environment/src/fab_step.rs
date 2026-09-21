@@ -1,7 +1,7 @@
 use crate::action::{Action,ActionType};
 use crate::game_state::{Gamestate,Phase,Player,PendingCard,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
 use crate::cards::{CardClass,CardData,CardType,Keyword};
-use crate::card_effects::{OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect};
+use crate::card_effects::{OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect};
 use rand::RngExt;
 
 pub fn step(gs: &mut Gamestate, act: Action) {
@@ -13,10 +13,10 @@ pub fn step(gs: &mut Gamestate, act: Action) {
     match gs.phase {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::Action => handle_action_phase(gs, act),
-        Phase::ActionPitch | Phase::ReactionPitch => handle_pitch_phase(gs, act),
+        Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch => handle_pitch_phase(gs, act),
         Phase::ActionInstant => handle_action_instant_phase(gs, act),
         Phase::Defend => handle_defend_phase(gs, act),
-        Phase::Reaction => handle_reaction_phase(gs, act),
+        Phase::DefendTriggers | Phase::Reaction => handle_reaction_phase(gs, act),
         Phase::Arsenal => handle_arsenal_phase(gs, act),
         Phase::PitchOrder => handle_pitch_order_phase(gs, act),
         _ => {}
@@ -193,13 +193,14 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     if already_paid {
         commit_pending_to_stack(gs);
     } else {
-        // Pitching during the Reaction window stays within that window: drop
-        // into ReactionPitch so we return to Reaction once paid. Every other
-        // caller (the Action and ActionInstant phases) uses ActionPitch.
-        gs.phase = if gs.phase == Phase::Reaction {
-            Phase::ReactionPitch
-        } else {
-            Phase::ActionPitch
+        // Pitching during a reaction window stays within that window: each has
+        // a pitch phase of its own so we return to the window we interrupted
+        // once the cost is paid, rather than to whichever came later. Every
+        // other caller (the Action and ActionInstant phases) uses ActionPitch.
+        gs.phase = match gs.phase {
+            Phase::Reaction => Phase::ReactionPitch,
+            Phase::DefendTriggers => Phase::DefendPitch,
+            _ => Phase::ActionPitch,
         };
     }
 }
@@ -243,6 +244,13 @@ fn close_priority_window(gs: &mut Gamestate) {
         gs.phase = Phase::Action;
         gs.active_player = gs.turn_player;
     }
+    else if gs.phase == Phase::DefendTriggers {
+        // The defend-trigger window is over, but combat is not: hand over to the
+        // ordinary reaction window, where reactions are legal again and the
+        // stack starts empty. Damage waits for that window to close.
+        gs.phase = Phase::Reaction;
+        gs.active_player = gs.turn_player;
+    }
     else if ( gs.phase == Phase::Reaction ) {
         resolve_combat_damage(gs);
         // Combat damage may have reduced a hero to 0 and ended the game; if so,
@@ -269,7 +277,16 @@ fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
             if gs.logging_enabled() {
                 gs.log_public(format!("{} passes", player_name(gs.active_player)));
             }
-            gs.phase = Phase::Reaction;
+            // Blockers are all declared now, so every "when you defend with"
+            // trigger for this attack goes on the stack together. They resolve
+            // in a window of their own; with none to resolve there is nothing
+            // to open it for, so we go straight to the reaction window and an
+            // ordinary block costs no extra round of priority.
+            gs.phase = if push_defend_triggers(gs) {
+                Phase::DefendTriggers
+            } else {
+                Phase::Reaction
+            };
             gs.active_player = gs.turn_player;
         }
         _ => {}
@@ -518,6 +535,114 @@ fn commit_blocker(gs: &mut Gamestate, idx: usize) {
     attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[link], None, None, idx);
 }
 
+/// The global indices of the cards on `player`'s chain link `link`, head first.
+/// The link is built by `attach_to_front_of_zone`, so the head is the most
+/// recently added card and this walks *back* through declaration order.
+fn chain_link_indices(player: &Player, cards: &[CardState; TOTAL_CARDS], link: usize) -> Vec<usize> {
+    let mut out = Vec::new();
+    let Some(head) = player.chain_link[link] else {
+        return out;
+    };
+    let mut cur = head.get();
+    loop {
+        out.push(cur);
+        let next = cards[cur].next_card.get();
+        if next == cur {
+            break;
+        }
+        cur = next;
+    }
+    out
+}
+
+/// Put a `DefendTrigger` on the stack for each declared blocker carrying a
+/// "when you defend with this" trigger, returning whether any were pushed.
+/// Called once the defender has finished declaring blockers, so every trigger
+/// for this attack goes on the stack together and each is then open to
+/// responses in the `DefendTriggers` window that follows, resolving one layer
+/// at a time like any other stack entry. The caller opens that window only when
+/// this returns true.
+///
+/// Blockers without a `defend_effect` — nearly all of them — put nothing on the
+/// stack, so an ordinary block still costs no extra priority rounds.
+///
+/// The stack resolves top-down, and `chain_link_indices` walks back through
+/// declaration order, so pushing in that order leaves the *first* blocker
+/// declared on top: simultaneous triggers resolve in the order their cards were
+/// declared. Real FaB lets their controller order them; the engine has no
+/// choice phase for that, and declaration order is the one the player already
+/// expressed.
+fn push_defend_triggers(gs: &mut Gamestate) -> bool {
+    let mut pushed = false;
+    let defender = gs.active_player;
+    // Only the turn player attacks, so the link being defended is the current
+    // link of the turn player's chain.
+    let attacker = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let link = current_chain_link(attacker);
+    let player = if defender == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+
+    for idx in chain_link_indices(player, &gs.cards, link) {
+        if gs.cards[idx].card.data().defend_effect.is_some() {
+            gs.push_to_stack(PendingCard {
+                index: CardIdx::new(idx),
+                typ: ActionType::DefendTrigger,
+            });
+            pushed = true;
+        }
+    }
+    pushed
+}
+
+/// Fire the "when you defend with this" trigger of `idx`, a blocker declared by
+/// `pid`, as that trigger resolves off the stack. Cards without a
+/// `defend_effect` never get a trigger pushed in the first place.
+fn apply_defend_effect(gs: &mut Gamestate, pid: PlayerIndex, idx: usize) {
+    match gs.cards[idx].card.data().defend_effect {
+        Some(DefendEffect::Reveal6BottomOtherwise) => reveal_top_keep_6(gs, pid),
+        // Rally the Rearguard's PitchToBlock is an activated ability, not a
+        // trigger; it is not wired up yet.
+        Some(DefendEffect::PitchToBlock) | None => {}
+    }
+}
+
+/// Pack Call's trigger: reveal the top card of `pid`'s own deck. A card with 6
+/// or more power stays where it is; anything less goes to the bottom. Either way
+/// the reveal is public, so the card stays known to both players — on the bottom
+/// that mirrors a face-up pitched card being bottomed (see `bottom_pitch_card`).
+///
+/// Revealing nothing is a legal outcome: an empty deck is a no-op rather than a
+/// panic, since a player can be decked and still declare blockers.
+fn reveal_top_keep_6(gs: &mut Gamestate, pid: PlayerIndex) {
+    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let Some(top) = player.top_deck_idx else {
+        return;
+    };
+    let top = top.get();
+    let card = gs.cards[top].card;
+    let keeps_top = card.data().power >= 6;
+
+    gs.cards[top].visible = CardVisibleState::BothKnow;
+    if gs.logging_enabled() {
+        gs.log_public(format!(
+            "{} reveals {:?} ({} power) from the top of their deck and puts it on the {}",
+            player_name(pid),
+            card,
+            card.data().power,
+            if keeps_top { "top" } else { "bottom" },
+        ));
+    }
+
+    if keeps_top {
+        return;
+    }
+
+    // Detaching fixes up both ends of the deck and its count; re-attaching at
+    // the bottom restores the count, so the deck is reordered, never resized.
+    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    detach_from_current_zone(player, &mut gs.cards, top);
+    attach_to_bottom_of_deck(player, &mut gs.cards, top);
+}
+
 /// Move a defense reaction that has just resolved off the stack onto the
 /// defender's side of the combat chain. It joins the very link the blockers
 /// declared in the defend step sit on — the attacker's current link — so its
@@ -559,6 +684,27 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     let owner = if top < PLAYER_CARDS { PlayerIndex::P1 } else { PlayerIndex::P2 };
 
     let data = gs.cards[top].card.data();
+
+    // A "when you defend with" trigger: only the effect resolves. The card
+    // itself was put on the combat chain when it was declared as a blocker and
+    // stays there, so — unlike every branch below — nothing moves zones, no
+    // action point is spent, and the card's own keywords and on-play effect are
+    // not re-fired.
+    if pending.typ == ActionType::DefendTrigger {
+        if gs.logging_enabled() {
+            let card = gs.cards[top].card;
+            gs.log_public(format!("{}'s {:?} defend trigger resolves", player_name(owner), card));
+        }
+        apply_defend_effect(gs, owner, top);
+        if gs.stack_is_empty() {
+            close_priority_window(gs);
+        } else {
+            // More triggers (or responses) still to resolve: priority returns to
+            // the turn player for a fresh round in the same window.
+            gs.active_player = gs.turn_player;
+        }
+        return;
+    }
 
     if gs.logging_enabled() {
         let card = gs.cards[top].card;
@@ -1082,6 +1228,8 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
         gs.phase = Phase::ActionInstant;
     } else if gs.phase == Phase::ReactionPitch {
         gs.phase = Phase::Reaction;
+    } else if gs.phase == Phase::DefendPitch {
+        gs.phase = Phase::DefendTriggers;
     }
 }
 

@@ -18,9 +18,10 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
             actions
         },
         Phase::Action => legal_action_phase(gs),
-        Phase::ActionPitch | Phase::ReactionPitch => legal_pitch_phase(gs),
+        Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch => legal_pitch_phase(gs),
         Phase::ActionInstant => legal_instant_phase(gs),
         Phase::Defend => legal_defend_phase(gs),
+        Phase::DefendTriggers => legal_defend_triggers_phase(gs),
         Phase::Reaction => legal_reaction_phase(gs),
         Phase::Arsenal => legal_arsenal_phase(gs),
         Phase::PitchOrder => legal_pitch_order_phase(gs),
@@ -217,6 +218,20 @@ fn legal_reaction_phase(gs: &Gamestate) -> Vec<Action> {
     }
 }
 
+/// The defend-trigger window (`Phase::DefendTriggers`): the defender has
+/// finished declaring blockers and their "when you defend with" triggers are on
+/// the stack. Both players hold priority in turn, but the window is narrowed to
+/// instants — an instant may be played and resolved above a pending trigger, a
+/// reaction may not. Reactions become legal again in the `Reaction` window this
+/// one hands over to once its stack empties (see `close_priority_window`).
+///
+/// Narrowing by phase rather than by scanning the stack means playing an instant
+/// in response cannot reopen the window underneath itself: the phase holds until
+/// every trigger has resolved.
+fn legal_defend_triggers_phase(gs: &Gamestate) -> Vec<Action> {
+    legal_play_phase(gs, is_instant_phase_playable)
+}
+
 /// Shared body for the action and instant phases. They differ only in which
 /// card types may be played (the `is_playable` predicate); the playable-card
 /// affordability, equipment activations, and pass logic are otherwise
@@ -346,13 +361,33 @@ fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_p
 }
 
 /// Whether the card can be played at all right now, before any question of
-/// paying for it: it must be playable at the current phase's speed, and — if it
-/// is an action, which costs an action point — the player must have a point
-/// left. Instants and reactions are free, so they stay playable with none.
-/// Applies to a card in hand and to the arsenal card alike.
+/// paying for it: its type must be playable at all, it must be playable at the
+/// current phase's speed, and — if it is an action, which costs an action
+/// point — the player must have a point left. Instants and reactions are free,
+/// so they stay playable with none. Applies to a card in hand and to the
+/// arsenal card alike.
 fn is_playable_now(player: &Player, data: &CardData, is_playable: fn(CardType) -> bool) -> bool {
-    is_playable(data.typ)
+    can_ever_be_played(data.typ)
+        && is_playable(data.typ)
         && !(uses_action_point(ActionType::PlayCard, data) && player.action_points == 0)
+}
+
+/// Whether a card of this type is ever put on the stack, in any window.
+///
+/// A resource card — Titanium Bauble is the catalog's only one — has no cost
+/// line to pay and no text to resolve. It earns its slot in the deck the two
+/// other ways any card can: pitched from hand for its 3 resources, or declared
+/// as a blocker for its 3 defense. Neither is a *play*, so it must never be
+/// offered as one.
+///
+/// The four speed gates below are allowlists that already omit `Resource`, so
+/// this check changes no behavior today. It is stated anyway, next to
+/// `is_playable_now` where both the hand and arsenal paths pass through it, so
+/// that the rule is a named rule rather than an accident of four separate
+/// omissions — the same reason `can_be_declared_as_blocker` tests the card type
+/// instead of leaning on every defense reaction carrying `no_block`.
+fn can_ever_be_played(typ: CardType) -> bool {
+    typ != CardType::Resource
 }
 
 /// The zone a card is being played from, which decides whether its own pitch
@@ -928,6 +963,22 @@ mod tests {
         assert!(!is_instant_phase_playable(CardType::DefenseReaction));
         assert!(!is_instant_phase_playable(CardType::Equipment));
         assert!(!is_instant_phase_playable(CardType::Weapon));
+    }
+
+    #[test]
+    fn can_ever_be_played_excludes_resources() {
+        // A resource card is never put on the stack: it is pitched or used as a
+        // blocker instead. Titanium Bauble is the catalog's only one.
+        assert!(!can_ever_be_played(CardType::Resource));
+        assert_eq!(Card::TitaniumBaubleB.data().typ, CardType::Resource);
+
+        // Every type that a speed gate does offer passes this first check, so
+        // it narrows nothing else.
+        assert!(can_ever_be_played(CardType::AttackAction));
+        assert!(can_ever_be_played(CardType::Action));
+        assert!(can_ever_be_played(CardType::Instant));
+        assert!(can_ever_be_played(CardType::AttackReaction));
+        assert!(can_ever_be_played(CardType::DefenseReaction));
     }
 
     #[test]

@@ -23,6 +23,8 @@
 //!   - Wounded Bull        (`Card::WoundedBullY`)
 //!   - Sigil of Solace     (`Card::SigilofSolaceB`)
 //!   - Come to Fight       (`Card::ComeToFightB`)
+//!   - Titanium Bauble     (`Card::TitaniumBaubleB`)
+//!   - Pack Call           (`Card::PackCallY`)
 
 use super::*;
 use crate::cards::Card;
@@ -1674,4 +1676,668 @@ fn toughen_up_from_the_arsenal_is_paid_for_by_pitching_the_whole_hand() {
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     assert_eq!(gs.cards[tu_idx].location, CardLocation::P2CombatChain);
     assert_eq!(gs.p2.life, 20 - 2);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Titanium Bauble (Card::TitaniumBaubleB)
+//
+// A blue *resource* card: cost 0, pitch 3, 0 power, 3 defense, no rules text.
+// It is the catalog's only `CardType::Resource`, and what makes it work is a
+// rule rather than an effect — a resource is never played. It contributes the
+// two ways any card can without being put on the stack: pitched from hand for
+// its 3 resources, or declared as a blocker for its 3 defense. The tests below
+// pin both halves: that it is offered in neither the action, instant nor
+// reaction window, from hand or from the arsenal (`can_ever_be_played`), and
+// that it still pitches and blocks for its printed 3.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn titanium_bauble_is_a_vanilla_3_pitch_3_block_resource() {
+    use crate::cards::Color;
+    let data = Card::TitaniumBaubleB.data();
+    assert_eq!(data.typ, CardType::Resource);
+    assert_eq!(data.cost, 0);
+    assert_eq!(data.pitch, 3);
+    assert_eq!(data.power, 0);
+    assert_eq!(data.defense, 3);
+    assert_eq!(data.card_class, CardClass::Generic);
+    assert!(matches!(data.color, Some(Color::Blue)));
+    // Nothing about it is an effect — it has no text at all.
+    assert!(!data.no_block, "a resource with defense still blocks");
+    assert!(data.keyword.is_empty(), "Titanium Bauble should carry no keywords");
+    assert!(data.play_effect.is_none(), "Titanium Bauble should have no on-play effect");
+    assert!(data.additional_cost.is_none(), "Titanium Bauble should have no additional cost");
+    assert!(data.ability.is_none(), "Titanium Bauble should have no activated ability");
+    assert!(data.defend_effect.is_none(), "Titanium Bauble should have no defend effect");
+    assert!(data.next_attack_effect.is_none(), "Titanium Bauble should have no next-attack effect");
+    assert!(data.target_effect.is_none(), "Titanium Bauble should have no target effect");
+    assert!(data.constant_effect.is_none(), "Titanium Bauble should have no constant effect");
+}
+
+#[test]
+fn titanium_bauble_is_never_offered_as_a_play_from_hand() {
+    let mut gs = setup_rhinar_action_phase();
+    // A 0-cost action alongside it, so the action window is demonstrably live
+    // and affordability is not what rules the bauble out.
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::TitaniumBaubleB, Card::ClearingBellowB]);
+    assert_eq!(gs.p1.action_points, 1);
+
+    let playable = playable_cards(&gs);
+    assert!(playable.contains(&Card::ClearingBellowB),
+        "the action window should be offering the 0-cost action next to it");
+    assert!(!playable.contains(&Card::TitaniumBaubleB),
+        "a resource card must never be offered as a play");
+}
+
+#[test]
+fn titanium_bauble_is_never_offered_as_a_play_from_the_arsenal() {
+    let mut gs = setup_rhinar_action_phase();
+
+    // Park a 0-cost action in the arsenal: it is offered from there, exactly as
+    // Dodge is in the reaction tests above.
+    let idx = put_in_arsenal(&mut gs, PlayerIndex::P1, Card::ClearingBellowB);
+    let offered: Vec<usize> = legal_actions(&gs).iter()
+        .filter(|a| a.typ == ActionType::PlayCard)
+        .map(|a| a.card_index())
+        .collect();
+    assert!(offered.contains(&idx), "an arsenal card of the right speed is offered");
+
+    // Relabel that same arsenal slot to Titanium Bauble — nothing else about the
+    // game changes — and the offer disappears. The type is what rules it out.
+    gs.cards[idx].card = Card::TitaniumBaubleB;
+    let offered: Vec<usize> = legal_actions(&gs).iter()
+        .filter(|a| a.typ == ActionType::PlayCard)
+        .map(|a| a.card_index())
+        .collect();
+    assert!(!offered.contains(&idx),
+        "a resource card must never be offered as a play from the arsenal either");
+}
+
+#[test]
+fn titanium_bauble_is_not_offered_in_the_defender_reaction_window() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    pass_to_defender_reaction(&mut gs);
+
+    // Dodge is free and legal here, so the reaction window is live.
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::TitaniumBaubleB, Card::DodgeB]);
+    let playable = playable_cards(&gs);
+    assert!(playable.contains(&Card::DodgeB),
+        "the defender's reaction window should be offering Dodge next to it");
+    assert!(!playable.contains(&Card::TitaniumBaubleB),
+        "a resource card is not a reaction and must not be offered in the reaction step");
+}
+
+#[test]
+fn titanium_bauble_pitches_for_3() {
+    let mut gs = setup_rhinar_action_phase();
+    // Muscle Mutt costs exactly 3, so the bauble's pitch covers it on its own.
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::MuscleMuttY, Card::TitaniumBaubleB]);
+    let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    let (mutt_idx, bauble_idx) = (hand[0], hand[1]);
+    assert_eq!(Card::MuscleMuttY.data().cost, 3);
+
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mutt_idx))});
+    assert_eq!(gs.phase, Phase::ActionPitch);
+
+    // Pitching the bauble pays the whole cost in one card: the attack leaves the
+    // stack for the reaction window with nothing left over.
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(bauble_idx))});
+    assert_eq!(gs.phase, Phase::ActionInstant,
+        "3 pitch covers a cost of 3, so no further pitching is asked for");
+    assert_eq!(gs.cards[bauble_idx].location, CardLocation::P1Pitch);
+    assert_eq!(gs.p1.resources, 0, "all 3 went into the cost, none floats");
+}
+
+#[test]
+fn titanium_bauble_blocks_for_3() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::TitaniumBaubleB]);
+    let bauble_idx = gs.p2.hand_idx.expect("the bauble should be the only card in hand").get();
+
+    // Unlike a defense reaction, a resource is declared as an ordinary blocker
+    // in the defend step.
+    assert!(blockable_cards(&gs).contains(&Card::TitaniumBaubleB),
+        "a resource with defense is a legal blocker");
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(bauble_idx))});
+    assert_eq!(gs.cards[bauble_idx].location, CardLocation::P2CombatChain);
+
+    // Its 3 block came off Muscle Mutt's 6 power: 3 damage, not 6.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // defender passes
+    assert_eq!(gs.p2.life, 20 - 3);
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pack Call (Card::PackCallY)
+//
+// "When you defend with Pack Call, reveal the top card of your deck. If it has
+// 6 or more power, put it on top of your deck. Otherwise, put it on the
+// bottom." A 6-power brute attack action that also carries the catalog's first
+// `defend_effect`.
+//
+// The trigger is not applied as the card is declared. Blockers are declared
+// first, and once the defender finishes the defend step every trigger for that
+// attack goes on the stack together (`push_defend_triggers`), to resolve one
+// layer at a time in the reaction window — so each can be responded to, exactly
+// like a played card. `resolve_top_of_stack` recognises the `DefendTrigger`
+// entry and resolves the effect alone: the card is already on the combat chain
+// and stays there.
+//
+// "Your deck" is the deck of whoever defends with it — never the turn player —
+// so the tests below block with it as p2 and check that p1's deck is untouched.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The order of `pid`'s deck, top first, as global card indices. Walks the
+/// linked list to its tail terminator (a node whose `next_card` points at
+/// itself), the convention `attach_to_bottom_of_deck` maintains.
+fn deck_order(gs: &Gamestate, pid: PlayerIndex) -> Vec<usize> {
+    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let mut out = Vec::new();
+    let mut cur = player.top_deck_idx.map(|i| i.get());
+    while let Some(idx) = cur {
+        out.push(idx);
+        let next = gs.cards[idx].next_card.get();
+        cur = if next == idx { None } else { Some(next) };
+    }
+    out
+}
+
+/// Relabel the card on top of `pid`'s deck to `card`, returning its index. The
+/// deck is left in place — only the identity of its top card changes.
+fn set_top_of_deck(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
+    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let idx = player.top_deck_idx.expect("deck should not be empty").get();
+    gs.cards[idx].card = card;
+    idx
+}
+
+/// Declare `cards` as p2's blockers, in the order given, then finish the defend
+/// step. Returns their indices. Any defend triggers are on the stack when this
+/// returns, still unresolved: the reaction window below is what resolves them.
+fn declare_blockers(gs: &mut Gamestate, cards: &[Card]) -> Vec<usize> {
+    set_hand(gs, PlayerIndex::P2, cards);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    assert_eq!(hand.len(), cards.len());
+    for &idx in &hand {
+        step(gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(idx))});
+    }
+    step(gs, Action{ typ: ActionType::Pass, card: None}); // done declaring blockers
+    // With triggers to resolve we land in their own window; with none, straight
+    // into the ordinary reaction window.
+    assert!(matches!(gs.phase, Phase::DefendTriggers | Phase::Reaction));
+    hand
+}
+
+/// Both players pass in succession, resolving exactly one layer off the stack
+/// (or closing the window and dealing combat damage when the stack is empty).
+fn pass_once_each(gs: &mut Gamestate) {
+    step(gs, Action{ typ: ActionType::Pass, card: None});
+    step(gs, Action{ typ: ActionType::Pass, card: None});
+}
+
+/// The cards whose defend triggers are waiting on the stack, bottom slot first.
+fn stacked_defend_triggers(gs: &Gamestate) -> Vec<Card> {
+    stacked_defend_trigger_indices(gs).into_iter().map(|i| gs.cards[i].card).collect()
+}
+
+/// The card indices of the defend triggers waiting on the stack, bottom slot
+/// first — so the *last* entry is the top of the stack, the next to resolve.
+/// Indices rather than cards, because two copies of the same card are the only
+/// way to tell resolution order apart while Pack Call is the catalog's one
+/// card with a defend trigger.
+fn stacked_defend_trigger_indices(gs: &Gamestate) -> Vec<usize> {
+    gs.stack.iter()
+        .flatten()
+        .filter(|p| p.typ == ActionType::DefendTrigger)
+        .map(|p| p.index.get())
+        .collect()
+}
+
+#[test]
+fn pack_call_is_a_6_power_brute_attack_with_a_defend_trigger() {
+    let data = Card::PackCallY.data();
+    assert_eq!(data.typ, CardType::AttackAction);
+    assert_eq!(data.cost, 3);
+    assert_eq!(data.power, 6);
+    assert_eq!(data.defense, 3);
+    assert_eq!(data.card_class, CardClass::Brute);
+    assert!(data.keyword.is_empty(), "Pack Call should carry no keywords");
+    // Its whole text is the defend trigger — nothing happens when it is played.
+    assert!(matches!(data.defend_effect, Some(DefendEffect::Reveal6BottomOtherwise)));
+    assert!(data.play_effect.is_none(), "Pack Call should have no on-play effect");
+    assert!(data.additional_cost.is_none(), "Pack Call should have no additional cost");
+    assert!(data.ability.is_none(), "Pack Call should have no activated ability");
+}
+
+#[test]
+fn pack_call_trigger_waits_on_the_stack_instead_of_firing_on_declaration() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+    let before = deck_order(&gs, PlayerIndex::P2);
+
+    // Declaring the blocker alone changes nothing: the trigger is not applied
+    // where the card is committed.
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::PackCallY]);
+    let pc_idx = gs.p2.hand_idx.expect("Pack Call should be in hand").get();
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(pc_idx))});
+    assert!(gs.stack_is_empty(), "nothing goes on the stack until blockers are all declared");
+    assert_eq!(deck_order(&gs, PlayerIndex::P2), before);
+
+    // Finishing the defend step opens the trigger window with the trigger on
+    // the stack — still unresolved.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.phase, Phase::DefendTriggers);
+    assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY]);
+    assert_eq!(gs.stack_top().map(|p| p.typ), Some(ActionType::DefendTrigger));
+    assert_eq!(deck_order(&gs, PlayerIndex::P2), before,
+        "the effect has not happened yet — the trigger is only on the stack");
+
+    // It resolves like any other stack layer, on a round of passes.
+    pass_once_each(&mut gs);
+    assert!(gs.stack_is_empty());
+    assert_eq!(*deck_order(&gs, PlayerIndex::P2).last().unwrap(), top,
+        "resolving the trigger is what applies the effect");
+}
+
+#[test]
+fn pack_call_trigger_resolves_leaving_the_card_on_the_combat_chain() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+    let pc_idx = declare_blockers(&mut gs, &[Card::PackCallY])[0];
+
+    // The card is on the chain from the moment it is declared, and resolving
+    // its trigger neither moves it nor sends it to the graveyard.
+    assert_eq!(gs.cards[pc_idx].location, CardLocation::P2CombatChain);
+    pass_once_each(&mut gs);
+    assert_eq!(gs.cards[pc_idx].location, CardLocation::P2CombatChain);
+    assert_eq!(gs.p2.chain_link[0], Some(CardIdx::new(pc_idx)));
+}
+
+#[test]
+fn pack_call_keeps_a_power6_card_on_top() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    // Wounded Bull sits exactly on the 6-power boundary, which is inclusive.
+    let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::WoundedBullY);
+    assert_eq!(Card::WoundedBullY.data().power, 6);
+    let before = deck_order(&gs, PlayerIndex::P2);
+
+    declare_blockers(&mut gs, &[Card::PackCallY]);
+    pass_once_each(&mut gs);
+
+    assert_eq!(gs.p2.top_deck_idx, Some(CardIdx::new(top)),
+        "a 6-power card stays on top");
+    assert_eq!(deck_order(&gs, PlayerIndex::P2), before,
+        "the deck order is untouched when the top card has 6 or more power");
+}
+
+#[test]
+fn pack_call_bottoms_a_sub_power6_card() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    // Rally the Rearguard has 4 power — under the line, so it is bottomed.
+    let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+    assert_eq!(Card::RallyTheRearguardB.data().power, 4);
+    let before = deck_order(&gs, PlayerIndex::P2);
+    let size_before = gs.p2.deck_size;
+
+    declare_blockers(&mut gs, &[Card::PackCallY]);
+    pass_once_each(&mut gs);
+
+    let after = deck_order(&gs, PlayerIndex::P2);
+    assert_eq!(*after.last().expect("deck is non-empty"), top,
+        "a sub-6-power card goes to the bottom");
+    assert_eq!(gs.p2.bottom_deck_idx, Some(CardIdx::new(top)),
+        "the bottom pointer follows it");
+    assert_ne!(gs.p2.top_deck_idx, Some(CardIdx::new(top)));
+
+    // The deck was reordered, not resized: the rest keeps its order, with the
+    // old top moved from the front to the back.
+    assert_eq!(gs.p2.deck_size, size_before);
+    assert_eq!(after.len(), before.len());
+    let mut expected = before[1..].to_vec();
+    expected.push(top);
+    assert_eq!(after, expected);
+}
+
+#[test]
+fn pack_call_reveals_its_own_controllers_deck() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    // The defender (p2) is not the turn player, so wiring the reveal to the
+    // wrong side would show up here.
+    set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+    let attacker_deck_before = deck_order(&gs, PlayerIndex::P1);
+    let defender_deck_before = deck_order(&gs, PlayerIndex::P2);
+
+    declare_blockers(&mut gs, &[Card::PackCallY]);
+    pass_once_each(&mut gs);
+
+    assert_eq!(deck_order(&gs, PlayerIndex::P1), attacker_deck_before,
+        "the attacker's deck must not be touched");
+    assert_ne!(deck_order(&gs, PlayerIndex::P2), defender_deck_before,
+        "the defender's own deck is the one revealed from");
+}
+
+#[test]
+fn pack_call_reveal_is_public_whichever_way_it_goes() {
+    // Kept on top: revealing it tells both players what is there.
+    let mut gs = dorinthea_defending_muscle_mutt();
+    let kept = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::WoundedBullY);
+    gs.cards[kept].visible = CardVisibleState::Hidden;
+    declare_blockers(&mut gs, &[Card::PackCallY]);
+    pass_once_each(&mut gs);
+    assert_eq!(gs.cards[kept].visible, CardVisibleState::BothKnow);
+
+    // Bottomed: it stays known there, as a face-up pitched card does.
+    let mut gs = dorinthea_defending_muscle_mutt();
+    let bottomed = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+    gs.cards[bottomed].visible = CardVisibleState::Hidden;
+    declare_blockers(&mut gs, &[Card::PackCallY]);
+    pass_once_each(&mut gs);
+    assert_eq!(gs.cards[bottomed].visible, CardVisibleState::BothKnow);
+}
+
+#[test]
+fn pack_call_on_an_empty_deck_does_nothing() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    // A decked player can still declare blockers, so an empty deck is a legal
+    // state for the trigger to resolve in — it must no-op rather than panic.
+    gs.p2.top_deck_idx = None;
+    gs.p2.bottom_deck_idx = None;
+    gs.p2.deck_size = 0;
+
+    let pc_idx = declare_blockers(&mut gs, &[Card::PackCallY])[0];
+    pass_once_each(&mut gs);
+
+    assert_eq!(gs.p2.deck_size, 0);
+    assert_eq!(gs.p2.top_deck_idx, None);
+    assert_eq!(gs.p2.bottom_deck_idx, None);
+    // The block itself still happened.
+    assert_eq!(gs.cards[pc_idx].location, CardLocation::P2CombatChain);
+}
+
+#[test]
+fn a_blocker_without_a_defend_trigger_puts_nothing_on_the_stack() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    // The same sub-6-power top card that Pack Call would bottom.
+    set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+    let before = deck_order(&gs, PlayerIndex::P2);
+
+    // Driving Blade has no defend effect, so an ordinary block costs no extra
+    // priority round and leaves the deck alone.
+    assert!(Card::DrivingBladeY.data().defend_effect.is_none());
+    declare_blockers(&mut gs, &[Card::DrivingBladeY]);
+
+    assert!(gs.stack_is_empty(), "an ordinary blocker puts no trigger on the stack");
+    assert_eq!(deck_order(&gs, PlayerIndex::P2), before);
+}
+
+#[test]
+fn defending_with_two_pack_calls_fires_the_effect_twice() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+
+    // Two sub-6-power cards on top, so each Pack Call bottoms one in turn and
+    // the two reveals are told apart by which card moved.
+    let order = deck_order(&gs, PlayerIndex::P2);
+    let (first_top, second_top) = (order[0], order[1]);
+    gs.cards[first_top].card = Card::RallyTheRearguardB;
+    gs.cards[second_top].card = Card::RallyTheRearguardB;
+
+    let blockers = declare_blockers(&mut gs, &[Card::PackCallY, Card::PackCallY]);
+    assert_eq!(blockers.len(), 2);
+
+    // Both triggers went on the stack together, as one batch. The two copies
+    // are identical cards, so order is only visible through their indices: the
+    // stack's top entry — the next to resolve — is the first blocker declared.
+    assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY, Card::PackCallY]);
+    assert_eq!(stacked_defend_trigger_indices(&gs), vec![blockers[1], blockers[0]],
+        "pushed so that the first-declared blocker's trigger sits on top");
+    assert_eq!(deck_order(&gs, PlayerIndex::P2), order, "neither has resolved yet");
+
+    // Each resolves on its own round of passes — two reveals, not one.
+    pass_once_each(&mut gs);
+    assert_eq!(stacked_defend_trigger_indices(&gs), vec![blockers[1]],
+        "the first-declared blocker's trigger resolved, leaving the second's");
+    let after_first = deck_order(&gs, PlayerIndex::P2);
+    assert_eq!(*after_first.last().unwrap(), first_top,
+        "one reveal has happened: the old top card is now at the bottom");
+    assert_ne!(*after_first.last().unwrap(), second_top);
+
+    pass_once_each(&mut gs);
+    assert!(gs.stack_is_empty(), "both triggers have resolved");
+
+    // The effect happened twice: the deck has rotated by two, both revealed
+    // cards now at the bottom in declaration order.
+    let after = deck_order(&gs, PlayerIndex::P2);
+    assert_eq!(after[after.len() - 2], first_top);
+    assert_eq!(after[after.len() - 1], second_top);
+    let mut expected = order[2..].to_vec();
+    expected.push(first_top);
+    expected.push(second_top);
+    assert_eq!(after, expected);
+}
+
+#[test]
+fn only_instants_are_offered_while_a_defend_trigger_is_on_the_stack() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+
+    // Pack Call blocks, leaving the defender a defense reaction and an instant.
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::PackCallY, Card::DodgeB, Card::SigilofSolaceB]);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(hand[0]))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY]);
+
+    // The attacker holds an instant and an attack reaction; only the instant is
+    // offered while the trigger is pending.
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::SigilofSolaceB, Card::BladeFlashB]);
+    gs.p1.resources = 5; // affordability is not what rules the reaction out
+    assert_eq!(Card::BladeFlashB.data().typ, CardType::AttackReaction);
+    let attacker = playable_cards(&gs);
+    assert!(attacker.contains(&Card::SigilofSolaceB),
+        "an instant may be played above a pending defend trigger");
+    assert!(!attacker.contains(&Card::BladeFlashB),
+        "an attack reaction may not");
+
+    // Same for the defender: her instant, not her defense reaction.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    gs.p2.resources = 5;
+    let defender = playable_cards(&gs);
+    assert!(defender.contains(&Card::SigilofSolaceB),
+        "an instant may be played above a pending defend trigger");
+    assert!(!defender.contains(&Card::DodgeB),
+        "a defense reaction may not");
+
+    // Playing that instant does not reopen the window. The trigger is no longer
+    // the *top* of the stack, but it is still on it, and the gate asks whether
+    // one is pending anywhere rather than whether it is next to resolve.
+    let sigil_idx = gs.p2.hand_iter(&gs.cards)
+        .find(|(_, cs)| cs.card == Card::SigilofSolaceB)
+        .expect("Sigil of Solace should still be in hand").0;
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
+    assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
+    assert_eq!(gs.active_player, PlayerIndex::P2, "playing a card keeps priority");
+    assert_ne!(gs.stack_top().map(|p| p.typ), Some(ActionType::DefendTrigger),
+        "the instant is on top now, the trigger underneath");
+    assert!(!playable_cards(&gs).contains(&Card::DodgeB),
+        "a reaction stays shut out while a trigger is anywhere on the stack");
+}
+
+#[test]
+fn reactions_are_offered_again_when_no_defend_trigger_is_pending() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+
+    // An ordinary blocker puts no trigger on the stack, so the reaction window
+    // is the usual one — the narrowing above is specific to a pending trigger.
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::DrivingBladeY, Card::DodgeB]);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(hand[0]))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    assert!(gs.stack_is_empty());
+
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    assert!(playable_cards(&gs).contains(&Card::DodgeB),
+        "with no trigger pending, a defense reaction is offered as before");
+}
+
+#[test]
+fn an_instant_resolves_above_a_defend_trigger_without_closing_the_window() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+
+    // Pack Call blocks; its trigger is on the stack, not yet resolved.
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::PackCallY, Card::SigilofSolaceB]);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    let (pc_idx, sigil_idx) = (hand[0], hand[1]);
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(pc_idx))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
+    assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY]);
+
+    // The defender answers the trigger with a free instant.
+    let life_before = gs.p2.life;
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
+    assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
+
+    // Last on, first off: the instant resolves while the trigger waits below,
+    // and the window stays open instead of closing into combat damage.
+    pass_once_each(&mut gs);
+    assert_eq!(gs.p2.life, life_before + 1, "Sigil of Solace resolved");
+    assert_eq!(gs.cards[sigil_idx].location, CardLocation::P2Graveyard);
+    assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY],
+        "the trigger is still waiting underneath");
+    assert_eq!(gs.phase, Phase::DefendTriggers, "the window must not close early");
+    assert_ne!(*deck_order(&gs, PlayerIndex::P2).last().unwrap(), top,
+        "the trigger has not resolved yet");
+
+    // Then the trigger resolves and its window hands over to the reaction
+    // window — still no damage.
+    pass_once_each(&mut gs);
+    assert!(gs.stack_is_empty());
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(*deck_order(&gs, PlayerIndex::P2).last().unwrap(), top);
+    assert_eq!(gs.p2.life, life_before + 1, "damage waits for the reaction window");
+
+    // Closing that window deals it: Pack Call's 3 block against 6 power.
+    pass_once_each(&mut gs);
+    assert_eq!(gs.p2.life, life_before + 1 - 3);
+}
+
+#[test]
+fn pack_call_still_blocks_for_3() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+    let pc_idx = declare_blockers(&mut gs, &[Card::PackCallY])[0];
+    assert_eq!(gs.cards[pc_idx].location, CardLocation::P2CombatChain);
+
+    // Resolving the last trigger empties the stack, which hands the
+    // defend-trigger window over to the ordinary reaction window — not to
+    // damage.
+    pass_once_each(&mut gs);
+    assert!(gs.stack_is_empty());
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.p2.life, 20, "no damage until the reaction window closes");
+
+    // Closing that window deals it. Its 3 block comes off Muscle Mutt's 6
+    // power: 3 damage, not 6 — the trigger is a bonus on top of an ordinary
+    // block, not a replacement for it.
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.p2.life, 20 - 3);
+}
+
+#[test]
+fn the_defend_trigger_window_hands_over_to_the_reaction_window_not_to_damage() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+
+    // Pack Call blocks, and the defender keeps a defense reaction in hand — one
+    // the trigger window will not let her play.
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::PackCallY, Card::DodgeB]);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    let dodge_idx = hand[1];
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(hand[0]))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    assert_eq!(gs.phase, Phase::DefendTriggers);
+
+    // The trigger resolves. Its window then hands over to the ordinary reaction
+    // window rather than dealing combat damage.
+    pass_once_each(&mut gs);
+    assert!(gs.stack_is_empty());
+    assert_eq!(gs.phase, Phase::Reaction, "the reaction window comes next");
+    assert_eq!(*deck_order(&gs, PlayerIndex::P2).last().unwrap(), top,
+        "the trigger did resolve");
+    assert_eq!(gs.p2.life, 20, "damage waits for the reaction window to close");
+    assert_eq!(gs.active_player, gs.turn_player, "which opens on the turn player");
+
+    // Reactions are legal again here, so blocking with Pack Call no longer costs
+    // the defender her reaction window.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    assert!(playable_cards(&gs).contains(&Card::DodgeB),
+        "the defense reaction the trigger window shut out is playable again");
+
+    // She plays it, and it blocks as usual: Pack Call's 3 plus Dodge's 2 against
+    // Muscle Mutt's 6 leaves 1.
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(dodge_idx))});
+    pass_once_each(&mut gs);
+    assert_eq!(gs.cards[dodge_idx].location, CardLocation::P2CombatChain);
+    assert_eq!(gs.p2.life, 20 - 1);
+}
+
+#[test]
+fn an_ordinary_block_skips_the_defend_trigger_window_entirely() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+
+    // No blocker carries a trigger, so there is nothing to open a trigger window
+    // for: the defend step goes straight to the reaction window, and an ordinary
+    // block costs no extra round of priority.
+    declare_blockers(&mut gs, &[Card::DrivingBladeY]);
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert!(gs.stack_is_empty());
+
+    // One round of passes closes it into damage: 6 power less 3 block.
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.p2.life, 20 - 3);
+}
+
+#[test]
+fn pitching_inside_the_defend_trigger_window_returns_to_it() {
+    // Nothing playable in this window currently costs anything — Sigil of
+    // Solace is the catalog's only instant and is free, as is its only
+    // instant-speed ability — so the legal-action gate cannot produce this
+    // state yet. A costed card is driven through `step` directly to pin the
+    // phase plumbing for the first costed instant that comes along: without
+    // `DefendPitch`, pitching here would fall through to `ActionPitch`
+    // and return to the wrong window.
+    let mut gs = dorinthea_defending_muscle_mutt();
+    set_hand(&mut gs, PlayerIndex::P2,
+        &[Card::PackCallY, Card::MuscleMuttY, Card::ClearingBellowB]);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    let (costed, pitcher) = (hand[1], hand[2]);
+
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(hand[0]))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    assert_eq!(gs.phase, Phase::DefendTriggers);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // priority to the defender
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+
+    assert_eq!(Card::MuscleMuttY.data().cost, 3);
+    assert_eq!(Card::ClearingBellowB.data().pitch, 3);
+    assert_eq!(gs.p2.resources, 0, "the cost is not already covered");
+
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(costed))});
+    assert_eq!(gs.phase, Phase::DefendPitch,
+        "pitching drops into this window's own pitch phase");
+
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitcher))});
+    assert_eq!(gs.phase, Phase::DefendTriggers,
+        "and returns to the window it interrupted, not to the reaction window");
+    assert_eq!(gs.cards[costed].location, CardLocation::Stack);
+    assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY],
+        "the trigger is still underneath, waiting");
 }

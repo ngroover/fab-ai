@@ -201,6 +201,108 @@ on-play-effect helpers).
                sigil_of_solace_gains_1_life_on_resolve,
                sigil_of_solace_heals_only_its_owner
 
+  [x] Titanium Bauble (Card::TitaniumBaubleB)
+        A blue resource card — cost 0, pitch 3, 0 power, 3 defense — with no
+        rules text, and the catalog's only `CardType::Resource`. What makes it
+        work is a rule rather than an effect: a resource is never played. It
+        contributes the two ways any card can without going on the stack —
+        pitched from hand for its 3 resources, or declared as an ordinary
+        blocker (not a defense reaction) for its 3 defense.
+          * `can_ever_be_played` rules the type out inside `is_playable_now`,
+            which both the hand and the arsenal paths pass through, so it is
+            offered in no window: action, instant or reaction. The four speed
+            gates are allowlists that already omit Resource, so the check is
+            redundant today; it is stated so the rule survives a gate gaining a
+            broader type, for the same reason `can_be_declared_as_blocker`
+            tests the card type rather than leaning on `no_block`.
+          * Nothing else needed changing — pitching and blocking already work
+            off the printed pitch and defense, and the tests pin that they do.
+        Tests: titanium_bauble_is_a_vanilla_3_pitch_3_block_resource,
+               titanium_bauble_is_never_offered_as_a_play_from_hand,
+               titanium_bauble_is_never_offered_as_a_play_from_the_arsenal,
+               titanium_bauble_is_not_offered_in_the_defender_reaction_window,
+               titanium_bauble_pitches_for_3,
+               titanium_bauble_blocks_for_3,
+               can_ever_be_played_excludes_resources
+               (the last in `legal_actions::tests`)
+
+  [x] Pack Call (Card::PackCallY)
+        "When you defend with Pack Call, reveal the top card of your deck. If
+        it has 6 or more power, put it on top of your deck. Otherwise, put it
+        on the bottom." A 6-power brute attack action that also carries the
+        catalog's first `defend_effect`, wiring up the previously unused
+        `DefendEffect::Reveal6BottomOtherwise`.
+          * The trigger is not applied where the card is committed. Blockers
+            are declared first; when the defender finishes the defend step,
+            `push_defend_triggers` puts a trigger on the stack for every
+            declared blocker carrying a `defend_effect`, as one batch. Each
+            then resolves as its own stack layer, so a trigger can be responded
+            to like a played card.
+          * Those layers resolve in a window of their own, `Phase::DefendTriggers`,
+            which sits between the defend step and the ordinary `Reaction`
+            window. When its stack empties it hands over to `Reaction` rather
+            than dealing combat damage (see `close_priority_window`), so the
+            reaction window still happens and damage waits for *it* to close.
+            The window is only entered when there is at least one trigger to
+            resolve, so an ordinary block costs no extra round of priority.
+            `DefendPitch` is its pitch phase, returning there once a
+            cost is covered — currently unreachable, since nothing playable in
+            the window costs anything, but pinned by a test so the first costed
+            instant does not land in the wrong window.
+          * The stack entry is a `PendingCard` typed `ActionType::DefendTrigger`
+            — a pseudo-action the engine pushes and `legal_actions` never
+            offers. `resolve_top_of_stack` recognises it and resolves the
+            effect alone: the card is already on the combat chain from when it
+            was declared and stays there, so nothing changes zones, no action
+            point is spent, and the card's keywords and on-play effect are not
+            re-fired.
+          * Simultaneous triggers resolve in the order their blockers were
+            declared. The stack resolves top-down and `chain_link_indices`
+            walks back through declaration order, so pushing in that order
+            leaves the first-declared blocker's trigger on top. Real FaB lets
+            the controller order them; there is no choice phase for that, and
+            declaration order is one the player already expressed.
+          * A blocker with no `defend_effect` — nearly all of them — puts
+            nothing on the stack, so an ordinary block still costs no extra
+            round of priority.
+          * The trigger window is narrowed to instants for both players: an
+            instant may be played and resolved above a pending trigger, a
+            reaction — attack or defense — may not. Narrowing by phase rather
+            than by scanning the stack means playing an instant in response
+            cannot reopen the window underneath itself. Reactions are legal
+            again in the `Reaction` window this one hands over to, so blocking
+            with Pack Call no longer costs the defender their reaction window.
+            Enforced where the engine enforces every other such rule, in
+            `legal_actions`; `step` executes whatever it is handed.
+          * "Your deck" is the deck of whoever defends with it, which is never
+            the turn player. `reveal_top_keep_6` therefore works off the
+            declaring player, and the attacker's deck is left alone.
+          * The 6-power boundary is inclusive: exactly 6 stays on top. Below
+            it, the card is detached and re-attached at the bottom, so the deck
+            is reordered and never resized.
+          * The reveal is public either way, so the card is left BothKnow — on
+            the bottom that mirrors a face-up pitched card being bottomed (see
+            `bottom_pitch_card`).
+          * An empty deck is a legal state to resolve in (a decked player can
+            still declare blockers), so it is a no-op rather than a panic.
+        Tests: pack_call_is_a_6_power_brute_attack_with_a_defend_trigger,
+               pack_call_trigger_waits_on_the_stack_instead_of_firing_on_declaration,
+               pack_call_trigger_resolves_leaving_the_card_on_the_combat_chain,
+               pack_call_keeps_a_power6_card_on_top,
+               pack_call_bottoms_a_sub_power6_card,
+               pack_call_reveals_its_own_controllers_deck,
+               pack_call_reveal_is_public_whichever_way_it_goes,
+               pack_call_on_an_empty_deck_does_nothing,
+               a_blocker_without_a_defend_trigger_puts_nothing_on_the_stack,
+               defending_with_two_pack_calls_fires_the_effect_twice,
+               only_instants_are_offered_while_a_defend_trigger_is_on_the_stack,
+               reactions_are_offered_again_when_no_defend_trigger_is_pending,
+               an_instant_resolves_above_a_defend_trigger_without_closing_the_window,
+               the_defend_trigger_window_hands_over_to_the_reaction_window_not_to_damage,
+               an_ordinary_block_skips_the_defend_trigger_window_entirely,
+               pitching_inside_the_defend_trigger_window_returns_to_it,
+               pack_call_still_blocks_for_3
+
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
@@ -210,7 +312,7 @@ on-play-effect helpers).
   [x] Wrecking Ball          (Card::WreckingBallR)  — see COMPLETE section above
   [ ] Barraging Beatdown     (Card::BarragingBeatdownY)
   [x] Muscle Mutt            (Card::MuscleMuttY)  — see COMPLETE section above
-  [ ] Pack Call              (Card::PackCallY)
+  [x] Pack Call              (Card::PackCallY)  — see COMPLETE section above
   [x] Raging Onslaught       (Card::RagingOnslaughtY)  — see COMPLETE section above
   [x] Smash Instinct         (Card::SmashInstinctY)  — see COMPLETE section above
   [x] Smash With Big Tree    (Card::SmashWithBigTreeY)  — see COMPLETE section above
@@ -219,7 +321,7 @@ on-play-effect helpers).
   [x] Come to Fight          (Card::ComeToFightB)  — see COMPLETE section above
   [x] Dodge                  (Card::DodgeB)  — see COMPLETE section above
   [ ] Rally the Rearguard    (Card::RallyTheRearguardB)
-  [ ] Titanium Bauble        (Card::TitaniumBaubleB)
+  [x] Titanium Bauble        (Card::TitaniumBaubleB)  — see COMPLETE section above
 
 
 ------------------------------------------------------------------------------
@@ -272,10 +374,12 @@ on-play-effect helpers).
 ==============================================================================
  NOTES
 ==============================================================================
-- Some shared combat mechanics (e.g. Intimidate, Pack Call token generation)
-  already have coverage in the general `fab_step::tests` module, but the cards
-  above are not yet considered fully implemented + dedicated-card-tested and so
-  remain on the TODO list.
+- Some shared combat mechanics (e.g. Intimidate) already have coverage in the
+  general `fab_step::tests` module, but the cards above are not yet considered
+  fully implemented + dedicated-card-tested and so remain on the TODO list.
+  (This note used to cite "Pack Call token generation" as a second example.
+  Pack Call is now complete, and its text in this catalog generates no tokens,
+  so the example is gone rather than moved.)
 - Arsenal plays: a card in the arsenal is offered as a play in the same windows
   a hand card would be (action, instant and reaction), gated by the same speed
   and action-point rules. It is paid for by pitching from hand, and because the

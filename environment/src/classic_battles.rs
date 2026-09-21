@@ -1,5 +1,5 @@
 use crate::cards::{Card, CardClass, CardData, CardType, Color, EquipmentSlot, Keyword, WeaponType};
-use crate::card_effects::{AdditionalCostType, Ability, ConstantEffect, OnPlayConditionType, OnPlayEffect, OnPlayEffectType};
+use crate::card_effects::{AdditionalCostType, Ability, ConstantEffect, DefendEffect, OnPlayConditionType, OnPlayEffect, OnPlayEffectType};
 use std::sync::LazyLock;
 
 /// Catalog of every card in the Rhinar vs Dorinthea classic battle.
@@ -330,7 +330,12 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             hero_intellect: 0,
             constant_effect: None,
             ability: None,
-            defend_effect: None,
+            // "When you defend with Pack Call, reveal the top card of your deck.
+            // If it has 6 or more power, put it on top of your deck. Otherwise,
+            // put it on the bottom." Fires as Pack Call is declared as a blocker
+            // (see `apply_defend_effect`), and looks at its own controller's
+            // deck — the defender's.
+            defend_effect: Some(DefendEffect::Reveal6BottomOtherwise),
             next_attack_effect: None,
             additional_cost: None,
             target_effect: None,
