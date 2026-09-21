@@ -1866,7 +1866,7 @@ fn declare_blockers(gs: &mut Gamestate, cards: &[Card]) -> Vec<usize> {
     step(gs, Action{ typ: ActionType::Pass, card: None}); // done declaring blockers
     // With triggers to resolve we land in their own window; with none, straight
     // into the ordinary reaction window.
-    assert!(matches!(gs.phase, Phase::DefendReaction | Phase::Reaction));
+    assert!(matches!(gs.phase, Phase::DefendTriggers | Phase::Reaction));
     hand
 }
 
@@ -1928,7 +1928,7 @@ fn pack_call_trigger_waits_on_the_stack_instead_of_firing_on_declaration() {
     // Finishing the defend step opens the trigger window with the trigger on
     // the stack — still unresolved.
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-    assert_eq!(gs.phase, Phase::DefendReaction);
+    assert_eq!(gs.phase, Phase::DefendTriggers);
     assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY]);
     assert_eq!(gs.stack_top().map(|p| p.typ), Some(ActionType::DefendTrigger));
     assert_eq!(deck_order(&gs, PlayerIndex::P2), before,
@@ -2209,7 +2209,7 @@ fn an_instant_resolves_above_a_defend_trigger_without_closing_the_window() {
     assert_eq!(gs.cards[sigil_idx].location, CardLocation::P2Graveyard);
     assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY],
         "the trigger is still waiting underneath");
-    assert_eq!(gs.phase, Phase::DefendReaction, "the window must not close early");
+    assert_eq!(gs.phase, Phase::DefendTriggers, "the window must not close early");
     assert_ne!(*deck_order(&gs, PlayerIndex::P2).last().unwrap(), top,
         "the trigger has not resolved yet");
 
@@ -2261,7 +2261,7 @@ fn the_defend_trigger_window_hands_over_to_the_reaction_window_not_to_damage() {
     let dodge_idx = hand[1];
     step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(hand[0]))});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
-    assert_eq!(gs.phase, Phase::DefendReaction);
+    assert_eq!(gs.phase, Phase::DefendTriggers);
 
     // The trigger resolves. Its window then hands over to the ordinary reaction
     // window rather than dealing combat damage.
@@ -2322,7 +2322,7 @@ fn pitching_inside_the_defend_trigger_window_returns_to_it() {
 
     step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(hand[0]))});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
-    assert_eq!(gs.phase, Phase::DefendReaction);
+    assert_eq!(gs.phase, Phase::DefendTriggers);
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // priority to the defender
     assert_eq!(gs.active_player, PlayerIndex::P2);
 
@@ -2335,7 +2335,7 @@ fn pitching_inside_the_defend_trigger_window_returns_to_it() {
         "pitching drops into this window's own pitch phase");
 
     step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitcher))});
-    assert_eq!(gs.phase, Phase::DefendReaction,
+    assert_eq!(gs.phase, Phase::DefendTriggers,
         "and returns to the window it interrupted, not to the reaction window");
     assert_eq!(gs.cards[costed].location, CardLocation::Stack);
     assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY],

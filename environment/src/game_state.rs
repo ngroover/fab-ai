@@ -171,13 +171,12 @@ pub enum Phase {
     /// like any other stack entry. When the stack empties this window hands over
     /// to `Reaction` rather than dealing combat damage, so the ordinary reaction
     /// window still happens.
-    DefendReaction,
-    /// Pitching to pay for a card played during the `DefendReaction` window,
+    DefendTriggers,
+    /// Pitching to pay for a card played during the `DefendTriggers` window,
     /// returning there once the cost is covered — what `ActionPitch` is to the
-    /// action phase and `ReactionPitch` to the reaction window. Named for the
-    /// defend step rather than after its window, since "defend reaction pitch"
-    /// reads as pitching for a *defense reaction*, which is the one thing that
-    /// cannot be played here.
+    /// action phase and `ReactionPitch` to the reaction window. Named after the
+    /// defend step rather than spelled out as `DefendTriggersPitch`: it is the
+    /// pitch phase reached from the defend step, and nothing else there pitches.
     DefendPitch,
     Reaction,
     ReactionPitch,

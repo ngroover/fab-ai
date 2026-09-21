@@ -16,7 +16,7 @@ pub fn step(gs: &mut Gamestate, act: Action) {
         Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch => handle_pitch_phase(gs, act),
         Phase::ActionInstant => handle_action_instant_phase(gs, act),
         Phase::Defend => handle_defend_phase(gs, act),
-        Phase::DefendReaction | Phase::Reaction => handle_reaction_phase(gs, act),
+        Phase::DefendTriggers | Phase::Reaction => handle_reaction_phase(gs, act),
         Phase::Arsenal => handle_arsenal_phase(gs, act),
         Phase::PitchOrder => handle_pitch_order_phase(gs, act),
         _ => {}
@@ -199,7 +199,7 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
         // other caller (the Action and ActionInstant phases) uses ActionPitch.
         gs.phase = match gs.phase {
             Phase::Reaction => Phase::ReactionPitch,
-            Phase::DefendReaction => Phase::DefendPitch,
+            Phase::DefendTriggers => Phase::DefendPitch,
             _ => Phase::ActionPitch,
         };
     }
@@ -244,7 +244,7 @@ fn close_priority_window(gs: &mut Gamestate) {
         gs.phase = Phase::Action;
         gs.active_player = gs.turn_player;
     }
-    else if gs.phase == Phase::DefendReaction {
+    else if gs.phase == Phase::DefendTriggers {
         // The defend-trigger window is over, but combat is not: hand over to the
         // ordinary reaction window, where reactions are legal again and the
         // stack starts empty. Damage waits for that window to close.
@@ -283,7 +283,7 @@ fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
             // to open it for, so we go straight to the reaction window and an
             // ordinary block costs no extra round of priority.
             gs.phase = if push_defend_triggers(gs) {
-                Phase::DefendReaction
+                Phase::DefendTriggers
             } else {
                 Phase::Reaction
             };
@@ -559,7 +559,7 @@ fn chain_link_indices(player: &Player, cards: &[CardState; TOTAL_CARDS], link: u
 /// "when you defend with this" trigger, returning whether any were pushed.
 /// Called once the defender has finished declaring blockers, so every trigger
 /// for this attack goes on the stack together and each is then open to
-/// responses in the `DefendReaction` window that follows, resolving one layer
+/// responses in the `DefendTriggers` window that follows, resolving one layer
 /// at a time like any other stack entry. The caller opens that window only when
 /// this returns true.
 ///
@@ -1229,7 +1229,7 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     } else if gs.phase == Phase::ReactionPitch {
         gs.phase = Phase::Reaction;
     } else if gs.phase == Phase::DefendPitch {
-        gs.phase = Phase::DefendReaction;
+        gs.phase = Phase::DefendTriggers;
     }
 }
 

@@ -21,7 +21,7 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
         Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch => legal_pitch_phase(gs),
         Phase::ActionInstant => legal_instant_phase(gs),
         Phase::Defend => legal_defend_phase(gs),
-        Phase::DefendReaction => legal_defend_reaction_phase(gs),
+        Phase::DefendTriggers => legal_defend_triggers_phase(gs),
         Phase::Reaction => legal_reaction_phase(gs),
         Phase::Arsenal => legal_arsenal_phase(gs),
         Phase::PitchOrder => legal_pitch_order_phase(gs),
@@ -218,7 +218,7 @@ fn legal_reaction_phase(gs: &Gamestate) -> Vec<Action> {
     }
 }
 
-/// The defend-trigger window (`Phase::DefendReaction`): the defender has
+/// The defend-trigger window (`Phase::DefendTriggers`): the defender has
 /// finished declaring blockers and their "when you defend with" triggers are on
 /// the stack. Both players hold priority in turn, but the window is narrowed to
 /// instants — an instant may be played and resolved above a pending trigger, a
@@ -228,7 +228,7 @@ fn legal_reaction_phase(gs: &Gamestate) -> Vec<Action> {
 /// Narrowing by phase rather than by scanning the stack means playing an instant
 /// in response cannot reopen the window underneath itself: the phase holds until
 /// every trigger has resolved.
-fn legal_defend_reaction_phase(gs: &Gamestate) -> Vec<Action> {
+fn legal_defend_triggers_phase(gs: &Gamestate) -> Vec<Action> {
     legal_play_phase(gs, is_instant_phase_playable)
 }
 

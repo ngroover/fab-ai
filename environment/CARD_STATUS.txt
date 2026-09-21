@@ -238,7 +238,7 @@ on-play-effect helpers).
             declared blocker carrying a `defend_effect`, as one batch. Each
             then resolves as its own stack layer, so a trigger can be responded
             to like a played card.
-          * Those layers resolve in a window of their own, `Phase::DefendReaction`,
+          * Those layers resolve in a window of their own, `Phase::DefendTriggers`,
             which sits between the defend step and the ordinary `Reaction`
             window. When its stack empties it hands over to `Reaction` rather
             than dealing combat damage (see `close_priority_window`), so the
