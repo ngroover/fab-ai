@@ -107,6 +107,10 @@ fn begin_turn(gs: &mut Gamestate) {
     // cannot leak into this turn's attacks.
     gs.p1.next_attack_action_bonus = 0;
     gs.p2.next_attack_action_bonus = 0;
+    // Likewise clear any unconsumed conditional "next brute attack" bonus so it
+    // cannot leak into this turn's attacks.
+    gs.p1.next_brute_attack_conditional_bonus = 0;
+    gs.p2.next_brute_attack_conditional_bonus = 0;
     // Clear the per-turn "has intimidated" flag so a prior turn's Intimidate
     // can never satisfy this turn's "if you've intimidated" conditions.
     gs.p1.has_intimidated = false;
@@ -956,6 +960,16 @@ fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayE
             let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
             player.next_attack_action_bonus = player.next_attack_action_bonus.saturating_add(effect.magnitude);
         }
+        // The next Brute attack the owner makes this turn gains `magnitude`
+        // power, but only while it is defended by fewer than two non-equipment
+        // cards (e.g. Barraging Beatdown). Banked here; the blocker count is a
+        // property of how the defender answers the attack, so it can only be
+        // read when combat damage resolves — see `resolve_combat_damage`.
+        OnPlayEffectType::NextBruteConditionalPower => {
+            let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+            player.next_brute_attack_conditional_bonus =
+                player.next_brute_attack_conditional_bonus.saturating_add(effect.magnitude);
+        }
         // The owner Intimidates: their opponent banishes a random card from hand
         // (e.g. Wrecking Ball, whose `DrawDiscardHit6` condition Intimidates on a
         // 6-power discard). This is separate from Rhinar's `OnDiscard6Intimidate`
@@ -1268,13 +1282,42 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         .map(|idx| gs.cards[idx.get()].card.data().typ == CardType::AttackAction)
         .unwrap_or(false);
     let attack_action_bonus = if attack_is_attack_action { attacker.next_attack_action_bonus } else { 0 };
+    // Whether the attacking card is a Brute *attack* of any kind, which gates
+    // the banked conditional bonus (e.g. Barraging Beatdown's +3). Unlike
+    // `attack_is_brute` above this covers a brute weapon swing as well as a
+    // brute attack action card: "your next Brute attack" names the attack, not
+    // the card type it is made with, so Bone Basher qualifies.
+    let attack_is_brute_attack = attacker.chain_link[link]
+        .map(|idx| {
+            let data = gs.cards[idx.get()].card.data();
+            data.card_class == CardClass::Brute
+                && matches!(data.typ, CardType::AttackAction | CardType::Weapon)
+        })
+        .unwrap_or(false);
+    // The number of non-equipment cards defending this link. Equipment is
+    // excluded by card type — the engine does not model blocking with equipment
+    // yet, so nothing puts an equipment card here today, but the text names the
+    // exclusion and the rule is stated where it belongs rather than left to
+    // emerge from that gap.
+    let non_equipment_blockers = chain_link_count(defender, &gs.cards, link, |d| {
+        d.typ != CardType::Equipment
+    });
+    // The conditional bonus pays out only while fewer than two non-equipment
+    // cards defend the attack; two or more nullify it. It is consumed either way
+    // (see below), so a nullified bonus does not roll over to a later attack.
+    let brute_conditional_bonus = if attack_is_brute_attack && non_equipment_blockers < 2 {
+        attacker.next_brute_attack_conditional_bonus
+    } else {
+        0
+    };
     // Total attack power is the cards on this chain link plus any banked on-play
     // bonus (e.g. Bare Fangs's conditional +2 power, Awakening Bellow's brute +3,
-    // Come to Fight's +1).
+    // Come to Fight's +1, Barraging Beatdown's conditional +3).
     let power = chain_link_total(attacker, &gs.cards, link, |d| d.power)
         .saturating_add(attacker.attack_power_bonus)
         .saturating_add(brute_bonus)
-        .saturating_add(attack_action_bonus);
+        .saturating_add(attack_action_bonus)
+        .saturating_add(brute_conditional_bonus);
     let blocked = chain_link_total(defender, &gs.cards, link, |d| d.defense);
     let damage = power.saturating_sub(blocked);
 
@@ -1328,6 +1371,13 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // so a weapon swing leaves it banked for a later attack action this turn.
     if attack_is_attack_action {
         attacker.next_attack_action_bonus = 0;
+    }
+    // The conditional brute bonus is spent by any brute attack, whether or not
+    // the blocker count let it pay out: the attack it was banked for has now
+    // happened, so a nullified bonus is gone rather than saved for the next one.
+    // A non-brute attack leaves it banked for a later brute attack this turn.
+    if attack_is_brute_attack {
+        attacker.next_brute_attack_conditional_bonus = 0;
     }
 }
 
@@ -1388,6 +1438,35 @@ fn is_weapon(data: &CardData) -> bool {
 fn spend_action_point(gs: &mut Gamestate, player: PlayerIndex) {
     let p = if player == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     p.action_points = p.action_points.saturating_sub(1);
+}
+
+/// How many cards on `player`'s chain link `link` satisfy `pred`. The companion
+/// of `chain_link_total`: it walks the same linked list, counting rather than
+/// summing, for rules that care about the number of cards defending an attack
+/// rather than the defense they add up to (e.g. Barraging Beatdown's "less than
+/// 2 non-equipment cards").
+fn chain_link_count(
+    player: &Player,
+    cards: &[CardState; TOTAL_CARDS],
+    link: usize,
+    pred: impl Fn(&CardData) -> bool,
+) -> u8 {
+    let Some(head) = player.chain_link[link] else {
+        return 0;
+    };
+    let mut count: u8 = 0;
+    let mut cur = head.get();
+    loop {
+        if pred(cards[cur].card.data()) {
+            count = count.saturating_add(1);
+        }
+        let next = cards[cur].next_card.get();
+        if next == cur {
+            break;
+        }
+        cur = next;
+    }
+    count
 }
 
 /// Sum a per-card stat (`power` for the attacker, `defense` for the defender)

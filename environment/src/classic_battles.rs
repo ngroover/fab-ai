@@ -287,7 +287,17 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             additional_cost: None,
             target_effect: None,
             play_condition: None,
-            play_effect: None,
+            // "Intimidate, then your next Brute attack this turn gains 'While
+            // this attack is defended by less than 2 non-equipment cards it has
+            // +3 power'. Go again." Intimidate and Go Again are keywords the
+            // engine applies generically as the card resolves; the on-play
+            // effect is the middle clause, banked for the next brute attack and
+            // paid out at combat damage if the blocker count allows.
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::Always,
+                effectType: OnPlayEffectType::NextBruteConditionalPower,
+                magnitude: 3,
+            }),
         },
         // Muscle Mutt
         CardData {

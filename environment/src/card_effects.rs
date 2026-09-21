@@ -71,6 +71,14 @@ pub enum OnPlayEffectType {
     /// next attack action card"). The class-agnostic sibling of
     /// `NextBrutePower`; like it, a weapon swing neither takes nor spends it.
     NextAttackPower,
+    /// Banks a *conditional* `magnitude` power for the next Brute attack the
+    /// owner makes this turn (Barraging Beatdown's "your next Brute attack this
+    /// turn gains 'While this attack is defended by less than 2 non-equipment
+    /// cards it has +3 power'"). Two things set it apart from `NextBrutePower`:
+    /// the bonus only pays out if the attack ends up defended by fewer than two
+    /// non-equipment cards, and "Brute attack" is read to cover a brute weapon
+    /// swing as well as a brute attack action card, so Bone Basher takes it.
+    NextBruteConditionalPower,
 }
 
 pub struct OnPlayEffect {

@@ -147,6 +147,7 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
         attack_go_again_bonus : false,
         next_brute_attack_action_bonus : 0,
         next_attack_action_bonus : 0,
+        next_brute_attack_conditional_bonus : 0,
         has_intimidated : false,
         // Logging is opted into via `reset(gs, true)`; off until then.
         log: None,

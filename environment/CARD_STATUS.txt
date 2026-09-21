@@ -304,13 +304,60 @@ on-play-effect helpers).
                pack_call_still_blocks_for_3
 
 
+  [x] Barraging Beatdown (Card::BarragingBeatdownY)
+        "Intimidate, then your next Brute attack this turn gains 'While this
+        attack is defended by less than 2 non-equipment cards it has +3 power'.
+        Go again." A 0-cost yellow brute action, so like Clearing Bellow it is
+        not an attack: Intimidate and Go Again are keywords the engine applies
+        generically as it resolves to the graveyard, sparing the action point.
+        The middle clause is the on-play effect, the new
+        `OnPlayEffectType::NextBruteConditionalPower`, banked on the player as
+        `next_brute_attack_conditional_bonus`.
+          * It is the defence-sensitive sibling of Awakening Bellow's
+            unconditional brute +3, and the two are separate pots, so a brute
+            attack under both collects both.
+          * The payout is decided at combat damage rather than at play, because
+            the blocker count belongs to how the defender answers the attack.
+            The new `chain_link_count` counts the non-equipment cards on the
+            defender's link — `chain_link_total`'s companion, counting rather
+            than summing — and the +3 applies only while that count is under 2.
+          * "Non-equipment" is read off the card type. The engine does not model
+            blocking with equipment yet, so nothing puts an equipment card on
+            the link today; the exclusion is stated where the rule lives rather
+            than left to emerge from that gap, for the same reason
+            `can_be_declared_as_blocker` tests the card type rather than leaning
+            on `no_block`. A defense reaction, by contrast, is not equipment and
+            does count: it joins the chain link as it resolves, so a declared
+            blocker plus a Dodge nullifies the bonus.
+          * "Your next Brute attack" names the attack, not the card type it is
+            made with, so a brute *weapon* swing takes it — Bone Basher both
+            takes and spends it, where Awakening Bellow's and Come to Fight's
+            bonuses would sit and wait. This is the one place the two brute
+            bonuses read the chain differently.
+          * A brute attack consumes it whether or not the blocker count let it
+            pay out: the attack it was banked for has happened, so a nullified
+            bonus is gone rather than saved for the next one. A non-brute attack
+            leaves it banked, and the turn boundary clears it.
+        Tests: barraging_beatdown_is_a_0_cost_brute_action_with_go_again_and_intimidate,
+               barraging_beatdown_banks_a_conditional_plus3_for_the_next_brute_attack,
+               barraging_beatdown_undefended_brute_attack_gets_plus3,
+               barraging_beatdown_bonus_survives_a_single_blocker,
+               barraging_beatdown_bonus_is_nullified_by_two_blockers,
+               barraging_beatdown_does_not_count_equipment_toward_the_two,
+               barraging_beatdown_counts_a_defense_reaction_toward_the_two,
+               barraging_beatdown_bonus_applies_to_a_brute_weapon_swing,
+               barraging_beatdown_bonus_is_left_banked_by_a_non_brute_attack,
+               barraging_beatdown_stacks_with_awakening_bellows_unconditional_bonus,
+               barraging_beatdown_bonus_does_not_survive_the_turn,
+               barraging_beatdown_played_from_hand_intimidates_banks_and_keeps_the_action_point
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
   [x] Beast Mode             (Card::BeastModeR)  — see COMPLETE section above
   [x] Pack Hunt              (Card::PackHuntR)  — see COMPLETE section above
   [x] Wrecking Ball          (Card::WreckingBallR)  — see COMPLETE section above
-  [ ] Barraging Beatdown     (Card::BarragingBeatdownY)
+  [x] Barraging Beatdown     (Card::BarragingBeatdownY)  — see COMPLETE section above
   [x] Muscle Mutt            (Card::MuscleMuttY)  — see COMPLETE section above
   [x] Pack Call              (Card::PackCallY)  — see COMPLETE section above
   [x] Raging Onslaught       (Card::RagingOnslaughtY)  — see COMPLETE section above

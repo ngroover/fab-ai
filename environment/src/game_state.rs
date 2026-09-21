@@ -290,6 +290,18 @@ pub struct Player {
     /// a weapon swing, consumed when an attack action card resolves combat
     /// damage, and cleared at the start of each turn so it never leaks.
     pub next_attack_action_bonus : u8,
+    /// Extra power banked for the *next Brute attack* this player makes this
+    /// turn, paid out only if that attack is defended by fewer than two
+    /// non-equipment cards. Set by on-play effects that hand a follow-up brute
+    /// a defence-sensitive pump (e.g. Barraging Beatdown's "+3 power while
+    /// defended by less than 2 non-equipment cards"). It differs from
+    /// `next_brute_attack_action_bonus` in two ways: the blocker count is
+    /// checked when combat damage resolves, and "Brute attack" covers a brute
+    /// *weapon* swing as well as a brute attack action card, so Bone Basher
+    /// both takes and spends it. Consumed by any brute attack — whether or not
+    /// the blocker count let it pay out — and cleared at the start of each turn
+    /// so it never leaks.
+    pub next_brute_attack_conditional_bonus : u8,
     /// Whether this player has resolved an Intimidate trigger so far this turn.
     /// Set when this player intimidates (an attack/action with the Intimidate
     /// keyword resolves) and read by on-play effects gated on "if you've

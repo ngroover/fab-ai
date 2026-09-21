@@ -25,6 +25,7 @@
 //!   - Come to Fight       (`Card::ComeToFightB`)
 //!   - Titanium Bauble     (`Card::TitaniumBaubleB`)
 //!   - Pack Call           (`Card::PackCallY`)
+//!   - Barraging Beatdown  (`Card::BarragingBeatdownY`)
 
 use super::*;
 use crate::cards::Card;
@@ -2340,4 +2341,265 @@ fn pitching_inside_the_defend_trigger_window_returns_to_it() {
     assert_eq!(gs.cards[costed].location, CardLocation::Stack);
     assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY],
         "the trigger is still underneath, waiting");
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Barraging Beatdown (Card::BarragingBeatdownY)
+//
+// "Intimidate, then your next Brute attack this turn gains 'While this attack
+// is defended by less than 2 non-equipment cards it has +3 power'. Go again."
+// A 0-cost yellow brute action. Intimidate and Go Again are keywords the engine
+// applies generically as it resolves — like Clearing Bellow, it is not an
+// attack, so it Intimidates on its way to the graveyard and spares the action
+// point. The middle clause is the on-play effect: +3 banked on the player as
+// `next_brute_attack_conditional_bonus` and paid out at combat damage only if
+// the attack it rides ends up defended by fewer than two non-equipment cards.
+//
+// It differs from Awakening Bellow's unconditional brute +3 in two ways, and
+// both are pinned below: the payout is gated on the defender's blocker count,
+// and "your next Brute attack" is read to cover a brute *weapon* swing as well
+// as a brute attack action card, so Bone Basher takes it where Awakening
+// Bellow's bonus would sit and wait.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Bank Barraging Beatdown's conditional +3 for p1 by resolving its on-play
+/// effect directly.
+fn bank_barraging_beatdown_bonus() -> Gamestate {
+    let mut gs = setup_rhinar_action_phase();
+    let effect = Card::BarragingBeatdownY
+        .data()
+        .play_effect
+        .as_ref()
+        .expect("Barraging Beatdown should carry an on-play effect");
+    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 3);
+    gs
+}
+
+/// Seat `card` on `pid`'s combat chain as a blocker against the attack on link
+/// 0. Mechanically identical to seating an attacker — blockers share the
+/// attack's link — so it delegates; the name is here to keep the tests below
+/// readable about which side of the chain each card is on.
+fn place_blocker_on_chain(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
+    place_attacker_on_chain(gs, pid, card)
+}
+
+#[test]
+fn barraging_beatdown_is_a_0_cost_brute_action_with_go_again_and_intimidate() {
+    use crate::card_effects::{OnPlayConditionType, OnPlayEffectType};
+    use crate::cards::Keyword;
+    let data = Card::BarragingBeatdownY.data();
+    assert_eq!(data.typ, CardType::Action);
+    assert_eq!(data.card_class, CardClass::Brute);
+    assert_eq!(data.cost, 0);
+    assert_eq!(data.pitch, 2);
+    // Not an attack: it has no power of its own, and blocks for 3.
+    assert_eq!(data.power, 0);
+    assert_eq!(data.defense, 3);
+    // "Intimidate" and "Go again" are the keyword halves of the text.
+    assert!(data.keyword.contains(Keyword::GoAgain));
+    assert!(data.keyword.contains(Keyword::Intimidate));
+
+    // The middle clause is the on-play effect, and it is unconditional at play
+    // time — the "less than 2 non-equipment cards" test belongs to the attack it
+    // hands the ability to, not to playing this card.
+    let effect = data.play_effect.as_ref().expect("Barraging Beatdown should carry an on-play effect");
+    assert!(matches!(effect.condition, OnPlayConditionType::Always));
+    assert!(matches!(effect.effectType, OnPlayEffectType::NextBruteConditionalPower));
+    assert_eq!(effect.magnitude, 3);
+}
+
+#[test]
+fn barraging_beatdown_banks_a_conditional_plus3_for_the_next_brute_attack() {
+    let gs = bank_barraging_beatdown_bonus();
+    assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 3);
+    assert_eq!(gs.p2.next_brute_attack_conditional_bonus, 0);
+    // The unconditional pots are separate and stay untouched.
+    assert_eq!(gs.p1.next_brute_attack_action_bonus, 0);
+    assert_eq!(gs.p1.next_attack_action_bonus, 0);
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+}
+
+#[test]
+fn barraging_beatdown_undefended_brute_attack_gets_plus3() {
+    let mut gs = bank_barraging_beatdown_bonus();
+
+    // Bare Fangs (brute, 6 power) against a defender who declares nothing: zero
+    // non-equipment cards is fewer than two, so the bonus pays out.
+    place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BareFangsR);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    // 6 + 3 = 9 damage, and the bonus is spent.
+    assert_eq!(gs.p2.life, life_before - 9);
+    assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 0);
+}
+
+#[test]
+fn barraging_beatdown_bonus_survives_a_single_blocker() {
+    let mut gs = bank_barraging_beatdown_bonus();
+
+    place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BareFangsR);
+    // One non-equipment card defends (On a Knife Edge, 2 defense). One is still
+    // "less than 2", so the bonus applies.
+    place_blocker_on_chain(&mut gs, PlayerIndex::P2, Card::OnAKnifeEdgeY);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    // (6 + 3) - 2 = 7 damage.
+    assert_eq!(gs.p2.life, life_before - 7);
+    assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 0);
+}
+
+#[test]
+fn barraging_beatdown_bonus_is_nullified_by_two_blockers() {
+    let mut gs = bank_barraging_beatdown_bonus();
+
+    place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BareFangsR);
+    // Two non-equipment cards defend (2 defense each), so the ability's own
+    // condition fails and the attack hits for its printed power alone.
+    place_blocker_on_chain(&mut gs, PlayerIndex::P2, Card::OnAKnifeEdgeY);
+    place_blocker_on_chain(&mut gs, PlayerIndex::P2, Card::OnAKnifeEdgeY);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    // 6 - 4 = 2 damage; with the bonus it would have been 5.
+    assert_eq!(gs.p2.life, life_before - 2);
+    // Nullified is not unspent: the attack it was banked for has happened, so
+    // the bonus is gone rather than saved for a later brute attack this turn.
+    assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 0);
+}
+
+#[test]
+fn barraging_beatdown_does_not_count_equipment_toward_the_two() {
+    let mut gs = bank_barraging_beatdown_bonus();
+
+    place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BareFangsR);
+    // Three cards defend, but two of them are equipment (1 defense each) and the
+    // text counts only non-equipment cards — so the count is 1 and the bonus
+    // still pays out.
+    place_blocker_on_chain(&mut gs, PlayerIndex::P2, Card::OnAKnifeEdgeY);
+    place_blocker_on_chain(&mut gs, PlayerIndex::P2, Card::IronrotHelm);
+    place_blocker_on_chain(&mut gs, PlayerIndex::P2, Card::IronrotLegs);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    // (6 + 3) - (2 + 1 + 1) = 5 damage. Equipment adds its defense like any
+    // other blocker; it just doesn't count against the ability.
+    assert_eq!(gs.p2.life, life_before - 5);
+    assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 0);
+}
+
+#[test]
+fn barraging_beatdown_counts_a_defense_reaction_toward_the_two() {
+    let mut gs = bank_barraging_beatdown_bonus();
+
+    place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BareFangsR);
+    // A defense reaction joins the chain link the attack sits on when it
+    // resolves (see `commit_defense_reaction`), and it is not equipment — so a
+    // declared blocker plus a Dodge is two non-equipment cards and nullifies the
+    // bonus just as two declared blockers would.
+    place_blocker_on_chain(&mut gs, PlayerIndex::P2, Card::OnAKnifeEdgeY);
+    place_blocker_on_chain(&mut gs, PlayerIndex::P2, Card::DodgeB);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    // 6 - (2 + 2) = 2 damage.
+    assert_eq!(gs.p2.life, life_before - 2);
+    assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 0);
+}
+
+#[test]
+fn barraging_beatdown_bonus_applies_to_a_brute_weapon_swing() {
+    let mut gs = bank_barraging_beatdown_bonus();
+
+    // Bone Basher is a Brute *weapon*, not an attack action card. "Your next
+    // Brute attack" names the attack rather than the card type it is made with,
+    // so a swing takes the bonus — where Awakening Bellow's and Come to Fight's
+    // bonuses would both sit and wait.
+    let attacker = place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BoneBasher);
+    assert_eq!(gs.cards[attacker].card.data().typ, CardType::Weapon);
+    assert_eq!(gs.cards[attacker].card.data().card_class, CardClass::Brute);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    // 4 + 3 = 7 damage, and the bonus is spent.
+    assert_eq!(gs.p2.life, life_before - 7);
+    assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 0);
+}
+
+#[test]
+fn barraging_beatdown_bonus_is_left_banked_by_a_non_brute_attack() {
+    let mut gs = bank_barraging_beatdown_bonus();
+
+    // Muscle Mutt is generic, so it is not the "next Brute attack" the ability
+    // was handed to: it neither takes the bonus nor spends it.
+    let attacker = place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
+    assert_eq!(gs.cards[attacker].card.data().card_class, CardClass::Generic);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    // 6 damage, and the bonus stays banked for a later brute attack this turn.
+    assert_eq!(gs.p2.life, life_before - 6);
+    assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 3);
+}
+
+#[test]
+fn barraging_beatdown_stacks_with_awakening_bellows_unconditional_bonus() {
+    let mut gs = bank_barraging_beatdown_bonus();
+
+    // The two brute pumps are separate pots, so a brute attack collects both.
+    let ab = Card::AwakeningBellowR
+        .data()
+        .play_effect
+        .as_ref()
+        .expect("Awakening Bellow should carry an on-play effect");
+    apply_on_play_effect(&mut gs, PlayerIndex::P1, ab);
+    assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
+
+    place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BareFangsR);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+
+    // 6 + 3 + 3 = 12 damage, and both are spent.
+    assert_eq!(gs.p2.life, life_before - 12);
+    assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 0);
+    assert_eq!(gs.p1.next_brute_attack_action_bonus, 0);
+}
+
+#[test]
+fn barraging_beatdown_bonus_does_not_survive_the_turn() {
+    let mut gs = bank_barraging_beatdown_bonus();
+
+    // "This turn": an unspent bonus is cleared at the turn boundary rather than
+    // leaking into a later turn's attacks.
+    begin_turn(&mut gs);
+    assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 0);
+    assert_eq!(gs.p2.next_brute_attack_conditional_bonus, 0);
+}
+
+#[test]
+fn barraging_beatdown_played_from_hand_intimidates_banks_and_keeps_the_action_point() {
+    let (mut gs, idx) = play_and_resolve_zero_cost_action(Card::BarragingBeatdownY);
+
+    // Not an attack, so it resolves to the graveyard rather than the chain, and
+    // its Intimidate fires on the way there.
+    assert_eq!(gs.cards[idx].location, CardLocation::P1Graveyard);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
+    assert!(gs.p1.has_intimidated);
+
+    // The middle clause banked its +3 for the brute attack still to come.
+    assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 3);
+
+    // Go Again: the action point survives, so that attack can follow.
+    assert_eq!(gs.p1.action_points, 1);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+
+    // Smash Instinct (brute, 6 power) then lands unblocked for 6 + 3 = 9.
+    place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::SmashInstinctY);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+    assert_eq!(gs.p2.life, life_before - 9);
 }
