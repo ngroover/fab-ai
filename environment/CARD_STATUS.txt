@@ -62,11 +62,24 @@ on-play-effect helpers).
         cost (Alpha Rampage, Wrecker Romp) and the play-effect draw-then-discard
         (Bare Fangs, Wild Ride). Independent of the played card's own keywords,
         so Alpha Rampage (Intimidate) discarding a 6-power card intimidates twice.
+          * Timing: the printed ability is "Once per Turn *Action*", so it is
+            action-speed and only triggers during Rhinar's own action phase.
+            Only the turn player has an action phase, so `maybe_discard6_intimidate`
+            gates on the discarding player being the turn player, and a discard
+            made on the opponent's turn does not intimidate however much power
+            it had. Both paths above are taken on your own turn, so this changes
+            nothing for them; the case it rules out is paying for Rally the
+            Rearguard's ability while defending — the engine's only off-turn
+            discard. The gate is in the trigger rather than at its call sites so
+            it holds for any off-turn discard added later.
         Tests: rhinar_constant_ability_is_on_discard6_intimidate,
                discard_cost_of_power6_card_triggers_intimidate,
                discard_cost_of_sub_power6_card_does_not_trigger_intimidate,
                bare_fangs_play_effect_power6_discard_also_intimidates,
                non_rhinar_hero_power6_discard_does_not_intimidate,
+               power6_discard_on_your_own_turn_still_intimidates,
+               power6_discard_on_the_opponents_turn_does_not_intimidate,
+               rally_ability_discarding_a_power6_card_does_not_intimidate,
                alpha_rampage_power6_discard_intimidates_twice
 
   [x] Pack Hunt    (Card::PackHuntR)
@@ -387,9 +400,11 @@ on-play-effect helpers).
             rather than the printed `CardData` so the block total can count it.
           * The discard is a cost, paid as the activation goes on the stack (the
             same moment a played card's `AdditionalCostType::DiscardCard` is
-            paid) and routed through `apply_discard_cost`, so it fires Rhinar's
-            `OnDiscard6Intimidate` like any other discard. An empty hand cannot
-            pay it, so the ability is not offered at all.
+            paid) and routed through `apply_discard_cost`. An empty hand cannot
+            pay it, so the ability is not offered at all. It does *not* fire
+            Rhinar's `OnDiscard6Intimidate`, even on a 6-power discard: his
+            ability is action-speed and this discard is made while defending,
+            on the opponent's turn — see the Rhinar entry above.
           * "Once per turn" is tracked per card on
             `CardState::ability_used_this_turn`, set when the activation is put
             on the stack — the cost is paid by then, so responding to it cannot
@@ -416,7 +431,9 @@ on-play-effect helpers).
                rally_ability_costs_no_action_point,
                rally_block_bonus_is_cleared_when_the_chain_closes,
                rally_once_per_turn_limit_lifts_at_the_turn_boundary,
-               two_blocking_rallies_are_pumped_independently
+               two_blocking_rallies_are_pumped_independently,
+               rally_ability_discarding_a_power6_card_does_not_intimidate,
+               rally_ability_still_works_when_the_discard_would_have_intimidated
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards

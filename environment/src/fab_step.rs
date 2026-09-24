@@ -938,12 +938,25 @@ fn apply_discard_cost(gs: &mut Gamestate, owner: PlayerIndex) {
 /// Apply Rhinar's `OnDiscard6Intimidate` constant hero ability after a card has
 /// just been discarded from `owner`'s hand: when the discarded card had 6 or more
 /// power and the owner's hero carries the constant effect, trigger an Intimidate
-/// (`apply_intimidate`). This fires for every discard path — the "discard a card"
-/// additional cost (e.g. Alpha Rampage, Wrecker Romp) and the play-effect
-/// draw-then-discard (e.g. Bare Fangs, Wild Ride) — and is independent of the
-/// played card's own keywords, so a card that both carries Intimidate and
-/// discards a 6-power card (e.g. Alpha Rampage) intimidates twice.
+/// (`apply_intimidate`). It is independent of the played card's own keywords, so
+/// a card that both carries Intimidate and discards a 6-power card (e.g. Alpha
+/// Rampage) intimidates twice.
+///
+/// Rhinar's ability is an *action*-speed one ("Once per Turn Action"), so it only
+/// triggers during its controller's own action phase. Only the turn player has an
+/// action phase, so that is the gate: a discard made while the opponent is
+/// attacking — paying for Rally the Rearguard's ability while defending is the
+/// only way today — does not intimidate, however much power it had. The check is
+/// stated here rather than at each call site so it holds for any future off-turn
+/// discard as well.
+///
+/// The discard paths that do fire it are the ones taken on your own turn: the
+/// "discard a card" additional cost (e.g. Alpha Rampage, Wrecker Romp) and the
+/// play-effect draw-then-discard (e.g. Bare Fangs, Wild Ride).
 fn maybe_discard6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, discarded_power: u8) {
+    if owner != gs.turn_player {
+        return;
+    }
     // `hero` is `Copy` and `data()` returns a `'static` reference, so this read
     // releases its borrow of the player before `apply_intimidate` mutates `gs`.
     let hero_data = (if owner == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 }).hero.data();

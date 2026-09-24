@@ -2960,3 +2960,138 @@ fn two_blocking_rallies_are_pumped_independently() {
     // gets through. (Damage lands as the window closes, in the pass above.)
     assert_eq!(gs.p2.life, 20);
 }
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rhinar's Intimidate is action-speed, so an off-turn discard does not fire it
+//
+// Rhinar's hero ability is "Once per Turn *Action* — whenever you discard a card
+// with 6 or more power, Intimidate". Being action-speed, it only triggers during
+// its controller's own action phase, and only the turn player has one. Every
+// discard path the engine had until now was taken on your own turn (a "discard a
+// card" additional cost, or a draw-then-discard play effect), so the distinction
+// never came up. Rally the Rearguard's ability is the first discard made while
+// *defending* — always the opponent's turn — and it must not intimidate.
+//
+// The gate lives in `maybe_discard6_intimidate` rather than at its call sites,
+// so it holds for any future off-turn discard too.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Put a 6-power card in `pid`'s hand as its only card, returning its index.
+/// Discarding from this hand is therefore deterministic and over the threshold.
+fn set_hand_to_one_power6_card(gs: &mut Gamestate, pid: PlayerIndex) -> usize {
+    set_hand(gs, pid, &[Card::SmashInstinctY]);
+    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let idx = player.hand_idx.expect("the 6-power card should be the only card in hand").get();
+    assert!(gs.cards[idx].card.data().power >= 6);
+    idx
+}
+
+#[test]
+fn power6_discard_on_your_own_turn_still_intimidates() {
+    // The baseline the rule is carved out of: Rhinar is the turn player, so his
+    // action-speed ability triggers exactly as it did before.
+    let mut gs = setup_rhinar_action_phase();
+    assert_eq!(gs.turn_player, PlayerIndex::P1);
+    let pick = set_hand_to_one_power6_card(&mut gs, PlayerIndex::P1);
+
+    apply_discard_cost(&mut gs, PlayerIndex::P1);
+
+    assert_eq!(gs.cards[pick].location, CardLocation::P1Graveyard);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
+    assert!(gs.p1.has_intimidated);
+}
+
+#[test]
+fn power6_discard_on_the_opponents_turn_does_not_intimidate() {
+    let mut gs = setup_rhinar_action_phase();
+    // Hand the turn to Dorinthea: Rhinar now has no action phase, so his
+    // action-speed ability cannot trigger.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.turn_player, PlayerIndex::P2);
+
+    let pick = set_hand_to_one_power6_card(&mut gs, PlayerIndex::P1);
+    apply_discard_cost(&mut gs, PlayerIndex::P1);
+
+    // The card is discarded and it is over the threshold — only the timing
+    // stops it.
+    assert_eq!(gs.cards[pick].location, CardLocation::P1Graveyard);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
+    assert!(!gs.p1.has_intimidated);
+}
+
+/// Dorinthea (p2) attacks with Muscle Mutt and Rhinar (p1) blocks with Rally the
+/// Rearguard, holding `spare` as the card his ability can discard. The mirror of
+/// `rally_blocking_muscle_mutt`, with Rhinar on defense so his hero ability is in
+/// play. Priority has passed to him in the reaction window. Returns the game and
+/// Rally's global index.
+fn rhinar_blocking_with_rally(spare: &[Card]) -> (Gamestate, usize) {
+    let mut gs = setup_rhinar_action_phase();
+    // Rhinar passes his turn out; Dorinthea takes hers.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.turn_player, PlayerIndex::P2);
+    assert_eq!(gs.phase, Phase::Action);
+
+    // She attacks with Muscle Mutt, paying its cost of 3 with a single pitch-3.
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::MuscleMuttY, Card::ClearingBellowB]);
+    let p2_hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(p2_hand[0]))});
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(p2_hand[1]))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.phase, Phase::Defend);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+
+    let mut hand = vec![Card::RallyTheRearguardB];
+    hand.extend_from_slice(spare);
+    set_hand(&mut gs, PlayerIndex::P1, &hand);
+    let rally_idx = gs.p1.hand_idx.expect("Rally should be in hand").get();
+
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(rally_idx))});
+    assert_eq!(gs.cards[rally_idx].location, CardLocation::P1CombatChain);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    assert_eq!(gs.phase, Phase::Reaction);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+
+    (gs, rally_idx)
+}
+
+#[test]
+fn rally_ability_discarding_a_power6_card_does_not_intimidate() {
+    // Rhinar blocks with Rally holding a single 6-power card, so activating the
+    // ability discards exactly that card.
+    let (mut gs, rally_idx) = rhinar_blocking_with_rally(&[Card::SmashInstinctY]);
+    let spare = gs.p1.hand_idx.expect("the 6-power card should be in hand").get();
+    assert!(gs.cards[spare].card.data().power >= 6);
+    // The hero who would intimidate is the one doing the discarding.
+    assert!(matches!(
+        gs.p1.hero.data().constant_effect,
+        Some(crate::card_effects::ConstantEffect::OnDiscard6Intimidate)
+    ));
+
+    step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(rally_idx))});
+
+    // The discard happened and cleared the power threshold, but it was made
+    // while defending — on Dorinthea's turn — so Rhinar's action-speed ability
+    // does not trigger and she banishes nothing.
+    assert_eq!(gs.cards[spare].location, CardLocation::P1Graveyard);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
+    assert!(!gs.p1.has_intimidated);
+}
+
+#[test]
+fn rally_ability_still_works_when_the_discard_would_have_intimidated() {
+    // The ability itself is unaffected by the intimidate rule: the +3 lands and
+    // the block is 5 either way.
+    let (mut gs, rally_idx) = rhinar_blocking_with_rally(&[Card::SmashInstinctY]);
+    step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(rally_idx))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+    assert_eq!(gs.cards[rally_idx].defense_bonus, 3);
+    // Muscle Mutt's 6 against 2 printed + 3 granted: 1 damage to Rhinar.
+    assert_eq!(gs.p1.life, 20 - 1);
+}
