@@ -942,13 +942,15 @@ fn apply_discard_cost(gs: &mut Gamestate, owner: PlayerIndex) {
 /// a card that both carries Intimidate and discards a 6-power card (e.g. Alpha
 /// Rampage) intimidates twice.
 ///
-/// Rhinar's ability is an *action*-speed one ("Once per Turn Action"), so it only
-/// triggers during its controller's own action phase. Only the turn player has an
-/// action phase, so that is the gate: a discard made while the opponent is
-/// attacking — paying for Rally the Rearguard's ability while defending is the
-/// only way today — does not intimidate, however much power it had. The check is
-/// stated here rather than at each call site so it holds for any future off-turn
-/// discard as well.
+/// It triggers on *every* qualifying discard — there is no once-per-turn limit,
+/// so two 6-power discards in a turn intimidate twice.
+///
+/// It is, however, action-speed: it only triggers during its controller's own
+/// action phase. Only the turn player has an action phase, so that is the gate —
+/// a discard made while the opponent is attacking (paying for Rally the
+/// Rearguard's ability while defending is the only way today) does not
+/// intimidate, however much power it had. The check is stated here rather than
+/// at each call site so it holds for any future off-turn discard as well.
 ///
 /// The discard paths that do fire it are the ones taken on your own turn: the
 /// "discard a card" additional cost (e.g. Alpha Rampage, Wrecker Romp) and the

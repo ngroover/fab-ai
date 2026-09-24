@@ -2965,13 +2965,14 @@ fn two_blocking_rallies_are_pumped_independently() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Rhinar's Intimidate is action-speed, so an off-turn discard does not fire it
 //
-// Rhinar's hero ability is "Once per Turn *Action* — whenever you discard a card
-// with 6 or more power, Intimidate". Being action-speed, it only triggers during
-// its controller's own action phase, and only the turn player has one. Every
-// discard path the engine had until now was taken on your own turn (a "discard a
-// card" additional cost, or a draw-then-discard play effect), so the distinction
-// never came up. Rally the Rearguard's ability is the first discard made while
-// *defending* — always the opponent's turn — and it must not intimidate.
+// Rhinar's hero ability is "whenever you discard a card with 6 or more power,
+// Intimidate" — every qualifying discard, with no once-per-turn limit. It is
+// action-speed, though, so it only triggers during its controller's own action
+// phase, and only the turn player has one. Every discard path the engine had
+// until now was taken on your own turn (a "discard a card" additional cost, or a
+// draw-then-discard play effect), so the distinction never came up. Rally the
+// Rearguard's ability is the first discard made while *defending* — always the
+// opponent's turn — and it must not intimidate.
 //
 // The gate lives in `maybe_discard6_intimidate` rather than at its call sites,
 // so it holds for any future off-turn discard too.
@@ -3000,6 +3001,24 @@ fn power6_discard_on_your_own_turn_still_intimidates() {
     assert_eq!(gs.cards[pick].location, CardLocation::P1Graveyard);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
     assert!(gs.p1.has_intimidated);
+}
+
+#[test]
+fn every_power6_discard_intimidates_there_is_no_once_per_turn_limit() {
+    // "Whenever you discard": the trigger has no per-turn cap, so a second
+    // qualifying discard in the same action phase intimidates again.
+    let mut gs = setup_rhinar_action_phase();
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::SmashInstinctY, Card::PackHuntR]);
+    assert!(gs.p1.hand_iter(&gs.cards).all(|(_, cs)| cs.card.data().power >= 6));
+    // The opponent needs cards to banish for both triggers to be observable.
+    assert!(gs.p2.hand_size >= 2);
+
+    apply_discard_cost(&mut gs, PlayerIndex::P1);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
+
+    apply_discard_cost(&mut gs, PlayerIndex::P1);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 2,
+        "the second 6-power discard intimidates too — the ability is not once per turn");
 }
 
 #[test]

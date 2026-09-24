@@ -62,22 +62,25 @@ on-play-effect helpers).
         cost (Alpha Rampage, Wrecker Romp) and the play-effect draw-then-discard
         (Bare Fangs, Wild Ride). Independent of the played card's own keywords,
         so Alpha Rampage (Intimidate) discarding a 6-power card intimidates twice.
-          * Timing: the printed ability is "Once per Turn *Action*", so it is
-            action-speed and only triggers during Rhinar's own action phase.
-            Only the turn player has an action phase, so `maybe_discard6_intimidate`
-            gates on the discarding player being the turn player, and a discard
-            made on the opponent's turn does not intimidate however much power
-            it had. Both paths above are taken on your own turn, so this changes
-            nothing for them; the case it rules out is paying for Rally the
-            Rearguard's ability while defending — the engine's only off-turn
-            discard. The gate is in the trigger rather than at its call sites so
-            it holds for any off-turn discard added later.
+          * "Whenever": there is no once-per-turn limit on it. Two 6-power
+            discards in a turn intimidate twice, and nothing tracks a use.
+          * Timing: the ability is action-speed, so it only triggers during
+            Rhinar's own action phase. Only the turn player has an action phase,
+            so `maybe_discard6_intimidate` gates on the discarding player being
+            the turn player, and a discard made on the opponent's turn does not
+            intimidate however much power it had. Both paths above are taken on
+            your own turn, so this changes nothing for them; the case it rules
+            out is paying for Rally the Rearguard's ability while defending —
+            the engine's only off-turn discard. The gate is in the trigger
+            rather than at its call sites so it holds for any off-turn discard
+            added later.
         Tests: rhinar_constant_ability_is_on_discard6_intimidate,
                discard_cost_of_power6_card_triggers_intimidate,
                discard_cost_of_sub_power6_card_does_not_trigger_intimidate,
                bare_fangs_play_effect_power6_discard_also_intimidates,
                non_rhinar_hero_power6_discard_does_not_intimidate,
                power6_discard_on_your_own_turn_still_intimidates,
+               every_power6_discard_intimidates_there_is_no_once_per_turn_limit,
                power6_discard_on_the_opponents_turn_does_not_intimidate,
                rally_ability_discarding_a_power6_card_does_not_intimidate,
                alpha_rampage_power6_discard_intimidates_twice
