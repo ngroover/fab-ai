@@ -151,6 +151,22 @@ pub struct CardState {
     pub card : Card,
     pub next_card : CardIdx,
     pub prev_card : CardIdx,
+    /// Extra defense granted to *this copy* of the card on top of its printed
+    /// `defense`, by an effect that pumps one card rather than the player (e.g.
+    /// Rally the Rearguard's "gains +3 block"). Unlike the power bonuses, which
+    /// are banked on the `Player` because they belong to whichever attack comes
+    /// next, this rides the card itself: two copies blocking the same attack are
+    /// pumped independently. Counted by `chain_link_total` when the block is
+    /// totalled, and cleared as the card leaves the combat chain, so the buff
+    /// lasts exactly as long as the combat it was granted in.
+    pub defense_bonus : u8,
+    /// Whether this copy's activated ability has been used so far this turn, for
+    /// the "once per turn" limit on abilities that carry one (e.g. Rally the
+    /// Rearguard). Per card rather than per player, so a second copy has its own
+    /// activation. Set when the ability is put on the stack — the cost is paid
+    /// then, so a countered activation still counts as used — and cleared for
+    /// every card at the start of each turn.
+    pub ability_used_this_turn : bool,
 }
 
 

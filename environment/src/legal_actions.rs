@@ -2,7 +2,7 @@ use crate::game_state::{Gamestate, Phase, Player, PlayerIndex, CardState, CardId
 use crate::action::{Action, ActionType};
 use crate::cards::{Card, CardData, CardType};
 use crate::card_effects::AdditionalCostType;
-use crate::fab_step::uses_action_point;
+use crate::fab_step::{chain_link_indices, current_chain_link, uses_action_point};
 
 
 pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
@@ -250,6 +250,7 @@ fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Ac
 
     legal_actions.extend(get_playable_cards(player, &gs.cards, total_pitch, is_playable));
     legal_actions.extend(get_equipment_activations(player, &gs.cards, total_pitch, is_playable));
+    legal_actions.extend(get_defending_activations(gs, is_playable));
 
     // Passing is always available; it ends the window without playing or
     // activating anything.
@@ -259,6 +260,86 @@ fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Ac
     });
 
     legal_actions
+}
+
+/// Activations of an ability that may only be used while its card is defending
+/// — Rally the Rearguard's "Discard a card: gains +3 block. Activate this
+/// ability only while Rally the Rearguard is defending." The card is not in a
+/// zone `get_equipment_activations` scans: it is on its controller's combat
+/// chain, put there when it was declared as a blocker.
+///
+/// "Defending" is read as the two windows where a declared blocker is answering
+/// a live attack: the defend-trigger window and the reaction window. Narrowing
+/// by phase is what keeps the ability off a blocker whose combat is already
+/// over — blockers stay on the chain until the action phase ends, so a card that
+/// blocked an earlier attack this turn is still sitting there during a later
+/// instant window, no longer defending anything. It is the same reason the
+/// defend-trigger window narrows by phase rather than by scanning the stack.
+///
+/// Only the defender may activate: the turn player's chain holds their attack,
+/// not blockers, so the check is that the active player is not the turn player.
+fn get_defending_activations(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Action> {
+    let mut actions: Vec<Action> = Vec::new();
+
+    // Only while an attack is live and being answered.
+    if !matches!(gs.phase, Phase::DefendTriggers | Phase::Reaction) {
+        return actions;
+    }
+    // Only the defender has blockers on their chain.
+    if gs.active_player == gs.turn_player {
+        return actions;
+    }
+
+    let defender = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    // Only the turn player attacks, so the link being defended is the current
+    // link of the turn player's chain — the same one the blockers were attached
+    // to when they were declared.
+    let attacker = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let link = current_chain_link(attacker);
+
+    for idx in chain_link_indices(defender, &gs.cards, link) {
+        let Some(ability) = &gs.cards[idx].card.data().ability else {
+            continue;
+        };
+        // This generator covers only the abilities restricted to defending; any
+        // other ability on a card here is activated from its own zone, if at all.
+        if !ability.only_while_defending() {
+            continue;
+        }
+        // The ability activates at a particular speed; only offer it when that
+        // speed is playable in the current window.
+        if !is_playable(ability.card_type()) {
+            continue;
+        }
+        // "Once per turn": a copy that has already been activated this turn is
+        // done, whether or not that activation has resolved yet.
+        if ability.once_per_turn() && gs.cards[idx].ability_used_this_turn {
+            continue;
+        }
+        // A cost that discards cannot be paid from an empty hand. The card
+        // itself is on the chain rather than in hand, so it can never be the
+        // card it discards.
+        if ability.discards_a_card() && defender.hand_idx.is_none() {
+            continue;
+        }
+        // Whatever resource cost the ability carries must also be payable. No
+        // defending ability costs resources today, so this is the same
+        // affordability rule as `get_equipment_activations`, stated so a future
+        // costed one is not offered for free.
+        let total_pitch: u8 = defender.hand_iter(&gs.cards)
+            .map(|(_, cs)| cs.card.data().pitch)
+            .sum();
+        if total_pitch < ability.resource_cost().saturating_sub(defender.resources) {
+            continue;
+        }
+
+        actions.push(Action {
+            typ: ActionType::Activate,
+            card: Some(CardIdx::new(idx)),
+        });
+    }
+
+    actions
 }
 
 fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8, is_playable: fn(CardType) -> bool) -> Vec<Action> {

@@ -1,7 +1,7 @@
 use crate::action::{Action,ActionType};
 use crate::game_state::{Gamestate,Phase,Player,PendingCard,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
 use crate::cards::{CardClass,CardData,CardType,Keyword};
-use crate::card_effects::{OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect};
+use crate::card_effects::{Ability,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect};
 use rand::RngExt;
 
 pub fn step(gs: &mut Gamestate, act: Action) {
@@ -115,6 +115,13 @@ fn begin_turn(gs: &mut Gamestate) {
     // can never satisfy this turn's "if you've intimidated" conditions.
     gs.p1.has_intimidated = false;
     gs.p2.has_intimidated = false;
+    // "Once per turn" is tracked per card, so every card's activation is freed
+    // here rather than on any one player's — a card can change hands between
+    // zones during a turn, and both players' cards are refreshed at the same
+    // boundary as the bonuses above.
+    for cs in gs.cards.iter_mut() {
+        cs.ability_used_this_turn = false;
+    }
     gs.check_game_end();
 }
 
@@ -542,7 +549,7 @@ fn commit_blocker(gs: &mut Gamestate, idx: usize) {
 /// The global indices of the cards on `player`'s chain link `link`, head first.
 /// The link is built by `attach_to_front_of_zone`, so the head is the most
 /// recently added card and this walks *back* through declaration order.
-fn chain_link_indices(player: &Player, cards: &[CardState; TOTAL_CARDS], link: usize) -> Vec<usize> {
+pub(crate) fn chain_link_indices(player: &Player, cards: &[CardState; TOTAL_CARDS], link: usize) -> Vec<usize> {
     let mut out = Vec::new();
     let Some(head) = player.chain_link[link] else {
         return out;
@@ -603,9 +610,34 @@ fn push_defend_triggers(gs: &mut Gamestate) -> bool {
 fn apply_defend_effect(gs: &mut Gamestate, pid: PlayerIndex, idx: usize) {
     match gs.cards[idx].card.data().defend_effect {
         Some(DefendEffect::Reveal6BottomOtherwise) => reveal_top_keep_6(gs, pid),
-        // Rally the Rearguard's PitchToBlock is an activated ability, not a
-        // trigger; it is not wired up yet.
+        // `PitchToBlock` is unused and no card in the catalog carries it. It was
+        // put here for Rally the Rearguard, whose "+3 block" turned out to be an
+        // activated ability rather than a defend trigger — it is implemented as
+        // `Ability::DiscardCardPlusBlock` (see `apply_defending_ability`), and
+        // the card's `defend_effect` is `None`.
         Some(DefendEffect::PitchToBlock) | None => {}
+    }
+}
+
+/// Resolve the effect of an ability activated while its card was defending, as
+/// that activation resolves off the stack. `idx` is the card on the combat
+/// chain; it stays there, so this only writes the card's own state.
+///
+/// Rally the Rearguard's is the only such ability: "+3 block", which lands on
+/// `CardState::defense_bonus` and is counted when the block is totalled at
+/// combat damage. Two activations (one per copy) pump their own copies; the
+/// bonus is cleared as the card leaves the chain (see `close_combat_chain`).
+fn apply_defending_ability(gs: &mut Gamestate, idx: usize) {
+    let Some(ability) = &gs.cards[idx].card.data().ability else {
+        return;
+    };
+    match ability {
+        Ability::DiscardCardPlusBlock => {
+            gs.cards[idx].defense_bonus = gs.cards[idx].defense_bonus.saturating_add(3);
+        }
+        // Every other ability in the catalog is activated from an equipment or
+        // weapon slot, never while defending, so none reaches this path.
+        _ => {}
     }
 }
 
@@ -694,6 +726,28 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     // stays there, so — unlike every branch below — nothing moves zones, no
     // action point is spent, and the card's own keywords and on-play effect are
     // not re-fired.
+    // An ability activated while its card was defending (Rally the Rearguard).
+    // Like a defend trigger, only the effect resolves: the card is on the combat
+    // chain from when it was declared as a blocker and stays there, so nothing
+    // changes zones, no action point is spent, and the card's own keywords and
+    // on-play effect are not fired — it was never played, only activated.
+    if pending.typ == ActionType::Activate
+        && gs.cards[top].location == CardLocation::combat_chain(owner) {
+        if gs.logging_enabled() {
+            let card = gs.cards[top].card;
+            gs.log_public(format!("{}'s {:?} ability resolves", player_name(owner), card));
+        }
+        apply_defending_ability(gs, top);
+        if gs.stack_is_empty() {
+            close_priority_window(gs);
+        } else {
+            // More entries still to resolve: priority returns to the turn player
+            // for a fresh round in the same window.
+            gs.active_player = gs.turn_player;
+        }
+        return;
+    }
+
     if pending.typ == ActionType::DefendTrigger {
         if gs.logging_enabled() {
             let card = gs.cards[top].card;
@@ -1208,13 +1262,24 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     let cs = gs.cards[pending_idx];
     let cost = action_cost(pending.typ, cs.card.data());
 
+    // Activating the ability of a card that is *defending* (Rally the Rearguard)
+    // does not move the card: it is on its controller's combat chain as a
+    // declared blocker and must stay there, still blocking, while the ability
+    // waits on the stack. Only the activation goes on the stack, as a pending
+    // entry pointing back at the card — the same shape as a defend trigger,
+    // whose card likewise stays put (see `resolve_top_of_stack`).
+    let activated_while_defending = pending.typ == ActionType::Activate
+        && cs.location == CardLocation::combat_chain(gs.active_player);
+
     let player = if gs.active_player == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     player.resources -= cost;
-    detach_from_current_zone(player, &mut gs.cards, pending_idx);
-    gs.cards[pending_idx].location = CardLocation::Stack;
-    // Playing a card puts it on the shared stack face-up, so it becomes known to
-    // both players.
-    gs.cards[pending_idx].visible = CardVisibleState::BothKnow;
+    if !activated_while_defending {
+        detach_from_current_zone(player, &mut gs.cards, pending_idx);
+        gs.cards[pending_idx].location = CardLocation::Stack;
+        // Playing a card puts it on the shared stack face-up, so it becomes known
+        // to both players.
+        gs.cards[pending_idx].visible = CardVisibleState::BothKnow;
+    }
     gs.push_to_stack(pending);
 
     // Additional costs are paid as the card is played. A "discard a card" cost
@@ -1225,6 +1290,22 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     if matches!(cs.card.data().additional_cost, Some(AdditionalCostType::DiscardCard)) {
         let owner = gs.active_player;
         apply_discard_cost(gs, owner);
+    }
+
+    // An activated ability pays its own costs here for the same reason: the
+    // activation is on the stack and the cost is what put it there. A "once per
+    // turn" ability is marked used at the same moment — the cost has been paid,
+    // so responding to the activation cannot hand the card its use back.
+    if pending.typ == ActionType::Activate {
+        if let Some(ability) = &cs.card.data().ability {
+            if ability.once_per_turn() {
+                gs.cards[pending_idx].ability_used_this_turn = true;
+            }
+            if ability.discards_a_card() {
+                let owner = gs.active_player;
+                apply_discard_cost(gs, owner);
+            }
+        }
     }
 
     // The card now lives on the stack, so it is no longer "pending" — clear it.
@@ -1313,12 +1394,16 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // Total attack power is the cards on this chain link plus any banked on-play
     // bonus (e.g. Bare Fangs's conditional +2 power, Awakening Bellow's brute +3,
     // Come to Fight's +1, Barraging Beatdown's conditional +3).
-    let power = chain_link_total(attacker, &gs.cards, link, |d| d.power)
+    let power = chain_link_total(attacker, &gs.cards, link, |cs| cs.card.data().power)
         .saturating_add(attacker.attack_power_bonus)
         .saturating_add(brute_bonus)
         .saturating_add(attack_action_bonus)
         .saturating_add(brute_conditional_bonus);
-    let blocked = chain_link_total(defender, &gs.cards, link, |d| d.defense);
+    // A blocker's contribution is its printed defense plus whatever was granted
+    // to that copy during the combat (Rally the Rearguard's +3 block).
+    let blocked = chain_link_total(defender, &gs.cards, link, |cs| {
+        cs.card.data().defense.saturating_add(cs.defense_bonus)
+    });
     let damage = power.saturating_sub(blocked);
 
     // Whether the attacking card (link 0 of the attacker's chain) has Go Again;
@@ -1407,6 +1492,11 @@ fn close_combat_chain(gs: &mut Gamestate) {
             let mut cur = head.get();
             loop {
                 let next = cards[cur].next_card.get();
+                // A block bonus granted during the combat (Rally the Rearguard's
+                // +3) belongs to that combat: it is cleared as the card leaves
+                // the chain, so a card that blocks again later — or comes back
+                // as an attack — carries only its printed defense.
+                cards[cur].defense_bonus = 0;
                 if is_weapon(cards[cur].card.data()) {
                     // A weapon on the chain returns to the slot it swung from.
                     cards[cur].location = CardLocation::weapon(pid);
@@ -1473,11 +1563,16 @@ fn chain_link_count(
 /// over every card on `player`'s combat chain. Each occupied chain link is the
 /// head of a linked list — all blockers declared against one attack share a
 /// single link — walked via `next_card` until a node points at itself.
+///
+/// `stat` is handed the whole `CardState` rather than the printed `CardData`, so
+/// a total can include a bonus granted to that one copy (e.g. the +3 block Rally
+/// the Rearguard's ability writes to `CardState::defense_bonus`) as well as what
+/// the card catalog prints.
 fn chain_link_total(
     player: &Player,
     cards: &[CardState; TOTAL_CARDS],
     link: usize,
-    stat: impl Fn(&CardData) -> u8,
+    stat: impl Fn(&CardState) -> u8,
 ) -> u8 {
     let Some(head) = player.chain_link[link] else {
         return 0;
@@ -1485,7 +1580,7 @@ fn chain_link_total(
     let mut total: u8 = 0;
     let mut cur = head.get();
     loop {
-        total = total.saturating_add(stat(cards[cur].card.data()));
+        total = total.saturating_add(stat(&cards[cur]));
         let next = cards[cur].next_card.get();
         if next == cur {
             break;
@@ -1505,7 +1600,7 @@ fn chain_link_total(
 /// Only meaningful for the attacking player. A defender's links may have gaps
 /// (an attack that went unblocked leaves its link empty on their side), so their
 /// occupied links are not a prefix and must not be counted this way.
-fn current_chain_link(attacker: &Player) -> usize {
+pub(crate) fn current_chain_link(attacker: &Player) -> usize {
     next_free_chain_link(attacker)
         .unwrap_or(attacker.chain_link.len())
         .saturating_sub(1)

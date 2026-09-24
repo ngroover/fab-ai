@@ -351,6 +351,73 @@ on-play-effect helpers).
                barraging_beatdown_bonus_does_not_survive_the_turn,
                barraging_beatdown_played_from_hand_intimidates_banks_and_keeps_the_action_point
 
+  [x] Rally the Rearguard (Card::RallyTheRearguardB)
+        "Once per turn Instant — Discard a card: Rally the Rearguard gains +3
+        block. Activate this ability only while Rally the Rearguard is
+        defending." A 2-cost blue generic attack action (4 power, 2 block) whose
+        text is entirely an activated ability: the catalog's first ability that
+        is neither an equipment piece's nor a weapon swing, and the first whose
+        effect the engine actually applies (`apply_defending_ability`).
+          * It is activated from the combat chain, a zone
+            `get_equipment_activations` does not scan — that one walks the
+            equipment and weapon slots. The new `get_defending_activations`
+            finds a card carrying an `only_while_defending` ability on the
+            active player's chain instead.
+          * "While defending" is read as the two windows where a declared
+            blocker is answering a live attack: `DefendTriggers` and `Reaction`.
+            The phase gate is what does the work, because blockers stay on the
+            chain until the action phase ends — a card that blocked an earlier
+            attack this turn is still sitting there during a later instant
+            window, no longer defending anything. Narrowing by phase is the same
+            approach the defend-trigger window takes, and is tested with
+            everything else saying yes so the gate is what is being pinned.
+          * Only the defender is offered it: the turn player's chain holds their
+            attack, not blockers, so the rule is that the active player is not
+            the turn player. Attacking *with* Rally therefore offers nothing.
+          * The activation goes on the stack while the card stays on the chain,
+            still blocking — the same shape as a Pack Call defend trigger, and
+            the reason `commit_pending_to_stack` skips its detach/relocate for a
+            card activated while defending, and `resolve_top_of_stack` resolves
+            the effect alone. Being on the stack, it can be responded to: an
+            instant resolves above it before the +3 lands.
+          * "+3 block" is granted to *that copy*, on the new
+            `CardState::defense_bonus`, rather than banked on the player as the
+            power bonuses are — two copies blocking the same attack are pumped
+            independently. `chain_link_total` now takes the whole `CardState`
+            rather than the printed `CardData` so the block total can count it.
+          * The discard is a cost, paid as the activation goes on the stack (the
+            same moment a played card's `AdditionalCostType::DiscardCard` is
+            paid) and routed through `apply_discard_cost`, so it fires Rhinar's
+            `OnDiscard6Intimidate` like any other discard. An empty hand cannot
+            pay it, so the ability is not offered at all.
+          * "Once per turn" is tracked per card on
+            `CardState::ability_used_this_turn`, set when the activation is put
+            on the stack — the cost is paid by then, so responding to it cannot
+            hand the use back — and cleared for every card at `begin_turn`. The
+            block bonus is cleared separately, as the card leaves the chain in
+            `close_combat_chain`, so it lasts exactly as long as its combat.
+          * The ability costs no action point (it is an instant), and the
+            attacker's point is still spent by the attack as the window closes.
+          * `DefendEffect::PitchToBlock` was put in the enum for this card before
+            it was understood to be an activated ability. It is unused and no
+            card carries it; the comment in `apply_defend_effect` now says so.
+        Tests: rally_the_rearguard_is_a_4_power_attack_action_with_a_defending_ability,
+               rally_ability_is_not_offered_while_it_sits_in_hand,
+               rally_ability_is_not_offered_to_the_attacker_swinging_it,
+               rally_ability_is_offered_to_the_defender_once_it_blocks,
+               rally_ability_is_not_offered_without_a_card_to_discard,
+               rally_ability_is_not_offered_once_its_combat_is_over,
+               rally_ability_discards_a_card_and_leaves_rally_on_the_chain,
+               rally_ability_adds_3_block_when_it_resolves,
+               rally_ability_blocks_3_more_of_the_attack,
+               rally_without_its_ability_blocks_only_its_printed_2,
+               rally_ability_is_once_per_turn,
+               rally_ability_can_be_responded_to_before_it_resolves,
+               rally_ability_costs_no_action_point,
+               rally_block_bonus_is_cleared_when_the_chain_closes,
+               rally_once_per_turn_limit_lifts_at_the_turn_boundary,
+               two_blocking_rallies_are_pumped_independently
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -367,7 +434,7 @@ on-play-effect helpers).
   [x] Clearing Bellow        (Card::ClearingBellowB)  — see COMPLETE section above
   [x] Come to Fight          (Card::ComeToFightB)  — see COMPLETE section above
   [x] Dodge                  (Card::DodgeB)  — see COMPLETE section above
-  [ ] Rally the Rearguard    (Card::RallyTheRearguardB)
+  [x] Rally the Rearguard    (Card::RallyTheRearguardB)  — see COMPLETE section above
   [x] Titanium Bauble        (Card::TitaniumBaubleB)  — see COMPLETE section above
 
 

@@ -26,6 +26,7 @@
 //!   - Titanium Bauble     (`Card::TitaniumBaubleB`)
 //!   - Pack Call           (`Card::PackCallY`)
 //!   - Barraging Beatdown  (`Card::BarragingBeatdownY`)
+//!   - Rally the Rearguard (`Card::RallyTheRearguardB`)
 
 use super::*;
 use crate::cards::Card;
@@ -2602,4 +2603,360 @@ fn barraging_beatdown_played_from_hand_intimidates_banks_and_keeps_the_action_po
     let life_before = gs.p2.life;
     resolve_combat_damage(&mut gs);
     assert_eq!(gs.p2.life, life_before - 9);
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rally the Rearguard (Card::RallyTheRearguardB)
+//
+// "Once per turn Instant — Discard a card: Rally the Rearguard gains +3 block.
+// Activate this ability only while Rally the Rearguard is defending."
+// A 2-cost blue generic attack action (4 power, 2 block) whose text is entirely
+// an activated ability — the catalog's first ability that is neither an
+// equipment piece's nor a weapon swing, and the first whose effect the engine
+// actually applies.
+//
+// What makes it work, beyond `Ability::DiscardCardPlusBlock` itself:
+//   * the card is activated from the combat chain, a zone
+//     `get_equipment_activations` does not scan, so the new
+//     `get_defending_activations` finds it there;
+//   * "while defending" is read as the defend-trigger and reaction windows, the
+//     two where a declared blocker is answering a live attack — blockers stay on
+//     the chain until the action phase ends, so a phase gate is what keeps the
+//     ability off a blocker whose combat is already over;
+//   * the activation goes on the stack while the card stays on the chain, still
+//     blocking — the same shape as a Pack Call defend trigger;
+//   * "+3 block" lands on that copy (`CardState::defense_bonus`) rather than on
+//     the player, so two copies blocking the same attack pump independently;
+//   * the discard is a cost, paid as the activation goes on the stack, and an
+//     empty hand means the ability is not offered at all.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The cards whose ability the active player is offered as an `Activate`.
+fn activatable_cards(gs: &Gamestate) -> HashSet<Card> {
+    legal_actions(gs).iter()
+        .filter(|a| a.typ == ActionType::Activate)
+        .map(|a| gs.cards[a.card_index()].card)
+        .collect()
+}
+
+/// Rhinar (p1) attacks with Muscle Mutt and Dorinthea (p2) blocks with Rally the
+/// Rearguard, leaving her holding `spare` as the card her ability can discard.
+/// Priority has passed to her in the reaction window, so the activation is the
+/// next thing she may do. Returns the game and Rally's global index.
+fn rally_blocking_muscle_mutt(spare: &[Card]) -> (Gamestate, usize) {
+    let mut gs = dorinthea_defending_muscle_mutt();
+
+    let mut hand = vec![Card::RallyTheRearguardB];
+    hand.extend_from_slice(spare);
+    set_hand(&mut gs, PlayerIndex::P2, &hand);
+    let rally_idx = gs.p2.hand_idx.expect("Rally should be in hand").get();
+
+    // Declare it as an ordinary blocker: it is an attack action card with 2
+    // printed defense, not a defense reaction, so it blocks in the defend step.
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(rally_idx))});
+    assert_eq!(gs.cards[rally_idx].location, CardLocation::P2CombatChain);
+
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    assert_eq!(gs.phase, Phase::Reaction, "Rally has no defend trigger of its own");
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+
+    (gs, rally_idx)
+}
+
+#[test]
+fn rally_the_rearguard_is_a_4_power_attack_action_with_a_defending_ability() {
+    use crate::cards::Keyword;
+    let data = Card::RallyTheRearguardB.data();
+    assert_eq!(data.typ, CardType::AttackAction);
+    assert_eq!(data.card_class, CardClass::Generic);
+    assert_eq!(data.cost, 2);
+    assert_eq!(data.pitch, 3);
+    assert_eq!(data.power, 4);
+    assert_eq!(data.defense, 2);
+    // The whole text is the ability: no keywords, no on-play or defend effect.
+    assert!(data.keyword.is_empty());
+    assert!(data.play_effect.is_none());
+    assert!(data.defend_effect.is_none());
+
+    let ability = data.ability.as_ref().expect("Rally should carry an activated ability");
+    // "Instant", and free of resources — the cost is the discard.
+    assert_eq!(ability.card_type(), CardType::Instant);
+    assert_eq!(ability.resource_cost(), 0);
+    assert!(ability.discards_a_card());
+    assert!(ability.only_while_defending());
+    assert!(ability.once_per_turn());
+}
+
+#[test]
+fn rally_ability_is_not_offered_while_it_sits_in_hand() {
+    let mut gs = setup_rhinar_action_phase();
+
+    // "Only while defending": in hand during its controller's own action phase
+    // it is a card to play, never an ability to activate.
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::RallyTheRearguardB, Card::BareFangsR]);
+    assert!(!activatable_cards(&gs).contains(&Card::RallyTheRearguardB));
+}
+
+#[test]
+fn rally_ability_is_not_offered_to_the_attacker_swinging_it() {
+    // Attacking with Rally puts it on the *attacker's* chain. It is not
+    // defending there, and the attacker is the turn player, so the ability is
+    // not offered even though the card sits on a combat chain.
+    let (gs, rally_idx) = play_and_resolve_attack(Card::RallyTheRearguardB);
+    assert_eq!(gs.cards[rally_idx].location, CardLocation::P1CombatChain);
+
+    // The defender is active in the Defend phase; step out to the reaction
+    // window so the attacker gets priority with his attack on the chain.
+    let mut gs = gs;
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // no blockers
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    assert!(!activatable_cards(&gs).contains(&Card::RallyTheRearguardB));
+}
+
+#[test]
+fn rally_ability_is_offered_to_the_defender_once_it_blocks() {
+    let (gs, _) = rally_blocking_muscle_mutt(&[Card::DodgeB]);
+    assert!(activatable_cards(&gs).contains(&Card::RallyTheRearguardB),
+        "a blocking Rally with a card to discard should offer its ability");
+}
+
+#[test]
+fn rally_ability_is_not_offered_without_a_card_to_discard() {
+    // Rally alone: once it is on the chain the hand is empty, so the discard
+    // cost cannot be paid and the ability is not offered.
+    let (gs, _) = rally_blocking_muscle_mutt(&[]);
+    assert_eq!(gs.p2.hand_idx, None);
+    assert!(!activatable_cards(&gs).contains(&Card::RallyTheRearguardB));
+}
+
+#[test]
+fn rally_ability_is_not_offered_once_its_combat_is_over() {
+    let mut gs = setup_rhinar_action_phase();
+
+    // Seat Rally on the *defender's* chain, as a blocker whose attack has
+    // already resolved: blockers stay on the chain until the action phase ends,
+    // so it is still sitting there while the turn player carries on.
+    place_attacker_on_chain(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::DodgeB]);
+
+    // Open an instant window in the turn player's action phase and pass priority
+    // to p2. Everything but the phase now says yes — p2 is not the turn player,
+    // Rally is on their chain, the ability is an instant, it is unused, and
+    // there is a card to discard — so this is what the phase gate alone rules
+    // out: the combat that card was defending is over.
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::SigilofSolaceB]);
+    let sigil_idx = gs.p1.hand_idx.expect("Sigil should be in hand").get();
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    assert_ne!(gs.active_player, gs.turn_player);
+
+    assert!(!activatable_cards(&gs).contains(&Card::RallyTheRearguardB),
+        "a blocker whose combat has ended is no longer defending");
+}
+
+#[test]
+fn rally_ability_discards_a_card_and_leaves_rally_on_the_chain() {
+    let (mut gs, rally_idx) = rally_blocking_muscle_mutt(&[Card::DodgeB]);
+    let spare = gs.p2.hand_idx.expect("the spare card should be in hand").get();
+
+    step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(rally_idx))});
+
+    // The cost is paid as the activation goes on the stack: the hand's only
+    // other card is discarded, and the ability is marked used.
+    assert_eq!(gs.cards[spare].location, CardLocation::P2Graveyard);
+    assert_eq!(gs.p2.hand_idx, None);
+    assert!(gs.cards[rally_idx].ability_used_this_turn);
+
+    // Rally itself has not moved: it is still on the chain, still blocking,
+    // while the activation waits on the stack to be responded to.
+    assert_eq!(gs.cards[rally_idx].location, CardLocation::P2CombatChain);
+    assert_eq!(gs.p2.chain_link[0], Some(CardIdx::new(rally_idx)));
+    assert!(!gs.stack_is_empty());
+    assert_eq!(gs.phase, Phase::Reaction, "a free activation needs no pitching");
+}
+
+#[test]
+fn rally_ability_adds_3_block_when_it_resolves() {
+    let (mut gs, rally_idx) = rally_blocking_muscle_mutt(&[Card::DodgeB]);
+    assert_eq!(gs.cards[rally_idx].defense_bonus, 0);
+
+    step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(rally_idx))});
+    // Still nothing until it resolves — it is on the stack, not yet applied.
+    assert_eq!(gs.cards[rally_idx].defense_bonus, 0);
+
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.cards[rally_idx].defense_bonus, 3);
+}
+
+#[test]
+fn rally_ability_blocks_3_more_of_the_attack() {
+    let (mut gs, rally_idx) = rally_blocking_muscle_mutt(&[Card::DodgeB]);
+
+    // Both pass: the activation resolves and, the stack being empty again, the
+    // window closes and combat damage is dealt in the same step.
+    step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(rally_idx))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+    // Muscle Mutt's 6 power against 2 printed + 3 granted = 5 block: 1 damage,
+    // where the unpumped block would have let 4 through.
+    assert_eq!(gs.p2.life, 20 - 1);
+}
+
+#[test]
+fn rally_without_its_ability_blocks_only_its_printed_2() {
+    // The same combat with the ability never activated, to pin that the 3 above
+    // is the ability's doing rather than the block's.
+    let (mut gs, _) = rally_blocking_muscle_mutt(&[Card::DodgeB]);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+    assert_eq!(gs.p2.life, 20 - 4);
+}
+
+#[test]
+fn rally_ability_is_once_per_turn() {
+    // Two spare cards, so the discard cost can be paid twice over and only the
+    // once-per-turn limit stands between her and a second +3.
+    let (mut gs, rally_idx) = rally_blocking_muscle_mutt(&[Card::DodgeB, Card::ToughenUpB]);
+    assert!(activatable_cards(&gs).contains(&Card::RallyTheRearguardB));
+
+    // Activating keeps priority with the activator, so the second offer can be
+    // checked in the same window the first was taken in.
+    step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(rally_idx))});
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    assert!(gs.p2.hand_idx.is_some(), "a card is still in hand to discard");
+    assert!(!activatable_cards(&gs).contains(&Card::RallyTheRearguardB),
+        "the ability is spent for the turn as soon as it is activated");
+
+    // It stays spent once the activation has resolved, rather than the limit
+    // being only about the entry sitting on the stack.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.cards[rally_idx].defense_bonus, 3);
+    assert!(gs.cards[rally_idx].ability_used_this_turn);
+}
+
+#[test]
+fn rally_ability_can_be_responded_to_before_it_resolves() {
+    let (mut gs, rally_idx) = rally_blocking_muscle_mutt(&[Card::DodgeB]);
+    step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(rally_idx))});
+
+    // An instant-speed activation sits on the stack rather than applying
+    // immediately, so it can be responded to. The activator keeps priority
+    // first; passing hands it to the attacker with the +3 still pending.
+    assert!(!gs.stack_is_empty());
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    assert!(!gs.stack_is_empty(), "passing priority must not resolve the activation");
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::SigilofSolaceB]);
+    let sigil_idx = gs.p1.hand_idx.expect("Sigil should be in hand").get();
+    let life_before = gs.p1.life;
+
+    // The instant resolves above the activation: p1 gains life while Rally's +3
+    // is still pending underneath.
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.p1.life, life_before + 1);
+    assert_eq!(gs.cards[rally_idx].defense_bonus, 0, "the activation is still on the stack");
+
+    // Passing it out then resolves the activation underneath.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.cards[rally_idx].defense_bonus, 3);
+}
+
+#[test]
+fn rally_ability_costs_no_action_point() {
+    let (mut gs, rally_idx) = rally_blocking_muscle_mutt(&[Card::DodgeB]);
+    // The action point belongs to the turn player, and an instant-speed ability
+    // activated by the defender must not touch it.
+    let attacker_points = gs.p1.action_points;
+    let defender_points = gs.p2.action_points;
+
+    // Activating spends nothing: an instant-speed ability costs no action point,
+    // and the defender has no action phase to spend one in anyway.
+    step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(rally_idx))});
+    assert_eq!(gs.p1.action_points, attacker_points);
+    assert_eq!(gs.p2.action_points, defender_points);
+
+    // Nor does resolving it. The attacker's point does go, but to the attack:
+    // combat damage spends it as the window closes, exactly as it would have
+    // without the activation (see `rally_without_its_ability_blocks_only_its_printed_2`).
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.p1.action_points, attacker_points);
+    assert_eq!(gs.p2.action_points, defender_points);
+}
+
+#[test]
+fn rally_block_bonus_is_cleared_when_the_chain_closes() {
+    let (mut gs, rally_idx) = rally_blocking_muscle_mutt(&[Card::DodgeB]);
+    // Both pass: the activation resolves and, with the stack empty, the window
+    // closes and combat damage is dealt — Rally is still on the chain, pumped.
+    step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(rally_idx))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.cards[rally_idx].defense_bonus, 3);
+    assert_eq!(gs.cards[rally_idx].location, CardLocation::P2CombatChain);
+
+    // The attacker then passes out of the action phase, closing the chain:
+    // Rally leaves for the graveyard and the granted block goes with it.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.cards[rally_idx].location, CardLocation::P2Graveyard);
+    assert_eq!(gs.cards[rally_idx].defense_bonus, 0);
+}
+
+#[test]
+fn rally_once_per_turn_limit_lifts_at_the_turn_boundary() {
+    let (mut gs, rally_idx) = rally_blocking_muscle_mutt(&[Card::DodgeB]);
+    step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(rally_idx))});
+    assert!(gs.cards[rally_idx].ability_used_this_turn);
+
+    begin_turn(&mut gs);
+    assert!(!gs.cards[rally_idx].ability_used_this_turn);
+}
+
+#[test]
+fn two_blocking_rallies_are_pumped_independently() {
+    let mut gs = dorinthea_defending_muscle_mutt();
+
+    // Both copies block, leaving one card in hand — enough to pay for exactly
+    // one activation, so the two copies' bonuses can be told apart.
+    set_hand(&mut gs, PlayerIndex::P2,
+        &[Card::RallyTheRearguardB, Card::RallyTheRearguardB, Card::DodgeB]);
+    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    let (first, second) = (hand[0], hand[1]);
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(first))});
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(second))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+
+    // Both are offered — "once per turn" is per card, not per player.
+    let offered: Vec<usize> = legal_actions(&gs).iter()
+        .filter(|a| a.typ == ActionType::Activate)
+        .map(|a| a.card_index())
+        .collect();
+    assert!(offered.contains(&first) && offered.contains(&second));
+
+    // Activating one pumps that copy alone.
+    step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(first))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.cards[first].defense_bonus, 3);
+    assert_eq!(gs.cards[second].defense_bonus, 0);
+    assert!(gs.cards[first].ability_used_this_turn);
+    assert!(!gs.cards[second].ability_used_this_turn);
+
+    // 2 + 2 printed plus the one granted 3 = 7 block against 6 power: nothing
+    // gets through. (Damage lands as the window closes, in the pass above.)
+    assert_eq!(gs.p2.life, 20);
 }

@@ -31,6 +31,30 @@ impl Ability {
         }
     }
 
+    /// Whether activating this ability costs a card discarded from hand, on top
+    /// of any `resource_cost`. Rally the Rearguard's "Discard a card:" is the
+    /// only such cost today. It gates the activation as well as paying for it:
+    /// an ability that discards is not offered to an empty hand.
+    pub fn discards_a_card(&self) -> bool {
+        matches!(self, Ability::DiscardCardPlusBlock)
+    }
+
+    /// Whether this ability may only be activated while its card is defending —
+    /// that is, while it sits on its controller's combat chain as a declared
+    /// blocker (Rally the Rearguard's "Activate this ability only while Rally
+    /// the Rearguard is defending"). An ability that is not so restricted is
+    /// activated from the zone its card lives in, which for every other ability
+    /// in the catalog is an equipment or weapon slot.
+    pub fn only_while_defending(&self) -> bool {
+        matches!(self, Ability::DiscardCardPlusBlock)
+    }
+
+    /// Whether this ability may be used only once per turn, tracked per card on
+    /// `CardState::ability_used_this_turn`.
+    pub fn once_per_turn(&self) -> bool {
+        matches!(self, Ability::DiscardCardPlusBlock)
+    }
+
     /// The card type at which this ability is activated. Action-speed abilities
     /// cost an action point on your turn; instant-speed abilities can be used at
     /// any time you have priority (e.g. during the defend step).

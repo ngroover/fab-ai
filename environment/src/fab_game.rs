@@ -92,6 +92,8 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
                     card,
                     next_card: CardIdx(0),
                     prev_card: CardIdx(0),
+                    defense_bonus: 0,
+                    ability_used_this_turn: false,
                 });
             }
             CardType::Equipment => {
@@ -101,6 +103,8 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
                     card,
                     next_card: CardIdx(0),
                     prev_card: CardIdx(0),
+                    defense_bonus: 0,
+                    ability_used_this_turn: false,
                 });
             }
             _ => {
@@ -110,6 +114,8 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
                     card,
                     next_card: CardIdx(0),
                     prev_card: CardIdx(0),
+                    defense_bonus: 0,
+                    ability_used_this_turn: false,
                 });
             }
         }
