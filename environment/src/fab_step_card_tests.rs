@@ -27,6 +27,7 @@
 //!   - Pack Call           (`Card::PackCallY`)
 //!   - Barraging Beatdown  (`Card::BarragingBeatdownY`)
 //!   - Rally the Rearguard (`Card::RallyTheRearguardB`)
+//!   - Chief Ruk'utan      (`Card::ChiefRukutan`)
 
 use super::*;
 use crate::cards::Card;
@@ -3113,4 +3114,270 @@ fn rally_ability_still_works_when_the_discard_would_have_intimidated() {
     assert_eq!(gs.cards[rally_idx].defense_bonus, 3);
     // Muscle Mutt's 6 against 2 printed + 3 granted: 1 damage to Rhinar.
     assert_eq!(gs.p1.life, 20 - 1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chief Ruk'utan (Card::ChiefRukutan)
+//
+// Rhinar's mentor. "While Chief Ruk'utan is face down in arsenal, at the start
+// of your turn, you may turn him face up. While Chief Ruk'utan is face up in
+// arsenal, whenever you play a card with 6 or more power, intimidate and put a
+// lesson counter on him. Then if there are 2 or more lesson counters on him,
+// banish him, search your deck for Alpha Rampage, put it face up in arsenal and
+// shuffle."
+//
+// The tests cover the turn-start flip (only on its owner's turn, only for a
+// mentor), the trigger (face up only, 6+ power only, played cards only, its
+// owner's plays only, at play time), and graduation at two lessons (banish,
+// fetch face up, shuffle — with and without an Alpha Rampage left to find).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Rhinar (p1) on his action phase with Chief Ruk'utan in his arsenal — face up
+/// or face down as asked — and `hand` (at most three cards) as his hand. Returns
+/// the game and Ruk'utan's index.
+fn rhinar_with_rukutan(face_up: bool, hand: &[Card]) -> (Gamestate, usize) {
+    let mut gs = setup_rhinar_action_phase();
+    let mut opening = vec![Card::ChiefRukutan];
+    opening.extend_from_slice(hand);
+    set_hand(&mut gs, PlayerIndex::P1, &opening);
+    let mentor = put_in_arsenal(&mut gs, PlayerIndex::P1, Card::ChiefRukutan);
+    if face_up {
+        turn_mentor_face_up(&mut gs, PlayerIndex::P1);
+        assert!(gs.cards[mentor].face_up);
+    }
+    (gs, mentor)
+}
+
+/// Play the first `card` in p1's hand with its cost already banked, so it goes
+/// straight onto the stack without a pitch step. Returns its index.
+fn play_from_hand_prepaid(gs: &mut Gamestate, card: Card) -> usize {
+    let idx = gs.p1.hand_iter(&gs.cards)
+        .find(|(_, cs)| cs.card == card)
+        .map(|(idx, _)| idx)
+        .expect("the card to play should be in hand");
+    gs.p1.resources = card.data().cost;
+    step(gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(idx))});
+    assert_eq!(gs.cards[idx].location, CardLocation::Stack);
+    idx
+}
+
+/// p1's deck card holding `card`, if there is one.
+fn p1_deck_copy_of(gs: &Gamestate, card: Card) -> Option<usize> {
+    (0..PLAYER_CARDS).find(|&i| gs.cards[i].location == CardLocation::P1Deck && gs.cards[i].card == card)
+}
+
+#[test]
+fn chief_rukutan_is_a_brute_mentor_with_the_on_play6_mentor_ability() {
+    use crate::card_effects::ConstantEffect;
+    let data = Card::ChiefRukutan.data();
+    assert_eq!(data.typ, CardType::Mentor);
+    assert_eq!(data.card_class, CardClass::Brute);
+    assert!(matches!(data.constant_effect, Some(ConstantEffect::OnPlay6Mentor)));
+    // The card it fetches is in Rhinar's deck to be found.
+    assert!(crate::decks::build_rhinar_deck().contains(&Card::AlphaRampageR));
+}
+
+#[test]
+fn rukutan_arsenaled_face_down_turns_face_up_at_the_start_of_rhinars_next_turn() {
+    let mut gs = setup_rhinar_action_phase();
+    let ruk = gs.p1.hand_idx.expect("opening hand").get();
+    gs.cards[ruk].card = Card::ChiefRukutan;
+
+    // Rhinar passes his action phase and arsenals Ruk'utan: it goes in face down.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.phase, Phase::Arsenal);
+    step(&mut gs, Action{ typ: ActionType::Arsenal, card: Some(CardIdx::new(ruk))});
+    assert_eq!(gs.turn_player, PlayerIndex::P2);
+    assert_eq!(gs.cards[ruk].location, CardLocation::P1Arsenal);
+
+    // It stays face down — and hidden from Dorinthea — through her turn: the
+    // flip is at the start of *its owner's* turn.
+    assert!(!gs.cards[ruk].face_up);
+    assert_eq!(gs.cards[ruk].visible, CardVisibleState::P1Knows);
+
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // Dorinthea's action phase
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // and her arsenal
+    assert_eq!(gs.turn_player, PlayerIndex::P1);
+    assert_eq!(gs.phase, Phase::Action);
+
+    // Rhinar's turn has begun: Ruk'utan is turned face up, for both to see.
+    assert!(gs.cards[ruk].face_up);
+    assert_eq!(gs.cards[ruk].visible, CardVisibleState::BothKnow);
+    assert_eq!(gs.cards[ruk].location, CardLocation::P1Arsenal);
+}
+
+#[test]
+fn a_non_mentor_arsenal_card_is_not_turned_face_up() {
+    let mut gs = setup_rhinar_action_phase();
+    let card = put_in_arsenal(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
+    turn_mentor_face_up(&mut gs, PlayerIndex::P1);
+    assert!(!gs.cards[card].face_up);
+}
+
+#[test]
+fn rukutan_is_never_offered_as_a_play_from_the_arsenal() {
+    let (gs, ruk) = rhinar_with_rukutan(true, &[Card::ClearingBellowB, Card::ClearingBellowB]);
+    let offered: Vec<usize> = legal_actions(&gs).iter()
+        .filter_map(|a| a.card.map(|c| c.get()))
+        .collect();
+    assert!(!offered.contains(&ruk));
+}
+
+#[test]
+fn face_up_rukutan_intimidates_and_takes_a_lesson_when_a_6_power_card_is_played() {
+    let (mut gs, ruk) = rhinar_with_rukutan(true, &[Card::MuscleMuttY]);
+    assert!(Card::MuscleMuttY.data().power >= 6);
+    assert!(Card::MuscleMuttY.data().keyword.is_empty(), "the intimidate must come from Ruk'utan");
+
+    let mutt = play_from_hand_prepaid(&mut gs, Card::MuscleMuttY);
+
+    // The trigger fires as the card is played: Muscle Mutt is still on the stack
+    // and Dorinthea has already banished a card.
+    assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mutt));
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
+    assert!(gs.p1.has_intimidated, "a Ruk'utan intimidate counts for 'if you've intimidated'");
+    assert_eq!(gs.cards[ruk].lesson_counters, 1);
+    // One lesson is not enough to graduate: Ruk'utan stays, face up.
+    assert_eq!(gs.cards[ruk].location, CardLocation::P1Arsenal);
+    assert!(gs.cards[ruk].face_up);
+}
+
+#[test]
+fn face_down_rukutan_does_not_trigger() {
+    let (mut gs, ruk) = rhinar_with_rukutan(false, &[Card::MuscleMuttY]);
+    play_from_hand_prepaid(&mut gs, Card::MuscleMuttY);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
+    assert_eq!(gs.cards[ruk].lesson_counters, 0);
+}
+
+#[test]
+fn rukutan_ignores_a_card_with_less_than_6_power() {
+    // Rally the Rearguard is a 4-power attack action: short of the threshold.
+    assert!(Card::RallyTheRearguardB.data().power < 6);
+    let (mut gs, ruk) = rhinar_with_rukutan(true, &[Card::RallyTheRearguardB]);
+    play_from_hand_prepaid(&mut gs, Card::RallyTheRearguardB);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
+    assert_eq!(gs.cards[ruk].lesson_counters, 0);
+}
+
+#[test]
+fn rukutan_ignores_the_opponents_6_power_plays() {
+    let (mut gs, ruk) = rhinar_with_rukutan(true, &[]);
+    maybe_mentor_on_play6(&mut gs, PlayerIndex::P2, 9);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P1), 0);
+    assert_eq!(gs.cards[ruk].lesson_counters, 0);
+}
+
+#[test]
+fn rukutan_graduates_on_his_second_lesson_fetching_alpha_rampage_face_up() {
+    let (mut gs, ruk) = rhinar_with_rukutan(true, &[Card::MuscleMuttY]);
+    gs.cards[ruk].lesson_counters = 1;
+    let rampage = p1_deck_copy_of(&gs, Card::AlphaRampageR).expect("Alpha Rampage should be in the deck");
+    let deck_before = gs.p1.deck_size;
+
+    play_from_hand_prepaid(&mut gs, Card::MuscleMuttY);
+
+    // The second lesson still intimidates first.
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
+
+    // Ruk'utan is banished, his counters left behind.
+    assert_eq!(gs.cards[ruk].location, CardLocation::P1BanishZone);
+    assert_eq!(gs.p1.banish_idx, Some(CardIdx::new(ruk)));
+    assert_eq!(gs.cards[ruk].lesson_counters, 0);
+    assert!(!gs.cards[ruk].face_up);
+
+    // Alpha Rampage now sits in the arsenal, face up and public.
+    assert_eq!(gs.p1.arsenal_idx, Some(CardIdx::new(rampage)));
+    assert_eq!(gs.cards[rampage].location, CardLocation::P1Arsenal);
+    assert!(gs.cards[rampage].face_up);
+    assert_eq!(gs.cards[rampage].visible, CardVisibleState::BothKnow);
+
+    // The deck lost exactly that card and is still a well-formed list.
+    assert_eq!(gs.p1.deck_size, deck_before - 1);
+    let order = deck_order(&gs, PlayerIndex::P1);
+    assert_eq!(order.len(), gs.p1.deck_size as usize);
+    assert!(order.iter().all(|&i| gs.cards[i].location == CardLocation::P1Deck));
+    assert!(!order.contains(&rampage));
+    assert_eq!(gs.p1.bottom_deck_idx.map(|i| i.get()), order.last().copied());
+}
+
+#[test]
+fn rukutan_graduation_shuffles_the_deck() {
+    let (mut gs, ruk) = rhinar_with_rukutan(true, &[]);
+    gs.cards[ruk].lesson_counters = 1;
+    let rampage = p1_deck_copy_of(&gs, Card::AlphaRampageR).expect("Alpha Rampage should be in the deck");
+    let mut expected_unshuffled = deck_order(&gs, PlayerIndex::P1);
+    expected_unshuffled.retain(|&i| i != rampage);
+
+    maybe_mentor_on_play6(&mut gs, PlayerIndex::P1, 6);
+
+    let after = deck_order(&gs, PlayerIndex::P1);
+    // Same cards, new order (a 30-odd card deck coming back in its old order
+    // would be a one-in-astronomical shuffle).
+    let mut a = after.clone();
+    let mut b = expected_unshuffled.clone();
+    a.sort();
+    b.sort();
+    assert_eq!(a, b);
+    assert_ne!(after, expected_unshuffled);
+}
+
+#[test]
+fn rukutan_graduates_even_with_no_alpha_rampage_left_to_find() {
+    let (mut gs, ruk) = rhinar_with_rukutan(true, &[]);
+    gs.cards[ruk].lesson_counters = 1;
+    // Alpha Rampage has already left the deck (here: relabelled away).
+    let rampage = p1_deck_copy_of(&gs, Card::AlphaRampageR).expect("Alpha Rampage should be in the deck");
+    gs.cards[rampage].card = Card::MuscleMuttY;
+    let deck_before = gs.p1.deck_size;
+
+    maybe_mentor_on_play6(&mut gs, PlayerIndex::P1, 6);
+
+    // He is banished all the same; the arsenal is simply left empty.
+    assert_eq!(gs.cards[ruk].location, CardLocation::P1BanishZone);
+    assert_eq!(gs.p1.arsenal_idx, None);
+    assert_eq!(gs.p1.deck_size, deck_before);
+    assert_eq!(deck_order(&gs, PlayerIndex::P1).len(), deck_before as usize);
+}
+
+#[test]
+fn alpha_rampage_fetched_by_rukutan_can_be_played_from_the_arsenal_that_turn() {
+    // Clearing Bellow pitches 3 to pay for it; Pack Call stays back to be the
+    // discard its additional cost demands.
+    let (mut gs, ruk) = rhinar_with_rukutan(true, &[Card::ClearingBellowB, Card::PackCallY]);
+    gs.cards[ruk].lesson_counters = 1;
+    maybe_mentor_on_play6(&mut gs, PlayerIndex::P1, 6);
+    let rampage = gs.p1.arsenal_idx.expect("Alpha Rampage should be in the arsenal").get();
+    assert_eq!(gs.cards[rampage].card, Card::AlphaRampageR);
+    assert_eq!(gs.phase, Phase::Action);
+
+    let offered = legal_actions(&gs).iter()
+        .any(|a| a.typ == ActionType::PlayCard && a.card == Some(CardIdx::new(rampage)));
+    assert!(offered, "the fetched Alpha Rampage should be playable from the arsenal");
+
+    // Playing it takes it out of the arsenal, and with it its face-up state.
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(rampage))});
+    let bellow = gs.p1.hand_iter(&gs.cards)
+        .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+        .map(|(idx, _)| idx)
+        .expect("Clearing Bellow should be in hand");
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(bellow))});
+    assert_eq!(gs.cards[rampage].location, CardLocation::Stack);
+    assert_eq!(gs.p1.arsenal_idx, None);
+    assert!(!gs.cards[rampage].face_up);
+}
+
+#[test]
+fn weapon_swing_does_not_teach_rukutan_a_lesson() {
+    // Swinging a weapon activates it rather than playing a card, so it never
+    // reaches the trigger, whatever its power. (Bone Basher's 4 would miss the
+    // threshold anyway; this pins down that an Activate is not even checked.)
+    let (mut gs, ruk) = rhinar_with_rukutan(true, &[Card::ClearingBellowB, Card::ClearingBellowB]);
+    let basher = gs.p1.weapon_idx.expect("Bone Basher should be equipped").get();
+    gs.p1.resources = 2;
+    step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(basher))});
+    assert_eq!(gs.cards[basher].location, CardLocation::Stack);
+    assert_eq!(gs.cards[ruk].lesson_counters, 0);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
 }

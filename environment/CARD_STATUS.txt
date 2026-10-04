@@ -438,6 +438,57 @@ on-play-effect helpers).
                rally_ability_discarding_a_power6_card_does_not_intimidate,
                rally_ability_still_works_when_the_discard_would_have_intimidated
 
+  [x] Chief Ruk'utan (Card::ChiefRukutan)
+        Rhinar's mentor. "While face down in arsenal, at the start of your turn,
+        you may turn him face up. While face up in arsenal, whenever you play a
+        card with 6 or more power, intimidate and put a lesson counter on him.
+        Then if there are 2 or more lesson counters on him, banish him, search
+        your deck for Alpha Rampage, put it face up in arsenal and shuffle."
+          * Face up / face down is the new `CardState::face_up`, meaningful only
+            in the arsenal and cleared as a card leaves it (in
+            `detach_from_current_zone`). Arsenaling a card at the end of a turn
+            leaves it face down.
+          * The flip is `turn_mentor_face_up`, run from `begin_turn` for the turn
+            player's arsenal. It keys off `CardType::Mentor`, since every mentor
+            carries the clause (Hala Goldenhelm will flip too, and do nothing
+            until her own ability is implemented). The "may" is always taken:
+            the engine has no start-of-turn choice, and a face-down mentor can
+            do nothing at all, so turning it up is never worse.
+          * The trigger is `ConstantEffect::OnPlay6Mentor` (renamed from the
+            unused `OnDiscard6Mentor` placeholder — the trigger is a play, not a
+            discard), checked by `maybe_mentor_on_play6` in
+            `commit_pending_to_stack` after any additional cost is paid. Only a
+            `PlayCard` counts: a weapon swing or other activation is not playing
+            a card. Power is the printed power, as for Rhinar's discard trigger.
+            It resolves inline at play time rather than as its own stack layer,
+            again like Rhinar's trigger, so the intimidate lands before the
+            played card resolves and before blockers are declared. It sets
+            `has_intimidated`, so Beast Mode sees it.
+          * Lesson counters are the new `CardState::lesson_counters`, on the
+            card itself, cleared when it is banished.
+          * Graduation is `graduate_mentor`: the mentor goes to the banish zone
+            (now a real linked list on `Player::banish_idx` — it was a single
+            index nothing used), the deck is searched for Alpha Rampage, which
+            goes into the arsenal face up and public, and the deck is shuffled
+            with `fab_game::shuffle_deck_for`. Banish and shuffle happen even if
+            Alpha Rampage is no longer in the deck. The fetched copy can be
+            played from the arsenal the same turn.
+          * `place_cards` clears `face_up` and `lesson_counters` so a reset game
+            starts without them.
+        Tests: chief_rukutan_is_a_brute_mentor_with_the_on_play6_mentor_ability,
+               rukutan_arsenaled_face_down_turns_face_up_at_the_start_of_rhinars_next_turn,
+               a_non_mentor_arsenal_card_is_not_turned_face_up,
+               rukutan_is_never_offered_as_a_play_from_the_arsenal,
+               face_up_rukutan_intimidates_and_takes_a_lesson_when_a_6_power_card_is_played,
+               face_down_rukutan_does_not_trigger,
+               rukutan_ignores_a_card_with_less_than_6_power,
+               rukutan_ignores_the_opponents_6_power_plays,
+               rukutan_graduates_on_his_second_lesson_fetching_alpha_rampage_face_up,
+               rukutan_graduation_shuffles_the_deck,
+               rukutan_graduates_even_with_no_alpha_rampage_left_to_find,
+               alpha_rampage_fetched_by_rukutan_can_be_played_from_the_arsenal_that_turn,
+               weapon_swing_does_not_teach_rukutan_a_lesson
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -462,7 +513,7 @@ on-play-effect helpers).
  TODO — RHINAR hero / weapon / equipment
 ------------------------------------------------------------------------------
   [x] Rhinar (hero)          (Card::Rhinar)  — see COMPLETE section above
-  [ ] Chief Rukutan          (Card::ChiefRukutan)
+  [x] Chief Rukutan          (Card::ChiefRukutan)  — see COMPLETE section above
   [ ] Bone Basher (weapon)   (Card::BoneBasher)
   [ ] Blossom of Spring      (Card::BlossomOfSpring)
   [ ] Bone Vizier            (Card::BoneVizier)

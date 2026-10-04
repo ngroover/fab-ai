@@ -6,7 +6,12 @@ use crate::cards::CardType;
 pub enum ConstantEffect {
     OnDiscard6Intimidate,
     OnDawnbladeGoAgainExtraSwing,
-    OnDiscard6Mentor,
+    /// Chief Ruk'utan's mentor ability: while the card sits face up in its
+    /// owner's arsenal, whenever its owner plays a card with 6 or more power,
+    /// they intimidate and put a lesson counter on it; at 2 or more lesson
+    /// counters it is banished and Alpha Rampage is fetched from the deck into
+    /// the arsenal, face up (see `fab_step::maybe_mentor_on_play6`).
+    OnPlay6Mentor,
     OnSwordHitMentor,
 }
 

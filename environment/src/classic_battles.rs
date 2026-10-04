@@ -625,7 +625,14 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
-            constant_effect: None,
+            // "While Chief Ruk'utan is face up in arsenal, whenever you play a
+            // card with 6 or more power, intimidate and put a lesson counter on
+            // Chief Ruk'utan. Then if there are 2 or more lesson counters on him,
+            // banish him, search your deck for Alpha Rampage, put it face up in
+            // arsenal and shuffle." The face-down half — "at the start of your
+            // turn, you may turn him face up" — is shared by every mentor and
+            // keys off the card type rather than this effect (see `begin_turn`).
+            constant_effect: Some(ConstantEffect::OnPlay6Mentor),
             ability: None,
             defend_effect: None,
             next_attack_effect: None,

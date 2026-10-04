@@ -167,6 +167,19 @@ pub struct CardState {
     /// then, so a countered activation still counts as used — and cleared for
     /// every card at the start of each turn.
     pub ability_used_this_turn : bool,
+    /// Whether this card sits face up in its owner's arsenal. A card arsenaled
+    /// at the end of a turn goes in face down; a mentor turns itself face up at
+    /// the start of its owner's next turn (see `begin_turn`), and a card an
+    /// effect puts into the arsenal "face up" (Chief Ruk'utan fetching Alpha
+    /// Rampage) arrives that way. Only meaningful in the arsenal: it is cleared
+    /// as the card leaves that zone (see `detach_from_current_zone`).
+    pub face_up : bool,
+    /// Lesson counters on this copy of a mentor card (e.g. Chief Ruk'utan, who
+    /// gains one each time his ability triggers and graduates at two). Lives on
+    /// the card rather than the player because the counters belong to that
+    /// object: they are cleared when the card is banished, so they never follow
+    /// it into another zone.
+    pub lesson_counters : u8,
 }
 
 

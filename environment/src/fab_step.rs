@@ -1,7 +1,8 @@
 use crate::action::{Action,ActionType};
 use crate::game_state::{Gamestate,Phase,Player,PendingCard,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
-use crate::cards::{CardClass,CardData,CardType,Keyword};
+use crate::cards::{Card,CardClass,CardData,CardType,Keyword};
 use crate::card_effects::{Ability,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect};
+use crate::fab_game::shuffle_deck_for;
 use rand::RngExt;
 
 pub fn step(gs: &mut Gamestate, act: Action) {
@@ -122,7 +123,35 @@ fn begin_turn(gs: &mut Gamestate) {
     for cs in gs.cards.iter_mut() {
         cs.ability_used_this_turn = false;
     }
+    turn_mentor_face_up(gs, gs.turn_player);
     gs.check_game_end();
+}
+
+/// "While [this mentor] is face down in arsenal, at the start of your turn, you
+/// may turn [it] face up." Every mentor in the catalog carries this clause, so it
+/// keys off the card type rather than any one card's effect. The engine has no
+/// choice phase at the start of a turn, so the "may" is always taken: a face-down
+/// mentor does nothing at all — it cannot be played, pitched for resources, or
+/// trigger — so turning it up is never worse than leaving it, and the only thing
+/// it gives away is a card the opponent would see the moment it triggered.
+///
+/// Only the turn player's arsenal is checked — it is the start of *their* turn —
+/// and a mentor already face up is left alone.
+fn turn_mentor_face_up(gs: &mut Gamestate, pid: PlayerIndex) {
+    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let Some(arsenal) = player.arsenal_idx else {
+        return;
+    };
+    let idx = arsenal.get();
+    if gs.cards[idx].card.data().typ != CardType::Mentor || gs.cards[idx].face_up {
+        return;
+    }
+    gs.cards[idx].face_up = true;
+    gs.cards[idx].visible = CardVisibleState::BothKnow;
+    if gs.logging_enabled() {
+        let card = gs.cards[idx].card;
+        gs.log_public(format!("{} turns {:?} face up in their arsenal", player_name(pid), card));
+    }
 }
 
 fn handle_action_phase(gs: &mut Gamestate, act: Action) {
@@ -969,6 +998,104 @@ fn maybe_discard6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, discarded_p
     }
 }
 
+/// Chief Ruk'utan's mentor ability (`ConstantEffect::OnPlay6Mentor`), checked
+/// each time `owner` plays a card, with `played_power` the played card's printed
+/// power: "While Chief Ruk'utan is face up in arsenal, whenever you play a card
+/// with 6 or more power, intimidate and put a lesson counter on Chief Ruk'utan.
+/// Then if there are 2 or more lesson counters on him, banish him, search your
+/// deck for Alpha Rampage, put it face up in arsenal and shuffle."
+///
+/// - **Face up in arsenal**: the mentor must be the card in `owner`'s arsenal
+///   and turned face up (see `turn_mentor_face_up`). Face down, it does nothing.
+///   The card that triggers it is always played from hand, since the mentor is
+///   occupying the arsenal.
+/// - **Power** is the printed power, the same reading Rhinar's discard trigger
+///   uses: the engine banks power bonuses on the player and applies them at
+///   combat damage, so no played card has a modified power to read here.
+/// - **Timing**: it fires as the card is played — when it goes on the stack,
+///   after any additional cost — rather than as it resolves. In FaB the trigger
+///   goes on the stack above the card and resolves first; the engine resolves
+///   it inline, as it does Rhinar's discard trigger, so the intimidate still
+///   lands before the played card resolves and before anyone blocks it.
+/// - It is not limited to its owner's turn ("whenever you play"); no card that
+///   can be played on the opponent's turn has 6 power today, so in practice it
+///   only fires on its owner's turn.
+fn maybe_mentor_on_play6(gs: &mut Gamestate, owner: PlayerIndex, played_power: u8) {
+    if played_power < 6 {
+        return;
+    }
+    let player = if owner == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let Some(arsenal) = player.arsenal_idx else {
+        return;
+    };
+    let mentor = arsenal.get();
+    if !gs.cards[mentor].face_up
+        || !matches!(gs.cards[mentor].card.data().constant_effect, Some(ConstantEffect::OnPlay6Mentor))
+    {
+        return;
+    }
+
+    if gs.logging_enabled() {
+        let card = gs.cards[mentor].card;
+        gs.log_public(format!("{}'s {:?} triggers", player_name(owner), card));
+    }
+    apply_intimidate(gs, owner);
+    gs.cards[mentor].lesson_counters = gs.cards[mentor].lesson_counters.saturating_add(1);
+    if gs.cards[mentor].lesson_counters >= 2 {
+        graduate_mentor(gs, owner, mentor, Card::AlphaRampageR);
+    }
+}
+
+/// A mentor's lesson is complete: banish the mentor (`mentor`, the card in
+/// `owner`'s arsenal), search `owner`'s deck for `fetch`, put it face up into the
+/// arsenal the mentor just left, and shuffle the deck. Banishing happens whether
+/// or not the search finds anything — `fetch` may already have been drawn — and
+/// the deck is shuffled either way, as searching it entitles the player to.
+///
+/// The fetched card arrives face up and is public; like any arsenal card it can
+/// be played this very turn, paid for out of hand.
+fn graduate_mentor(gs: &mut Gamestate, owner: PlayerIndex, mentor: usize, fetch: Card) {
+    let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    detach_from_current_zone(player, &mut gs.cards, mentor);
+    gs.cards[mentor].location = CardLocation::banish(owner);
+    gs.cards[mentor].visible = CardVisibleState::BothKnow;
+    // The counters belonged to the mentor while it sat in the arsenal; a card
+    // that changes zones leaves them behind.
+    gs.cards[mentor].lesson_counters = 0;
+    attach_to_front_of_zone(&mut gs.cards, &mut player.banish_idx, None, None, mentor);
+
+    let deck = CardLocation::deck(owner);
+    let base = owner.index() * PLAYER_CARDS;
+    let found = (base..base + PLAYER_CARDS)
+        .find(|&i| gs.cards[i].location == deck && gs.cards[i].card == fetch);
+
+    if gs.logging_enabled() {
+        let card = gs.cards[mentor].card;
+        let outcome = match found {
+            Some(_) => format!("puts {:?} face up in their arsenal", fetch),
+            None => format!("finds no {:?}", fetch),
+        };
+        gs.log_public(format!(
+            "{} banishes {:?}, searches their deck and {}",
+            player_name(owner), card, outcome
+        ));
+    }
+
+    let (player, cards, rng) = if owner == PlayerIndex::P1 {
+        (&mut gs.p1, &mut gs.cards, &mut gs.rng)
+    } else {
+        (&mut gs.p2, &mut gs.cards, &mut gs.rng)
+    };
+    if let Some(idx) = found {
+        detach_from_current_zone(player, cards, idx);
+        cards[idx].location = CardLocation::arsenal(owner);
+        cards[idx].visible = CardVisibleState::BothKnow;
+        cards[idx].face_up = true;
+        player.arsenal_idx = Some(CardIdx::new(idx));
+    }
+    shuffle_deck_for(player, cards, rng);
+}
+
 /// Resolve a card's "when you play" effect as it resolves off the stack. The
 /// effect is a (condition, effect, magnitude) triple: the condition is evaluated
 /// first (it may itself move cards, as `DrawDiscardHit6` does), and the effect is
@@ -1305,6 +1432,14 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     if matches!(cs.card.data().additional_cost, Some(AdditionalCostType::DiscardCard)) {
         let owner = gs.active_player;
         apply_discard_cost(gs, owner);
+    }
+
+    // "Whenever you play a card" triggers fire once the card has been played —
+    // after its additional costs are paid. Only a played card counts: swinging a
+    // weapon or activating an ability is not playing a card.
+    if pending.typ == ActionType::PlayCard {
+        let owner = gs.active_player;
+        maybe_mentor_on_play6(gs, owner, cs.card.data().power);
     }
 
     // An activated ability pays its own costs here for the same reason: the
@@ -1715,8 +1850,15 @@ fn detach_from_current_zone(player: &mut Player, cards: &mut [CardState; TOTAL_C
         CardLocation::P1Chest | CardLocation::P2Chest => player.chest_idx = None,
         CardLocation::P1Arms | CardLocation::P2Arms => player.arms_idx = None,
         CardLocation::P1Legs | CardLocation::P2Legs => player.legs_idx = None,
-        CardLocation::P1Arsenal | CardLocation::P2Arsenal => player.arsenal_idx = None,
-        CardLocation::P1BanishZone | CardLocation::P2BanishZone => player.banish_idx = None,
+        CardLocation::P1Arsenal | CardLocation::P2Arsenal => {
+            player.arsenal_idx = None;
+            // Face up or down is a property of the card's place in the arsenal;
+            // wherever it goes next, it does not carry that orientation along.
+            cards[idx].face_up = false;
+        }
+        CardLocation::P1BanishZone | CardLocation::P2BanishZone => {
+            detach_from_linked_list(cards, &mut player.banish_idx, None, None, idx);
+        }
         CardLocation::P1IntimidateBanish | CardLocation::P2IntimidateBanish => {
             detach_from_linked_list(cards, &mut player.intimidate_banish_idx, None, None, idx);
         }

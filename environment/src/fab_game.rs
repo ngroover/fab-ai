@@ -94,6 +94,8 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
                     prev_card: CardIdx(0),
                     defense_bonus: 0,
                     ability_used_this_turn: false,
+                    face_up: false,
+                    lesson_counters: 0,
                 });
             }
             CardType::Equipment => {
@@ -105,6 +107,8 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
                     prev_card: CardIdx(0),
                     defense_bonus: 0,
                     ability_used_this_turn: false,
+                    face_up: false,
+                    lesson_counters: 0,
                 });
             }
             _ => {
@@ -116,6 +120,8 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
                     prev_card: CardIdx(0),
                     defense_bonus: 0,
                     ability_used_this_turn: false,
+                    face_up: false,
+                    lesson_counters: 0,
                 });
             }
         }
@@ -202,7 +208,10 @@ pub fn shuffle_decks(gs: &mut Gamestate) {
     shuffle_deck_for(&mut gs.p2, &mut gs.cards, &mut gs.rng);
 }
 
-fn shuffle_deck_for(
+/// Shuffle `player`'s deck: every card of theirs tagged as in the deck is put in
+/// a random order and relinked, top to bottom. Also used mid-game by effects
+/// that search the deck and then shuffle it (Chief Ruk'utan).
+pub(crate) fn shuffle_deck_for(
     player: &mut Player,
     cards: &mut [CardState; TOTAL_CARDS],
     rng: &mut SmallRng,
@@ -256,6 +265,10 @@ fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
     // Walk only this player's half of the shared array, recording each card's
     // global slot position alongside mutating its CardState.
     for idx in base..base + PLAYER_CARDS {
+        // Arsenal orientation and mentor lesson counters belong to the game
+        // that set them; a replayed state starts every card without them.
+        cards[idx].face_up = false;
+        cards[idx].lesson_counters = 0;
         let data = cards[idx].card.data();
         match data.typ {
             CardType::Equipment => {
