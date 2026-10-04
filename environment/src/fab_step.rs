@@ -169,13 +169,21 @@ fn handle_mentor_flip_phase(gs: &mut Gamestate, act: Action) {
     gs.phase = Phase::Action;
 }
 
+/// Mark the arsenal card at `idx` face up. A face-up card is public — both
+/// players can see what it is — so its visibility becomes `BothKnow` in the same
+/// step. Every place that turns a card face up goes through here, so the two can
+/// never disagree.
+fn set_face_up(cards: &mut [CardState; TOTAL_CARDS], idx: usize) {
+    cards[idx].face_up = true;
+    cards[idx].visible = CardVisibleState::BothKnow;
+}
+
 /// Turn the mentor at `idx` — face down in its owner's arsenal — face up. It
 /// becomes public, and stays face up for as long as it remains in the arsenal
 /// (`face_up` is cleared only as a card leaves that zone).
 fn turn_mentor_face_up(gs: &mut Gamestate, idx: usize) {
     let pid = if idx < PLAYER_CARDS { PlayerIndex::P1 } else { PlayerIndex::P2 };
-    gs.cards[idx].face_up = true;
-    gs.cards[idx].visible = CardVisibleState::BothKnow;
+    set_face_up(&mut gs.cards, idx);
     if gs.logging_enabled() {
         let card = gs.cards[idx].card;
         gs.log_public(format!("{} turns {:?} face up in their arsenal", player_name(pid), card));
@@ -1117,8 +1125,7 @@ fn graduate_mentor(gs: &mut Gamestate, owner: PlayerIndex, mentor: usize, fetch:
     if let Some(idx) = found {
         detach_from_current_zone(player, cards, idx);
         cards[idx].location = CardLocation::arsenal(owner);
-        cards[idx].visible = CardVisibleState::BothKnow;
-        cards[idx].face_up = true;
+        set_face_up(cards, idx);
         player.arsenal_idx = Some(CardIdx::new(idx));
     }
     shuffle_deck_for(player, cards, rng);

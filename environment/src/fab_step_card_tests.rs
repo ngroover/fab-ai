@@ -3487,3 +3487,34 @@ fn weapon_swing_does_not_teach_rukutan_a_lesson() {
     assert_eq!(gs.cards[ruk].lesson_counters, 0);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
 }
+
+#[test]
+fn a_face_up_card_is_always_visible_to_both_players() {
+    // Random play through whole games, checking after every action that each
+    // face-up card is known to both players, and that a face-down card in the
+    // arsenal is never shown to its owner's opponent.
+    use rand::{RngExt, SeedableRng};
+    let mut face_up_seen = 0;
+    for seed in 0..300u64 {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+        reset(&mut gs, false);
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
+        while !gs.is_game_over() {
+            let actions = legal_actions(&gs);
+            let act = actions[rng.random_range(0..actions.len())];
+            step(&mut gs, act);
+            for (idx, cs) in gs.cards.iter().enumerate() {
+                if cs.face_up {
+                    face_up_seen += 1;
+                    assert_eq!(cs.visible, CardVisibleState::BothKnow,
+                        "face-up {:?} (slot {}) should be visible to both players", cs.card, idx);
+                } else if cs.location == CardLocation::P1Arsenal {
+                    assert_ne!(cs.visible, CardVisibleState::P2Knows);
+                } else if cs.location == CardLocation::P2Arsenal {
+                    assert_ne!(cs.visible, CardVisibleState::P1Knows);
+                }
+            }
+        }
+    }
+    assert!(face_up_seen > 0, "random play should turn some mentor face up");
+}

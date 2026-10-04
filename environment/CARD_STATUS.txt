@@ -450,6 +450,10 @@ on-play-effect helpers).
             in the arsenal and cleared as a card leaves it (in
             `detach_from_current_zone`). Arsenaling a card at the end of a turn
             leaves it face down.
+            A face-up card is public: `set_face_up` sets it to `BothKnow` in the
+            same step, and is the only way any card is turned face up (the
+            mentor flip and the fetched Alpha Rampage both use it). A face-down
+            arsenal card stays known only to its owner.
           * The flip is a decision: when the turn player has a face-down mentor
             in their arsenal, `begin_turn` opens the turn in the new
             `Phase::MentorFlip` instead of the Action phase. They either flip it
@@ -483,6 +487,7 @@ on-play-effect helpers).
             starts without them.
         Tests: chief_rukutan_is_a_brute_mentor_with_the_on_play6_mentor_ability,
                rukutan_blocks_for_3_like_hala,
+               a_face_up_card_is_always_visible_to_both_players,
                a_face_down_mentor_opens_its_owners_turn_with_a_flip_decision,
                flipping_turns_the_mentor_face_up_and_starts_the_action_phase,
                a_flipped_mentor_stays_face_up_and_is_never_offered_again,
