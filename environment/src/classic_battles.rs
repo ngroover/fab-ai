@@ -617,7 +617,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             cost: 0,
             pitch: 0,
             power: 0,
-            defense: 0,
+            defense: 3,
             color: None,
             no_block: false,
             slot: None,

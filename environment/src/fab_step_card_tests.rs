@@ -3167,6 +3167,39 @@ fn p1_deck_copy_of(gs: &Gamestate, card: Card) -> Option<usize> {
 }
 
 #[test]
+fn rukutan_blocks_for_3_like_hala() {
+    assert_eq!(Card::ChiefRukutan.data().defense, 3);
+    assert_eq!(Card::ChiefRukutan.data().defense, Card::HalaGoldenhelm.data().defense);
+    assert!(!Card::ChiefRukutan.data().no_block);
+
+    // Dorinthea attacks with Muscle Mutt (6); Rhinar blocks with Ruk'utan alone.
+    let mut gs = setup_rhinar_action_phase();
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // Rhinar's action phase
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // and his arsenal
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::MuscleMuttY, Card::ClearingBellowB]);
+    let p2_hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(p2_hand[0]))});
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(p2_hand[1]))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.phase, Phase::Defend);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::ChiefRukutan]);
+    let ruk = gs.p1.hand_idx.expect("Ruk'utan should be in hand").get();
+    let offered = legal_actions(&gs).iter()
+        .any(|a| a.typ == ActionType::Defend && a.card == Some(CardIdx::new(ruk)));
+    assert!(offered, "Ruk'utan should be offered as a blocker");
+
+    step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(ruk))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // defender passes
+
+    // 6 power against 3 block: Rhinar takes 3.
+    assert_eq!(gs.p1.life, 20 - 3);
+}
+
+#[test]
 fn chief_rukutan_is_a_brute_mentor_with_the_on_play6_mentor_ability() {
     use crate::card_effects::ConstantEffect;
     let data = Card::ChiefRukutan.data();

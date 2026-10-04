@@ -163,7 +163,7 @@ CARD_CATALOG: Dict[str, Card] = {
     # ── RHINAR — MENTOR ─────────────────────────────────────────────────────
 
     "chief_ruk_utan": Card("Chief Ruk'utan", [CardType.MENTOR], cost=0, pitch=0,
-                           power=0, defense=0,
+                           power=0, defense=3,
                            card_class=CardClass.BRUTE,
                            text="While Ruk'utan is face down in arsenal, at the start of your turn, you may turn him face up.  While Ruk'utan is face up in arsenal, whenever you play a card with 6 or more power, intimidate and put a lesson counter on him.  Then if there are 2 or more lesson counters on Rok'utan, banish him, search your deck for Alpha Rampage, put it face up in arsenal and shuffle."),
 
