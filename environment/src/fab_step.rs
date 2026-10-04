@@ -13,6 +13,7 @@ pub fn step(gs: &mut Gamestate, act: Action) {
     }
     match gs.phase {
         Phase::ChooseFirst => handle_choose_first(gs, act),
+        Phase::MentorFlip => handle_mentor_flip_phase(gs, act),
         Phase::Action => handle_action_phase(gs, act),
         Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch => handle_pitch_phase(gs, act),
         Phase::ActionInstant => handle_action_instant_phase(gs, act),
@@ -123,29 +124,56 @@ fn begin_turn(gs: &mut Gamestate) {
     for cs in gs.cards.iter_mut() {
         cs.ability_used_this_turn = false;
     }
-    turn_mentor_face_up(gs, gs.turn_player);
+    // "At the start of your turn, you may turn [a face-down mentor] face up":
+    // when the turn player has one in their arsenal, the turn opens on that
+    // decision instead of going straight to the Action phase (see
+    // `handle_mentor_flip_phase`). The callers have already set the phase to
+    // Action, so with no such mentor there is nothing to change.
+    if face_down_mentor_in_arsenal(gs, gs.turn_player).is_some() {
+        gs.phase = Phase::MentorFlip;
+        gs.active_player = gs.turn_player;
+    }
     gs.check_game_end();
 }
 
-/// "While [this mentor] is face down in arsenal, at the start of your turn, you
-/// may turn [it] face up." Every mentor in the catalog carries this clause, so it
-/// keys off the card type rather than any one card's effect. The engine has no
-/// choice phase at the start of a turn, so the "may" is always taken: a face-down
-/// mentor does nothing at all — it cannot be played, pitched for resources, or
-/// trigger — so turning it up is never worse than leaving it, and the only thing
-/// it gives away is a card the opponent would see the moment it triggered.
-///
-/// Only the turn player's arsenal is checked — it is the start of *their* turn —
-/// and a mentor already face up is left alone.
-fn turn_mentor_face_up(gs: &mut Gamestate, pid: PlayerIndex) {
+/// The face-down mentor in `pid`'s arsenal, if there is one — the card the
+/// `MentorFlip` phase offers to turn face up. Every mentor in the catalog
+/// carries the "at the start of your turn, you may turn [it] face up" clause,
+/// so this keys off the card type rather than any one card's effect. A mentor
+/// already face up is never offered again: nothing turns it back down while it
+/// stays in the arsenal.
+pub(crate) fn face_down_mentor_in_arsenal(gs: &Gamestate, pid: PlayerIndex) -> Option<usize> {
     let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let Some(arsenal) = player.arsenal_idx else {
-        return;
-    };
-    let idx = arsenal.get();
-    if gs.cards[idx].card.data().typ != CardType::Mentor || gs.cards[idx].face_up {
-        return;
+    let idx = player.arsenal_idx?.get();
+    (gs.cards[idx].card.data().typ == CardType::Mentor && !gs.cards[idx].face_up).then_some(idx)
+}
+
+/// Handle the turn player's decision in the `MentorFlip` phase: flip the
+/// face-down mentor in their arsenal face up (`FlipFaceUp`), or leave it face
+/// down (`Pass`). Either way the turn carries on into the Action phase.
+///
+/// Leaving it down hides the card from the opponent, but a face-down mentor
+/// does nothing — it cannot be played, pitched, or trigger — so the choice is
+/// between information and the mentor's ability. A declined mentor is offered
+/// again at the start of its owner's next turn.
+fn handle_mentor_flip_phase(gs: &mut Gamestate, act: Action) {
+    match act.typ {
+        ActionType::FlipFaceUp => turn_mentor_face_up(gs, act.card_index()),
+        ActionType::Pass => {
+            if gs.logging_enabled() {
+                gs.log_public(format!("{} leaves their arsenal face down", player_name(gs.active_player)));
+            }
+        }
+        _ => return,
     }
+    gs.phase = Phase::Action;
+}
+
+/// Turn the mentor at `idx` — face down in its owner's arsenal — face up. It
+/// becomes public, and stays face up for as long as it remains in the arsenal
+/// (`face_up` is cleared only as a card leaves that zone).
+fn turn_mentor_face_up(gs: &mut Gamestate, idx: usize) {
+    let pid = if idx < PLAYER_CARDS { PlayerIndex::P1 } else { PlayerIndex::P2 };
     gs.cards[idx].face_up = true;
     gs.cards[idx].visible = CardVisibleState::BothKnow;
     if gs.logging_enabled() {
@@ -1006,7 +1034,7 @@ fn maybe_discard6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, discarded_p
 /// deck for Alpha Rampage, put it face up in arsenal and shuffle."
 ///
 /// - **Face up in arsenal**: the mentor must be the card in `owner`'s arsenal
-///   and turned face up (see `turn_mentor_face_up`). Face down, it does nothing.
+///   and turned face up (see `handle_mentor_flip_phase`). Face down, it does nothing.
 ///   The card that triggers it is always played from hand, since the mentor is
 ///   occupying the arsenal.
 /// - **Power** is the printed power, the same reading Rhinar's discard trigger

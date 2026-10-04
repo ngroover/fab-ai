@@ -188,6 +188,14 @@ pub struct CardState {
 pub enum Phase {
     Start,
     ChooseFirst,
+    /// The start of the turn player's turn, entered only when a mentor sits face
+    /// down in their arsenal: "While [this mentor] is face down in arsenal, at
+    /// the start of your turn, you may turn [it] face up." The turn player either
+    /// flips it (`FlipFaceUp`) or declines (`Pass`); either way the Action phase
+    /// follows. A mentor turned face up stays that way — it is never offered
+    /// again — while a declined one is offered again at the start of each of its
+    /// owner's later turns, for as long as it stays face down.
+    MentorFlip,
     Action,
     ActionPitch,
     ActionInstant,

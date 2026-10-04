@@ -3142,7 +3142,7 @@ fn rhinar_with_rukutan(face_up: bool, hand: &[Card]) -> (Gamestate, usize) {
     set_hand(&mut gs, PlayerIndex::P1, &opening);
     let mentor = put_in_arsenal(&mut gs, PlayerIndex::P1, Card::ChiefRukutan);
     if face_up {
-        turn_mentor_face_up(&mut gs, PlayerIndex::P1);
+        turn_mentor_face_up(&mut gs, mentor);
         assert!(gs.cards[mentor].face_up);
     }
     (gs, mentor)
@@ -3177,8 +3177,10 @@ fn chief_rukutan_is_a_brute_mentor_with_the_on_play6_mentor_ability() {
     assert!(crate::decks::build_rhinar_deck().contains(&Card::AlphaRampageR));
 }
 
-#[test]
-fn rukutan_arsenaled_face_down_turns_face_up_at_the_start_of_rhinars_next_turn() {
+/// Rhinar arsenals Chief Ruk'utan at the end of his first turn (face down),
+/// then Dorinthea passes through her turn. Returns the game as Rhinar's second
+/// turn begins, and Ruk'utan's index.
+fn rhinar_second_turn_with_face_down_rukutan() -> (Gamestate, usize) {
     let mut gs = setup_rhinar_action_phase();
     let ruk = gs.p1.hand_idx.expect("opening hand").get();
     gs.cards[ruk].card = Card::ChiefRukutan;
@@ -3190,28 +3192,99 @@ fn rukutan_arsenaled_face_down_turns_face_up_at_the_start_of_rhinars_next_turn()
     assert_eq!(gs.turn_player, PlayerIndex::P2);
     assert_eq!(gs.cards[ruk].location, CardLocation::P1Arsenal);
 
-    // It stays face down — and hidden from Dorinthea — through her turn: the
-    // flip is at the start of *its owner's* turn.
+    // Dorinthea's turn is not interrupted — the decision is on its owner's
+    // turn — and Ruk'utan stays face down and hidden from her throughout.
+    assert_eq!(gs.phase, Phase::Action);
     assert!(!gs.cards[ruk].face_up);
     assert_eq!(gs.cards[ruk].visible, CardVisibleState::P1Knows);
-
-    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // Dorinthea's action phase
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // her action phase
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // and her arsenal
     assert_eq!(gs.turn_player, PlayerIndex::P1);
-    assert_eq!(gs.phase, Phase::Action);
+    (gs, ruk)
+}
 
-    // Rhinar's turn has begun: Ruk'utan is turned face up, for both to see.
+/// Pass Rhinar's turn (and Dorinthea's after it) back round to the start of
+/// Rhinar's next turn, without arsenaling anything.
+fn pass_round_to_rhinars_next_turn(gs: &mut Gamestate) {
+    assert_eq!(gs.phase, Phase::Action);
+    step(gs, Action{ typ: ActionType::Pass, card: None}); // Rhinar's action phase
+    step(gs, Action{ typ: ActionType::Pass, card: None}); // his arsenal (occupied)
+    step(gs, Action{ typ: ActionType::Pass, card: None}); // Dorinthea's action phase
+    step(gs, Action{ typ: ActionType::Pass, card: None}); // her arsenal
+    assert_eq!(gs.turn_player, PlayerIndex::P1);
+}
+
+#[test]
+fn a_face_down_mentor_opens_its_owners_turn_with_a_flip_decision() {
+    let (gs, ruk) = rhinar_second_turn_with_face_down_rukutan();
+    assert_eq!(gs.phase, Phase::MentorFlip);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+
+    // The two choices: flip Ruk'utan, or leave him face down.
+    let actions = legal_actions(&gs);
+    assert_eq!(actions.len(), 2);
+    assert!(actions.iter().any(|a| a.typ == ActionType::FlipFaceUp && a.card == Some(CardIdx::new(ruk))));
+    assert!(actions.iter().any(|a| a.typ == ActionType::Pass));
+}
+
+#[test]
+fn flipping_turns_the_mentor_face_up_and_starts_the_action_phase() {
+    let (mut gs, ruk) = rhinar_second_turn_with_face_down_rukutan();
+    step(&mut gs, Action{ typ: ActionType::FlipFaceUp, card: Some(CardIdx::new(ruk))});
+
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
     assert!(gs.cards[ruk].face_up);
     assert_eq!(gs.cards[ruk].visible, CardVisibleState::BothKnow);
     assert_eq!(gs.cards[ruk].location, CardLocation::P1Arsenal);
 }
 
 #[test]
-fn a_non_mentor_arsenal_card_is_not_turned_face_up() {
+fn a_flipped_mentor_stays_face_up_and_is_never_offered_again() {
+    let (mut gs, ruk) = rhinar_second_turn_with_face_down_rukutan();
+    step(&mut gs, Action{ typ: ActionType::FlipFaceUp, card: Some(CardIdx::new(ruk))});
+
+    // Two more full rounds: each of Rhinar's turns goes straight to the Action
+    // phase, with Ruk'utan still face up.
+    for _ in 0..2 {
+        pass_round_to_rhinars_next_turn(&mut gs);
+        assert_eq!(gs.phase, Phase::Action);
+        assert!(gs.cards[ruk].face_up);
+        assert_eq!(gs.cards[ruk].location, CardLocation::P1Arsenal);
+    }
+}
+
+#[test]
+fn declining_leaves_the_mentor_face_down_and_it_is_offered_again_next_turn() {
+    let (mut gs, ruk) = rhinar_second_turn_with_face_down_rukutan();
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+    assert_eq!(gs.phase, Phase::Action);
+    assert!(!gs.cards[ruk].face_up);
+    assert_eq!(gs.cards[ruk].visible, CardVisibleState::P1Knows, "a declined mentor stays hidden");
+
+    // Still face down, so the next turn opens on the same decision.
+    pass_round_to_rhinars_next_turn(&mut gs);
+    assert_eq!(gs.phase, Phase::MentorFlip);
+    assert_eq!(face_down_mentor_in_arsenal(&gs, PlayerIndex::P1), Some(ruk));
+}
+
+#[test]
+fn a_face_down_mentor_does_not_trigger_after_being_declined() {
+    let (mut gs, ruk) = rhinar_second_turn_with_face_down_rukutan();
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    maybe_mentor_on_play6(&mut gs, PlayerIndex::P1, 6);
+    assert_eq!(gs.cards[ruk].lesson_counters, 0);
+    assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
+}
+
+#[test]
+fn a_non_mentor_arsenal_card_opens_no_flip_decision() {
     let mut gs = setup_rhinar_action_phase();
-    let card = put_in_arsenal(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
-    turn_mentor_face_up(&mut gs, PlayerIndex::P1);
-    assert!(!gs.cards[card].face_up);
+    put_in_arsenal(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
+    assert_eq!(face_down_mentor_in_arsenal(&gs, PlayerIndex::P1), None);
+    pass_round_to_rhinars_next_turn(&mut gs);
+    assert_eq!(gs.phase, Phase::Action);
 }
 
 #[test]

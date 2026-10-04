@@ -20,6 +20,9 @@ pub enum ActionType {
     /// tell `resolve_top_of_stack` that what is resolving is the card's trigger
     /// rather than the card itself — which is already on the combat chain.
     DefendTrigger,
+    /// Turn the face-down mentor in the turn player's arsenal face up, in the
+    /// `MentorFlip` phase at the start of their turn. `card` is the mentor.
+    FlipFaceUp,
     Pass
 }
 

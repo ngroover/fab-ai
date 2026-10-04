@@ -448,12 +448,16 @@ on-play-effect helpers).
             in the arsenal and cleared as a card leaves it (in
             `detach_from_current_zone`). Arsenaling a card at the end of a turn
             leaves it face down.
-          * The flip is `turn_mentor_face_up`, run from `begin_turn` for the turn
-            player's arsenal. It keys off `CardType::Mentor`, since every mentor
-            carries the clause (Hala Goldenhelm will flip too, and do nothing
-            until her own ability is implemented). The "may" is always taken:
-            the engine has no start-of-turn choice, and a face-down mentor can
-            do nothing at all, so turning it up is never worse.
+          * The flip is a decision: when the turn player has a face-down mentor
+            in their arsenal, `begin_turn` opens the turn in the new
+            `Phase::MentorFlip` instead of the Action phase. They either flip it
+            (`ActionType::FlipFaceUp`) or decline (`Pass`); the Action phase
+            follows either way. A flipped mentor stays face up for as long as it
+            is in the arsenal and is never offered again; a declined one stays
+            face down (and hidden) and is offered again at the start of each of
+            its owner's later turns. It keys off `CardType::Mentor`, since every
+            mentor carries the clause (Hala Goldenhelm gets the decision too,
+            and does nothing face up until her own ability is implemented).
           * The trigger is `ConstantEffect::OnPlay6Mentor` (renamed from the
             unused `OnDiscard6Mentor` placeholder — the trigger is a play, not a
             discard), checked by `maybe_mentor_on_play6` in
@@ -476,8 +480,12 @@ on-play-effect helpers).
           * `place_cards` clears `face_up` and `lesson_counters` so a reset game
             starts without them.
         Tests: chief_rukutan_is_a_brute_mentor_with_the_on_play6_mentor_ability,
-               rukutan_arsenaled_face_down_turns_face_up_at_the_start_of_rhinars_next_turn,
-               a_non_mentor_arsenal_card_is_not_turned_face_up,
+               a_face_down_mentor_opens_its_owners_turn_with_a_flip_decision,
+               flipping_turns_the_mentor_face_up_and_starts_the_action_phase,
+               a_flipped_mentor_stays_face_up_and_is_never_offered_again,
+               declining_leaves_the_mentor_face_down_and_it_is_offered_again_next_turn,
+               a_face_down_mentor_does_not_trigger_after_being_declined,
+               a_non_mentor_arsenal_card_opens_no_flip_decision,
                rukutan_is_never_offered_as_a_play_from_the_arsenal,
                face_up_rukutan_intimidates_and_takes_a_lesson_when_a_6_power_card_is_played,
                face_down_rukutan_does_not_trigger,
