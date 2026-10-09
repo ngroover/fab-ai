@@ -94,8 +94,6 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
                     prev_card: CardIdx(0),
                     defense_bonus: 0,
                     ability_used_this_turn: false,
-                    face_up: false,
-                    lesson_counters: 0,
                 });
             }
             CardType::Equipment => {
@@ -107,8 +105,6 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
                     prev_card: CardIdx(0),
                     defense_bonus: 0,
                     ability_used_this_turn: false,
-                    face_up: false,
-                    lesson_counters: 0,
                 });
             }
             _ => {
@@ -120,8 +116,6 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
                     prev_card: CardIdx(0),
                     defense_bonus: 0,
                     ability_used_this_turn: false,
-                    face_up: false,
-                    lesson_counters: 0,
                 });
             }
         }
@@ -161,6 +155,8 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
         next_attack_action_bonus : 0,
         next_brute_attack_conditional_bonus : 0,
         has_intimidated : false,
+        arsenal_face_up : false,
+        arsenal_lesson_counters : 0,
         // Logging is opted into via `reset(gs, true)`; off until then.
         log: None,
     };
@@ -258,6 +254,8 @@ fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
     player.hand_idx = None;
     player.pitch_idx = None;
     player.arsenal_idx = None;
+    player.arsenal_face_up = false;
+    player.arsenal_lesson_counters = 0;
     player.banish_idx = None;
     player.intimidate_banish_idx = None;
     player.resources = 0;
@@ -265,10 +263,6 @@ fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
     // Walk only this player's half of the shared array, recording each card's
     // global slot position alongside mutating its CardState.
     for idx in base..base + PLAYER_CARDS {
-        // Arsenal orientation and mentor lesson counters belong to the game
-        // that set them; a replayed state starts every card without them.
-        cards[idx].face_up = false;
-        cards[idx].lesson_counters = 0;
         let data = cards[idx].card.data();
         match data.typ {
             CardType::Equipment => {

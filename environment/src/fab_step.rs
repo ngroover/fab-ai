@@ -145,7 +145,7 @@ fn begin_turn(gs: &mut Gamestate) {
 pub(crate) fn face_down_mentor_in_arsenal(gs: &Gamestate, pid: PlayerIndex) -> Option<usize> {
     let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
     let idx = player.arsenal_idx?.get();
-    (gs.cards[idx].card.data().typ == CardType::Mentor && !gs.cards[idx].face_up).then_some(idx)
+    (gs.cards[idx].card.data().typ == CardType::Mentor && !player.arsenal_face_up).then_some(idx)
 }
 
 /// Handle the turn player's decision in the `MentorFlip` phase: flip the
@@ -169,21 +169,23 @@ fn handle_mentor_flip_phase(gs: &mut Gamestate, act: Action) {
     gs.phase = Phase::Action;
 }
 
-/// Mark the arsenal card at `idx` face up. A face-up card is public — both
-/// players can see what it is — so its visibility becomes `BothKnow` in the same
-/// step. Every place that turns a card face up goes through here, so the two can
-/// never disagree.
-fn set_face_up(cards: &mut [CardState; TOTAL_CARDS], idx: usize) {
-    cards[idx].face_up = true;
+/// Mark `player`'s arsenal card — `idx`, the card in their arsenal — face up. A
+/// face-up card is public — both players can see what it is — so its
+/// visibility becomes `BothKnow` in the same step. Every place that turns a
+/// card face up goes through here, so the two can never disagree.
+fn set_arsenal_face_up(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], idx: usize) {
+    debug_assert_eq!(player.arsenal_idx, Some(CardIdx::new(idx)), "only the arsenal card can be face up");
+    player.arsenal_face_up = true;
     cards[idx].visible = CardVisibleState::BothKnow;
 }
 
 /// Turn the mentor at `idx` — face down in its owner's arsenal — face up. It
 /// becomes public, and stays face up for as long as it remains in the arsenal
-/// (`face_up` is cleared only as a card leaves that zone).
+/// (`Player::arsenal_face_up` is cleared only as the arsenal empties).
 fn turn_mentor_face_up(gs: &mut Gamestate, idx: usize) {
     let pid = if idx < PLAYER_CARDS { PlayerIndex::P1 } else { PlayerIndex::P2 };
-    set_face_up(&mut gs.cards, idx);
+    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    set_arsenal_face_up(player, &mut gs.cards, idx);
     if gs.logging_enabled() {
         let card = gs.cards[idx].card;
         gs.log_public(format!("{} turns {:?} face up in their arsenal", player_name(pid), card));
@@ -1065,7 +1067,7 @@ fn maybe_mentor_on_play6(gs: &mut Gamestate, owner: PlayerIndex, played_power: u
         return;
     };
     let mentor = arsenal.get();
-    if !gs.cards[mentor].face_up
+    if !player.arsenal_face_up
         || !matches!(gs.cards[mentor].card.data().constant_effect, Some(ConstantEffect::OnPlay6Mentor))
     {
         return;
@@ -1076,8 +1078,9 @@ fn maybe_mentor_on_play6(gs: &mut Gamestate, owner: PlayerIndex, played_power: u
         gs.log_public(format!("{}'s {:?} triggers", player_name(owner), card));
     }
     apply_intimidate(gs, owner);
-    gs.cards[mentor].lesson_counters = gs.cards[mentor].lesson_counters.saturating_add(1);
-    if gs.cards[mentor].lesson_counters >= 2 {
+    let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    player.arsenal_lesson_counters = player.arsenal_lesson_counters.saturating_add(1);
+    if player.arsenal_lesson_counters >= 2 {
         graduate_mentor(gs, owner, mentor, Card::AlphaRampageR);
     }
 }
@@ -1091,13 +1094,12 @@ fn maybe_mentor_on_play6(gs: &mut Gamestate, owner: PlayerIndex, played_power: u
 /// The fetched card arrives face up and is public; like any arsenal card it can
 /// be played this very turn, paid for out of hand.
 fn graduate_mentor(gs: &mut Gamestate, owner: PlayerIndex, mentor: usize, fetch: Card) {
+    // Leaving the arsenal clears its face-up state and lesson counters: they
+    // belonged to the mentor while it sat there, and do not follow it.
     let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     detach_from_current_zone(player, &mut gs.cards, mentor);
     gs.cards[mentor].location = CardLocation::banish(owner);
     gs.cards[mentor].visible = CardVisibleState::BothKnow;
-    // The counters belonged to the mentor while it sat in the arsenal; a card
-    // that changes zones leaves them behind.
-    gs.cards[mentor].lesson_counters = 0;
     attach_to_front_of_zone(&mut gs.cards, &mut player.banish_idx, None, None, mentor);
 
     let deck = CardLocation::deck(owner);
@@ -1125,8 +1127,8 @@ fn graduate_mentor(gs: &mut Gamestate, owner: PlayerIndex, mentor: usize, fetch:
     if let Some(idx) = found {
         detach_from_current_zone(player, cards, idx);
         cards[idx].location = CardLocation::arsenal(owner);
-        set_face_up(cards, idx);
         player.arsenal_idx = Some(CardIdx::new(idx));
+        set_arsenal_face_up(player, cards, idx);
     }
     shuffle_deck_for(player, cards, rng);
 }
@@ -1887,9 +1889,11 @@ fn detach_from_current_zone(player: &mut Player, cards: &mut [CardState; TOTAL_C
         CardLocation::P1Legs | CardLocation::P2Legs => player.legs_idx = None,
         CardLocation::P1Arsenal | CardLocation::P2Arsenal => {
             player.arsenal_idx = None;
-            // Face up or down is a property of the card's place in the arsenal;
-            // wherever it goes next, it does not carry that orientation along.
-            cards[idx].face_up = false;
+            // Face up or down, and any lesson counters, belong to the arsenal
+            // slot's current occupant; an emptied arsenal starts afresh, and the
+            // card leaving takes neither with it.
+            player.arsenal_face_up = false;
+            player.arsenal_lesson_counters = 0;
         }
         CardLocation::P1BanishZone | CardLocation::P2BanishZone => {
             detach_from_linked_list(cards, &mut player.banish_idx, None, None, idx);

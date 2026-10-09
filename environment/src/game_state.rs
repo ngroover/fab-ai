@@ -167,19 +167,6 @@ pub struct CardState {
     /// then, so a countered activation still counts as used — and cleared for
     /// every card at the start of each turn.
     pub ability_used_this_turn : bool,
-    /// Whether this card sits face up in its owner's arsenal. A card arsenaled
-    /// at the end of a turn goes in face down; a mentor turns itself face up at
-    /// the start of its owner's next turn (see `begin_turn`), and a card an
-    /// effect puts into the arsenal "face up" (Chief Ruk'utan fetching Alpha
-    /// Rampage) arrives that way. Only meaningful in the arsenal: it is cleared
-    /// as the card leaves that zone (see `detach_from_current_zone`).
-    pub face_up : bool,
-    /// Lesson counters on this copy of a mentor card (e.g. Chief Ruk'utan, who
-    /// gains one each time his ability triggers and graduates at two). Lives on
-    /// the card rather than the player because the counters belong to that
-    /// object: they are cleared when the card is banished, so they never follow
-    /// it into another zone.
-    pub lesson_counters : u8,
 }
 
 
@@ -345,6 +332,21 @@ pub struct Player {
     /// intimidated this turn" (e.g. Beast Mode's conditional +2 power). Cleared
     /// at the start of each turn so it never carries into a later turn.
     pub has_intimidated : bool,
+    /// Whether the card in this player's arsenal (`arsenal_idx`) is face up. A
+    /// card arsenaled at the end of a turn goes in face down; a mentor may be
+    /// turned face up at the start of its owner's turn (the `MentorFlip` phase),
+    /// and a card an effect puts into the arsenal "face up" (Chief Ruk'utan
+    /// fetching Alpha Rampage) arrives that way. Face up and down only exist in
+    /// the arsenal, which holds one card, so this lives on the player rather
+    /// than on every card; it is cleared whenever the arsenal empties (see
+    /// `detach_from_current_zone`).
+    pub arsenal_face_up : bool,
+    /// Lesson counters on the mentor in this player's arsenal (Chief Ruk'utan
+    /// gains one each time his ability triggers and graduates at two). A mentor
+    /// only collects them while in the arsenal, so like `arsenal_face_up` they
+    /// are kept here and cleared whenever the arsenal empties — the counters
+    /// never follow the card into another zone.
+    pub arsenal_lesson_counters : u8,
     /// This player's view of the game log: what they would legitimately know,
     /// with hidden information (e.g. the identity of a card the opponent drew)
     /// redacted. `None` when logging is disabled (the default, so simulation

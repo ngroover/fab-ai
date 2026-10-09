@@ -3143,7 +3143,7 @@ fn rhinar_with_rukutan(face_up: bool, hand: &[Card]) -> (Gamestate, usize) {
     let mentor = put_in_arsenal(&mut gs, PlayerIndex::P1, Card::ChiefRukutan);
     if face_up {
         turn_mentor_face_up(&mut gs, mentor);
-        assert!(gs.cards[mentor].face_up);
+        assert!(gs.p1.arsenal_face_up);
     }
     (gs, mentor)
 }
@@ -3228,7 +3228,7 @@ fn rhinar_second_turn_with_face_down_rukutan() -> (Gamestate, usize) {
     // Dorinthea's turn is not interrupted — the decision is on its owner's
     // turn — and Ruk'utan stays face down and hidden from her throughout.
     assert_eq!(gs.phase, Phase::Action);
-    assert!(!gs.cards[ruk].face_up);
+    assert!(!gs.p1.arsenal_face_up);
     assert_eq!(gs.cards[ruk].visible, CardVisibleState::P1Knows);
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // her action phase
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // and her arsenal
@@ -3267,7 +3267,7 @@ fn flipping_turns_the_mentor_face_up_and_starts_the_action_phase() {
 
     assert_eq!(gs.phase, Phase::Action);
     assert_eq!(gs.active_player, PlayerIndex::P1);
-    assert!(gs.cards[ruk].face_up);
+    assert!(gs.p1.arsenal_face_up);
     assert_eq!(gs.cards[ruk].visible, CardVisibleState::BothKnow);
     assert_eq!(gs.cards[ruk].location, CardLocation::P1Arsenal);
 }
@@ -3282,7 +3282,7 @@ fn a_flipped_mentor_stays_face_up_and_is_never_offered_again() {
     for _ in 0..2 {
         pass_round_to_rhinars_next_turn(&mut gs);
         assert_eq!(gs.phase, Phase::Action);
-        assert!(gs.cards[ruk].face_up);
+        assert!(gs.p1.arsenal_face_up);
         assert_eq!(gs.cards[ruk].location, CardLocation::P1Arsenal);
     }
 }
@@ -3293,7 +3293,7 @@ fn declining_leaves_the_mentor_face_down_and_it_is_offered_again_next_turn() {
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
     assert_eq!(gs.phase, Phase::Action);
-    assert!(!gs.cards[ruk].face_up);
+    assert!(!gs.p1.arsenal_face_up);
     assert_eq!(gs.cards[ruk].visible, CardVisibleState::P1Knows, "a declined mentor stays hidden");
 
     // Still face down, so the next turn opens on the same decision.
@@ -3307,7 +3307,7 @@ fn a_face_down_mentor_does_not_trigger_after_being_declined() {
     let (mut gs, ruk) = rhinar_second_turn_with_face_down_rukutan();
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     maybe_mentor_on_play6(&mut gs, PlayerIndex::P1, 6);
-    assert_eq!(gs.cards[ruk].lesson_counters, 0);
+    assert_eq!(gs.p1.arsenal_lesson_counters, 0);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
 }
 
@@ -3342,10 +3342,10 @@ fn face_up_rukutan_intimidates_and_takes_a_lesson_when_a_6_power_card_is_played(
     assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mutt));
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
     assert!(gs.p1.has_intimidated, "a Ruk'utan intimidate counts for 'if you've intimidated'");
-    assert_eq!(gs.cards[ruk].lesson_counters, 1);
+    assert_eq!(gs.p1.arsenal_lesson_counters, 1);
     // One lesson is not enough to graduate: Ruk'utan stays, face up.
     assert_eq!(gs.cards[ruk].location, CardLocation::P1Arsenal);
-    assert!(gs.cards[ruk].face_up);
+    assert!(gs.p1.arsenal_face_up);
 }
 
 #[test]
@@ -3353,7 +3353,7 @@ fn face_down_rukutan_does_not_trigger() {
     let (mut gs, ruk) = rhinar_with_rukutan(false, &[Card::MuscleMuttY]);
     play_from_hand_prepaid(&mut gs, Card::MuscleMuttY);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
-    assert_eq!(gs.cards[ruk].lesson_counters, 0);
+    assert_eq!(gs.p1.arsenal_lesson_counters, 0);
 }
 
 #[test]
@@ -3363,7 +3363,7 @@ fn rukutan_ignores_a_card_with_less_than_6_power() {
     let (mut gs, ruk) = rhinar_with_rukutan(true, &[Card::RallyTheRearguardB]);
     play_from_hand_prepaid(&mut gs, Card::RallyTheRearguardB);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
-    assert_eq!(gs.cards[ruk].lesson_counters, 0);
+    assert_eq!(gs.p1.arsenal_lesson_counters, 0);
 }
 
 #[test]
@@ -3372,13 +3372,13 @@ fn rukutan_ignores_the_opponents_6_power_plays() {
     maybe_mentor_on_play6(&mut gs, PlayerIndex::P2, 9);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P1), 0);
-    assert_eq!(gs.cards[ruk].lesson_counters, 0);
+    assert_eq!(gs.p1.arsenal_lesson_counters, 0);
 }
 
 #[test]
 fn rukutan_graduates_on_his_second_lesson_fetching_alpha_rampage_face_up() {
     let (mut gs, ruk) = rhinar_with_rukutan(true, &[Card::MuscleMuttY]);
-    gs.cards[ruk].lesson_counters = 1;
+    gs.p1.arsenal_lesson_counters = 1;
     let rampage = p1_deck_copy_of(&gs, Card::AlphaRampageR).expect("Alpha Rampage should be in the deck");
     let deck_before = gs.p1.deck_size;
 
@@ -3387,16 +3387,16 @@ fn rukutan_graduates_on_his_second_lesson_fetching_alpha_rampage_face_up() {
     // The second lesson still intimidates first.
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
 
-    // Ruk'utan is banished, his counters left behind.
+    // Ruk'utan is banished.
     assert_eq!(gs.cards[ruk].location, CardLocation::P1BanishZone);
     assert_eq!(gs.p1.banish_idx, Some(CardIdx::new(ruk)));
-    assert_eq!(gs.cards[ruk].lesson_counters, 0);
-    assert!(!gs.cards[ruk].face_up);
+    // The arsenal now holds Alpha Rampage, starting with no lesson counters.
+    assert_eq!(gs.p1.arsenal_lesson_counters, 0);
 
     // Alpha Rampage now sits in the arsenal, face up and public.
     assert_eq!(gs.p1.arsenal_idx, Some(CardIdx::new(rampage)));
     assert_eq!(gs.cards[rampage].location, CardLocation::P1Arsenal);
-    assert!(gs.cards[rampage].face_up);
+    assert!(gs.p1.arsenal_face_up);
     assert_eq!(gs.cards[rampage].visible, CardVisibleState::BothKnow);
 
     // The deck lost exactly that card and is still a well-formed list.
@@ -3411,7 +3411,7 @@ fn rukutan_graduates_on_his_second_lesson_fetching_alpha_rampage_face_up() {
 #[test]
 fn rukutan_graduation_shuffles_the_deck() {
     let (mut gs, ruk) = rhinar_with_rukutan(true, &[]);
-    gs.cards[ruk].lesson_counters = 1;
+    gs.p1.arsenal_lesson_counters = 1;
     let rampage = p1_deck_copy_of(&gs, Card::AlphaRampageR).expect("Alpha Rampage should be in the deck");
     let mut expected_unshuffled = deck_order(&gs, PlayerIndex::P1);
     expected_unshuffled.retain(|&i| i != rampage);
@@ -3432,7 +3432,7 @@ fn rukutan_graduation_shuffles_the_deck() {
 #[test]
 fn rukutan_graduates_even_with_no_alpha_rampage_left_to_find() {
     let (mut gs, ruk) = rhinar_with_rukutan(true, &[]);
-    gs.cards[ruk].lesson_counters = 1;
+    gs.p1.arsenal_lesson_counters = 1;
     // Alpha Rampage has already left the deck (here: relabelled away).
     let rampage = p1_deck_copy_of(&gs, Card::AlphaRampageR).expect("Alpha Rampage should be in the deck");
     gs.cards[rampage].card = Card::MuscleMuttY;
@@ -3452,7 +3452,7 @@ fn alpha_rampage_fetched_by_rukutan_can_be_played_from_the_arsenal_that_turn() {
     // Clearing Bellow pitches 3 to pay for it; Pack Call stays back to be the
     // discard its additional cost demands.
     let (mut gs, ruk) = rhinar_with_rukutan(true, &[Card::ClearingBellowB, Card::PackCallY]);
-    gs.cards[ruk].lesson_counters = 1;
+    gs.p1.arsenal_lesson_counters = 1;
     maybe_mentor_on_play6(&mut gs, PlayerIndex::P1, 6);
     let rampage = gs.p1.arsenal_idx.expect("Alpha Rampage should be in the arsenal").get();
     assert_eq!(gs.cards[rampage].card, Card::AlphaRampageR);
@@ -3471,7 +3471,7 @@ fn alpha_rampage_fetched_by_rukutan_can_be_played_from_the_arsenal_that_turn() {
     step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(bellow))});
     assert_eq!(gs.cards[rampage].location, CardLocation::Stack);
     assert_eq!(gs.p1.arsenal_idx, None);
-    assert!(!gs.cards[rampage].face_up);
+    assert!(!gs.p1.arsenal_face_up);
 }
 
 #[test]
@@ -3484,15 +3484,16 @@ fn weapon_swing_does_not_teach_rukutan_a_lesson() {
     gs.p1.resources = 2;
     step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(basher))});
     assert_eq!(gs.cards[basher].location, CardLocation::Stack);
-    assert_eq!(gs.cards[ruk].lesson_counters, 0);
+    assert_eq!(gs.p1.arsenal_lesson_counters, 0);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
 }
 
 #[test]
 fn a_face_up_card_is_always_visible_to_both_players() {
-    // Random play through whole games, checking after every action that each
-    // face-up card is known to both players, and that a face-down card in the
-    // arsenal is never shown to its owner's opponent.
+    // Random play through whole games, checking after every action that a
+    // face-up arsenal card is known to both players, that a face-down one is
+    // never shown to its owner's opponent, and that an empty arsenal carries no
+    // face-up state or lesson counters.
     use rand::{RngExt, SeedableRng};
     let mut face_up_seen = 0;
     for seed in 0..300u64 {
@@ -3503,15 +3504,27 @@ fn a_face_up_card_is_always_visible_to_both_players() {
             let actions = legal_actions(&gs);
             let act = actions[rng.random_range(0..actions.len())];
             step(&mut gs, act);
-            for (idx, cs) in gs.cards.iter().enumerate() {
-                if cs.face_up {
+            for player in [&gs.p1, &gs.p2] {
+                let Some(arsenal) = player.arsenal_idx else {
+                    // An empty arsenal has nothing face up and no counters.
+                    assert!(!player.arsenal_face_up);
+                    assert_eq!(player.arsenal_lesson_counters, 0);
+                    continue;
+                };
+                let cs = gs.cards[arsenal.get()];
+                assert_eq!(cs.location, CardLocation::arsenal(player.pid));
+                if player.arsenal_face_up {
                     face_up_seen += 1;
                     assert_eq!(cs.visible, CardVisibleState::BothKnow,
-                        "face-up {:?} (slot {}) should be visible to both players", cs.card, idx);
-                } else if cs.location == CardLocation::P1Arsenal {
-                    assert_ne!(cs.visible, CardVisibleState::P2Knows);
-                } else if cs.location == CardLocation::P2Arsenal {
-                    assert_ne!(cs.visible, CardVisibleState::P1Knows);
+                        "face-up {:?} should be visible to both players", cs.card);
+                } else {
+                    // Face down: never shown to the opponent alone.
+                    let opponent_only = if player.pid == PlayerIndex::P1 {
+                        CardVisibleState::P2Knows
+                    } else {
+                        CardVisibleState::P1Knows
+                    };
+                    assert_ne!(cs.visible, opponent_only);
                 }
             }
         }

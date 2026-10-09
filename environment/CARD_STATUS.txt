@@ -446,12 +446,14 @@ on-play-effect helpers).
         your deck for Alpha Rampage, put it face up in arsenal and shuffle."
           * Blocks for 3, the same as Hala Goldenhelm (the catalog had 0, in
             both the Rust and Python catalogs).
-          * Face up / face down is the new `CardState::face_up`, meaningful only
-            in the arsenal and cleared as a card leaves it (in
-            `detach_from_current_zone`). Arsenaling a card at the end of a turn
-            leaves it face down.
-            A face-up card is public: `set_face_up` sets it to `BothKnow` in the
-            same step, and is the only way any card is turned face up (the
+          * Face up / face down is `Player::arsenal_face_up`. Orientation only
+            exists in the arsenal, which holds one card, so it is kept on the
+            player rather than taking space in every `CardState`. It is cleared
+            whenever the arsenal empties (in `detach_from_current_zone`).
+            Arsenaling a card at the end of a turn leaves it face down.
+            A face-up card is public: `set_arsenal_face_up` sets it to
+            `BothKnow` in the same step, and is the only way any card is turned
+            face up (the
             mentor flip and the fetched Alpha Rampage both use it). A face-down
             arsenal card stays known only to its owner.
           * The flip is a decision: when the turn player has a face-down mentor
@@ -474,8 +476,11 @@ on-play-effect helpers).
             again like Rhinar's trigger, so the intimidate lands before the
             played card resolves and before blockers are declared. It sets
             `has_intimidated`, so Beast Mode sees it.
-          * Lesson counters are the new `CardState::lesson_counters`, on the
-            card itself, cleared when it is banished.
+          * Lesson counters are `Player::arsenal_lesson_counters`, for the same
+            reason: a mentor only collects them in the arsenal. They are cleared
+            whenever the arsenal empties, so they never follow the card out —
+            banishing Ruk'utan clears them, and the fetched Alpha Rampage starts
+            at 0.
           * Graduation is `graduate_mentor`: the mentor goes to the banish zone
             (now a real linked list on `Player::banish_idx` — it was a single
             index nothing used), the deck is searched for Alpha Rampage, which
@@ -483,8 +488,8 @@ on-play-effect helpers).
             with `fab_game::shuffle_deck_for`. Banish and shuffle happen even if
             Alpha Rampage is no longer in the deck. The fetched copy can be
             played from the arsenal the same turn.
-          * `place_cards` clears `face_up` and `lesson_counters` so a reset game
-            starts without them.
+          * `place_cards` clears `arsenal_face_up` and `arsenal_lesson_counters`
+            with the rest of the arsenal, so a reset game starts without them.
         Tests: chief_rukutan_is_a_brute_mentor_with_the_on_play6_mentor_ability,
                rukutan_blocks_for_3_like_hala,
                a_face_up_card_is_always_visible_to_both_players,
