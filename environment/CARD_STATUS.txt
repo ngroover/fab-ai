@@ -438,6 +438,92 @@ on-play-effect helpers).
                rally_ability_discarding_a_power6_card_does_not_intimidate,
                rally_ability_still_works_when_the_discard_would_have_intimidated
 
+  [x] Chief Ruk'utan (Card::ChiefRukutan)
+        Rhinar's mentor. "While face down in arsenal, at the start of your turn,
+        you may turn him face up. While face up in arsenal, whenever you play a
+        card with 6 or more power, intimidate and put a lesson counter on him.
+        Then if there are 2 or more lesson counters on him, banish him, search
+        your deck for Alpha Rampage, put it face up in arsenal and shuffle."
+          * Blocks for 3, the same as Hala Goldenhelm (the catalog had 0, in
+            both the Rust and Python catalogs).
+          * Face up / face down is `Player::arsenal_face_up`. Orientation only
+            exists in the arsenal, which holds one card, so it is kept on the
+            player rather than taking space in every `CardState`. It is cleared
+            whenever the arsenal empties (in `detach_from_current_zone`).
+            Arsenaling a card at the end of a turn leaves it face down.
+            A face-up card is public: `set_arsenal_face_up` sets it to
+            `BothKnow` in the same step, and is the only way any card is turned
+            face up (the
+            mentor flip and the fetched Alpha Rampage both use it). A face-down
+            arsenal card stays known only to its owner.
+          * The flip is a decision: when the turn player has a face-down mentor
+            in their arsenal, `begin_turn` opens the turn in the new
+            `Phase::MentorFlip` instead of the Action phase. They either flip it
+            (`ActionType::FlipFaceUp`) or decline (`Pass`); the Action phase
+            follows either way. A flipped mentor stays face up for as long as it
+            is in the arsenal and is never offered again; a declined one stays
+            face down (and hidden) and is offered again at the start of each of
+            its owner's later turns. Declining is logged only to the omniscient
+            log and the decider's own log (`Gamestate::log_private`): the
+            opponent's log gets no entry, since only a mentor is ever offered
+            the flip and a public decline would reveal one. Flipping is logged
+            publicly, as it reveals the card anyway. It keys off `CardType::Mentor`, since every
+            mentor carries the clause (Hala Goldenhelm gets the decision too,
+            and does nothing face up until her own ability is implemented).
+          * The card is split into two effects. His constant effect is the
+            general `ConstantEffect::OnPlay6Intimidate` ("whenever you play a
+            card with 6 or more power, intimidate"), the play counterpart of
+            Rhinar's `OnDiscard6Intimidate`; it replaces the unused
+            `OnDiscard6Mentor` placeholder. His lesson counter and search are
+            the new `CardData::mentor_effect`,
+            `MentorEffect::AlphaRampageSearch`, run by
+            `mentor_alpha_rampage_search` on the same trigger, after the
+            intimidate. Every other catalog entry has `mentor_effect: None`.
+          * The trigger is checked by `maybe_play6_intimidate` in
+            `commit_pending_to_stack` after any additional cost is paid. Only a
+            `PlayCard` counts: a weapon swing or other activation is not playing
+            a card. Power is the printed power, as for Rhinar's discard trigger.
+            It resolves inline at play time rather than as its own stack layer,
+            again like Rhinar's trigger, so the intimidate lands before the
+            played card resolves and before blockers are declared. It sets
+            `has_intimidated`, so Beast Mode sees it.
+          * Lesson counters are `Player::arsenal_lesson_counters`, for the same
+            reason: a mentor only collects them in the arsenal. They are cleared
+            whenever the arsenal empties, so they never follow the card out —
+            banishing Ruk'utan clears them, and the fetched Alpha Rampage starts
+            at 0.
+          * Graduation (`mentor_alpha_rampage_search` reaching 2 counters) is
+            `graduate_mentor`: the mentor goes to the banish zone
+            (now a real linked list on `Player::banish_idx` — it was a single
+            index nothing used), the deck is searched for Alpha Rampage, which
+            goes into the arsenal face up and public, and the deck is shuffled
+            with `fab_game::shuffle_deck_for`. Banish and shuffle happen even if
+            Alpha Rampage is no longer in the deck. The fetched copy can be
+            played from the arsenal the same turn.
+          * `place_cards` clears `arsenal_face_up` and `arsenal_lesson_counters`
+            with the rest of the arsenal, so a reset game starts without them.
+        Tests: chief_rukutan_is_a_brute_mentor_with_play6_intimidate_and_alpha_rampage_search,
+               rukutan_blocks_for_3_like_hala,
+               a_face_up_card_is_always_visible_to_both_players,
+               declining_the_flip_is_not_logged_to_the_opponent,
+               flipping_is_logged_publicly,
+               a_face_down_mentor_opens_its_owners_turn_with_a_flip_decision,
+               flipping_turns_the_mentor_face_up_and_starts_the_action_phase,
+               a_flipped_mentor_stays_face_up_and_is_never_offered_again,
+               declining_leaves_the_mentor_face_down_and_it_is_offered_again_next_turn,
+               a_face_down_mentor_does_not_trigger_after_being_declined,
+               a_non_mentor_arsenal_card_opens_no_flip_decision,
+               rukutan_is_never_offered_as_a_play_from_the_arsenal,
+               face_up_rukutan_intimidates_and_takes_a_lesson_when_a_6_power_card_is_played,
+               face_down_rukutan_does_not_trigger,
+               rukutan_ignores_a_card_with_less_than_6_power,
+               rukutan_ignores_the_opponents_6_power_plays,
+               rukutan_graduates_on_his_second_lesson_fetching_alpha_rampage_face_up,
+               rukutan_graduation_shuffles_the_deck,
+               rukutan_graduates_even_with_no_alpha_rampage_left_to_find,
+               alpha_rampage_fetched_by_rukutan_can_be_played_from_the_arsenal_that_turn,
+               weapon_swing_does_not_teach_rukutan_a_lesson
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -462,7 +548,7 @@ on-play-effect helpers).
  TODO — RHINAR hero / weapon / equipment
 ------------------------------------------------------------------------------
   [x] Rhinar (hero)          (Card::Rhinar)  — see COMPLETE section above
-  [ ] Chief Rukutan          (Card::ChiefRukutan)
+  [x] Chief Rukutan          (Card::ChiefRukutan)  — see COMPLETE section above
   [ ] Bone Basher (weapon)   (Card::BoneBasher)
   [ ] Blossom of Spring      (Card::BlossomOfSpring)
   [ ] Bone Vizier            (Card::BoneVizier)

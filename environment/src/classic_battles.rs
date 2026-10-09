@@ -1,5 +1,5 @@
 use crate::cards::{Card, CardClass, CardData, CardType, Color, EquipmentSlot, Keyword, WeaponType};
-use crate::card_effects::{AdditionalCostType, Ability, ConstantEffect, DefendEffect, OnPlayConditionType, OnPlayEffect, OnPlayEffectType};
+use crate::card_effects::{AdditionalCostType, Ability, ConstantEffect, DefendEffect, MentorEffect, OnPlayConditionType, OnPlayEffect, OnPlayEffectType};
 use std::sync::LazyLock;
 
 /// Catalog of every card in the Rhinar vs Dorinthea classic battle.
@@ -39,6 +39,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Dorinthea, Quicksilver Prodigy
         CardData {
@@ -63,6 +64,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // ── RHINAR — RED ────────────────────────────────────────────────
         // Alpha Rampage
@@ -89,6 +91,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Awakening Bellow
         CardData {
@@ -119,6 +122,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
                 effectType: OnPlayEffectType::NextBrutePower,
                 magnitude: 3,
             }),
+            mentor_effect: None,
         },
         // Bare Fangs
         CardData {
@@ -147,6 +151,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
                 effectType: OnPlayEffectType::ConditionalPower,
                 magnitude: 2,
             }),
+            mentor_effect: None,
         },
         // Beast Mode
         CardData {
@@ -176,6 +181,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
                 effectType: OnPlayEffectType::ConditionalPower,
                 magnitude: 2,
             }),
+            mentor_effect: None,
         },
         // Pack Hunt
         CardData {
@@ -200,6 +206,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Wild Ride
         CardData {
@@ -231,6 +238,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
                 effectType: OnPlayEffectType::ConditionalGoAgain,
                 magnitude: 0,
             }),
+            mentor_effect: None,
         },
         // Wrecking Ball
         CardData {
@@ -263,6 +271,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
                 effectType: OnPlayEffectType::ConditionalIntimidate,
                 magnitude: 0,
             }),
+            mentor_effect: None,
         },
         // ── RHINAR — YELLOW ─────────────────────────────────────────────
         // Barraging Beatdown
@@ -298,6 +307,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
                 effectType: OnPlayEffectType::NextBruteConditionalPower,
                 magnitude: 3,
             }),
+            mentor_effect: None,
         },
         // Muscle Mutt
         CardData {
@@ -322,6 +332,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Pack Call
         CardData {
@@ -351,6 +362,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Raging Onslaught
         CardData {
@@ -375,6 +387,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Smash Instinct
         CardData {
@@ -399,6 +412,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Smash with Big Tree
         CardData {
@@ -423,6 +437,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Wounded Bull
         CardData {
@@ -455,6 +470,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
                 effectType: OnPlayEffectType::ConditionalPower,
                 magnitude: 1,
             }),
+            mentor_effect: None,
         },
         // ── RHINAR — BLUE ───────────────────────────────────────────────
         // Clearing Bellow
@@ -480,6 +496,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Come to Fight
         CardData {
@@ -511,6 +528,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
                 effectType: OnPlayEffectType::NextAttackPower,
                 magnitude: 1,
             }),
+            mentor_effect: None,
         },
         // Dodge
         CardData {
@@ -535,6 +553,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Rally the Rearguard
         CardData {
@@ -559,6 +578,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Titanium Bauble
         CardData {
@@ -583,6 +603,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Wrecker Romp
         CardData {
@@ -608,6 +629,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // ── RHINAR — MENTOR ─────────────────────────────────────────────
         // Chief Ruk'utan
@@ -617,7 +639,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             cost: 0,
             pitch: 0,
             power: 0,
-            defense: 0,
+            defense: 3,
             color: None,
             no_block: false,
             slot: None,
@@ -625,7 +647,16 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
-            constant_effect: None,
+            // "While Chief Ruk'utan is face up in arsenal, whenever you play a
+            // card with 6 or more power, intimidate and put a lesson counter on
+            // Chief Ruk'utan. Then if there are 2 or more lesson counters on him,
+            // banish him, search your deck for Alpha Rampage, put it face up in
+            // arsenal and shuffle." Split in two: the intimidate is the constant
+            // effect, and the lesson counter and search are his mentor effect,
+            // below. The face-down half — "at the start of your turn, you may
+            // turn him face up" — is shared by every mentor and keys off the
+            // card type rather than either effect (see `begin_turn`).
+            constant_effect: Some(ConstantEffect::OnPlay6Intimidate),
             ability: None,
             defend_effect: None,
             next_attack_effect: None,
@@ -633,6 +664,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: Some(MentorEffect::AlphaRampageSearch),
         },
         // ── RHINAR — EQUIPMENT ──────────────────────────────────────────
         // Bone Basher
@@ -658,6 +690,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Blossom of Spring
         CardData {
@@ -682,6 +715,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Bone Vizier
         CardData {
@@ -706,6 +740,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Ironhide Gauntlet
         CardData {
@@ -730,6 +765,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Ironhide Legs
         CardData {
@@ -754,6 +790,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // ── DORINTHEA — RED ─────────────────────────────────────────────
         // En Garde
@@ -779,6 +816,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Flock of the Feather Walkers
         CardData {
@@ -803,6 +841,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // In the Swing
         CardData {
@@ -827,6 +866,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Ironsong Response
         CardData {
@@ -851,6 +891,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Second Swing
         CardData {
@@ -875,6 +916,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Sharpen Steel
         CardData {
@@ -899,6 +941,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Thrust
         CardData {
@@ -923,6 +966,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Warrior's Valor
         CardData {
@@ -947,6 +991,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // ── DORINTHEA — YELLOW ──────────────────────────────────────────
         // Driving Blade
@@ -972,6 +1017,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Glistening Steelblade
         CardData {
@@ -996,6 +1042,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // On a Knife Edge
         CardData {
@@ -1020,6 +1067,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Out for Blood
         CardData {
@@ -1044,6 +1092,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Run Through
         CardData {
@@ -1068,6 +1117,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Slice and Dice
         CardData {
@@ -1092,6 +1142,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // ── DORINTHEA — BLUE ────────────────────────────────────────────
         // Blade Flash
@@ -1117,6 +1168,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Hit and Run
         CardData {
@@ -1141,6 +1193,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Sigil of Solace
         CardData {
@@ -1171,6 +1224,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
                 effectType: OnPlayEffectType::GainLife,
                 magnitude: 1,
             }),
+            mentor_effect: None,
         },
         // Toughen Up
         CardData {
@@ -1195,6 +1249,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Visit the Blacksmith
         CardData {
@@ -1219,6 +1274,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // ── DORINTHEA — MENTOR ──────────────────────────────────────────
         // Hala Goldenhelm
@@ -1244,6 +1300,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // ── DORINTHEA — EQUIPMENT ───────────────────────────────────────
         // Dawnblade, Resplendent
@@ -1269,6 +1326,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Gallantry Gold
         CardData {
@@ -1293,6 +1351,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Ironrot Helm
         CardData {
@@ -1317,6 +1376,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
         // Ironrot Legs
         CardData {
@@ -1341,6 +1401,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         },
     ]
 });

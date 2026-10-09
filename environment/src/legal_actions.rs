@@ -2,7 +2,7 @@ use crate::game_state::{Gamestate, Phase, Player, PlayerIndex, CardState, CardId
 use crate::action::{Action, ActionType};
 use crate::cards::{Card, CardData, CardType};
 use crate::card_effects::AdditionalCostType;
-use crate::fab_step::{chain_link_indices, current_chain_link, uses_action_point};
+use crate::fab_step::{chain_link_indices, current_chain_link, face_down_mentor_in_arsenal, uses_action_point};
 
 
 pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
@@ -17,6 +17,7 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
                         card: None});
             actions
         },
+        Phase::MentorFlip => legal_mentor_flip_phase(gs),
         Phase::Action => legal_action_phase(gs),
         Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch => legal_pitch_phase(gs),
         Phase::ActionInstant => legal_instant_phase(gs),
@@ -29,6 +30,23 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
         // Terminal phases: the game is over, so there are no legal actions.
         Phase::Player1Win | Phase::Player2Win | Phase::Draw => Vec::new(),
     }
+}
+
+/// The start-of-turn mentor decision: turn the face-down mentor in the turn
+/// player's arsenal face up, or pass to leave it face down. Both always offered.
+fn legal_mentor_flip_phase(gs: &Gamestate) -> Vec<Action> {
+    let mut actions = Vec::new();
+    if let Some(idx) = face_down_mentor_in_arsenal(gs, gs.active_player) {
+        actions.push(Action {
+            typ: ActionType::FlipFaceUp,
+            card: Some(CardIdx::new(idx)),
+        });
+    }
+    actions.push(Action {
+        typ: ActionType::Pass,
+        card: None,
+    });
+    actions
 }
 
 fn legal_defend_phase(gs: &Gamestate) -> Vec<Action> {
@@ -821,6 +839,7 @@ mod tests {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         }
     }
 

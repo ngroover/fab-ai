@@ -155,6 +155,8 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
         next_attack_action_bonus : 0,
         next_brute_attack_conditional_bonus : 0,
         has_intimidated : false,
+        arsenal_face_up : false,
+        arsenal_lesson_counters : 0,
         // Logging is opted into via `reset(gs, true)`; off until then.
         log: None,
     };
@@ -202,7 +204,10 @@ pub fn shuffle_decks(gs: &mut Gamestate) {
     shuffle_deck_for(&mut gs.p2, &mut gs.cards, &mut gs.rng);
 }
 
-fn shuffle_deck_for(
+/// Shuffle `player`'s deck: every card of theirs tagged as in the deck is put in
+/// a random order and relinked, top to bottom. Also used mid-game by effects
+/// that search the deck and then shuffle it (Chief Ruk'utan).
+pub(crate) fn shuffle_deck_for(
     player: &mut Player,
     cards: &mut [CardState; TOTAL_CARDS],
     rng: &mut SmallRng,
@@ -249,6 +254,8 @@ fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
     player.hand_idx = None;
     player.pitch_idx = None;
     player.arsenal_idx = None;
+    player.arsenal_face_up = false;
+    player.arsenal_lesson_counters = 0;
     player.banish_idx = None;
     player.intimidate_banish_idx = None;
     player.resources = 0;

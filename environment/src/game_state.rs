@@ -175,6 +175,14 @@ pub struct CardState {
 pub enum Phase {
     Start,
     ChooseFirst,
+    /// The start of the turn player's turn, entered only when a mentor sits face
+    /// down in their arsenal: "While [this mentor] is face down in arsenal, at
+    /// the start of your turn, you may turn [it] face up." The turn player either
+    /// flips it (`FlipFaceUp`) or declines (`Pass`); either way the Action phase
+    /// follows. A mentor turned face up stays that way — it is never offered
+    /// again — while a declined one is offered again at the start of each of its
+    /// owner's later turns, for as long as it stays face down.
+    MentorFlip,
     Action,
     ActionPitch,
     ActionInstant,
@@ -324,6 +332,21 @@ pub struct Player {
     /// intimidated this turn" (e.g. Beast Mode's conditional +2 power). Cleared
     /// at the start of each turn so it never carries into a later turn.
     pub has_intimidated : bool,
+    /// Whether the card in this player's arsenal (`arsenal_idx`) is face up. A
+    /// card arsenaled at the end of a turn goes in face down; a mentor may be
+    /// turned face up at the start of its owner's turn (the `MentorFlip` phase),
+    /// and a card an effect puts into the arsenal "face up" (Chief Ruk'utan
+    /// fetching Alpha Rampage) arrives that way. Face up and down only exist in
+    /// the arsenal, which holds one card, so this lives on the player rather
+    /// than on every card; it is cleared whenever the arsenal empties (see
+    /// `detach_from_current_zone`).
+    pub arsenal_face_up : bool,
+    /// Lesson counters on the mentor in this player's arsenal (Chief Ruk'utan
+    /// gains one each time his ability triggers and graduates at two). A mentor
+    /// only collects them while in the arsenal, so like `arsenal_face_up` they
+    /// are kept here and cleared whenever the arsenal empties — the counters
+    /// never follow the card into another zone.
+    pub arsenal_lesson_counters : u8,
     /// This player's view of the game log: what they would legitimately know,
     /// with hidden information (e.g. the identity of a card the opponent drew)
     /// redacted. `None` when logging is disabled (the default, so simulation
@@ -479,6 +502,22 @@ impl Gamestate {
         }
         if let Some(log) = &mut self.log {
             log.push(full);
+        }
+    }
+
+    /// Append an event only `pid` is entitled to know about: it goes to the
+    /// omniscient gamestate log and `pid`'s own log, and the opponent's log gets
+    /// no entry at all — not even a redacted one, since the bare fact that the
+    /// event happened would itself give something away (e.g. declining to flip a
+    /// mentor reveals that there is a mentor in the arsenal). A no-op when
+    /// logging is disabled.
+    pub fn log_private(&mut self, pid: PlayerIndex, msg: String) {
+        let own = if pid == PlayerIndex::P1 { &mut self.p1.log } else { &mut self.p2.log };
+        if let Some(log) = own {
+            log.push(msg.clone());
+        }
+        if let Some(log) = &mut self.log {
+            log.push(msg);
         }
     }
 }
