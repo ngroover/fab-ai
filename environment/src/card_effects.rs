@@ -6,13 +6,26 @@ use crate::cards::CardType;
 pub enum ConstantEffect {
     OnDiscard6Intimidate,
     OnDawnbladeGoAgainExtraSwing,
-    /// Chief Ruk'utan's mentor ability: while the card sits face up in its
-    /// owner's arsenal, whenever its owner plays a card with 6 or more power,
-    /// they intimidate and put a lesson counter on it; at 2 or more lesson
-    /// counters it is banished and Alpha Rampage is fetched from the deck into
-    /// the arsenal, face up (see `fab_step::maybe_mentor_on_play6`).
-    OnPlay6Mentor,
+    /// "Whenever you play a card with 6 or more power, intimidate." The play
+    /// counterpart of `OnDiscard6Intimidate`. Carried by Chief Ruk'utan, whose
+    /// constant effect only applies while he is face up in his owner's arsenal
+    /// (see `fab_step::maybe_play6_intimidate`); his lesson counter and Alpha
+    /// Rampage search ride the same trigger as his `MentorEffect`.
+    OnPlay6Intimidate,
     OnSwordHitMentor,
+}
+
+/// What a mentor does with its lessons, on top of its constant effect. A
+/// mentor collects a lesson counter each time its constant effect triggers
+/// (counters live on the arsenal, `Player::arsenal_lesson_counters`), and its
+/// mentor effect says what that lesson builds towards.
+#[repr(u8)]
+pub enum MentorEffect {
+    /// Chief Ruk'utan: "put a lesson counter on Chief Ruk'utan. Then if there
+    /// are 2 or more lesson counters on him, banish him, search your deck for
+    /// Alpha Rampage, put it face up in arsenal and shuffle." See
+    /// `fab_step::mentor_alpha_rampage_search`.
+    AlphaRampageSearch,
 }
 
 #[repr(u8)]

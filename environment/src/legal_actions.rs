@@ -839,6 +839,7 @@ mod tests {
             target_effect: None,
             play_condition: None,
             play_effect: None,
+            mentor_effect: None,
         }
     }
 

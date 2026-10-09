@@ -3200,12 +3200,15 @@ fn rukutan_blocks_for_3_like_hala() {
 }
 
 #[test]
-fn chief_rukutan_is_a_brute_mentor_with_the_on_play6_mentor_ability() {
+fn chief_rukutan_is_a_brute_mentor_with_play6_intimidate_and_alpha_rampage_search() {
     use crate::card_effects::ConstantEffect;
     let data = Card::ChiefRukutan.data();
     assert_eq!(data.typ, CardType::Mentor);
     assert_eq!(data.card_class, CardClass::Brute);
-    assert!(matches!(data.constant_effect, Some(ConstantEffect::OnPlay6Mentor)));
+    // The intimidate is the general play-6 constant effect; the lesson counter
+    // and Alpha Rampage search are his mentor effect.
+    assert!(matches!(data.constant_effect, Some(ConstantEffect::OnPlay6Intimidate)));
+    assert!(matches!(data.mentor_effect, Some(crate::card_effects::MentorEffect::AlphaRampageSearch)));
     // The card it fetches is in Rhinar's deck to be found.
     assert!(crate::decks::build_rhinar_deck().contains(&Card::AlphaRampageR));
 }
@@ -3306,7 +3309,7 @@ fn declining_leaves_the_mentor_face_down_and_it_is_offered_again_next_turn() {
 fn a_face_down_mentor_does_not_trigger_after_being_declined() {
     let (mut gs, ruk) = rhinar_second_turn_with_face_down_rukutan();
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-    maybe_mentor_on_play6(&mut gs, PlayerIndex::P1, 6);
+    maybe_play6_intimidate(&mut gs, PlayerIndex::P1, 6);
     assert_eq!(gs.p1.arsenal_lesson_counters, 0);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
 }
@@ -3369,7 +3372,7 @@ fn rukutan_ignores_a_card_with_less_than_6_power() {
 #[test]
 fn rukutan_ignores_the_opponents_6_power_plays() {
     let (mut gs, ruk) = rhinar_with_rukutan(true, &[]);
-    maybe_mentor_on_play6(&mut gs, PlayerIndex::P2, 9);
+    maybe_play6_intimidate(&mut gs, PlayerIndex::P2, 9);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P1), 0);
     assert_eq!(gs.p1.arsenal_lesson_counters, 0);
@@ -3416,7 +3419,7 @@ fn rukutan_graduation_shuffles_the_deck() {
     let mut expected_unshuffled = deck_order(&gs, PlayerIndex::P1);
     expected_unshuffled.retain(|&i| i != rampage);
 
-    maybe_mentor_on_play6(&mut gs, PlayerIndex::P1, 6);
+    maybe_play6_intimidate(&mut gs, PlayerIndex::P1, 6);
 
     let after = deck_order(&gs, PlayerIndex::P1);
     // Same cards, new order (a 30-odd card deck coming back in its old order
@@ -3438,7 +3441,7 @@ fn rukutan_graduates_even_with_no_alpha_rampage_left_to_find() {
     gs.cards[rampage].card = Card::MuscleMuttY;
     let deck_before = gs.p1.deck_size;
 
-    maybe_mentor_on_play6(&mut gs, PlayerIndex::P1, 6);
+    maybe_play6_intimidate(&mut gs, PlayerIndex::P1, 6);
 
     // He is banished all the same; the arsenal is simply left empty.
     assert_eq!(gs.cards[ruk].location, CardLocation::P1BanishZone);
@@ -3453,7 +3456,7 @@ fn alpha_rampage_fetched_by_rukutan_can_be_played_from_the_arsenal_that_turn() {
     // discard its additional cost demands.
     let (mut gs, ruk) = rhinar_with_rukutan(true, &[Card::ClearingBellowB, Card::PackCallY]);
     gs.p1.arsenal_lesson_counters = 1;
-    maybe_mentor_on_play6(&mut gs, PlayerIndex::P1, 6);
+    maybe_play6_intimidate(&mut gs, PlayerIndex::P1, 6);
     let rampage = gs.p1.arsenal_idx.expect("Alpha Rampage should be in the arsenal").get();
     assert_eq!(gs.cards[rampage].card, Card::AlphaRampageR);
     assert_eq!(gs.phase, Phase::Action);

@@ -1,7 +1,7 @@
 use crate::action::{Action,ActionType};
 use crate::game_state::{Gamestate,Phase,Player,PendingCard,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
 use crate::cards::{Card,CardClass,CardData,CardType,Keyword};
-use crate::card_effects::{Ability,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect};
+use crate::card_effects::{Ability,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,MentorEffect};
 use crate::fab_game::shuffle_deck_for;
 use rand::RngExt;
 
@@ -1036,17 +1036,19 @@ fn maybe_discard6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, discarded_p
     }
 }
 
-/// Chief Ruk'utan's mentor ability (`ConstantEffect::OnPlay6Mentor`), checked
-/// each time `owner` plays a card, with `played_power` the played card's printed
-/// power: "While Chief Ruk'utan is face up in arsenal, whenever you play a card
-/// with 6 or more power, intimidate and put a lesson counter on Chief Ruk'utan.
-/// Then if there are 2 or more lesson counters on him, banish him, search your
-/// deck for Alpha Rampage, put it face up in arsenal and shuffle."
+/// `ConstantEffect::OnPlay6Intimidate`, checked each time `owner` plays a card,
+/// with `played_power` the played card's printed power: "whenever you play a
+/// card with 6 or more power, intimidate". The play counterpart of Rhinar's
+/// `OnDiscard6Intimidate` (`maybe_discard6_intimidate`).
 ///
-/// - **Face up in arsenal**: the mentor must be the card in `owner`'s arsenal
-///   and turned face up (see `handle_mentor_flip_phase`). Face down, it does nothing.
-///   The card that triggers it is always played from hand, since the mentor is
-///   occupying the arsenal.
+/// Its only carrier is Chief Ruk'utan, whose text puts the whole ability behind
+/// "While Chief Ruk'utan is face up in arsenal", so it is read off the card in
+/// `owner`'s arsenal and only while that card is face up (see
+/// `handle_mentor_flip_phase`). The card that triggers it is always played from
+/// hand, since the mentor is occupying the arsenal. Once the intimidate is done,
+/// a mentor's lesson follows on the same trigger: its `MentorEffect`, if it has
+/// one (Ruk'utan's `mentor_alpha_rampage_search`).
+///
 /// - **Power** is the printed power, the same reading Rhinar's discard trigger
 ///   uses: the engine banks power bonuses on the player and applies them at
 ///   combat damage, so no played card has a modified power to read here.
@@ -1058,7 +1060,7 @@ fn maybe_discard6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, discarded_p
 /// - It is not limited to its owner's turn ("whenever you play"); no card that
 ///   can be played on the opponent's turn has 6 power today, so in practice it
 ///   only fires on its owner's turn.
-fn maybe_mentor_on_play6(gs: &mut Gamestate, owner: PlayerIndex, played_power: u8) {
+fn maybe_play6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, played_power: u8) {
     if played_power < 6 {
         return;
     }
@@ -1067,8 +1069,9 @@ fn maybe_mentor_on_play6(gs: &mut Gamestate, owner: PlayerIndex, played_power: u
         return;
     };
     let mentor = arsenal.get();
+    let data = gs.cards[mentor].card.data();
     if !player.arsenal_face_up
-        || !matches!(gs.cards[mentor].card.data().constant_effect, Some(ConstantEffect::OnPlay6Mentor))
+        || !matches!(data.constant_effect, Some(ConstantEffect::OnPlay6Intimidate))
     {
         return;
     }
@@ -1078,6 +1081,19 @@ fn maybe_mentor_on_play6(gs: &mut Gamestate, owner: PlayerIndex, played_power: u
         gs.log_public(format!("{}'s {:?} triggers", player_name(owner), card));
     }
     apply_intimidate(gs, owner);
+    match data.mentor_effect {
+        Some(MentorEffect::AlphaRampageSearch) => mentor_alpha_rampage_search(gs, owner, mentor),
+        None => {}
+    }
+}
+
+/// Chief Ruk'utan's lesson (`MentorEffect::AlphaRampageSearch`), run each time
+/// his constant effect triggers: "put a lesson counter on Chief Ruk'utan. Then
+/// if there are 2 or more lesson counters on him, banish him, search your deck
+/// for Alpha Rampage, put it face up in arsenal and shuffle." `mentor` is
+/// Ruk'utan, in `owner`'s arsenal; the counters are the arsenal's
+/// (`Player::arsenal_lesson_counters`).
+fn mentor_alpha_rampage_search(gs: &mut Gamestate, owner: PlayerIndex, mentor: usize) {
     let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     player.arsenal_lesson_counters = player.arsenal_lesson_counters.saturating_add(1);
     if player.arsenal_lesson_counters >= 2 {
@@ -1476,7 +1492,7 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     // weapon or activating an ability is not playing a card.
     if pending.typ == ActionType::PlayCard {
         let owner = gs.active_player;
-        maybe_mentor_on_play6(gs, owner, cs.card.data().power);
+        maybe_play6_intimidate(gs, owner, cs.card.data().power);
     }
 
     // An activated ability pays its own costs here for the same reason: the

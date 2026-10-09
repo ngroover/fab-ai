@@ -466,9 +466,16 @@ on-play-effect helpers).
             its owner's later turns. It keys off `CardType::Mentor`, since every
             mentor carries the clause (Hala Goldenhelm gets the decision too,
             and does nothing face up until her own ability is implemented).
-          * The trigger is `ConstantEffect::OnPlay6Mentor` (renamed from the
-            unused `OnDiscard6Mentor` placeholder — the trigger is a play, not a
-            discard), checked by `maybe_mentor_on_play6` in
+          * The card is split into two effects. His constant effect is the
+            general `ConstantEffect::OnPlay6Intimidate` ("whenever you play a
+            card with 6 or more power, intimidate"), the play counterpart of
+            Rhinar's `OnDiscard6Intimidate`; it replaces the unused
+            `OnDiscard6Mentor` placeholder. His lesson counter and search are
+            the new `CardData::mentor_effect`,
+            `MentorEffect::AlphaRampageSearch`, run by
+            `mentor_alpha_rampage_search` on the same trigger, after the
+            intimidate. Every other catalog entry has `mentor_effect: None`.
+          * The trigger is checked by `maybe_play6_intimidate` in
             `commit_pending_to_stack` after any additional cost is paid. Only a
             `PlayCard` counts: a weapon swing or other activation is not playing
             a card. Power is the printed power, as for Rhinar's discard trigger.
@@ -481,7 +488,8 @@ on-play-effect helpers).
             whenever the arsenal empties, so they never follow the card out —
             banishing Ruk'utan clears them, and the fetched Alpha Rampage starts
             at 0.
-          * Graduation is `graduate_mentor`: the mentor goes to the banish zone
+          * Graduation (`mentor_alpha_rampage_search` reaching 2 counters) is
+            `graduate_mentor`: the mentor goes to the banish zone
             (now a real linked list on `Player::banish_idx` — it was a single
             index nothing used), the deck is searched for Alpha Rampage, which
             goes into the arsenal face up and public, and the deck is shuffled
@@ -490,7 +498,7 @@ on-play-effect helpers).
             played from the arsenal the same turn.
           * `place_cards` clears `arsenal_face_up` and `arsenal_lesson_counters`
             with the rest of the arsenal, so a reset game starts without them.
-        Tests: chief_rukutan_is_a_brute_mentor_with_the_on_play6_mentor_ability,
+        Tests: chief_rukutan_is_a_brute_mentor_with_play6_intimidate_and_alpha_rampage_search,
                rukutan_blocks_for_3_like_hala,
                a_face_up_card_is_always_visible_to_both_players,
                a_face_down_mentor_opens_its_owners_turn_with_a_flip_decision,
