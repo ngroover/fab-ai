@@ -3306,6 +3306,52 @@ fn declining_leaves_the_mentor_face_down_and_it_is_offered_again_next_turn() {
 }
 
 #[test]
+fn declining_the_flip_is_not_logged_to_the_opponent() {
+    // Same lead-up as `rhinar_second_turn_with_face_down_rukutan`, with logging
+    // on so each player's view can be checked.
+    let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+    reset(&mut gs, true);
+    step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+    let ruk = gs.p1.hand_idx.expect("opening hand").get();
+    gs.cards[ruk].card = Card::ChiefRukutan;
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Arsenal, card: Some(CardIdx::new(ruk))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.phase, Phase::MentorFlip);
+
+    let p2_before = gs.p2.log.as_ref().unwrap().len();
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+    let declined = "P1 leaves their arsenal face down";
+    assert_eq!(gs.log.as_ref().unwrap().last().map(String::as_str), Some(declined));
+    assert_eq!(gs.p1.log.as_ref().unwrap().last().map(String::as_str), Some(declined));
+    // Dorinthea's log gains nothing, so she cannot tell a decision was made.
+    assert_eq!(gs.p2.log.as_ref().unwrap().len(), p2_before);
+    assert!(gs.p2.log.as_ref().unwrap().iter().all(|l| !l.contains("face down")));
+}
+
+#[test]
+fn flipping_is_logged_publicly() {
+    // Turning the mentor face up reveals it anyway, so both players see it.
+    let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+    reset(&mut gs, true);
+    step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+    let ruk = gs.p1.hand_idx.expect("opening hand").get();
+    gs.cards[ruk].card = Card::ChiefRukutan;
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Arsenal, card: Some(CardIdx::new(ruk))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::FlipFaceUp, card: Some(CardIdx::new(ruk))});
+
+    let flipped = "P1 turns ChiefRukutan face up in their arsenal";
+    for log in [&gs.log, &gs.p1.log, &gs.p2.log] {
+        assert_eq!(log.as_ref().unwrap().last().map(String::as_str), Some(flipped));
+    }
+}
+
+#[test]
 fn a_face_down_mentor_does_not_trigger_after_being_declined() {
     let (mut gs, ruk) = rhinar_second_turn_with_face_down_rukutan();
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});

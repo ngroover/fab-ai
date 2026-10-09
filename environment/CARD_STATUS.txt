@@ -463,7 +463,11 @@ on-play-effect helpers).
             follows either way. A flipped mentor stays face up for as long as it
             is in the arsenal and is never offered again; a declined one stays
             face down (and hidden) and is offered again at the start of each of
-            its owner's later turns. It keys off `CardType::Mentor`, since every
+            its owner's later turns. Declining is logged only to the omniscient
+            log and the decider's own log (`Gamestate::log_private`): the
+            opponent's log gets no entry, since only a mentor is ever offered
+            the flip and a public decline would reveal one. Flipping is logged
+            publicly, as it reveals the card anyway. It keys off `CardType::Mentor`, since every
             mentor carries the clause (Hala Goldenhelm gets the decision too,
             and does nothing face up until her own ability is implemented).
           * The card is split into two effects. His constant effect is the
@@ -501,6 +505,8 @@ on-play-effect helpers).
         Tests: chief_rukutan_is_a_brute_mentor_with_play6_intimidate_and_alpha_rampage_search,
                rukutan_blocks_for_3_like_hala,
                a_face_up_card_is_always_visible_to_both_players,
+               declining_the_flip_is_not_logged_to_the_opponent,
+               flipping_is_logged_publicly,
                a_face_down_mentor_opens_its_owners_turn_with_a_flip_decision,
                flipping_turns_the_mentor_face_up_and_starts_the_action_phase,
                a_flipped_mentor_stays_face_up_and_is_never_offered_again,

@@ -160,8 +160,12 @@ fn handle_mentor_flip_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
         ActionType::FlipFaceUp => turn_mentor_face_up(gs, act.card_index()),
         ActionType::Pass => {
+            // Private to the decider: the opponent only ever sees a face-down
+            // arsenal card, and a public "leaves it face down" would tell them
+            // it is a mentor — the only card that is ever offered the flip.
             if gs.logging_enabled() {
-                gs.log_public(format!("{} leaves their arsenal face down", player_name(gs.active_player)));
+                let pid = gs.active_player;
+                gs.log_private(pid, format!("{} leaves their arsenal face down", player_name(pid)));
             }
         }
         _ => return,

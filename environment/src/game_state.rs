@@ -504,6 +504,22 @@ impl Gamestate {
             log.push(full);
         }
     }
+
+    /// Append an event only `pid` is entitled to know about: it goes to the
+    /// omniscient gamestate log and `pid`'s own log, and the opponent's log gets
+    /// no entry at all — not even a redacted one, since the bare fact that the
+    /// event happened would itself give something away (e.g. declining to flip a
+    /// mentor reveals that there is a mentor in the arsenal). A no-op when
+    /// logging is disabled.
+    pub fn log_private(&mut self, pid: PlayerIndex, msg: String) {
+        let own = if pid == PlayerIndex::P1 { &mut self.p1.log } else { &mut self.p2.log };
+        if let Some(log) = own {
+            log.push(msg.clone());
+        }
+        if let Some(log) = &mut self.log {
+            log.push(msg);
+        }
+    }
 }
 
 /// A card the active player has committed to play, activate, or attack with,
