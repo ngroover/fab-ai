@@ -68,9 +68,12 @@ impl Ability {
     }
 
     /// Whether this ability may be used only once per turn, tracked per card on
-    /// `CardState::ability_used_this_turn`.
+    /// `CardState::ability_used_this_turn`. Both weapon swings are "Once per
+    /// Turn Action": the weapon returns to its slot whenever the combat chain
+    /// closes, which the turn player can do mid-turn (`ActionType::CloseChain`),
+    /// so its being back in the slot says nothing about whether it has swung.
     pub fn once_per_turn(&self) -> bool {
-        matches!(self, Ability::DiscardCardPlusBlock)
+        matches!(self, Ability::DiscardCardPlusBlock | Ability::Attack2 | Ability::Attack1)
     }
 
     /// The card type at which this ability is activated. Action-speed abilities

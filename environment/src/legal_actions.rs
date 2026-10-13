@@ -210,7 +210,25 @@ fn pitch_leaves_card_to_discard(
 fn legal_action_phase(gs: &Gamestate) -> Vec<Action> {
     // The action phase offers every card playable at action speed, plus
     // activating equipment and the equipped weapon.
-    legal_play_phase(gs, is_action_phase_playable)
+    let mut actions = legal_play_phase(gs, is_action_phase_playable);
+
+    // Breaking the combat chain is offered while one is open — combat damage
+    // has been dealt and play has returned here — and the turn player still has
+    // an action point for another attack. Without one, breaking it gains
+    // nothing: passing closes the chain anyway as the action phase ends.
+    let player = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    if combat_chain_open(gs) && player.action_points > 0 {
+        actions.push(Action {
+            typ: ActionType::CloseChain,
+            card: None,
+        });
+    }
+    actions
+}
+
+/// Whether any card sits on either player's combat chain.
+fn combat_chain_open(gs: &Gamestate) -> bool {
+    gs.p1.chain_link.iter().chain(gs.p2.chain_link.iter()).any(|link| link.is_some())
 }
 
 fn legal_instant_phase(gs: &Gamestate) -> Vec<Action> {
@@ -387,6 +405,12 @@ fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], 
             // The ability activates at a particular speed; only offer it when
             // that speed is playable in the current phase.
             if !is_playable(ability.card_type()) {
+                continue;
+            }
+
+            // "Once per turn" (a weapon swing): a card that has already been
+            // activated this turn is done, even once it is back in its slot.
+            if ability.once_per_turn() && cards[idx].ability_used_this_turn {
                 continue;
             }
 

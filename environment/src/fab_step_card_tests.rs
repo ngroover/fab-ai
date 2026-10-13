@@ -29,6 +29,7 @@
 //!   - Rally the Rearguard (`Card::RallyTheRearguardB`)
 //!   - Chief Ruk'utan      (`Card::ChiefRukutan`)
 //!   - Bone Basher         (`Card::BoneBasher`)
+//!   - Breaking the combat chain (`ActionType::CloseChain`)
 
 use super::*;
 use crate::cards::Card;
@@ -3605,14 +3606,25 @@ fn bone_basher_swing_offered(gs: &Gamestate) -> bool {
 /// carry the attack through an unblocked combat back to his action phase.
 /// Returns the game and the weapon's global index.
 fn swing_bone_basher_unblocked() -> (Gamestate, usize) {
+    swing_bone_basher_unblocked_keeping(&[])
+}
+
+/// As `swing_bone_basher_unblocked`, but Rhinar still holds `kept` once the
+/// swing is paid for.
+fn swing_bone_basher_unblocked_keeping(kept: &[Card]) -> (Gamestate, usize) {
     let mut gs = setup_rhinar_action_phase();
-    set_hand(&mut gs, PlayerIndex::P1, &[Card::ClearingBellowB]);
+    let mut hand = vec![Card::ClearingBellowB];
+    hand.extend_from_slice(kept);
+    set_hand(&mut gs, PlayerIndex::P1, &hand);
+    let pitch_idx = gs.p1.hand_iter(&gs.cards)
+        .find(|(_, cs)| cs.card == Card::ClearingBellowB)
+        .map(|(idx, _)| idx)
+        .unwrap();
 
     let weapon_idx = gs.p1.weapon_idx.expect("Rhinar should start with a weapon").get();
     assert_eq!(gs.cards[weapon_idx].card, Card::BoneBasher);
     step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(weapon_idx))});
     assert_eq!(gs.phase, Phase::ActionPitch);
-    let pitch_idx = gs.p1.hand_idx.unwrap().get();
     step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitch_idx))});
     assert_eq!(gs.phase, Phase::ActionInstant);
     // 3 pitched against a cost of 2 leaves 1 floating.
@@ -3695,12 +3707,20 @@ fn bone_basher_unblocked_swing_hits_for_4_and_spends_the_action_point() {
 
 #[test]
 fn bone_basher_cannot_swing_twice_in_a_turn() {
-    let (mut gs, _) = swing_bone_basher_unblocked();
+    let (mut gs, weapon_idx) = swing_bone_basher_unblocked();
 
     // Even with an action point and resources to spare (as if the swing had
     // gone again), the weapon is still on the chain and cannot swing again.
     gs.p1.action_points = 1;
     gs.p1.resources = 2;
+    assert!(gs.cards[weapon_idx].ability_used_this_turn);
+    assert!(!bone_basher_swing_offered(&gs));
+
+    // Breaking the chain puts the weapon back in its slot, but it has already
+    // swung this turn, so it is still not offered.
+    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
+    assert_eq!(gs.p1.weapon_idx, Some(CardIdx::new(weapon_idx)));
+    assert_eq!(gs.phase, Phase::Action);
     assert!(!bone_basher_swing_offered(&gs));
 }
 
@@ -3722,4 +3742,122 @@ fn bone_basher_can_swing_again_on_rhinars_next_turn() {
     assert_eq!(gs.p1.action_points, 1);
     set_hand(&mut gs, PlayerIndex::P1, &[Card::ClearingBellowB]);
     assert!(bone_basher_swing_offered(&gs));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Breaking the combat chain (ActionType::CloseChain)
+//
+// Once combat damage is dealt and play is back in the Action phase, the turn
+// player may break the open chain before their next attack: every card on it
+// leaves — a weapon back to its slot, everything else to its owner's graveyard
+// — and the Action phase carries on. It is offered only while a chain is open
+// and the turn player has an action point left for another attack.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn close_chain_offered(gs: &Gamestate) -> bool {
+    legal_actions(gs).iter().any(|a| a.typ == ActionType::CloseChain)
+}
+
+/// Swing Bone Basher on Rhinar's first turn and have Dorinthea block it with
+/// one hand card, then carry play back to Rhinar's action phase. Returns the
+/// game, the weapon's index and the blocker's index.
+fn swing_bone_basher_blocked() -> (Gamestate, usize, usize) {
+    let mut gs = setup_rhinar_action_phase();
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::ClearingBellowB]);
+    let weapon_idx = gs.p1.weapon_idx.unwrap().get();
+    step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(weapon_idx))});
+    let pitch_idx = gs.p1.hand_idx.unwrap().get();
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitch_idx))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.phase, Phase::Defend);
+
+    let block = *legal_actions(&gs).iter()
+        .find(|a| a.typ == ActionType::Defend)
+        .expect("Dorinthea should have a card to block with");
+    let blocker_idx = block.card_index();
+    step(&mut gs, block);
+    while gs.phase != Phase::Action {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.cards[blocker_idx].location, CardLocation::P2CombatChain);
+    (gs, weapon_idx, blocker_idx)
+}
+
+#[test]
+fn close_chain_is_not_offered_without_an_open_chain() {
+    let gs = setup_rhinar_action_phase();
+    assert!(!close_chain_offered(&gs));
+}
+
+#[test]
+fn close_chain_is_not_offered_without_an_action_point() {
+    // Bone Basher has no Go Again, so the swing spent Rhinar's only point:
+    // there is no next attack to break the chain for.
+    let (gs, _) = swing_bone_basher_unblocked();
+    assert_eq!(gs.p1.action_points, 0);
+    assert!(!close_chain_offered(&gs));
+}
+
+#[test]
+fn close_chain_is_offered_after_combat_with_an_action_point_left() {
+    let (mut gs, _) = swing_bone_basher_unblocked();
+    gs.p1.action_points = 1; // as if the attack had gone again
+    assert!(close_chain_offered(&gs));
+}
+
+#[test]
+fn close_chain_returns_the_weapon_and_bins_the_blockers() {
+    let (mut gs, weapon_idx, blocker_idx) = swing_bone_basher_blocked();
+    gs.p1.action_points = 1;
+    assert!(close_chain_offered(&gs));
+    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
+
+    // The weapon is back in its slot, the blocker in Dorinthea's graveyard,
+    // and both chains are empty.
+    assert_eq!(gs.cards[weapon_idx].location, CardLocation::P1Weapon);
+    assert_eq!(gs.p1.weapon_idx, Some(CardIdx::new(weapon_idx)));
+    assert_eq!(gs.cards[blocker_idx].location, CardLocation::P2Graveyard);
+    assert!(gs.p1.chain_link.iter().all(|l| l.is_none()));
+    assert!(gs.p2.chain_link.iter().all(|l| l.is_none()));
+
+    // The action phase carries on with the action point intact, and with the
+    // chain gone there is nothing left to break.
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    assert_eq!(gs.p1.action_points, 1);
+    assert!(!close_chain_offered(&gs));
+}
+
+#[test]
+fn the_next_attack_after_breaking_the_chain_opens_a_fresh_chain() {
+    // Keep a 2-cost attack back; the swing leaves 1 resource floating, and a
+    // second pitch-3 card covers the rest.
+    let (mut gs, _) = swing_bone_basher_unblocked_keeping(
+        &[Card::SmashWithBigTreeY, Card::ClearingBellowB]);
+    gs.p1.action_points = 1;
+    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
+
+    let find = |gs: &Gamestate, card: Card| gs.p1.hand_iter(&gs.cards)
+        .find(|(_, cs)| cs.card == card).map(|(idx, _)| idx).unwrap();
+    let attack_idx = find(&gs, Card::SmashWithBigTreeY);
+    let pitch_idx = find(&gs, Card::ClearingBellowB);
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(attack_idx))});
+    assert_eq!(gs.phase, Phase::ActionPitch);
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitch_idx))});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+    // It takes link 0 rather than queueing behind the swing.
+    assert_eq!(gs.phase, Phase::Defend);
+    assert_eq!(gs.p1.chain_link[0], Some(CardIdx::new(attack_idx)));
+    assert!(gs.p1.chain_link[1..].iter().all(|l| l.is_none()));
+}
+
+#[test]
+fn passing_still_closes_the_chain_and_ends_the_action_phase() {
+    let (mut gs, weapon_idx) = swing_bone_basher_unblocked();
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.phase, Phase::Arsenal);
+    assert_eq!(gs.cards[weapon_idx].location, CardLocation::P1Weapon);
 }

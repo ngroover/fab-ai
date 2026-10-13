@@ -23,6 +23,12 @@ pub enum ActionType {
     /// Turn the face-down mentor in the turn player's arsenal face up, in the
     /// `MentorFlip` phase at the start of their turn. `card` is the mentor.
     FlipFaceUp,
+    /// Break the combat chain: in the Action phase, with combat damage dealt
+    /// and the stack empty, the turn player may close the open chain before
+    /// their next attack. Every card on it leaves — a weapon back to its slot,
+    /// everything else to its owner's graveyard — and the Action phase carries
+    /// on. Carries no card.
+    CloseChain,
     Pass
 }
 

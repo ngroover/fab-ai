@@ -204,6 +204,14 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
         ActionType::PlayCard | ActionType::Activate => {
             commit_card_to_pending(gs, act);
         }
+        // Breaking the combat chain clears it ahead of the next attack, which
+        // then opens a fresh chain on link 0. The action phase carries on.
+        ActionType::CloseChain => {
+            if gs.logging_enabled() {
+                gs.log_public(format!("{} breaks the combat chain", player_name(gs.active_player)));
+            }
+            close_combat_chain(gs);
+        }
         // Passing ends the action phase; nothing is pending. The combat chain
         // closes and play advances to the turn player's Arsenal phase.
         ActionType::Pass => {
@@ -1673,7 +1681,8 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     }
 }
 
-/// Close the combat chain as the action phase ends. Every card still sitting on
+/// Close the combat chain, either as the action phase ends or when the turn
+/// player breaks it mid-turn (`ActionType::CloseChain`). Every card still sitting on
 /// either player's chain leaves it: a weapon returns to its owner's weapon slot,
 /// every other card goes to its owner's graveyard. Each occupied chain link is
 /// the head of a linked list (all blockers against one attack share a link), so

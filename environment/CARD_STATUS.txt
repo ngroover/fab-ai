@@ -531,17 +531,33 @@ on-play-effect helpers).
             Activate of `Ability::Attack2` (attack-action speed, 2 resources),
             offered by `get_equipment_activations` only with an action point
             and enough pitch + floating resources to pay.
-          * "Once per turn" is enforced by zones, not by
-            `ability_used_this_turn`: the swing carries the weapon onto the
-            combat chain, and it only returns to its slot when the chain closes
-            as the action phase ends. So it can't be swung again that turn,
-            even with a spare action point.
+          * "Once per turn" is tracked on `ability_used_this_turn`:
+            `Ability::once_per_turn` now covers both weapon swings (`Attack2`,
+            and Dawnblade's `Attack1`), and `get_equipment_activations` skips a
+            card already used this turn. The weapon being back in its slot is
+            not enough, because the chain can now close mid-turn.
+          * Breaking the combat chain: new `ActionType::CloseChain`. In the
+            Action phase, while a chain is open and the turn player still has
+            an action point, they may break it before their next attack.
+            `close_combat_chain` sends the weapon back to its slot and every
+            other card (attacks, blockers) to its owner's graveyard, and the
+            Action phase carries on; the next attack opens a fresh chain on
+            link 0. Passing still closes the chain and ends the phase. (Blocking
+            with equipment isn't implemented yet, so nothing else returns to a
+            slot.) Dorinthea's extra Dawnblade swing will need an exception to
+            the once-per-turn flag when her hero ability is implemented.
         Tests: bone_basher_is_a_4_power_brute_club_swung_for_2,
                bone_basher_swing_is_offered_only_when_2_resources_can_be_paid,
                bone_basher_swing_needs_an_action_point,
                bone_basher_unblocked_swing_hits_for_4_and_spends_the_action_point,
                bone_basher_cannot_swing_twice_in_a_turn,
-               bone_basher_can_swing_again_on_rhinars_next_turn
+               bone_basher_can_swing_again_on_rhinars_next_turn,
+               close_chain_is_not_offered_without_an_open_chain,
+               close_chain_is_not_offered_without_an_action_point,
+               close_chain_is_offered_after_combat_with_an_action_point_left,
+               close_chain_returns_the_weapon_and_bins_the_blockers,
+               the_next_attack_after_breaking_the_chain_opens_a_fresh_chain,
+               passing_still_closes_the_chain_and_ends_the_action_phase
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
