@@ -1,16 +1,17 @@
 use crate::cards::{Card, CardClass, CardData, CardType, Color, EquipmentSlot, Keyword, WeaponType};
 use crate::card_effects::{AdditionalCostType, Ability, ConstantEffect, DefendEffect, MentorEffect, OnPlayConditionType, OnPlayEffect, OnPlayEffectType};
-use std::sync::LazyLock;
 
 /// Catalog of every card in the Rhinar vs Dorinthea classic battle.
 ///
 /// The array is positional: index `i` corresponds to the `Card` enum variant
 /// with discriminant `i` (see `cards::Card`). Data mirrors `classic_battles.py`.
 ///
-/// Built exactly once on first access and shared thereafter, so hot paths that
-/// look up card data don't re-materialize all 52 entries on every call.
-static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
-    [
+/// A plain `static` built at compile time, so a lookup is a bare array index:
+/// no first-use initialization check on the hot paths that read card data, and
+/// the compiler can fold lookups of a known card away entirely. Keeping it
+/// const-evaluable means keyword sets are combined with `Keyword::union`, since
+/// the `|` operator isn't usable in a `static` initializer.
+static CARD_CATALOG: [CardData; 52] = [
         // ── HEROES ──────────────────────────────────────────────────────
         // Rhinar
         CardData {
@@ -79,7 +80,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             no_block: false,
             slot: None,
             card_class: CardClass::Brute,
-            keyword: Keyword::RhinarSpecialization | Keyword::Intimidate,
+            keyword: Keyword::RhinarSpecialization.union(Keyword::Intimidate),
             hero_life: 0,
             hero_intellect: 0,
             constant_effect: None,
@@ -105,7 +106,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             no_block: false,
             slot: None,
             card_class: CardClass::Brute,
-            keyword: Keyword::GoAgain | Keyword::Intimidate,
+            keyword: Keyword::GoAgain.union(Keyword::Intimidate),
             hero_life: 0,
             hero_intellect: 0,
             constant_effect: None,
@@ -286,7 +287,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             no_block: false,
             slot: None,
             card_class: CardClass::Brute,
-            keyword: Keyword::GoAgain | Keyword::Intimidate,
+            keyword: Keyword::GoAgain.union(Keyword::Intimidate),
             hero_life: 0,
             hero_intellect: 0,
             constant_effect: None,
@@ -485,7 +486,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             no_block: false,
             slot: None,
             card_class: CardClass::Brute,
-            keyword: Keyword::GoAgain | Keyword::Intimidate,
+            keyword: Keyword::GoAgain.union(Keyword::Intimidate),
             hero_life: 0,
             hero_intellect: 0,
             constant_effect: None,
@@ -1031,7 +1032,7 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             no_block: false,
             slot: None,
             card_class: CardClass::Warrior,
-            keyword: Keyword::DorintheaSpecialization | Keyword::GoAgain,
+            keyword: Keyword::DorintheaSpecialization.union(Keyword::GoAgain),
             hero_life: 0,
             hero_intellect: 0,
             constant_effect: None,
@@ -1403,10 +1404,9 @@ static CARD_CATALOG: LazyLock<[CardData; 52]> = LazyLock::new(|| {
             play_effect: None,
             mentor_effect: None,
         },
-    ]
-});
+];
 
-/// Returns a reference to the shared card catalog, initializing it on first use.
+/// Returns a reference to the shared card catalog.
 pub fn get_card_catalog() -> &'static [CardData; 52] {
     &CARD_CATALOG
 }
