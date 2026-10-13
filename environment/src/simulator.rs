@@ -112,6 +112,18 @@ mod tests {
         assert!(!log.is_empty());
     }
 
+    /// Seed 69221 reaches a reaction window where Dorinthea stacks four attack
+    /// reactions and Rhinar answers with two Dodges — six layers at once, which
+    /// overflowed the stack back when it held only five.
+    #[test]
+    fn random_game_with_a_six_layer_stack_finishes() {
+        let seed = 69221;
+        let game = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+        let mut sim = Simulator::new(game, RandomAgent::new(Some(seed + 1)), RandomAgent::new(Some(seed + 2)));
+        sim.run(false);
+        assert!(sim.game.is_over());
+    }
+
     /// Random agents explore far more of the action space than scripted tests,
     /// so sweep many seeds to catch states where the engine deadlocks (a
     /// non-terminal state with no legal actions) or panics mid-game.

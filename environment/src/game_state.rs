@@ -73,8 +73,11 @@ impl PlayerIndex {
 pub const PLAYER_CARDS: usize = 45;
 pub const TOTAL_CARDS: usize = PLAYER_CARDS * 2;
 /// Maximum number of cards the stack can hold at once. Committing a card beyond
-/// this limit panics (see `Gamestate::push_to_stack`).
-pub const STACK_SIZE: usize = 5;
+/// this limit panics (see `Gamestate::push_to_stack`). Both players may keep
+/// adding instants, reactions and activations without passing, so a single
+/// reaction window can legitimately stack six or more layers (e.g. four attack
+/// reactions answered by two Dodges); 16 leaves ample headroom.
+pub const STACK_SIZE: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
