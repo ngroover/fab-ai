@@ -584,4 +584,16 @@ impl Player {
             current: self.pitch_idx.map(|i| i.get()),
         }
     }
+
+    /// Iterate over the cards on this player's combat chain link `link` as
+    /// `(slot_index, CardState)` pairs, head (most recently added) first. Like
+    /// the hand, a chain link is a linked list ending at a self-pointing node,
+    /// so the same iterator walks it without collecting into a `Vec`. Yields
+    /// nothing if the link is empty.
+    pub fn chain_link_iter<'a>(&self, link: usize, cards: &'a [CardState; TOTAL_CARDS]) -> HandIter<'a> {
+        HandIter {
+            cards,
+            current: self.chain_link[link].map(|i| i.get()),
+        }
+    }
 }

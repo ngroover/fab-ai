@@ -1,4 +1,4 @@
-use crate::action::Action;
+use crate::action::{Action, LegalActions};
 use crate::cards::{Card, CardType, EquipmentSlot};
 use crate::game_state::{
     CardIdx, CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase, PlayerIndex,
@@ -304,7 +304,9 @@ impl crate::simulator::Game for Gamestate {
         reset(self, logging);
     }
 
-    fn legal_actions(&self) -> Vec<Action> {
+    type ActionList = LegalActions;
+
+    fn legal_actions(&self) -> LegalActions {
         crate::legal_actions::legal_actions(self)
     }
 

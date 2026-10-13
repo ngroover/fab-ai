@@ -14,9 +14,14 @@ pub trait Game {
     /// the implementation keeps; implementations without one may ignore it.
     fn reset(&mut self, logging: bool);
 
+    /// The list `legal_actions` returns. Anything that reads as a slice of
+    /// actions works — a `Vec`, or a fixed-capacity inline list that avoids
+    /// allocating on every decision (the FaB engine's `LegalActions`).
+    type ActionList: std::ops::Deref<Target = [Self::Action]>;
+
     /// The actions the player to act may legally take right now. Empty only in
     /// a terminal state.
-    fn legal_actions(&self) -> Vec<Self::Action>;
+    fn legal_actions(&self) -> Self::ActionList;
 
     /// Apply one action, advancing the game.
     fn step(&mut self, action: Self::Action);
