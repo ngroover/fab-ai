@@ -524,6 +524,25 @@ on-play-effect helpers).
                alpha_rampage_fetched_by_rukutan_can_be_played_from_the_arsenal_that_turn,
                weapon_swing_does_not_teach_rukutan_a_lesson
 
+  [x] Bone Basher (Card::BoneBasher)
+        Rhinar's weapon. Two-handed brute club, 4 power. "Once per Turn
+        Action — {r}{r}: Attack." No other text, no Go Again.
+          * Already handled by the generic weapon path: the swing is an
+            Activate of `Ability::Attack2` (attack-action speed, 2 resources),
+            offered by `get_equipment_activations` only with an action point
+            and enough pitch + floating resources to pay.
+          * "Once per turn" is enforced by zones, not by
+            `ability_used_this_turn`: the swing carries the weapon onto the
+            combat chain, and it only returns to its slot when the chain closes
+            as the action phase ends. So it can't be swung again that turn,
+            even with a spare action point.
+        Tests: bone_basher_is_a_4_power_brute_club_swung_for_2,
+               bone_basher_swing_is_offered_only_when_2_resources_can_be_paid,
+               bone_basher_swing_needs_an_action_point,
+               bone_basher_unblocked_swing_hits_for_4_and_spends_the_action_point,
+               bone_basher_cannot_swing_twice_in_a_turn,
+               bone_basher_can_swing_again_on_rhinars_next_turn
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -549,7 +568,7 @@ on-play-effect helpers).
 ------------------------------------------------------------------------------
   [x] Rhinar (hero)          (Card::Rhinar)  — see COMPLETE section above
   [x] Chief Rukutan          (Card::ChiefRukutan)  — see COMPLETE section above
-  [ ] Bone Basher (weapon)   (Card::BoneBasher)
+  [x] Bone Basher (weapon)   (Card::BoneBasher)  — see COMPLETE section above
   [ ] Blossom of Spring      (Card::BlossomOfSpring)
   [ ] Bone Vizier            (Card::BoneVizier)
   [ ] Ironhide Gauntlet      (Card::IronhideGauntlet)

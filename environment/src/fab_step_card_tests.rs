@@ -28,6 +28,7 @@
 //!   - Barraging Beatdown  (`Card::BarragingBeatdownY`)
 //!   - Rally the Rearguard (`Card::RallyTheRearguardB`)
 //!   - Chief Ruk'utan      (`Card::ChiefRukutan`)
+//!   - Bone Basher         (`Card::BoneBasher`)
 
 use super::*;
 use crate::cards::Card;
@@ -3579,4 +3580,146 @@ fn a_face_up_card_is_always_visible_to_both_players() {
         }
     }
     assert!(face_up_seen > 0, "random play should turn some mentor face up");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bone Basher (Card::BoneBasher)
+//
+// Rhinar's weapon: a 4-power two-handed brute club with "Once per Turn Action —
+// {r}{r}: Attack" and no other text. The swing is an Activate of its `Attack2`
+// ability, gated and paid like any other activated ability: it costs an action
+// point plus 2 resources. "Once per turn" falls out of the zones rather than a
+// flag: a swing carries the weapon onto the combat chain, and it only returns
+// to its slot when the chain closes as the action phase ends, so it is not in
+// its slot to be swung again until the next turn.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Whether Bone Basher's swing is among the active player's legal actions.
+fn bone_basher_swing_offered(gs: &Gamestate) -> bool {
+    legal_actions(gs).iter().any(|a| {
+        a.typ == ActionType::Activate && gs.cards[a.card_index()].card == Card::BoneBasher
+    })
+}
+
+/// Swing Bone Basher on Rhinar's first turn, paying with a pitch-3 card, and
+/// carry the attack through an unblocked combat back to his action phase.
+/// Returns the game and the weapon's global index.
+fn swing_bone_basher_unblocked() -> (Gamestate, usize) {
+    let mut gs = setup_rhinar_action_phase();
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::ClearingBellowB]);
+
+    let weapon_idx = gs.p1.weapon_idx.expect("Rhinar should start with a weapon").get();
+    assert_eq!(gs.cards[weapon_idx].card, Card::BoneBasher);
+    step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(weapon_idx))});
+    assert_eq!(gs.phase, Phase::ActionPitch);
+    let pitch_idx = gs.p1.hand_idx.unwrap().get();
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitch_idx))});
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    // 3 pitched against a cost of 2 leaves 1 floating.
+    assert_eq!(gs.p1.resources, 1);
+
+    // Resolve the swing onto the chain, then pass through defend, triggers and
+    // reactions with no blockers so the full 4 lands.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.phase, Phase::Defend);
+    while gs.phase != Phase::Action {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.turn_player, PlayerIndex::P1);
+    (gs, weapon_idx)
+}
+
+#[test]
+fn bone_basher_is_a_4_power_brute_club_swung_for_2() {
+    use crate::cards::WeaponType;
+    let data = Card::BoneBasher.data();
+    assert_eq!(data.typ, CardType::Weapon);
+    assert_eq!(data.weapon_type, Some(WeaponType::Club2h));
+    assert_eq!(data.card_class, CardClass::Brute);
+    assert_eq!(data.power, 4);
+    assert!(data.keyword.is_empty(), "Bone Basher should carry no keywords (no Go Again)");
+    assert!(data.play_effect.is_none());
+    assert!(data.next_attack_effect.is_none());
+    assert!(data.constant_effect.is_none());
+
+    // The swing is an attack-action-speed ability costing {r}{r}.
+    let ability = data.ability.as_ref().expect("Bone Basher should have an attack ability");
+    assert!(matches!(ability, Ability::Attack2));
+    assert_eq!(ability.resource_cost(), 2);
+    assert_eq!(ability.card_type(), CardType::AttackAction);
+    assert!(!ability.discards_a_card());
+    assert!(!ability.only_while_defending());
+}
+
+#[test]
+fn bone_basher_swing_is_offered_only_when_2_resources_can_be_paid() {
+    // A lone pitch-1 card cannot pay {r}{r}.
+    let mut gs = setup_rhinar_action_phase();
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::AlphaRampageR]);
+    gs.p1.resources = 0;
+    assert!(!bone_basher_swing_offered(&gs));
+
+    // A floating resource makes up the difference.
+    gs.p1.resources = 1;
+    assert!(bone_basher_swing_offered(&gs));
+
+    // So does a pitch-2 card on its own.
+    let mut gs = setup_rhinar_action_phase();
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::MuscleMuttY]);
+    gs.p1.resources = 0;
+    assert!(bone_basher_swing_offered(&gs));
+}
+
+#[test]
+fn bone_basher_swing_needs_an_action_point() {
+    let mut gs = setup_rhinar_action_phase();
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::ClearingBellowB]);
+    assert!(bone_basher_swing_offered(&gs));
+    gs.p1.action_points = 0;
+    assert!(!bone_basher_swing_offered(&gs));
+}
+
+#[test]
+fn bone_basher_unblocked_swing_hits_for_4_and_spends_the_action_point() {
+    let life_before = Card::Dorinthea.data().hero_life;
+    let (gs, weapon_idx) = swing_bone_basher_unblocked();
+
+    assert_eq!(gs.p2.life, life_before - 4);
+    // No Go Again: the swing used Rhinar's only action point.
+    assert_eq!(gs.p1.action_points, 0);
+    // The weapon sits on the chain until it closes.
+    assert_eq!(gs.cards[weapon_idx].location, CardLocation::P1CombatChain);
+    assert_eq!(gs.p1.weapon_idx, None);
+}
+
+#[test]
+fn bone_basher_cannot_swing_twice_in_a_turn() {
+    let (mut gs, _) = swing_bone_basher_unblocked();
+
+    // Even with an action point and resources to spare (as if the swing had
+    // gone again), the weapon is still on the chain and cannot swing again.
+    gs.p1.action_points = 1;
+    gs.p1.resources = 2;
+    assert!(!bone_basher_swing_offered(&gs));
+}
+
+#[test]
+fn bone_basher_can_swing_again_on_rhinars_next_turn() {
+    let (mut gs, weapon_idx) = swing_bone_basher_unblocked();
+
+    // Pass out of Rhinar's turn and through Dorinthea's.
+    while gs.turn_player == PlayerIndex::P1 {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    while !(gs.turn_player == PlayerIndex::P1 && gs.phase == Phase::Action) {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+
+    // Back in its slot with a fresh action point, the swing is on offer again.
+    assert_eq!(gs.cards[weapon_idx].location, CardLocation::P1Weapon);
+    assert_eq!(gs.p1.weapon_idx, Some(CardIdx::new(weapon_idx)));
+    assert_eq!(gs.p1.action_points, 1);
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::ClearingBellowB]);
+    assert!(bone_basher_swing_offered(&gs));
 }
