@@ -214,9 +214,18 @@ pub(crate) fn shuffle_deck_for(
 ) {
     let base = player_base(player.pid);
     let deck_loc = CardLocation::deck(player.pid);
-    let mut cards_in_deck: Vec<usize> = (base..base + PLAYER_CARDS)
-        .filter(|&i| cards[i].location == deck_loc)
-        .collect();
+    // Gather the deck into a fixed array on the stack rather than a `Vec`: a
+    // player owns only `PLAYER_CARDS` cards, so it always fits, and resetting a
+    // game allocates nothing.
+    let mut slots = [0usize; PLAYER_CARDS];
+    let mut len = 0;
+    for i in base..base + PLAYER_CARDS {
+        if cards[i].location == deck_loc {
+            slots[len] = i;
+            len += 1;
+        }
+    }
+    let cards_in_deck = &mut slots[..len];
     cards_in_deck.shuffle(rng);
 
     if !cards_in_deck.is_empty() {
