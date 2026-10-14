@@ -617,26 +617,6 @@ fn commit_blocker(gs: &mut Gamestate, idx: usize) {
     attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[link], None, None, idx);
 }
 
-/// The global indices of the cards on `player`'s chain link `link`, head first.
-/// The link is built by `attach_to_front_of_zone`, so the head is the most
-/// recently added card and this walks *back* through declaration order.
-pub(crate) fn chain_link_indices(player: &Player, cards: &[CardState; TOTAL_CARDS], link: usize) -> Vec<usize> {
-    let mut out = Vec::new();
-    let Some(head) = player.chain_link[link] else {
-        return out;
-    };
-    let mut cur = head.get();
-    loop {
-        out.push(cur);
-        let next = cards[cur].next_card.get();
-        if next == cur {
-            break;
-        }
-        cur = next;
-    }
-    out
-}
-
 /// Put a `DefendTrigger` on the stack for each declared blocker carrying a
 /// "when you defend with this" trigger, returning whether any were pushed.
 /// Called once the defender has finished declaring blockers, so every trigger
@@ -648,8 +628,9 @@ pub(crate) fn chain_link_indices(player: &Player, cards: &[CardState; TOTAL_CARD
 /// Blockers without a `defend_effect` — nearly all of them — put nothing on the
 /// stack, so an ordinary block still costs no extra priority rounds.
 ///
-/// The stack resolves top-down, and `chain_link_indices` walks back through
-/// declaration order, so pushing in that order leaves the *first* blocker
+/// The stack resolves top-down, and a chain link's list runs head first — most
+/// recently added card first, built by `attach_to_front_of_zone` — so walking it
+/// goes back through declaration order, so pushing in that order leaves the *first* blocker
 /// declared on top: simultaneous triggers resolve in the order their cards were
 /// declared. Real FaB lets their controller order them; the engine has no
 /// choice phase for that, and declaration order is the one the player already
@@ -663,7 +644,11 @@ fn push_defend_triggers(gs: &mut Gamestate) -> bool {
     let link = current_chain_link(attacker);
     let player = if defender == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
 
-    for idx in chain_link_indices(player, &gs.cards, link) {
+    // Walk the link by hand rather than with `chain_link_iter`: pushing to the
+    // stack needs `gs` mutably, so read each node's successor before pushing.
+    let mut cur = player.chain_link[link].map(|i| i.get());
+    while let Some(idx) = cur {
+        let next = gs.cards[idx].next_card.get();
         if gs.cards[idx].card.data().defend_effect.is_some() {
             gs.push_to_stack(PendingCard {
                 index: CardIdx::new(idx),
@@ -671,6 +656,8 @@ fn push_defend_triggers(gs: &mut Gamestate) -> bool {
             });
             pushed = true;
         }
+        // A node whose `next_card` points at itself marks the end of the link.
+        cur = if next == idx { None } else { Some(next) };
     }
     pushed
 }
@@ -924,6 +911,22 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     }
 }
 
+/// The global slot of a card chosen uniformly at random from `pid`'s hand, or
+/// `None` when the hand is empty. Counts the hand, draws one index from the rng,
+/// then walks the linked list to it — two short walks instead of collecting the
+/// hand into a `Vec`, so the random hand picks made by Intimidate and the
+/// discard effects allocate nothing.
+fn random_hand_card(gs: &mut Gamestate, pid: PlayerIndex) -> Option<usize> {
+    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let len = player.hand_iter(&gs.cards).count();
+    if len == 0 {
+        return None;
+    }
+    let k = gs.rng.random_range(0..len);
+    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    player.hand_iter(&gs.cards).nth(k).map(|(idx, _)| idx)
+}
+
 /// Resolve an Intimidate trigger: the opponent of `attacker` (the player whose
 /// card just resolved) banishes one card chosen uniformly at random from their
 /// hand into their Intimidate banish zone. A no-op when that opponent's hand is
@@ -939,17 +942,9 @@ fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
     let intimidator = if attacker == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     intimidator.has_intimidated = true;
 
-    // Snapshot the victim's hand slots, releasing the borrow on `gs.cards`
-    // before we draw from the rng and mutate the hand below.
-    let hand: Vec<usize> = {
-        let player = if victim == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-        player.hand_iter(&gs.cards).map(|(idx, _)| idx).collect()
-    };
-    if hand.is_empty() {
+    let Some(pick) = random_hand_card(gs, victim) else {
         return;
-    }
-
-    let pick = hand[gs.rng.random_range(0..hand.len())];
+    };
 
     if gs.logging_enabled() {
         let card = gs.cards[pick].card;
@@ -977,17 +972,9 @@ fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
 /// a dedicated choice phase; the play/pitch legal-action gates ensure a card is
 /// held back in hand so this cost can always be paid.
 fn apply_discard_cost(gs: &mut Gamestate, owner: PlayerIndex) {
-    // Snapshot the owner's hand slots, releasing the borrow on `gs.cards`
-    // before drawing from the rng and mutating the hand below.
-    let hand: Vec<usize> = {
-        let player = if owner == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-        player.hand_iter(&gs.cards).map(|(idx, _)| idx).collect()
-    };
-    if hand.is_empty() {
+    let Some(pick) = random_hand_card(gs, owner) else {
         return;
-    }
-
-    let pick = hand[gs.rng.random_range(0..hand.len())];
+    };
     let discarded_power = gs.cards[pick].card.data().power;
 
     // The discard lands face-up in the graveyard, so it is public.
@@ -1272,15 +1259,10 @@ fn draw_then_discard_hit6(gs: &mut Gamestate, owner: PlayerIndex) -> bool {
         draw_cards(player, cards, 1);
     }
 
-    // Snapshot the hand, then pick a card to discard at random.
-    let hand: Vec<usize> = {
-        let player = if owner == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-        player.hand_iter(&gs.cards).map(|(idx, _)| idx).collect()
-    };
-    if hand.is_empty() {
+    // Pick a card to discard at random.
+    let Some(pick) = random_hand_card(gs, owner) else {
         return false;
-    }
-    let pick = hand[gs.rng.random_range(0..hand.len())];
+    };
     let discarded_power = gs.cards[pick].card.data().power;
 
     // The discard lands face-up in the graveyard, so it is public.

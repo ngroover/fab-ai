@@ -14,9 +14,14 @@ pub trait Game {
     /// the implementation keeps; implementations without one may ignore it.
     fn reset(&mut self, logging: bool);
 
+    /// The list `legal_actions` returns. Anything that reads as a slice of
+    /// actions works — a `Vec`, or a fixed-capacity inline list that avoids
+    /// allocating on every decision (the FaB engine's `LegalActions`).
+    type ActionList: std::ops::Deref<Target = [Self::Action]>;
+
     /// The actions the player to act may legally take right now. Empty only in
     /// a terminal state.
-    fn legal_actions(&self) -> Vec<Self::Action>;
+    fn legal_actions(&self) -> Self::ActionList;
 
     /// Apply one action, advancing the game.
     fn step(&mut self, action: Self::Action);
@@ -110,6 +115,18 @@ mod tests {
 
         let log = sim.game.log.as_ref().expect("logging was enabled");
         assert!(!log.is_empty());
+    }
+
+    /// Seed 69221 reaches a reaction window where Dorinthea stacks four attack
+    /// reactions and Rhinar answers with two Dodges — six layers at once, which
+    /// overflowed the stack back when it held only five.
+    #[test]
+    fn random_game_with_a_six_layer_stack_finishes() {
+        let seed = 69221;
+        let game = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+        let mut sim = Simulator::new(game, RandomAgent::new(Some(seed + 1)), RandomAgent::new(Some(seed + 2)));
+        sim.run(false);
+        assert!(sim.game.is_over());
     }
 
     /// Random agents explore far more of the action space than scripted tests,

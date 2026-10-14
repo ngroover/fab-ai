@@ -1,5 +1,5 @@
 use crate::simulator::Game;
-use rand::RngExt;
+use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
@@ -33,6 +33,11 @@ impl RandomAgent {
 
 impl<G: Game> Agent<G> for RandomAgent {
     fn select_action(&mut self, _game: &G, legal_actions: &[G::Action]) -> G::Action {
-        legal_actions[self.rng.random_range(0..legal_actions.len())]
+        // Scale one 32-bit draw into `0..len` with a multiply and shift instead
+        // of `random_range`, whose general-purpose path dominated the cost of a
+        // random playout. The bias is at most len / 2^32 — negligible for the
+        // handful of legal actions a decision offers.
+        let len = legal_actions.len() as u64;
+        legal_actions[((self.rng.next_u32() as u64 * len) >> 32) as usize]
     }
 }
