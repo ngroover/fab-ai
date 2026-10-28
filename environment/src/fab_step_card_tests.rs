@@ -2621,8 +2621,8 @@ fn barraging_beatdown_played_from_hand_intimidates_banks_and_keeps_the_action_po
 //
 // What makes it work, beyond `Ability::DiscardCardPlusBlock` itself:
 //   * the card is activated from the combat chain, a zone
-//     `get_equipment_activations` does not scan, so the new
-//     `get_defending_activations` finds it there;
+//     `push_equipment_activations` does not scan, so the new
+//     `push_defending_activations` finds it there;
 //   * "while defending" is read as the defend-trigger and reaction windows, the
 //     two where a declared blocker is answering a live attack — blockers stay on
 //     the chain until the action phase ends, so a phase gate is what keeps the

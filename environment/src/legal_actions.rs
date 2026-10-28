@@ -1,14 +1,14 @@
 use crate::game_state::{Gamestate, Phase, Player, PlayerIndex, CardState, CardIdx, TOTAL_CARDS};
-use crate::action::{Action, ActionType};
-use crate::cards::{Card, CardData, CardType};
+use crate::action::{Action, ActionType, LegalActions};
+use crate::cards::{CardData, CardType};
 use crate::card_effects::AdditionalCostType;
-use crate::fab_step::{chain_link_indices, current_chain_link, face_down_mentor_in_arsenal, uses_action_point};
+use crate::fab_step::{current_chain_link, face_down_mentor_in_arsenal, uses_action_point};
 
 
-pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
+pub fn legal_actions(gs: &Gamestate) -> LegalActions {
     match gs.phase {
         Phase::ChooseFirst => {
-            let mut actions = Vec::new();
+            let mut actions = LegalActions::new();
             actions.push(Action{
                         typ : ActionType::ChooseFirst,
                         card: None});
@@ -26,16 +26,16 @@ pub fn legal_actions(gs: &Gamestate) -> Vec<Action> {
         Phase::Reaction => legal_reaction_phase(gs),
         Phase::Arsenal => legal_arsenal_phase(gs),
         Phase::PitchOrder => legal_pitch_order_phase(gs),
-        Phase::Start => Vec::new(),
+        Phase::Start => LegalActions::new(),
         // Terminal phases: the game is over, so there are no legal actions.
-        Phase::Player1Win | Phase::Player2Win | Phase::Draw => Vec::new(),
+        Phase::Player1Win | Phase::Player2Win | Phase::Draw => LegalActions::new(),
     }
 }
 
 /// The start-of-turn mentor decision: turn the face-down mentor in the turn
 /// player's arsenal face up, or pass to leave it face down. Both always offered.
-fn legal_mentor_flip_phase(gs: &Gamestate) -> Vec<Action> {
-    let mut actions = Vec::new();
+fn legal_mentor_flip_phase(gs: &Gamestate) -> LegalActions {
+    let mut actions = LegalActions::new();
     if let Some(idx) = face_down_mentor_in_arsenal(gs, gs.active_player) {
         actions.push(Action {
             typ: ActionType::FlipFaceUp,
@@ -49,14 +49,14 @@ fn legal_mentor_flip_phase(gs: &Gamestate) -> Vec<Action> {
     actions
 }
 
-fn legal_defend_phase(gs: &Gamestate) -> Vec<Action> {
+fn legal_defend_phase(gs: &Gamestate) -> LegalActions {
     // When we enter the Defend phase the active player is flipped to the
     // defender (see resolve_top_of_stack), so the usual active-player lookup
     // gives us the player choosing blockers.
     let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
 
     // Every card in hand the defender may declare as a blocker.
-    let mut actions: Vec<Action> = player.hand_iter(&gs.cards)
+    let mut actions: LegalActions = player.hand_iter(&gs.cards)
         .filter(|(_, cs)| can_be_declared_as_blocker(cs.card.data()))
         .map(|(idx, _)| Action {
             typ: ActionType::Defend,
@@ -74,13 +74,13 @@ fn legal_defend_phase(gs: &Gamestate) -> Vec<Action> {
     actions
 }
 
-fn legal_arsenal_phase(gs: &Gamestate) -> Vec<Action> {
+fn legal_arsenal_phase(gs: &Gamestate) -> LegalActions {
     // The turn player has passed their action phase and may now set a card
     // aside. The active player is the turn player here, so the usual lookup
     // gives us the player choosing.
     let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
 
-    let mut actions = Vec::new();
+    let mut actions = LegalActions::new();
 
     // The arsenal holds a single card: every card in hand is a choice, but only
     // while the slot is free.
@@ -101,7 +101,7 @@ fn legal_arsenal_phase(gs: &Gamestate) -> Vec<Action> {
     actions
 }
 
-fn legal_pitch_order_phase(gs: &Gamestate) -> Vec<Action> {
+fn legal_pitch_order_phase(gs: &Gamestate) -> LegalActions {
     // The active player — the owner of the pitch zone being cleared, the turn
     // player first and then the opponent — picks, card by card, the order
     // their pitched cards go to the bottom of their deck. Every card still in
@@ -117,7 +117,7 @@ fn legal_pitch_order_phase(gs: &Gamestate) -> Vec<Action> {
         .collect()
 }
 
-fn legal_pitch_phase(gs: &Gamestate) -> Vec<Action> {
+fn legal_pitch_phase(gs: &Gamestate) -> LegalActions {
     let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
 
     // The card being paid for is held pending in the zone it is played from —
@@ -207,7 +207,7 @@ fn pitch_leaves_card_to_discard(
     total.saturating_sub(reserved) >= remaining_cost as u32
 }
 
-fn legal_action_phase(gs: &Gamestate) -> Vec<Action> {
+fn legal_action_phase(gs: &Gamestate) -> LegalActions {
     // The action phase offers every card playable at action speed, plus
     // activating equipment and the equipped weapon.
     let mut actions = legal_play_phase(gs, is_action_phase_playable);
@@ -231,22 +231,22 @@ fn combat_chain_open(gs: &Gamestate) -> bool {
     gs.p1.chain_link.iter().chain(gs.p2.chain_link.iter()).any(|link| link.is_some())
 }
 
-fn legal_instant_phase(gs: &Gamestate) -> Vec<Action> {
+fn legal_instant_phase(gs: &Gamestate) -> LegalActions {
     // The instant phase shares the action phase's machinery but only ever
     // offers instants (see `is_instant_phase_playable`). Equipment and weapon
     // activations are action-speed abilities, so the `is_playable` gate inside
-    // `get_equipment_activations` filters them out here.
+    // `push_equipment_activations` filters them out here.
     legal_play_phase(gs, is_instant_phase_playable)
 }
 
-fn legal_reaction_phase(gs: &Gamestate) -> Vec<Action> {
+fn legal_reaction_phase(gs: &Gamestate) -> LegalActions {
     // The reaction phase (the combat reaction step) shares the same machinery
     // and offers cards playable at reaction speed, which depends on the side:
     // the attacker (the turn player — only the turn player attacks) may play
     // instants and attack reactions, the defender instants and defense
     // reactions. Activated abilities of those same speeds — e.g. an
     // instant-speed equipment ability — are offered too, gated by the same
-    // predicate inside `get_equipment_activations`.
+    // predicate inside `push_equipment_activations`.
     if gs.active_player == gs.turn_player {
         legal_play_phase(gs, is_attacker_reaction_playable)
     } else {
@@ -264,7 +264,7 @@ fn legal_reaction_phase(gs: &Gamestate) -> Vec<Action> {
 /// Narrowing by phase rather than by scanning the stack means playing an instant
 /// in response cannot reopen the window underneath itself: the phase holds until
 /// every trigger has resolved.
-fn legal_defend_triggers_phase(gs: &Gamestate) -> Vec<Action> {
+fn legal_defend_triggers_phase(gs: &Gamestate) -> LegalActions {
     legal_play_phase(gs, is_instant_phase_playable)
 }
 
@@ -273,8 +273,8 @@ fn legal_defend_triggers_phase(gs: &Gamestate) -> Vec<Action> {
 /// affordability, equipment activations, and pass logic are otherwise
 /// identical. Equipment abilities (and the weapon swing) are gated by the same
 /// `is_playable` predicate, applied to each ability's activation card type.
-fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Action> {
-    let mut legal_actions = Vec::new();
+fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> LegalActions {
+    let mut legal_actions = LegalActions::new();
     let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
 
     // Total pitch available across the whole hand. Computed once here and shared
@@ -284,9 +284,9 @@ fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Ac
         .map(|(_, cs)| cs.card.data().pitch)
         .sum();
 
-    legal_actions.extend(get_playable_cards(player, &gs.cards, total_pitch, is_playable));
-    legal_actions.extend(get_equipment_activations(player, &gs.cards, total_pitch, is_playable));
-    legal_actions.extend(get_defending_activations(gs, is_playable));
+    push_playable_cards(&mut legal_actions, player, &gs.cards, total_pitch, is_playable);
+    push_equipment_activations(&mut legal_actions, player, &gs.cards, total_pitch, is_playable);
+    push_defending_activations(&mut legal_actions, gs, is_playable);
 
     // Passing is always available; it ends the window without playing or
     // activating anything.
@@ -301,7 +301,7 @@ fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Ac
 /// Activations of an ability that may only be used while its card is defending
 /// — Rally the Rearguard's "Discard a card: gains +3 block. Activate this
 /// ability only while Rally the Rearguard is defending." The card is not in a
-/// zone `get_equipment_activations` scans: it is on its controller's combat
+/// zone `push_equipment_activations` scans: it is on its controller's combat
 /// chain, put there when it was declared as a blocker.
 ///
 /// "Defending" is read as the two windows where a declared blocker is answering
@@ -314,16 +314,14 @@ fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Ac
 ///
 /// Only the defender may activate: the turn player's chain holds their attack,
 /// not blockers, so the check is that the active player is not the turn player.
-fn get_defending_activations(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> Vec<Action> {
-    let mut actions: Vec<Action> = Vec::new();
-
+fn push_defending_activations(actions: &mut LegalActions, gs: &Gamestate, is_playable: fn(CardType) -> bool) {
     // Only while an attack is live and being answered.
     if !matches!(gs.phase, Phase::DefendTriggers | Phase::Reaction) {
-        return actions;
+        return;
     }
     // Only the defender has blockers on their chain.
     if gs.active_player == gs.turn_player {
-        return actions;
+        return;
     }
 
     let defender = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
@@ -333,7 +331,7 @@ fn get_defending_activations(gs: &Gamestate, is_playable: fn(CardType) -> bool) 
     let attacker = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
     let link = current_chain_link(attacker);
 
-    for idx in chain_link_indices(defender, &gs.cards, link) {
+    for (idx, _) in defender.chain_link_iter(link, &gs.cards) {
         let Some(ability) = &gs.cards[idx].card.data().ability else {
             continue;
         };
@@ -360,7 +358,7 @@ fn get_defending_activations(gs: &Gamestate, is_playable: fn(CardType) -> bool) 
         }
         // Whatever resource cost the ability carries must also be payable. No
         // defending ability costs resources today, so this is the same
-        // affordability rule as `get_equipment_activations`, stated so a future
+        // affordability rule as `push_equipment_activations`, stated so a future
         // costed one is not offered for free.
         let total_pitch: u8 = defender.hand_iter(&gs.cards)
             .map(|(_, cs)| cs.card.data().pitch)
@@ -374,13 +372,9 @@ fn get_defending_activations(gs: &Gamestate, is_playable: fn(CardType) -> bool) 
             card: Some(CardIdx::new(idx)),
         });
     }
-
-    actions
 }
 
-fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8, is_playable: fn(CardType) -> bool) -> Vec<Action> {
-    let mut actions: Vec<Action> = Vec::new();
-
+fn push_equipment_activations(actions: &mut LegalActions, player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8, is_playable: fn(CardType) -> bool) {
     // Each worn piece is only an option if it carries an activated ability
     // (e.g. Blossom of Spring, Gallantry Gold); passive equipment such as Bone
     // Vizier or the Ironhide pieces has none. The weapon belongs here too: a
@@ -433,14 +427,13 @@ fn get_equipment_activations(player: &Player, cards: &[CardState; TOTAL_CARDS], 
             }
         }
     }
-
-    actions
 }
 
-fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8, is_playable: fn(CardType) -> bool) -> Vec<Action> {
-    let mut actions: Vec<Action> = Vec::new();
-
-    let mut seen: Vec<Card> = Vec::new();
+fn push_playable_cards(actions: &mut LegalActions, player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8, is_playable: fn(CardType) -> bool) {
+    // Bit `card as u8` is set once a copy of that card has been considered.
+    // The catalog has fewer than 64 cards, so one word covers every card
+    // without allocating.
+    let mut seen: u64 = 0;
     for (idx, cardstate) in player.hand_iter(cards) {
         let card = cardstate.card;
         let data = card.data();
@@ -450,10 +443,11 @@ fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_p
         }
 
         // Duplicate copies are an identical choice — emit only the first.
-        if seen.contains(&card) {
+        let bit = 1u64 << (card as u8);
+        if seen & bit != 0 {
             continue;
         }
-        seen.push(card);
+        seen |= bit;
 
         if can_pay_for_card(player, cards, total_pitch, idx, PlayedFrom::Hand) {
             actions.push(Action {
@@ -479,8 +473,6 @@ fn get_playable_cards(player: &Player, cards: &[CardState; TOTAL_CARDS], total_p
             });
         }
     }
-
-    actions
 }
 
 /// Whether the card can be played at all right now, before any question of
@@ -625,6 +617,7 @@ fn is_defender_reaction_playable(typ: CardType) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cards::Card;
     use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
     use crate::fab_game::{gamestate_from_decklists,reset};
     use crate::fab_step::step;

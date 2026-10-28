@@ -52,3 +52,115 @@ impl Action {
         self.card.expect("action carries no card").get()
     }
 }
+
+/// The most legal actions any single decision may offer. `LegalActions` stores
+/// its actions inline in an array of this size, so generating them never
+/// touches the heap; offering more panics (see `LegalActions::push`).
+pub const MAX_LEGAL_ACTIONS: usize = 16;
+
+/// A fixed-capacity list of legal actions, returned by `legal_actions`. The
+/// actions live inline in an array of `MAX_LEGAL_ACTIONS` slots with a length
+/// marking how many are filled, so building the list allocates nothing — the
+/// legal-action generators run on every step, and a heap `Vec` there was the
+/// engine's single largest cost. Derefs to `&[Action]`, so callers read it
+/// exactly like a slice (`iter`, `len`, `is_empty`, indexing).
+#[derive(Clone, Copy)]
+pub struct LegalActions {
+    actions: [Action; MAX_LEGAL_ACTIONS],
+    len: u8,
+}
+
+impl LegalActions {
+    /// An empty list.
+    pub const fn new() -> Self {
+        LegalActions {
+            actions: [Action { typ: ActionType::Pass, card: None }; MAX_LEGAL_ACTIONS],
+            len: 0,
+        }
+    }
+
+    /// Append an action. Panics if the list already holds `MAX_LEGAL_ACTIONS`,
+    /// which would mean a decision offers more choices than the engine sized
+    /// for — raise the constant rather than silently dropping a legal action.
+    #[inline]
+    pub fn push(&mut self, action: Action) {
+        let len = self.len as usize;
+        if len == MAX_LEGAL_ACTIONS {
+            panic!("legal actions exceeded MAX_LEGAL_ACTIONS ({})", MAX_LEGAL_ACTIONS);
+        }
+        self.actions[len] = action;
+        self.len += 1;
+    }
+}
+
+impl std::ops::Deref for LegalActions {
+    type Target = [Action];
+
+    #[inline]
+    fn deref(&self) -> &[Action] {
+        &self.actions[..self.len as usize]
+    }
+}
+
+impl Extend<Action> for LegalActions {
+    fn extend<I: IntoIterator<Item = Action>>(&mut self, iter: I) {
+        for action in iter {
+            self.push(action);
+        }
+    }
+}
+
+impl FromIterator<Action> for LegalActions {
+    fn from_iter<I: IntoIterator<Item = Action>>(iter: I) -> Self {
+        let mut actions = LegalActions::new();
+        actions.extend(iter);
+        actions
+    }
+}
+
+impl IntoIterator for LegalActions {
+    type Item = Action;
+    type IntoIter = std::iter::Take<std::array::IntoIter<Action, MAX_LEGAL_ACTIONS>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.actions.into_iter().take(self.len as usize)
+    }
+}
+
+impl<'a> IntoIterator for &'a LegalActions {
+    type Item = &'a Action;
+    type IntoIter = std::slice::Iter<'a, Action>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl std::fmt::Debug for LegalActions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pass() -> Action {
+        Action { typ: ActionType::Pass, card: None }
+    }
+
+    #[test]
+    fn legal_actions_hold_up_to_the_maximum() {
+        let actions: LegalActions = std::iter::repeat_n(pass(), MAX_LEGAL_ACTIONS).collect();
+        assert_eq!(actions.len(), MAX_LEGAL_ACTIONS);
+        assert_eq!(actions.into_iter().count(), MAX_LEGAL_ACTIONS);
+    }
+
+    #[test]
+    #[should_panic(expected = "legal actions exceeded MAX_LEGAL_ACTIONS (16)")]
+    fn pushing_past_the_maximum_panics() {
+        let mut actions: LegalActions = std::iter::repeat_n(pass(), MAX_LEGAL_ACTIONS).collect();
+        actions.push(pass());
+    }
+}

@@ -1,4 +1,4 @@
-use crate::action::Action;
+use crate::action::{Action, LegalActions};
 use crate::cards::{Card, CardType, EquipmentSlot};
 use crate::game_state::{
     CardIdx, CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase, PlayerIndex,
@@ -214,9 +214,18 @@ pub(crate) fn shuffle_deck_for(
 ) {
     let base = player_base(player.pid);
     let deck_loc = CardLocation::deck(player.pid);
-    let mut cards_in_deck: Vec<usize> = (base..base + PLAYER_CARDS)
-        .filter(|&i| cards[i].location == deck_loc)
-        .collect();
+    // Gather the deck into a fixed array on the stack rather than a `Vec`: a
+    // player owns only `PLAYER_CARDS` cards, so it always fits, and resetting a
+    // game allocates nothing.
+    let mut slots = [0usize; PLAYER_CARDS];
+    let mut len = 0;
+    for i in base..base + PLAYER_CARDS {
+        if cards[i].location == deck_loc {
+            slots[len] = i;
+            len += 1;
+        }
+    }
+    let cards_in_deck = &mut slots[..len];
     cards_in_deck.shuffle(rng);
 
     if !cards_in_deck.is_empty() {
@@ -304,7 +313,9 @@ impl crate::simulator::Game for Gamestate {
         reset(self, logging);
     }
 
-    fn legal_actions(&self) -> Vec<Action> {
+    type ActionList = LegalActions;
+
+    fn legal_actions(&self) -> LegalActions {
         crate::legal_actions::legal_actions(self)
     }
 
