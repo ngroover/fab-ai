@@ -314,3 +314,13 @@ pub fn uses_this_turn(gs: &Gamestate, card: Card) -> u8 {
         player.deck_kind.id_of(card).map_or(0, |id| player.abilities_used.count(id))
     }).sum()
 }
+
+/// A fresh game between two decklists, dealt and ready for the first
+/// decision: the `Decklists`, `gamestate_from_decklists` and `reset` steps in
+/// one. Tests that need to reset again build the `Decklists` themselves.
+pub fn new_game(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: Option<u64>, logging: bool) -> Gamestate {
+    let decks = crate::fab_game::Decklists::new(p1_deck, p2_deck);
+    let mut gs = crate::fab_game::gamestate_from_decklists(&decks, seed);
+    crate::fab_game::reset(&mut gs, &decks, logging);
+    gs
+}

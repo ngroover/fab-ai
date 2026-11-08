@@ -177,6 +177,7 @@ impl DeckSlot {
 
     /// Turn the slot into `card`, keeping whether it is known.
     #[inline]
+    #[allow(dead_code)] // used by tests
     pub fn set_card(&mut self, card: DeckCardId) {
         self.0 = (self.0 & Self::KNOWN) | card.get() as u8;
     }
@@ -297,14 +298,6 @@ pub struct Player {
     /// Which deck card enum this player's `DeckCardId`s belong to — the deck
     /// `hero` plays. Fixed when the game is built.
     pub deck_kind : DeckKind,
-    /// The cards the player starts the game with, in decklist order: the
-    /// deck before it is shuffled, the worn equipment, and the weapon. `reset`
-    /// deals the zones out from these. The deck is a plain array rather than a
-    /// second `Deck` buffer: it is only read at `reset`, and a fixed list of ids
-    /// is a third the size.
-    pub starting_deck : [DeckCardId; DECK_CARDS],
-    pub starting_equipment : CardCounts,
-    pub starting_weapon : Option<DeckCardId>,
     /// The deck, top first. Drawn from the front; pitched cards go on the back.
     pub deck : Deck,
     /// The hand: how many copies of each card are in it. The hand is
@@ -424,7 +417,7 @@ pub struct Player {
     /// This player's view of the game log: what they would legitimately know,
     /// with hidden information (e.g. the identity of a card the opponent drew)
     /// redacted. `None` when logging is disabled (the default, so simulation
-    /// and cloning pay nothing); `reset(gs, true)` turns it on. Entries are
+    /// and cloning pay nothing); `reset(gs, decks, true)` turns it on. Entries are
     /// pushed at the moment each event happens, so a single `step` may log
     /// several (e.g. a pass that also resolves the top of the stack).
     pub log : Option<Vec<String>>,
@@ -469,7 +462,7 @@ pub struct Gamestate {
     /// The omniscient game log: every logged event with nothing redacted (the
     /// per-player views with hidden information removed live on `Player::log`).
     /// `None` when logging is disabled (the default, so simulation and cloning
-    /// pay nothing); `reset(gs, true)` turns it on. Entries are pushed at the
+    /// pay nothing); `reset(gs, decks, true)` turns it on. Entries are pushed at the
     /// moment each event happens, so a single `step` may log several (e.g. a
     /// pass that also resolves the top of the stack).
     pub log : Option<Vec<String>>,
@@ -552,6 +545,7 @@ impl Gamestate {
     /// or lost, so a different total means some path took a card out of one
     /// zone without putting it in another (or the reverse). Called by `step`
     /// and `legal_actions` in debug builds.
+    #[cfg_attr(not(debug_assertions), allow(dead_code))] // read by the debug-build check
     pub fn debug_check_card_totals(&self) {
         for player in [&self.p1, &self.p2] {
             let on_stack = self.stack.iter()
@@ -566,7 +560,7 @@ impl Gamestate {
         }
     }
 
-    /// True when logging was enabled by `reset(gs, true)`. Callers should check
+    /// True when logging was enabled by `reset(gs, decks, true)`. Callers should check
     /// this before building log strings so disabled logging costs nothing.
     pub fn logging_enabled(&self) -> bool {
         self.log.is_some()
@@ -629,6 +623,7 @@ impl PendingCard {
     /// that stays in its zone: a defend trigger, or an ability activated while
     /// its card is defending, puts only the effect on the stack and leaves the
     /// card on the combat chain.
+    #[cfg_attr(not(debug_assertions), allow(dead_code))] // read by the debug-build check
     pub fn holds_card(&self) -> bool {
         self.typ != ActionType::DefendTrigger && self.from != Zone::CombatChain
     }
@@ -636,7 +631,7 @@ impl PendingCard {
 
 impl Player {
     /// A player with every zone empty, playing `hero`'s deck. `reset` deals the
-    /// starting cards out.
+    /// starting cards out of `fab_game::Decklists`.
     pub fn new(pid: PlayerIndex, hero: Card) -> Player {
         Player {
             pid,
@@ -645,9 +640,6 @@ impl Player {
             intellect: 0,
             hero,
             deck_kind: DeckKind::for_hero(hero),
-            starting_deck: [DeckCardId::new(0); DECK_CARDS],
-            starting_equipment: CardCounts::EMPTY,
-            starting_weapon: None,
             deck: empty_deck(),
             hand: CardCounts::EMPTY,
             pitch: CardCounts::EMPTY,
@@ -670,7 +662,7 @@ impl Player {
             has_intimidated: false,
             arsenal_face_up: false,
             arsenal_lesson_counters: 0,
-            // Logging is opted into via `reset(gs, true)`; off until then.
+            // Logging is opted into via `reset(gs, decks, true)`; off until then.
             log: None,
         }
     }
@@ -691,6 +683,7 @@ impl Player {
     /// `card`'s id in this player's deck. Panics if the deck does not contain
     /// it, since such a card can never be in any of this player's zones.
     #[inline]
+    #[allow(dead_code)] // used by tests
     pub fn deck_id(&self, card: Card) -> DeckCardId {
         match self.deck_kind.id_of(card) {
             Some(id) => id,
@@ -797,6 +790,7 @@ impl Player {
     }
 
     /// How many of this player's cards are in their zones (the stack aside).
+    #[cfg_attr(not(debug_assertions), allow(dead_code))] // read by the debug-build check
     pub fn cards_in_zones(&self) -> usize {
         let counted = [
             self.hand, self.pitch, self.graveyard, self.banished,

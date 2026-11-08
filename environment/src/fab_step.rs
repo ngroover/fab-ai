@@ -1755,7 +1755,7 @@ mod card_tests;
 mod tests {
     use super::*;
     use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
-    use crate::fab_game::{gamestate_from_decklists,reset};
+    use crate::fab_game::{gamestate_from_decklists, reset, Decklists};
     use crate::game_state::CardVisibleState;
     use crate::cards::Card;
     use crate::deck_cards::{DorintheaCard, RhinarCard};
@@ -1764,8 +1764,7 @@ mod tests {
 
     #[test]
     fn test_go_first_step() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         assert_eq!(gs.active_player, PlayerIndex::P1);
 
@@ -1778,8 +1777,7 @@ mod tests {
 
     #[test]
     fn test_go_second_step() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         assert_eq!(gs.active_player, PlayerIndex::P1);
 
@@ -1792,8 +1790,7 @@ mod tests {
 
     #[test]
     fn test_play_card_moves_to_pitch() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -1819,8 +1816,7 @@ mod tests {
 
     #[test]
     fn test_play_affordable_card_moves_to_instant() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -1848,8 +1844,7 @@ mod tests {
 
     #[test]
     fn test_pitch_commits_played_card_to_stack() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -1877,8 +1872,7 @@ mod tests {
 
     #[test]
     fn test_card_visibility_follows_zone() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
         // Cards still in the deck are hidden from both players; cards drawn into a
@@ -1911,8 +1905,7 @@ mod tests {
 
     #[test]
     fn test_bottomed_pitch_card_stays_visible() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
         // Pitch a card to pay for Muscle Mutt, then play through to the end of the
@@ -1936,8 +1929,7 @@ mod tests {
 
     #[test]
     fn test_pitch_below_cost_keeps_card_pending() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -1972,8 +1964,7 @@ mod tests {
 
     #[test]
     fn test_pitch_commits_weapon_attack_to_stack() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -1999,8 +1990,7 @@ mod tests {
 
     #[test]
     fn test_end_turn_clears_unspent_resources() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -2022,8 +2012,7 @@ mod tests {
 
     #[test]
     fn test_attack_card_moves_to_pitch() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -2041,8 +2030,7 @@ mod tests {
 
     #[test]
     fn test_play_packcall() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -2073,8 +2061,7 @@ mod tests {
     /// Instant phase with p1 as both turn and active player. Returns the gamestate
     /// and the stack slot the committed card occupies.
     fn instant_phase_with_one_card() -> (Gamestate, Card) {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -2090,8 +2077,7 @@ mod tests {
 
     #[test]
     fn test_choose_first_sets_turn_player() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
         assert_eq!(gs.active_player, PlayerIndex::P1);
 
         // Going second flips both the active player and, since they own the turn,
@@ -2138,8 +2124,7 @@ mod tests {
 
     #[test]
     fn test_attack_action_resolves_to_combat_chain() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -2170,8 +2155,7 @@ mod tests {
 
     #[test]
     fn test_weapon_attack_resolves_to_combat_chain() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -2202,8 +2186,7 @@ mod tests {
     /// Mutt. Mirrors `test_attack_action_resolves_to_combat_chain` and leaves the
     /// gamestate in the Defend phase with p2 as the active (defending) player.
     fn step_to_dorinthea_defending() -> Gamestate {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -2371,8 +2354,7 @@ mod tests {
 
     #[test]
     fn test_turn_player_starts_with_one_action_point() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         // Before the first-player choice neither player has been granted their
         // action point yet.
@@ -2394,8 +2376,7 @@ mod tests {
         // so combat damage is dealt. Muscle Mutt has no Go Again, so its action
         // point is spent once damage resolves — and back in the Action phase
         // Rhinar can no longer play another attack action or action.
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         assert_eq!(gs.p1.action_points, 1);
@@ -2462,8 +2443,7 @@ mod tests {
         // A complete attack stepped through every phase with no helpers: Rhinar
         // attacks with Muscle Mutt (power 6), Dorinthea blocks with a single
         // Driving Blade (defense 3), and 6 - 3 = 3 damage is dealt to her life.
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         // ── ChooseFirst phase ──────────────────────────────────────────────
         assert_eq!(gs.phase, Phase::ChooseFirst);
@@ -2531,8 +2511,7 @@ mod tests {
         // she commits three defense-3 cards (Driving Blade, In the Swing, Second
         // Swing) for 9 total defense against Muscle Mutt's 6 power, so no damage
         // gets through and her life is unchanged.
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         // ── ChooseFirst phase ──────────────────────────────────────────────
         assert_eq!(gs.phase, Phase::ChooseFirst);
@@ -2685,8 +2664,7 @@ mod tests {
         // walks it back in order: the instant window resolves the attack onto the
         // chain (-> Defend), declaring blocks advances to the turn player's
         // Reaction window, and emptying that window returns to the Action phase.
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         let tp = gs.turn_player;
 
@@ -2776,8 +2754,7 @@ mod tests {
 
     #[test]
     fn test_pass_clears_pending_card() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -2862,8 +2839,7 @@ mod tests {
     fn test_action_phase_pass_returns_weapon_to_weapon_slot() {
         // Swing Bone Basher through a full combat so the weapon card is left on
         // the combat chain when play returns to the Action phase.
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
         let weapon = weapon_card(&gs, PlayerIndex::P1);
@@ -3262,8 +3238,7 @@ mod tests {
 
     #[test]
     fn test_arsenal_logs_hide_card_from_opponent() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, true);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
@@ -3291,8 +3266,7 @@ mod tests {
     fn test_close_combat_chain_logs_once() {
         // With logging on, closing a populated chain logs a single public event
         // after the pass itself.
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, true);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
         step_card(&mut gs, ActionType::PlayCard, mm);
@@ -3321,8 +3295,7 @@ mod tests {
 
     #[test]
     fn test_initial_hand() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -3343,8 +3316,7 @@ mod tests {
 
     #[test]
     fn test_draw_cards_includes_last_card() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -3377,8 +3349,7 @@ mod tests {
     /// life, the turn counter at 1, in the Action phase. A convenient starting
     /// point for poking the win/draw conditions.
     fn fresh_game() -> Gamestate {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         gs
     }
@@ -3574,9 +3545,12 @@ mod tests {
 
     #[test]
     fn test_reset_clears_turn_count() {
-        let mut gs = fresh_game();
+        let decks = Decklists::new(build_rhinar_deck(), build_dorinthea_deck());
+        let mut gs = gamestate_from_decklists(&decks, Some(42));
+        reset(&mut gs, &decks, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         gs.turn_count = 17;
-        reset(&mut gs, false);
+        reset(&mut gs, &decks, false);
         assert_eq!(gs.turn_count, 0);
     }
 
@@ -3584,8 +3558,7 @@ mod tests {
 
     #[test]
     fn test_logging_disabled_leaves_logs_none() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
@@ -3596,8 +3569,7 @@ mod tests {
 
     #[test]
     fn test_logging_events_as_they_happen() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, true);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);
 
         // The first-player choice logs three events: the choice itself, then
         // each player's opening-hand draw the moment it happens.
@@ -3623,8 +3595,7 @@ mod tests {
     #[test]
     fn test_logging_pass_and_stack_resolution_in_one_step() {
         // Drive Muscle Mutt onto the stack with logging on.
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, true);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
         step_card(&mut gs, ActionType::PlayCard, mm);
@@ -3649,8 +3620,7 @@ mod tests {
 
     #[test]
     fn test_logging_hides_opponent_draws() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, true);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
         // Entries 1 and 2 are the opening-hand draws (entry 0 is the choice).
@@ -3672,8 +3642,7 @@ mod tests {
 
     #[test]
     fn test_logging_damage_message_includes_life_change() {
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, true);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);
         // Re-drive step_to_dorinthea_defending with logging on, then run out the
         // reaction window so Muscle Mutt's 6 damage lands.
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
@@ -3710,8 +3679,7 @@ mod tests {
         // Pack Hunt is an attack action carrying Intimidate. When it resolves
         // (onto the attacker's combat chain) the defending player must banish a
         // random card from their hand into their Intimidate banish zone.
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
         // Relabel two of Rhinar's (p1) hand cards: one to Pack Hunt (the attack
@@ -3861,8 +3829,7 @@ mod tests {
         // banked Go Again. Each attack sits on its own chain link and deals its
         // own 6 damage: 20 -> 14 -> 8. Were both attacks sharing a link, the
         // second would be scored as 6 + 6 and take Dorinthea to 2.
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         relabel_hand(&mut gs, PlayerIndex::P1,
             &[Card::MuscleMuttY, Card::ClearingBellowB, Card::MuscleMuttY, Card::ClearingBellowB]);
@@ -3892,8 +3859,7 @@ mod tests {
         // Mutt is unblocked and deals its full 6: 20 -> 17 -> 11. Were the
         // blocker still counted, the second attack would be scored as 12 power
         // against 3 defense and take Dorinthea to 8.
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         relabel_hand(&mut gs, PlayerIndex::P1,
             &[Card::MuscleMuttY, Card::ClearingBellowB, Card::MuscleMuttY, Card::ClearingBellowB]);
@@ -3915,8 +3881,7 @@ mod tests {
     fn test_closing_the_chain_clears_every_link() {
         // Two attacks on two links: passing closes the whole chain, not just the
         // link the last attack was on, so both attacks reach the graveyard.
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         relabel_hand(&mut gs, PlayerIndex::P1,
             &[Card::MuscleMuttY, Card::ClearingBellowB, Card::MuscleMuttY, Card::ClearingBellowB]);
@@ -3942,8 +3907,7 @@ mod tests {
         // link and mis-score the attack. Every link is parked full here — cards
         // pulled off the top of the deck and moved onto the chain — so the next
         // attack has nowhere to go.
-        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
-        reset(&mut gs, false);
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         relabel_hand(&mut gs, PlayerIndex::P1,
             &[Card::MuscleMuttY, Card::ClearingBellowB, Card::MuscleMuttY, Card::ClearingBellowB]);

@@ -2,7 +2,7 @@ use crate::agents::Agent;
 
 /// A two-player, alternating-decision game the simulator can drive. Anything
 /// that can report its legal actions, apply one with a step function, and say
-/// when it is finished can be simulated — the FaB `Gamestate` implements this
+/// when it is finished can be simulated — the FaB `FabGame` implements this
 /// (see `fab_game`), but another game with its own state and action types can
 /// be dropped in unchanged.
 pub trait Game {
@@ -81,11 +81,11 @@ mod tests {
     use super::*;
     use crate::agents::RandomAgent;
     use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
-    use crate::fab_game::gamestate_from_decklists;
+    use crate::fab_game::FabGame;
 
     #[test]
     fn run_plays_a_random_game_to_a_terminal_state() {
-        let game = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         let mut sim = Simulator::new(game, RandomAgent::new(Some(1)), RandomAgent::new(Some(2)));
 
         let steps = sim.run(false);
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn run_resets_so_a_finished_simulator_can_run_again() {
-        let game = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         let mut sim = Simulator::new(game, RandomAgent::new(Some(1)), RandomAgent::new(Some(2)));
 
         sim.run(false);
@@ -108,12 +108,12 @@ mod tests {
 
     #[test]
     fn run_with_logging_records_a_game_log() {
-        let game = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         let mut sim = Simulator::new(game, RandomAgent::new(Some(1)), RandomAgent::new(Some(2)));
 
         sim.run(true);
 
-        let log = sim.game.log.as_ref().expect("logging was enabled");
+        let log = sim.game.state.log.as_ref().expect("logging was enabled");
         assert!(!log.is_empty());
     }
 
@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn random_game_with_a_six_layer_stack_finishes() {
         let seed = 69221;
-        let game = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+        let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
         let mut sim = Simulator::new(game, RandomAgent::new(Some(seed + 1)), RandomAgent::new(Some(seed + 2)));
         sim.run(false);
         assert!(sim.game.is_over());
@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn random_games_terminate_across_many_seeds() {
         for seed in 0..500u64 {
-            let game = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+            let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
             let mut sim = Simulator::new(game, RandomAgent::new(Some(seed + 1)), RandomAgent::new(Some(seed + 2)));
             sim.run(false);
             assert!(sim.game.is_over(), "seed {} deadlocked (no legal actions before terminal state)", seed);

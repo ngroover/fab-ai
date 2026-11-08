@@ -19,7 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use agents::RandomAgent;
 use decks::{build_dorinthea_deck, build_rhinar_deck};
-use fab_game::gamestate_from_decklists;
+use fab_game::FabGame;
 use game_state::Phase;
 use simulator::Simulator;
 
@@ -41,7 +41,7 @@ fn main() {
         .expect("system clock before unix epoch")
         .as_nanos() as u64;
 
-    let game = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(time_seed));
+    let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(time_seed));
     let mut sim = Simulator::new(
         game,
         RandomAgent::new(Some(time_seed.wrapping_add(1))),
@@ -54,7 +54,7 @@ fn main() {
 
     for _ in 0..num_games {
         sim.run(false);
-        match sim.game.phase {
+        match sim.game.state.phase {
             Phase::Player1Win => rhinar_wins += 1,
             Phase::Player2Win => dorinthea_wins += 1,
             Phase::Draw => draws += 1,
