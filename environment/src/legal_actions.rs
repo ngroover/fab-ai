@@ -1,5 +1,6 @@
-use crate::game_state::{Gamestate, Phase, Player, PlayerIndex, CardState, CardIdx, TOTAL_CARDS};
-use crate::action::{Action, ActionType, LegalActions};
+use crate::game_state::{Gamestate, Phase, Player, Zone};
+use crate::action::{Action, ActionType, CardRef, LegalActions};
+use crate::card_counts::{CardCounts, DeckCardId};
 use crate::cards::{CardData, CardType};
 use crate::card_effects::AdditionalCostType;
 use crate::fab_step::{current_chain_link, face_down_mentor_in_arsenal, uses_action_point};
@@ -7,10 +8,7 @@ use crate::fab_step::{current_chain_link, face_down_mentor_in_arsenal, uses_acti
 
 pub fn legal_actions(gs: &Gamestate) -> LegalActions {
     #[cfg(debug_assertions)]
-    {
-        gs.p1.debug_check_zones(&gs.cards);
-        gs.p2.debug_check_zones(&gs.cards);
-    }
+    gs.debug_check_card_totals();
     match gs.phase {
         Phase::ChooseFirst => {
             let mut actions = LegalActions::new();
@@ -41,11 +39,8 @@ pub fn legal_actions(gs: &Gamestate) -> LegalActions {
 /// player's arsenal face up, or pass to leave it face down. Both always offered.
 fn legal_mentor_flip_phase(gs: &Gamestate) -> LegalActions {
     let mut actions = LegalActions::new();
-    if let Some(idx) = face_down_mentor_in_arsenal(gs, gs.active_player) {
-        actions.push(Action {
-            typ: ActionType::FlipFaceUp,
-            card: Some(CardIdx::new(idx)),
-        });
+    if let Some(id) = face_down_mentor_in_arsenal(gs, gs.active_player) {
+        actions.push(Action::new(ActionType::FlipFaceUp, CardRef::new(id, Zone::Arsenal)));
     }
     actions.push(Action {
         typ: ActionType::Pass,
@@ -58,15 +53,13 @@ fn legal_defend_phase(gs: &Gamestate) -> LegalActions {
     // When we enter the Defend phase the active player is flipped to the
     // defender (see resolve_top_of_stack), so the usual active-player lookup
     // gives us the player choosing blockers.
-    let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let player = gs.player(gs.active_player);
 
-    // Every card in hand the defender may declare as a blocker.
-    let mut actions: LegalActions = player.hand_iter(&gs.cards)
-        .filter(|(_, cs)| can_be_declared_as_blocker(cs.card.data()))
-        .map(|(idx, _)| Action {
-            typ: ActionType::Defend,
-            card: Some(CardIdx::new(idx)),
-        })
+    // Every card in hand the defender may declare as a blocker — once per
+    // distinct card, since copies are the same choice.
+    let mut actions: LegalActions = player.hand.iter()
+        .filter(|&(id, _)| can_be_declared_as_blocker(player.card(id).data()))
+        .map(|(id, _)| Action::new(ActionType::Defend, CardRef::new(id, Zone::Hand)))
         .collect();
 
     // Blocking is optional (and the only choice once the hand is empty):
@@ -83,16 +76,15 @@ fn legal_arsenal_phase(gs: &Gamestate) -> LegalActions {
     // The turn player has passed their action phase and may now set a card
     // aside. The active player is the turn player here, so the usual lookup
     // gives us the player choosing.
-    let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let player = gs.player(gs.active_player);
 
     let mut actions = LegalActions::new();
 
-    // The arsenal holds a single card: every card in hand is a choice, but only
-    // while the slot is free.
-    if player.arsenal_idx.is_none() {
-        actions.extend(player.hand_iter(&gs.cards).map(|(idx, _)| Action {
-            typ: ActionType::Arsenal,
-            card: Some(CardIdx::new(idx)),
+    // The arsenal holds a single card: every distinct card in hand is a
+    // choice, but only while the slot is free.
+    if player.arsenal.is_none() {
+        actions.extend(player.hand.iter().map(|(id, _)| {
+            Action::new(ActionType::Arsenal, CardRef::new(id, Zone::Hand))
         }));
     }
 
@@ -109,97 +101,72 @@ fn legal_arsenal_phase(gs: &Gamestate) -> LegalActions {
 fn legal_pitch_order_phase(gs: &Gamestate) -> LegalActions {
     // The active player — the owner of the pitch zone being cleared, the turn
     // player first and then the opponent — picks, card by card, the order
-    // their pitched cards go to the bottom of their deck. Every card still in
-    // the pitch zone is a choice; there is no pass — the phase only ends once
-    // the zone is empty (see `handle_pitch_order_phase`).
-    let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-
-    player.pitch_iter(&gs.cards)
-        .map(|(idx, _)| Action {
-            typ: ActionType::BottomPitch,
-            card: Some(CardIdx::new(idx)),
-        })
+    // their pitched cards go to the bottom of their deck. Every distinct card
+    // still in the pitch zone is a choice; there is no pass — the phase only
+    // ends once the zone is empty (see `handle_pitch_order_phase`).
+    gs.player(gs.active_player).pitch.iter()
+        .map(|(id, _)| Action::new(ActionType::BottomPitch, CardRef::new(id, Zone::Pitch)))
         .collect()
 }
 
 fn legal_pitch_phase(gs: &Gamestate) -> LegalActions {
-    let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let player = gs.player(gs.active_player);
 
     // The card being paid for is held pending in the zone it is played from —
     // the hand, or the arsenal. A pending hand card can't pitch for itself, so
-    // exclude it from the options; a pending arsenal card isn't in hand at all,
+    // one copy of it is set aside; a pending arsenal card isn't in hand at all,
     // leaving the whole hand free to pay for it.
-    let pending_index = gs.pending_card.map(|p| p.index.get());
+    let pending = gs.pending_card;
+    let available = match pending {
+        Some(p) if p.from == Zone::Hand => player.hand.without(p.card),
+        _ => player.hand,
+    };
 
     // A pending card with a "discard a card" additional cost must leave a card
     // behind to discard once its cost is paid. When that's the case, pitching a
     // card is only legal if the rest of the hand can still both finish covering
     // the cost and keep a spare card to discard — so pitching the card that
     // ought to be discarded (e.g. the lone low-pitch card) is disallowed.
-    let discard_cost_cost: Option<u8> = gs.pending_card.and_then(|p| {
-        let data = gs.cards[p.index.get()].card.data();
+    let discard_cost_cost: Option<u8> = pending.and_then(|p| {
+        let data = player.card(p.card).data();
         matches!(data.additional_cost, Some(AdditionalCostType::DiscardCard)).then_some(data.cost)
     });
 
     // Every other card in hand is a pitch option, as long as it actually pitches
     // for resources — cards with a pitch value of 0 produce nothing and can't be
     // pitched.
-    player.hand_iter(&gs.cards)
-        .filter(|(idx, _)| Some(*idx) != pending_index)
-        .filter(|(_, cs)| cs.card.data().pitch > 0)
-        .filter(|(idx, cs)| match discard_cost_cost {
-            Some(cost) => pitch_leaves_card_to_discard(
-                player,
-                &gs.cards,
-                pending_index.expect("discard cost implies a pending card"),
-                cost,
-                player.resources,
-                *idx,
-                cs.card.data().pitch,
-            ),
+    available.iter()
+        .filter(|&(id, _)| player.card(id).data().pitch > 0)
+        .filter(|&(id, _)| match discard_cost_cost {
+            Some(cost) => pitch_leaves_card_to_discard(player, available, cost, player.resources, id),
             None => true,
         })
-        .map(|(idx, _)| Action {
-            typ: ActionType::Pitch,
-            card: Some(CardIdx::new(idx)),
-        })
+        .map(|(id, _)| Action::new(ActionType::Pitch, CardRef::new(id, Zone::Hand)))
         .collect()
 }
 
 /// While paying for a card that carries a "discard a card" additional cost,
-/// decide whether pitching the candidate at `cand_idx` can still leave a card in
-/// hand to discard once the cost is covered. Pitching it banks `cand_pitch` more
-/// resources; the rest of the hand (everything except the pending card and the
-/// candidate) must then be able to cover whatever cost remains while keeping its
+/// decide whether pitching a copy of `cand` can still leave a card in hand to
+/// discard once the cost is covered. `available` is the hand without the
+/// pending card. Pitching the candidate banks its pitch; the rest of the hand
+/// must then be able to cover whatever cost remains while keeping its
 /// lowest-pitch card back to discard.
 fn pitch_leaves_card_to_discard(
     player: &Player,
-    cards: &[CardState; TOTAL_CARDS],
-    pending_idx: usize,
+    available: CardCounts,
     cost: u8,
     resources: u8,
-    cand_idx: usize,
-    cand_pitch: u8,
+    cand: DeckCardId,
 ) -> bool {
     // Cost still owed after banking what this candidate pitches.
+    let cand_pitch = player.card(cand).data().pitch;
     let remaining_cost = cost.saturating_sub(resources.saturating_add(cand_pitch));
 
-    // Summarise the rest of the hand left after pitching the candidate.
-    let mut count: u32 = 0;
-    let mut total: u32 = 0;
-    let mut min_pitch: Option<u8> = None;
-    for (idx, cs) in player.hand_iter(cards) {
-        if idx == pending_idx || idx == cand_idx {
-            continue;
-        }
-        let p = cs.card.data().pitch;
-        count += 1;
-        total += p as u32;
-        min_pitch = Some(min_pitch.map_or(p, |m| m.min(p)));
-    }
+    // The rest of the hand left after pitching the candidate.
+    let rest = available.without(cand);
 
     // No card left means nothing to discard, so this pitch is a dead end.
-    if count == 0 {
+    if rest.is_empty() {
         return false;
     }
     // Cost already fully covered: the remaining cards include the discard.
@@ -208,8 +175,8 @@ fn pitch_leaves_card_to_discard(
     }
     // Reserve the lowest-pitch remaining card for the discard; the rest must
     // still cover what's owed.
-    let reserved = min_pitch.unwrap_or(0) as u32;
-    total.saturating_sub(reserved) >= remaining_cost as u32
+    let reserved = min_pitch(player, rest).unwrap_or(0);
+    player.pitch_total(rest).saturating_sub(reserved) >= remaining_cost
 }
 
 fn legal_action_phase(gs: &Gamestate) -> LegalActions {
@@ -221,7 +188,7 @@ fn legal_action_phase(gs: &Gamestate) -> LegalActions {
     // has been dealt and play has returned here — and the turn player still has
     // an action point for another attack. Without one, breaking it gains
     // nothing: passing closes the chain anyway as the action phase ends.
-    let player = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let player = gs.player(gs.turn_player);
     if combat_chain_open(gs) && player.action_points > 0 {
         actions.push(Action {
             typ: ActionType::CloseChain,
@@ -233,7 +200,7 @@ fn legal_action_phase(gs: &Gamestate) -> LegalActions {
 
 /// Whether any card sits on either player's combat chain.
 fn combat_chain_open(gs: &Gamestate) -> bool {
-    gs.p1.chain_link.iter().chain(gs.p2.chain_link.iter()).any(|link| link.is_some())
+    gs.p1.chain_occupied() || gs.p2.chain_occupied()
 }
 
 fn legal_instant_phase(gs: &Gamestate) -> LegalActions {
@@ -280,15 +247,15 @@ fn legal_defend_triggers_phase(gs: &Gamestate) -> LegalActions {
 /// `is_playable` predicate, applied to each ability's activation card type.
 fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> LegalActions {
     let mut legal_actions = LegalActions::new();
-    let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let player = gs.player(gs.active_player);
 
     // Total pitch available across the whole hand. Computed once here and shared
     // by both the hand-card playability and equipment-activation affordability
     // checks, since pitching pays for either.
     let total_pitch = player.hand_pitch_total();
 
-    push_playable_cards(&mut legal_actions, player, &gs.cards, total_pitch, is_playable);
-    push_equipment_activations(&mut legal_actions, player, &gs.cards, total_pitch, is_playable);
+    push_playable_cards(&mut legal_actions, player, total_pitch, is_playable);
+    push_equipment_activations(&mut legal_actions, player, total_pitch, is_playable);
     push_defending_activations(&mut legal_actions, gs, is_playable);
 
     // Passing is always available; it ends the window without playing or
@@ -327,15 +294,14 @@ fn push_defending_activations(actions: &mut LegalActions, gs: &Gamestate, is_pla
         return;
     }
 
-    let defender = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let defender = gs.player(gs.active_player);
     // Only the turn player attacks, so the link being defended is the current
     // link of the turn player's chain — the same one the blockers were attached
     // to when they were declared.
-    let attacker = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let link = current_chain_link(attacker);
+    let link = current_chain_link(gs.player(gs.turn_player));
 
-    for (idx, _) in defender.chain_link_iter(link, &gs.cards) {
-        let Some(ability) = &gs.cards[idx].card.data().ability else {
+    for (id, copies) in defender.chain_link[link].iter() {
+        let Some(ability) = &defender.card(id).data().ability else {
             continue;
         };
         // This generator covers only the abilities restricted to defending; any
@@ -349,8 +315,9 @@ fn push_defending_activations(actions: &mut LegalActions, gs: &Gamestate, is_pla
             continue;
         }
         // "Once per turn": a copy that has already been activated this turn is
-        // done, whether or not that activation has resolved yet.
-        if ability.once_per_turn() && gs.cards[idx].ability_used_this_turn {
+        // done, whether or not that activation has resolved yet. Another copy
+        // on the link may still activate.
+        if ability.once_per_turn() && defender.abilities_used.count(id) >= copies {
             continue;
         }
         // A cost that discards cannot be paid from an empty hand. The card
@@ -368,14 +335,11 @@ fn push_defending_activations(actions: &mut LegalActions, gs: &Gamestate, is_pla
             continue;
         }
 
-        actions.push(Action {
-            typ: ActionType::Activate,
-            card: Some(CardIdx::new(idx)),
-        });
+        actions.push(Action::new(ActionType::Activate, CardRef::new(id, Zone::CombatChain)));
     }
 }
 
-fn push_equipment_activations(actions: &mut LegalActions, player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8, is_playable: fn(CardType) -> bool) {
+fn push_equipment_activations(actions: &mut LegalActions, player: &Player, total_pitch: u8, is_playable: fn(CardType) -> bool) {
     // Each worn piece is only an option if it carries an activated ability
     // (e.g. Blossom of Spring, Gallantry Gold); passive equipment such as Bone
     // Vizier or the Ironhide pieces has none. The weapon belongs here too: a
@@ -383,95 +347,62 @@ fn push_equipment_activations(actions: &mut LegalActions, player: &Player, cards
     // cost. Each is offered as an Activate; whether resolving it routes the card
     // to the combat chain (a weapon) or the graveyard (an armor ability) is
     // decided later from the card type (see `commits_as_attack`).
-    let activatable_slots = [
-        player.head_idx,
-        player.chest_idx,
-        player.arms_idx,
-        player.legs_idx,
-        player.weapon_idx,
-    ];
-    for slot in activatable_slots {
-        if let Some(idx) = slot {
-            let idx = idx.get();
-            let Some(ability) = &cards[idx].card.data().ability else {
-                continue;
-            };
+    let worn = player.equipment.iter().map(|(id, n)| (id, n, Zone::Equipment));
+    let weapon = player.weapon.map(|id| (id, 1, Zone::Weapon));
+    for (id, copies, zone) in worn.chain(weapon) {
+        let data = player.card(id).data();
+        let Some(ability) = &data.ability else {
+            continue;
+        };
 
-            // The ability activates at a particular speed; only offer it when
-            // that speed is playable in the current phase.
-            if !is_playable(ability.card_type()) {
-                continue;
-            }
+        // The ability activates at a particular speed; only offer it when
+        // that speed is playable in the current phase.
+        if !is_playable(ability.card_type()) {
+            continue;
+        }
 
-            // "Once per turn" (a weapon swing): a card that has already been
-            // activated this turn is done, even once it is back in its slot.
-            if ability.once_per_turn() && cards[idx].ability_used_this_turn {
-                continue;
-            }
+        // "Once per turn" (a weapon swing): a card that has already been
+        // activated this turn is done, even once it is back in its slot.
+        if ability.once_per_turn() && player.abilities_used.count(id) >= copies {
+            continue;
+        }
 
-            // Action-speed abilities (a weapon swing, or an action ability such
-            // as Blossom of Spring) cost an action point; with none left the
-            // player can't activate them. Instant-speed abilities are free.
-            if uses_action_point(ActionType::Activate, cards[idx].card.data())
-                && player.action_points == 0 {
-                continue;
-            }
+        // Action-speed abilities (a weapon swing, or an action ability such
+        // as Blossom of Spring) cost an action point; with none left the
+        // player can't activate them. Instant-speed abilities are free.
+        if uses_action_point(ActionType::Activate, data) && player.action_points == 0 {
+            continue;
+        }
 
-            // The activation cost is set by the ability; only offer it when the
-            // hand can pitch enough to cover what banked resources don't.
-            let needed = ability.resource_cost().saturating_sub(player.resources);
-            if total_pitch >= needed {
-                actions.push(Action {
-                    typ: ActionType::Activate,
-                    card: Some(CardIdx::new(idx)),
-                });
-            }
+        // The activation cost is set by the ability; only offer it when the
+        // hand can pitch enough to cover what banked resources don't.
+        let needed = ability.resource_cost().saturating_sub(player.resources);
+        if total_pitch >= needed {
+            actions.push(Action::new(ActionType::Activate, CardRef::new(id, zone)));
         }
     }
 }
 
-fn push_playable_cards(actions: &mut LegalActions, player: &Player, cards: &[CardState; TOTAL_CARDS], total_pitch: u8, is_playable: fn(CardType) -> bool) {
-    // Bit `card as u8` is set once a copy of that card has been considered.
-    // The catalog has fewer than 64 cards, so one word covers every card
-    // without allocating.
-    let mut seen: u64 = 0;
-    for (idx, cardstate) in player.hand_iter(cards) {
-        let card = cardstate.card;
-        let data = card.data();
-
-        if !is_playable_now(player, data, is_playable) {
-            continue;
-        }
-
-        // Duplicate copies are an identical choice — emit only the first.
-        let bit = 1u64 << (card as u8);
-        if seen & bit != 0 {
-            continue;
-        }
-        seen |= bit;
-
-        if can_pay_for_card(player, cards, total_pitch, idx, PlayedFrom::Hand) {
-            actions.push(Action {
-                typ: ActionType::PlayCard,
-                card: Some(CardIdx::new(idx)),
-            });
+fn push_playable_cards(actions: &mut LegalActions, player: &Player, total_pitch: u8, is_playable: fn(CardType) -> bool) {
+    // The hand is a bitfield of distinct cards, so each card is offered once
+    // however many copies are held — copies are an identical choice.
+    for (id, _) in player.hand.iter() {
+        let data = player.card(id).data();
+        if is_playable_now(player, data, is_playable)
+            && can_pay_for_card(player, total_pitch, id, PlayedFrom::Hand) {
+            actions.push(Action::new(ActionType::PlayCard, CardRef::new(id, Zone::Hand)));
         }
     }
 
     // The arsenal card is played as though it were in hand: the same speeds, the
     // same action-point cost, and paid for by pitching from hand. It is offered
-    // independently of the hand dedup above — playing the copy in the arsenal
-    // empties the arsenal, so it stays a distinct choice from playing a copy
-    // held in hand.
-    if let Some(arsenal_idx) = player.arsenal_idx {
-        let idx = arsenal_idx.get();
-        let data = cards[idx].card.data();
+    // independently of the hand — playing the copy in the arsenal empties the
+    // arsenal, so it stays a distinct choice from playing a copy held in hand.
+    if let Some(id) = player.arsenal {
+        let data = player.card(id).data();
         if is_playable_now(player, data, is_playable)
-            && can_pay_for_card(player, cards, total_pitch, idx, PlayedFrom::Arsenal) {
-            actions.push(Action {
-                typ: ActionType::PlayCard,
-                card: Some(arsenal_idx),
-            });
+            && can_pay_for_card(player, total_pitch, id, PlayedFrom::Arsenal) {
+            actions.push(Action::new(ActionType::PlayCard, CardRef::new(id, Zone::Arsenal)));
         }
     }
 }
@@ -514,7 +445,7 @@ enum PlayedFrom {
     Arsenal,
 }
 
-/// Whether the player can cover the cost of playing the card at `idx`, given
+/// Whether the player can cover the cost of playing a copy of `id`, given
 /// `total_pitch` — the pitch available across their whole hand.
 ///
 /// A card played from hand cannot pitch for itself, so its own pitch comes out
@@ -523,12 +454,11 @@ enum PlayedFrom {
 /// card itself never adds to the pool either way.
 fn can_pay_for_card(
     player: &Player,
-    cards: &[CardState; TOTAL_CARDS],
     total_pitch: u8,
-    idx: usize,
+    id: DeckCardId,
     played_from: PlayedFrom,
 ) -> bool {
-    let data = cards[idx].card.data();
+    let data = player.card(id).data();
 
     // Cost still owed after spending banked resource points.
     let needed = data.cost.saturating_sub(player.resources);
@@ -550,7 +480,11 @@ fn can_pay_for_card(
     // hand card is available to discard, since none of them is the card being
     // played.
     if matches!(data.additional_cost, Some(AdditionalCostType::DiscardCard)) {
-        match min_other_hand_pitch(player, cards, idx) {
+        let others = match played_from {
+            PlayedFrom::Hand => player.hand.without(id),
+            PlayedFrom::Arsenal => player.hand,
+        };
+        match min_pitch(player, others) {
             Some(reserved) => pitch_pool = pitch_pool.saturating_sub(reserved),
             None => return false,
         }
@@ -560,16 +494,13 @@ fn can_pay_for_card(
     pitch_pool >= needed
 }
 
-/// The pitch value of the lowest-pitch card in `player`'s hand other than the
-/// card at `played_idx`. This is the card a "discard a card" additional cost
-/// would set aside to discard (the cheapest to lose), and removing it from the
-/// pitch pool is equivalent to sorting the hand by pitch and dropping the
-/// lowest card. `None` when the hand holds no other card to discard.
-fn min_other_hand_pitch(player: &Player, cards: &[CardState; TOTAL_CARDS], played_idx: usize) -> Option<u8> {
-    player.hand_iter(cards)
-        .filter(|(idx, _)| *idx != played_idx)
-        .map(|(_, cs)| cs.card.data().pitch)
-        .min()
+/// The pitch value of the lowest-pitch card in `counts` — the rest of the hand
+/// once the played card is set aside. This is the card a "discard a card"
+/// additional cost would set aside to discard (the cheapest to lose), and
+/// removing it from the pitch pool is equivalent to sorting the hand by pitch
+/// and dropping the lowest card. `None` when there is no other card to discard.
+fn min_pitch(player: &Player, counts: CardCounts) -> Option<u8> {
+    counts.iter().map(|(id, _)| player.card(id).data().pitch).min()
 }
 
 /// Whether a card in the defender's hand may be committed as a blocker in the
@@ -622,7 +553,8 @@ mod tests {
     use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
     use crate::fab_game::{gamestate_from_decklists,reset};
     use crate::fab_step::step;
-    use crate::game_state::CardLocation;
+    use crate::game_state::{PlayerIndex, Zone};
+    use crate::test_support::*;
     use std::collections::HashSet;
 
     #[test]
@@ -657,7 +589,7 @@ mod tests {
         // The opening hand is the three yellow attack actions plus Clearing
         // Bellow; all are playable and affordable from the rest of the hand.
         let playable: HashSet<Card> = plays.iter()
-                .map(|a| gs.cards[a.card_index()].card)
+                .map(|a| card_of(&gs, a))
                 .collect();
         assert_eq!(playable, HashSet::from([
             Card::MuscleMuttY,
@@ -668,7 +600,7 @@ mod tests {
 
         // Every play is sourced from the Hand.
         for a in &plays {
-            assert_eq!(gs.cards[a.card_index()].location, CardLocation::P1Hand);
+            assert_eq!(a.card_ref().zone, Zone::Hand);
         }
     }
 
@@ -690,10 +622,10 @@ mod tests {
         // hand is offered as a Pitch action sourced from the Hand.
         for a in &actions {
             assert_eq!(a.typ, ActionType::Pitch);
-            assert_eq!(gs.cards[a.card_index()].location, CardLocation::P1Hand);
+            assert_eq!(a.card_ref().zone, Zone::Hand);
         }
         let pitchable: HashSet<Card> = actions.iter()
-                .map(|a| gs.cards[a.card_index()].card)
+                .map(|a| card_of(&gs, a))
                 .collect();
         assert_eq!(pitchable, HashSet::from([
             Card::MuscleMuttY,
@@ -715,19 +647,16 @@ mod tests {
         // phase. The pending card can't pitch for itself, so it should not appear
         // among the pitch options even though it sits in the hand with a positive
         // pitch value.
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
         assert_eq!(gs.phase, Phase::ActionPitch);
 
         let actions = legal_actions(&gs);
-        assert!(actions.iter().all(|a| a.card != Some(CardIdx::new(mm_idx))));
+        assert!(actions.iter().all(|a| named(&gs, a) != Some(mm)));
 
         // The rest of the opening hand is still offered.
         let pitchable: HashSet<Card> = actions.iter()
-                .map(|a| gs.cards[a.card_index()].card)
+                .map(|a| card_of(&gs, a))
                 .collect();
         assert_eq!(pitchable, HashSet::from([
             Card::PackCallY,
@@ -748,17 +677,11 @@ mod tests {
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
 
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
 
         // Both players pass; the attack resolves to the chain and Dorinthea must
         // now defend.
@@ -780,12 +703,14 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         assert_eq!(gs.active_player, PlayerIndex::P1);
 
-        let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+        let mut hand = hand_cards(&gs, PlayerIndex::P1);
         assert_eq!(hand.len(), 4);
-        gs.set_card(hand[0], Card::FlockOfTheFeatherWalkersR);
-        gs.set_card(hand[1], Card::SharpenSteelR);
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(hand[0]))});
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(hand[1]))});
+        relabel(&mut gs, PlayerIndex::P1, Zone::Hand, hand[0], Card::FlockOfTheFeatherWalkersR);
+        hand[0] = Card::FlockOfTheFeatherWalkersR;
+        relabel(&mut gs, PlayerIndex::P1, Zone::Hand, hand[1], Card::SharpenSteelR);
+        hand[1] = Card::SharpenSteelR;
+        step_card(&mut gs, ActionType::PlayCard, hand[0]);
+        step_card(&mut gs, ActionType::Pitch, hand[1]);
 
         // Both players pass; the attack resolves to the chain and Rhinar must
         // now defend.
@@ -809,10 +734,10 @@ mod tests {
                 .filter(|a| a.typ == ActionType::Defend)
                 .collect();
         for a in &defends {
-            assert_eq!(gs.cards[a.card_index()].location, CardLocation::P2Hand);
+            assert_eq!(a.card_ref().zone, Zone::Hand);
         }
         let blockable: HashSet<Card> = defends.iter()
-                .map(|a| gs.cards[a.card_index()].card)
+                .map(|a| card_of(&gs, a))
                 .collect();
         assert_eq!(blockable, HashSet::from([
             Card::DrivingBladeY,
@@ -835,19 +760,17 @@ mod tests {
         // — played in the reaction step, never declared as a blocker — that also
         // carries no_block. It must drop out of the defend options while the
         // rest of the hand is still offered.
-        let db_idx = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
-                .map(|(idx, _)| idx)
-                .expect("Driving Blade should be in the opening hand");
-        gs.set_card(db_idx, Card::ToughenUpB);
+        let db = expect_in(&gs, PlayerIndex::P2, Card::DrivingBladeY, Zone::Hand, "Driving Blade should be in the opening hand");
+        relabel(&mut gs, PlayerIndex::P2, Zone::Hand, db, Card::ToughenUpB);
+        let db = Card::ToughenUpB;
         assert!(Card::ToughenUpB.data().no_block);
 
         let actions = legal_actions(&gs);
 
-        assert!(actions.iter().all(|a| a.card != Some(CardIdx::new(db_idx))));
+        assert!(actions.iter().all(|a| named(&gs, a) != Some(db)));
         let blockable: HashSet<Card> = actions.iter()
                 .filter(|a| a.typ == ActionType::Defend)
-                .map(|a| gs.cards[a.card_index()].card)
+                .map(|a| card_of(&gs, a))
                 .collect();
         assert_eq!(blockable, HashSet::from([
             Card::SharpenSteelR,
@@ -925,10 +848,10 @@ mod tests {
                 .collect();
         assert_eq!(arsenals.len(), 4);
         for a in &arsenals {
-            assert_eq!(gs.cards[a.card_index()].location, CardLocation::P1Hand);
+            assert_eq!(a.card_ref().zone, Zone::Hand);
         }
         let choices: HashSet<Card> = arsenals.iter()
-                .map(|a| gs.cards[a.card_index()].card)
+                .map(|a| card_of(&gs, a))
                 .collect();
         assert_eq!(choices, HashSet::from([
             Card::MuscleMuttY,
@@ -954,11 +877,8 @@ mod tests {
         // back. Turn 3: Rhinar passes into his Arsenal phase again — his slot is
         // still occupied from turn 1.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Arsenal, card: Some(CardIdx::new(mm_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::Arsenal, mm);
 
         assert_eq!(gs.active_player, PlayerIndex::P2);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
@@ -967,7 +887,7 @@ mod tests {
         assert_eq!(gs.active_player, PlayerIndex::P1);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Arsenal);
-        assert!(gs.p1.arsenal_idx.is_some());
+        assert!(gs.p1.arsenal.is_some());
 
         // The single arsenal slot is taken, so no Arsenal choices are offered —
         // only the Pass that ends the turn.
@@ -1016,16 +936,18 @@ mod tests {
         // and a non-reaction (Flock of the Feather Walkers, an AttackAction) so
         // we can see the predicate filter at work: only the attack reaction is
         // offered as a PlayCard.
-        let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+        let mut hand = hand_cards(&gs, PlayerIndex::P1);
         assert_eq!(hand.len(), 2, "expected Dorinthea to hold two cards in reaction");
-        gs.set_card(hand[0], Card::InTheSwingR);
-        gs.set_card(hand[1], Card::FlockOfTheFeatherWalkersR);
+        relabel(&mut gs, PlayerIndex::P1, Zone::Hand, hand[0], Card::InTheSwingR);
+        hand[0] = Card::InTheSwingR;
+        relabel(&mut gs, PlayerIndex::P1, Zone::Hand, hand[1], Card::FlockOfTheFeatherWalkersR);
+        hand[1] = Card::FlockOfTheFeatherWalkersR;
 
         let actions = legal_actions(&gs);
 
         let playable: HashSet<Card> = actions.iter()
                 .filter(|a| a.typ == ActionType::PlayCard)
-                .map(|a| gs.cards[a.card_index()].card)
+                .map(|a| card_of(&gs, a))
                 .collect();
         assert!(playable.contains(&Card::InTheSwingR));
         assert!(!playable.contains(&Card::FlockOfTheFeatherWalkersR));
@@ -1033,20 +955,22 @@ mod tests {
         // A defense reaction (Toughen Up) is not the attacker's to play:
         // relabeled to one, the card drops out of the offered plays — even with
         // its cost of 2 already banked.
-        gs.set_card(hand[0], Card::ToughenUpB);
+        relabel(&mut gs, PlayerIndex::P1, Zone::Hand, hand[0], Card::ToughenUpB);
+        hand[0] = Card::ToughenUpB;
         gs.p1.resources = 2;
         let actions = legal_actions(&gs);
         assert!(actions.iter().all(|a| a.typ != ActionType::PlayCard
-                || gs.cards[a.card_index()].card != Card::ToughenUpB));
+                || card_of(&gs, a) != Card::ToughenUpB));
         gs.p1.resources = 0;
 
         // Relabel the reaction to an Instant (Sigil of Solace) — still a reaction-
         // speed card, so it stays offered.
-        gs.set_card(hand[0], Card::SigilofSolaceB);
+        relabel(&mut gs, PlayerIndex::P1, Zone::Hand, hand[0], Card::SigilofSolaceB);
+        hand[0] = Card::SigilofSolaceB;
         let actions = legal_actions(&gs);
         let playable: HashSet<Card> = actions.iter()
                 .filter(|a| a.typ == ActionType::PlayCard)
-                .map(|a| gs.cards[a.card_index()].card)
+                .map(|a| card_of(&gs, a))
                 .collect();
         assert!(playable.contains(&Card::SigilofSolaceB));
 
@@ -1072,16 +996,18 @@ mod tests {
         // Up) and an attack reaction (Thrust): as the defender she is offered the
         // defense reaction but not the attack reaction. The rest of her hand
         // pitches for Toughen Up's 2, so cost is not what decides it.
-        let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+        let mut hand = hand_cards(&gs, PlayerIndex::P2);
         assert!(hand.len() >= 4, "expected Dorinthea to hold her opening hand in reaction");
-        gs.set_card(hand[0], Card::ToughenUpB);
-        gs.set_card(hand[1], Card::ThrustR);
+        relabel(&mut gs, PlayerIndex::P2, Zone::Hand, hand[0], Card::ToughenUpB);
+        hand[0] = Card::ToughenUpB;
+        relabel(&mut gs, PlayerIndex::P2, Zone::Hand, hand[1], Card::ThrustR);
+        hand[1] = Card::ThrustR;
 
         let actions = legal_actions(&gs);
 
         let playable: HashSet<Card> = actions.iter()
                 .filter(|a| a.typ == ActionType::PlayCard)
-                .map(|a| gs.cards[a.card_index()].card)
+                .map(|a| card_of(&gs, a))
                 .collect();
         assert!(playable.contains(&Card::ToughenUpB));
         assert!(!playable.contains(&Card::ThrustR));
@@ -1141,20 +1067,14 @@ mod tests {
 
         // Rhinar plays Muscle Mutt (cost 3): it becomes pending and we drop into
         // the ActionPitch phase.
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
         assert_eq!(gs.phase, Phase::ActionPitch);
 
         // Pitch Clearing Bellow (pitch 3) to cover the cost. Muscle Mutt commits
         // to the stack and the game advances to the Instant phase.
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
         assert_eq!(gs.phase, Phase::ActionInstant);
 
         // Rhinar's remaining hand is two yellow attack actions (Pack Call, Raging
@@ -1203,21 +1123,19 @@ mod tests {
         // Blossom of Spring (chest ability) and Bone Basher (weapon swing) are
         // both Activates; the passive equipment is offered as neither.
         let activatable: HashSet<Card> = activations.iter()
-                .map(|a| gs.cards[a.card_index()].card)
+                .map(|a| card_of(&gs, a))
                 .collect();
         assert_eq!(
             activatable,
             HashSet::from([Card::BlossomOfSpring, Card::BoneBasher])
         );
 
-        // Each card sits in its expected zone, derived from its slot rather than
-        // carried on the action: Bone Basher as the weapon, Blossom of Spring as
-        // chest equipment.
+        // Each action names the zone its card sits in: Bone Basher the weapon
+        // zone, Blossom of Spring the equipment zones.
         for a in &activations {
-            let cs = gs.cards[a.card_index()];
-            match cs.card {
-                Card::BoneBasher => assert_eq!(cs.location, CardLocation::P1Weapon),
-                Card::BlossomOfSpring => assert_eq!(cs.location, CardLocation::P1Chest),
+            match card_of(&gs, a) {
+                Card::BoneBasher => assert_eq!(a.card_ref().zone, Zone::Weapon),
+                Card::BlossomOfSpring => assert_eq!(a.card_ref().zone, Zone::Equipment),
                 other => panic!("unexpected activation for {:?}", other),
             }
         }
@@ -1243,67 +1161,42 @@ mod tests {
         // Generic piece in both decks) + Dawnblade (weapon swing). The passive
         // equipment (Ironrot Helm/Legs) is offered as neither.
         let activatable: HashSet<Card> = activations.iter()
-                .map(|a| gs.cards[a.card_index()].card)
+                .map(|a| card_of(&gs, a))
                 .collect();
         assert_eq!(
             activatable,
             HashSet::from([Card::GallantryGold, Card::BlossomOfSpring, Card::Dawnblade])
         );
 
-        // Each card sits in its expected slot, derived from its CardState rather
-        // than carried on the action.
+        // Each action names the zone its card sits in.
         for a in &activations {
-            let cs = gs.cards[a.card_index()];
-            match cs.card {
-                Card::GallantryGold => assert_eq!(cs.location, CardLocation::P2Arms),
-                Card::BlossomOfSpring => assert_eq!(cs.location, CardLocation::P2Chest),
-                Card::Dawnblade => assert_eq!(cs.location, CardLocation::P2Weapon),
+            match card_of(&gs, a) {
+                Card::GallantryGold | Card::BlossomOfSpring => {
+                    assert_eq!(a.card_ref().zone, Zone::Equipment)
+                }
+                Card::Dawnblade => assert_eq!(a.card_ref().zone, Zone::Weapon),
                 other => panic!("unexpected activation for {:?}", other),
             }
         }
     }
 
-    /// Move the head of `pid`'s hand into their (empty) arsenal, relabelled as
-    /// `card`, and return its global index. Mirrors what the Arsenal phase does
-    /// at the end of a turn, without having to play one out.
-    fn put_in_arsenal(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
-        let head = {
-            let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-            assert!(player.arsenal_idx.is_none(), "the arsenal slot should be free");
-            player.hand_idx.expect("hand should hold a card to arsenal").get()
-        };
-        // Relabel while still in hand, so the hand bitfield follows along.
-        gs.set_card(head, card);
-        let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-        // The hand is a singly-linked list whose tail points at itself, so
-        // advancing past the head drops it, as the engine's own detach does.
-        let next = gs.cards[head].next_card.get();
-        player.hand_idx = if next == head { None } else { Some(CardIdx::new(next)) };
-        player.hand_remove(card);
-        player.arsenal_idx = Some(CardIdx::new(head));
-        gs.cards[head].location = CardLocation::arsenal(pid);
-        head
+    /// Drop cards from `pid`'s hand into the graveyard until only `n` remain.
+    fn trim_hand(gs: &mut Gamestate, pid: PlayerIndex, n: usize) {
+        let keep: Vec<Card> = hand_cards(gs, pid).into_iter().take(n).collect();
+        set_hand(gs, pid, &keep);
     }
 
-    /// Drop cards off the front of `pid`'s hand into the graveyard until only
-    /// `n` remain.
-    fn trim_hand(gs: &mut Gamestate, pid: PlayerIndex, n: usize) {
-        let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-        while player.hand_size() as usize > n {
-            let head = player.hand_idx.expect("hand non-empty while trimming").get();
-            let next = gs.cards[head].next_card.get();
-            player.hand_idx = if next == head { None } else { Some(CardIdx::new(next)) };
-            player.hand_remove(gs.cards[head].card);
-            player.zone_add(CardLocation::graveyard(pid), gs.cards[head].card);
-            gs.cards[head].location = CardLocation::graveyard(pid);
-        }
+    /// Whether a `PlayCard` from the arsenal is offered.
+    fn arsenal_play_offered(gs: &Gamestate) -> bool {
+        legal_actions(gs).iter()
+            .any(|a| a.typ == ActionType::PlayCard && a.card_ref().zone == Zone::Arsenal)
     }
 
     /// The cards offered to the active player as `PlayCard` actions.
     fn playable_cards(gs: &Gamestate) -> HashSet<Card> {
         legal_actions(gs).iter()
             .filter(|a| a.typ == ActionType::PlayCard)
-            .map(|a| gs.cards[a.card_index()].card)
+            .map(|a| card_of(&gs, a))
             .collect()
     }
 
@@ -1315,15 +1208,10 @@ mod tests {
 
         // A 0-cost action in the arsenal is playable exactly as it would be
         // from hand: the arsenal card is played as though it were in hand.
-        let arsenal_idx = put_in_arsenal(&mut gs, PlayerIndex::P1, Card::ClearingBellowB);
+        let arsenal = put_in_arsenal(&mut gs, PlayerIndex::P1, Card::ClearingBellowB);
 
-        let offered: Vec<usize> = legal_actions(&gs).iter()
-            .filter(|a| a.typ == ActionType::PlayCard)
-            .map(|a| a.card_index())
-            .collect();
-        assert!(offered.contains(&arsenal_idx),
-            "the arsenal card should be offered as a play");
-        assert_eq!(gs.cards[arsenal_idx].location, CardLocation::P1Arsenal,
+        assert!(arsenal_play_offered(&gs), "the arsenal card should be offered as a play");
+        assert!(in_zone(&gs, PlayerIndex::P1, arsenal, Zone::Arsenal),
             "it is still in the arsenal until it is actually played");
     }
 
@@ -1350,28 +1238,19 @@ mod tests {
         // the cost has to come out of hand. With a hand that pitches for
         // nothing — a lone Chief Ruk'utan, the deck's one pitch-0 card — it is
         // unaffordable and drops out of the options.
-        let arsenal_idx = put_in_arsenal(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
+        put_in_arsenal(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
         assert_eq!(Card::MuscleMuttY.data().cost, 3);
         trim_hand(&mut gs, PlayerIndex::P1, 1);
-        let hand_head = gs.p1.hand_idx.expect("hand should not be empty").get();
-        gs.set_card(hand_head, Card::ChiefRukutan); // pitch 0
+        set_hand(&mut gs, PlayerIndex::P1, &[Card::ChiefRukutan]); // pitch 0
         assert_eq!(Card::ChiefRukutan.data().pitch, 0);
-        let offered: Vec<usize> = legal_actions(&gs).iter()
-            .filter(|a| a.typ == ActionType::PlayCard)
-            .map(|a| a.card_index())
-            .collect();
-        assert!(!offered.contains(&arsenal_idx),
+        assert!(!arsenal_play_offered(&gs),
             "an arsenal card the hand cannot pay for must not be offered");
 
         // Give the hand a single pitch-3 card and it becomes affordable — the
         // whole hand pays, since none of it is the card being played.
-        gs.set_card(hand_head, Card::ClearingBellowB); // pitch 3
+        set_hand(&mut gs, PlayerIndex::P1, &[Card::ClearingBellowB]); // pitch 3
         assert_eq!(Card::ClearingBellowB.data().pitch, 3);
-        let offered: Vec<usize> = legal_actions(&gs).iter()
-            .filter(|a| a.typ == ActionType::PlayCard)
-            .map(|a| a.card_index())
-            .collect();
-        assert!(offered.contains(&arsenal_idx));
+        assert!(arsenal_play_offered(&gs));
     }
 
     #[test]
@@ -1392,11 +1271,7 @@ mod tests {
         assert_eq!(gs.active_player, PlayerIndex::P2);
         // Dorinthea's defense reaction is Toughen Up; the three cards left in
         // her hand pitch for its 2.
-        let arsenal_idx = put_in_arsenal(&mut gs, PlayerIndex::P2, Card::ToughenUpB);
-        let offered: Vec<usize> = legal_actions(&gs).iter()
-            .filter(|a| a.typ == ActionType::PlayCard)
-            .map(|a| a.card_index())
-            .collect();
-        assert!(offered.contains(&arsenal_idx));
+        put_in_arsenal(&mut gs, PlayerIndex::P2, Card::ToughenUpB);
+        assert!(arsenal_play_offered(&gs));
     }
 }

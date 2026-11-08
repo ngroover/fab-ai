@@ -1,5 +1,6 @@
 use crate::action::{Action,ActionType};
-use crate::game_state::{Gamestate,Phase,Player,PendingCard,PlayerIndex,CardIdx,CardLocation,CardVisibleState,CardState,PLAYER_CARDS,TOTAL_CARDS};
+use crate::card_counts::{CardCounts, DeckCardId};
+use crate::game_state::{DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
 use crate::cards::{Card,CardClass,CardData,CardType,Keyword};
 use crate::card_effects::{Ability,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,MentorEffect};
 use crate::fab_game::shuffle_deck_for;
@@ -12,10 +13,7 @@ pub fn step(gs: &mut Gamestate, act: Action) {
         return;
     }
     #[cfg(debug_assertions)]
-    {
-        gs.p1.debug_check_zones(&gs.cards);
-        gs.p2.debug_check_zones(&gs.cards);
-    }
+    gs.debug_check_card_totals();
     match gs.phase {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::MentorFlip => handle_mentor_flip_phase(gs, act),
@@ -36,10 +34,17 @@ fn player_name(pid: PlayerIndex) -> &'static str {
 }
 
 /// The card names in `player`'s hand, joined for a log message.
-fn hand_card_names(player: &Player, cards: &[CardState; TOTAL_CARDS]) -> String {
-    player
-        .hand_iter(cards)
-        .map(|(_, cs)| format!("{:?}", cs.card))
+fn hand_card_names(player: &Player) -> String {
+    card_names(player, player.hand)
+}
+
+/// Every card in `counts` (one entry per copy, in id order), joined for a log
+/// message.
+fn card_names(player: &Player, counts: CardCounts) -> String {
+    counts
+        .iter()
+        .flat_map(|(id, n)| std::iter::repeat_n(player.card(id), n as usize))
+        .map(|card| format!("{:?}", card))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -52,7 +57,7 @@ fn log_opening_hand(gs: &mut Gamestate, pid: PlayerIndex) {
         return;
     }
     let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let named = format!("{} draws [{}]", player_name(pid), hand_card_names(player, &gs.cards));
+    let named = format!("{} draws [{}]", player_name(pid), hand_card_names(player));
     let hidden = format!("{} draws {} cards", player_name(pid), player.hand_size());
     let (p1_msg, p2_msg) = if pid == PlayerIndex::P1 {
         (named.clone(), hidden)
@@ -80,11 +85,9 @@ fn handle_choose_first(gs: &mut Gamestate, act: Action) {
     // begin turn logic
     gs.phase = Phase::Action;
     begin_turn(gs);
-    // The cards live in the shared `gs.cards` array; draw each player's opening
-    // hand by passing that array alongside the player and its id.
-    draw_to_intellect(&mut gs.p1, &mut gs.cards);
+    draw_to_intellect(&mut gs.p1);
     log_opening_hand(gs, PlayerIndex::P1);
-    draw_to_intellect(&mut gs.p2, &mut gs.cards);
+    draw_to_intellect(&mut gs.p2);
     log_opening_hand(gs, PlayerIndex::P2);
 }
 
@@ -122,13 +125,10 @@ fn begin_turn(gs: &mut Gamestate) {
     // can never satisfy this turn's "if you've intimidated" conditions.
     gs.p1.has_intimidated = false;
     gs.p2.has_intimidated = false;
-    // "Once per turn" is tracked per card, so every card's activation is freed
-    // here rather than on any one player's — a card can change hands between
-    // zones during a turn, and both players' cards are refreshed at the same
+    // "Once per turn" activations are freed for both players at the same
     // boundary as the bonuses above.
-    for cs in gs.cards.iter_mut() {
-        cs.ability_used_this_turn = false;
-    }
+    gs.p1.abilities_used = CardCounts::EMPTY;
+    gs.p2.abilities_used = CardCounts::EMPTY;
     // "At the start of your turn, you may turn [a face-down mentor] face up":
     // when the turn player has one in their arsenal, the turn opens on that
     // decision instead of going straight to the Action phase (see
@@ -147,10 +147,10 @@ fn begin_turn(gs: &mut Gamestate) {
 /// so this keys off the card type rather than any one card's effect. A mentor
 /// already face up is never offered again: nothing turns it back down while it
 /// stays in the arsenal.
-pub(crate) fn face_down_mentor_in_arsenal(gs: &Gamestate, pid: PlayerIndex) -> Option<usize> {
-    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let idx = player.arsenal_idx?.get();
-    (gs.cards[idx].card.data().typ == CardType::Mentor && !player.arsenal_face_up).then_some(idx)
+pub(crate) fn face_down_mentor_in_arsenal(gs: &Gamestate, pid: PlayerIndex) -> Option<DeckCardId> {
+    let player = gs.player(pid);
+    let id = player.arsenal?;
+    (player.card(id).data().typ == CardType::Mentor && !player.arsenal_face_up).then_some(id)
 }
 
 /// Handle the turn player's decision in the `MentorFlip` phase: flip the
@@ -163,7 +163,7 @@ pub(crate) fn face_down_mentor_in_arsenal(gs: &Gamestate, pid: PlayerIndex) -> O
 /// again at the start of its owner's next turn.
 fn handle_mentor_flip_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
-        ActionType::FlipFaceUp => turn_mentor_face_up(gs, act.card_index()),
+        ActionType::FlipFaceUp => turn_mentor_face_up(gs, gs.active_player),
         ActionType::Pass => {
             // Private to the decider: the opponent only ever sees a face-down
             // arsenal card, and a public "leaves it face down" would tell them
@@ -178,25 +178,23 @@ fn handle_mentor_flip_phase(gs: &mut Gamestate, act: Action) {
     gs.phase = Phase::Action;
 }
 
-/// Mark `player`'s arsenal card — `idx`, the card in their arsenal — face up. A
-/// face-up card is public — both players can see what it is — so its
-/// visibility becomes `BothKnow` in the same step. Every place that turns a
-/// card face up goes through here, so the two can never disagree.
-fn set_arsenal_face_up(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], idx: usize) {
-    debug_assert_eq!(player.arsenal_idx, Some(CardIdx::new(idx)), "only the arsenal card can be face up");
+/// Mark `player`'s arsenal card face up. A face-up card is public — both players
+/// can see what it is (see `Player::visibility`). Every place that turns a card
+/// face up goes through here.
+fn set_arsenal_face_up(player: &mut Player) {
+    debug_assert!(player.arsenal.is_some(), "only an arsenal card can be face up");
     player.arsenal_face_up = true;
-    cards[idx].visible = CardVisibleState::BothKnow;
 }
 
-/// Turn the mentor at `idx` — face down in its owner's arsenal — face up. It
+/// Turn the mentor face down in `pid`'s arsenal face up. It
 /// becomes public, and stays face up for as long as it remains in the arsenal
 /// (`Player::arsenal_face_up` is cleared only as the arsenal empties).
-fn turn_mentor_face_up(gs: &mut Gamestate, idx: usize) {
-    let pid = if idx < PLAYER_CARDS { PlayerIndex::P1 } else { PlayerIndex::P2 };
-    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-    set_arsenal_face_up(player, &mut gs.cards, idx);
+fn turn_mentor_face_up(gs: &mut Gamestate, pid: PlayerIndex) {
+    let player = gs.player_mut(pid);
+    set_arsenal_face_up(player);
     if gs.logging_enabled() {
-        let card = gs.cards[idx].card;
+        let player = gs.player(pid);
+        let card = player.card(player.arsenal.expect("a mentor is in the arsenal"));
         gs.log_public(format!("{} turns {:?} face up in their arsenal", player_name(pid), card));
     }
 }
@@ -265,26 +263,28 @@ fn handle_action_instant_phase(gs: &mut Gamestate, act: Action) {
 fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     // Cost of committing this card: an Activate (an armor ability or a weapon
     // swing) pays its ability's cost; a played card pays its own catalog cost.
-    let card_idx = act.card.expect("play/activate action requires a card");
-    let cs = gs.cards[card_idx.get()];
-    let cost = action_cost(act.typ, cs.card.data());
+    let card_ref = act.card.expect("play/activate action requires a card");
+    let owner = gs.active_player;
+    let card = gs.player(owner).card(card_ref.id);
+    let cost = action_cost(act.typ, card.data());
 
     // Committing a card reveals it, so the announcement is public.
     if gs.logging_enabled() {
         let verb = if act.typ == ActionType::Activate { "activates" } else { "plays" };
-        gs.log_public(format!("{} {} {:?}", player_name(gs.active_player), verb, cs.card));
+        gs.log_public(format!("{} {} {:?}", player_name(owner), verb, card));
     }
 
-    let player = if gs.active_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let already_paid = player.resources >= cost;
+    let already_paid = gs.player(owner).resources >= cost;
 
     gs.pending_card = Some(PendingCard {
-        index: card_idx,
+        owner,
+        card: card_ref.id,
+        from: card_ref.zone,
         typ: act.typ,
     });
 
     // Affordable outright: no pitching needed, commit to the stack now.
-    // Otherwise leave it pending (off the stack) and pitch for it.
+    // Otherwise leave it pending (still in its zone) and pitch for it.
     if already_paid {
         commit_pending_to_stack(gs);
     } else {
@@ -367,7 +367,7 @@ fn close_priority_window(gs: &mut Gamestate) {
 /// Reaction window, pushed onto the return stack when the attack was committed.
 fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
-        ActionType::Defend => commit_blocker(gs, act.card_index()),
+        ActionType::Defend => commit_blocker(gs, act.card_ref().id),
         ActionType::Pass => {
             if gs.logging_enabled() {
                 gs.log_public(format!("{} passes", player_name(gs.active_player)));
@@ -398,12 +398,12 @@ fn handle_arsenal_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
         ActionType::Arsenal => {
             let pid = gs.active_player;
-            let card_idx = act.card_index();
+            let id = act.card_ref().id;
 
             // The arsenal is face-down: its owner (and the omniscient log) know
             // the card, the opponent only sees that a card was set aside.
             if gs.logging_enabled() {
-                let named = format!("{} arsenals {:?}", player_name(pid), gs.cards[card_idx].card);
+                let named = format!("{} arsenals {:?}", player_name(pid), gs.player(pid).card(id));
                 let hidden = format!("{} arsenals a card", player_name(pid));
                 let (p1_msg, p2_msg) = if pid == PlayerIndex::P1 {
                     (named.clone(), hidden)
@@ -414,10 +414,7 @@ fn handle_arsenal_phase(gs: &mut Gamestate, act: Action) {
             }
 
             // Move the chosen card out of the hand into the arsenal slot.
-            let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-            detach_from_current_zone(player, &mut gs.cards, card_idx);
-            gs.cards[card_idx].location = CardLocation::arsenal(pid);
-            player.arsenal_idx = Some(CardIdx::new(card_idx));
+            move_card(gs.player_mut(pid), id, Zone::Hand, Zone::Arsenal);
 
             start_pitch_order(gs);
         }
@@ -455,13 +452,11 @@ fn start_pitch_order(gs: &mut Gamestate) {
 /// or more cards an order must be chosen, so the PitchOrder phase begins with
 /// `pid` active (they own the cards being ordered) and `false` is returned.
 fn resolve_pitch_zone(gs: &mut Gamestate, pid: PlayerIndex) -> bool {
-    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let pitch_count = player.pitch.len();
-    let pitch_head = player.pitch_idx;
-    match pitch_count {
+    let pitch = gs.player(pid).pitch;
+    match pitch.len() {
         0 => true,
         1 => {
-            bottom_pitched_card(gs, pitch_head.expect("pitch zone holds a card").get());
+            bottom_pitched_card(gs, pid, pitch.nth(0).expect("pitch zone holds a card"));
             true
         }
         _ => {
@@ -482,11 +477,10 @@ fn handle_pitch_order_phase(gs: &mut Gamestate, act: Action) {
     if act.typ != ActionType::BottomPitch {
         return;
     }
-    bottom_pitched_card(gs, act.card_index());
-
     let pid = gs.active_player;
-    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    if !player.pitch.is_empty() {
+    bottom_pitched_card(gs, pid, act.card_ref().id);
+
+    if !gs.player(pid).pitch.is_empty() {
         // More pitched cards to order; stay in the PitchOrder phase.
         return;
     }
@@ -500,40 +494,20 @@ fn handle_pitch_order_phase(gs: &mut Gamestate, act: Action) {
     }
 }
 
-/// Move the card at global index `idx` out of its owner's pitch zone onto the
-/// bottom of their deck. Pitched cards sit face-up, so the move is public.
-fn bottom_pitched_card(gs: &mut Gamestate, idx: usize) {
-    let pid = if idx < PLAYER_CARDS { PlayerIndex::P1 } else { PlayerIndex::P2 };
+/// Move a copy of `id` out of `pid`'s pitch zone onto the bottom of their deck.
+/// Pitched cards sit face-up, so the move is public.
+fn bottom_pitched_card(gs: &mut Gamestate, pid: PlayerIndex, id: DeckCardId) {
     if gs.logging_enabled() {
         gs.log_public(format!(
             "{} puts {:?} on the bottom of their deck",
-            player_name(pid), gs.cards[idx].card
+            player_name(pid), gs.player(pid).card(id)
         ));
     }
-    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-    detach_from_current_zone(player, &mut gs.cards, idx);
-    gs.cards[idx].location = CardLocation::deck(pid);
-    // These cards were pitched face-up, so both players already saw them; putting
-    // them on the bottom of the deck keeps that knowledge (visibility is left as
-    // BothKnow rather than reset to Hidden).
-    attach_to_bottom_of_deck(player, &mut gs.cards, idx);
-}
-
-/// Append the card at global index `idx` to the bottom of `player`'s deck. The
-/// card becomes the new tail terminator (its `next_card` points at itself); an
-/// empty deck makes it the top as well. Counterpart of `attach_to_front_of_zone`
-/// for the one zone that grows from its tail. The caller is responsible for
-/// setting the card's `location`.
-fn attach_to_bottom_of_deck(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], idx: usize) {
-    if let Some(old_bottom) = player.bottom_deck_idx {
-        cards[old_bottom.get()].next_card = CardIdx::new(idx);
-        cards[idx].prev_card = old_bottom;
-    } else {
-        player.top_deck_idx = Some(CardIdx::new(idx));
-    }
-    cards[idx].next_card = CardIdx::new(idx);
-    player.bottom_deck_idx = Some(CardIdx::new(idx));
-    player.deck_size += 1;
+    let player = gs.player_mut(pid);
+    player.remove_from(Zone::Pitch, id);
+    // These cards were pitched face-up, so both players already saw them; on
+    // the bottom of the deck they stay known.
+    player.deck.push_back(DeckSlot::known(id));
 }
 
 /// End the turn player's turn: they draw back up to intellect, then the turn
@@ -542,11 +516,20 @@ fn attach_to_bottom_of_deck(player: &mut Player, cards: &mut [CardState; TOTAL_C
 /// since the defender can bank leftovers from reaction-window pitches too.
 fn end_turn(gs: &mut Gamestate) {
     let pid = gs.turn_player;
-    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-    let hand_before = player.hand_size();
-    draw_to_intellect(player, &mut gs.cards);
-    let drawn = player.hand_size() - hand_before;
-    log_end_of_turn_draw(gs, pid, drawn);
+    // The cards about to be drawn, named for the log before they leave the deck.
+    let drawn_names = if gs.logging_enabled() {
+        let player = gs.player(pid);
+        let need = player.intellect.saturating_sub(player.hand_size()) as usize;
+        Some(player.deck.iter().take(need)
+            .map(|slot| format!("{:?}", player.card(slot.card)))
+            .collect::<Vec<_>>())
+    } else {
+        None
+    };
+    let drawn = draw_to_intellect(gs.player_mut(pid));
+    if let Some(names) = drawn_names {
+        log_end_of_turn_draw(gs, pid, drawn, &names);
+    }
 
     gs.p1.resources = 0;
     gs.p2.resources = 0;
@@ -559,21 +542,14 @@ fn end_turn(gs: &mut Gamestate) {
 
 /// Log that `pid` drew back up to intellect at the end of their turn. The drawn
 /// cards are hidden information: the omniscient log and the drawing player's
-/// own log name them, while the opponent's log only records the count. Drawn
-/// cards are prepended to the hand, so the first `drawn` hand cards are the
-/// ones just drawn. Drawing nothing logs nothing.
-fn log_end_of_turn_draw(gs: &mut Gamestate, pid: PlayerIndex, drawn: u8) {
+/// own log name them (`names`, read off the top of the deck before the draw),
+/// while the opponent's log only records the count. Drawing nothing logs
+/// nothing.
+fn log_end_of_turn_draw(gs: &mut Gamestate, pid: PlayerIndex, drawn: u8, names: &[String]) {
     if !gs.logging_enabled() || drawn == 0 {
         return;
     }
-    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let names = player
-        .hand_iter(&gs.cards)
-        .take(drawn as usize)
-        .map(|(_, cs)| format!("{:?}", cs.card))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let named = format!("{} draws [{}]", player_name(pid), names);
+    let named = format!("{} draws [{}]", player_name(pid), names.join(", "));
     let hidden = format!("{} draws {} cards", player_name(pid), drawn);
     let (p1_msg, p2_msg) = if pid == PlayerIndex::P1 {
         (named.clone(), hidden)
@@ -602,32 +578,26 @@ fn handle_reaction_phase(gs: &mut Gamestate, act: Action) {
     }
 }
 
-/// Move the defender's chosen blocker out of their hand and onto the combat
-/// chain. All blockers declared against the current attack join a *single* chain
-/// link (link 0 of the defender's chain), chained together through
-/// `next_card`/`prev_card` just like the hand, deck, and pitch zones — so the one
-/// link can hold any number of blocking cards. The defender is the active player;
-/// the attacker's card sits on the *attacker's* chain, a separate array.
-fn commit_blocker(gs: &mut Gamestate, idx: usize) {
+/// Move a copy of the defender's chosen blocker `id` out of their hand and onto
+/// the combat chain. All blockers declared against the current attack join a
+/// *single* chain link on the defender's side — an unordered `CardCounts`, so
+/// the one link can hold any number of blocking cards. The defender is the
+/// active player; the attacker's card sits on the *attacker's* chain, a
+/// separate array.
+fn commit_blocker(gs: &mut Gamestate, id: DeckCardId) {
     let pid = gs.active_player;
     // Declaring a blocker reveals it, so the announcement is public.
     if gs.logging_enabled() {
-        gs.log_public(format!("{} defends with {:?}", player_name(pid), gs.cards[idx].card));
+        gs.log_public(format!("{} defends with {:?}", player_name(pid), gs.player(pid).card(id)));
     }
     // A blocker joins the link of the attack it is blocking — the attacker's
     // current chain link — so that link's damage is calculated against these
     // blockers alone and they play no part in a later attack this turn. Only the
     // turn player attacks, so the attacker is always the turn player.
-    let attacker = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let link = current_chain_link(attacker);
-    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-
-    detach_from_current_zone(player, &mut gs.cards, idx);
-    gs.cards[idx].location = CardLocation::combat_chain(pid);
-    // Declaring a blocker plays it face-up onto the combat chain, so it becomes
-    // known to both players.
-    gs.cards[idx].visible = CardVisibleState::BothKnow;
-    attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[link], None, None, idx);
+    let link = current_chain_link(gs.player(gs.turn_player));
+    let player = gs.player_mut(pid);
+    player.remove_from(Zone::Hand, id);
+    player.chain_link[link].add(id);
 }
 
 /// Put a `DefendTrigger` on the stack for each declared blocker carrying a
@@ -641,45 +611,42 @@ fn commit_blocker(gs: &mut Gamestate, idx: usize) {
 /// Blockers without a `defend_effect` — nearly all of them — put nothing on the
 /// stack, so an ordinary block still costs no extra priority rounds.
 ///
-/// The stack resolves top-down, and a chain link's list runs head first — most
-/// recently added card first, built by `attach_to_front_of_zone` — so walking it
-/// goes back through declaration order, so pushing in that order leaves the *first* blocker
-/// declared on top: simultaneous triggers resolve in the order their cards were
-/// declared. Real FaB lets their controller order them; the engine has no
-/// choice phase for that, and declaration order is the one the player already
-/// expressed.
+/// A chain link is unordered, so the triggers are pushed in card-id order, one
+/// per copy, and resolve in the reverse of that. Real FaB lets their controller
+/// order simultaneous triggers; the engine has no choice phase for that, and
+/// none of the catalog's defend triggers depend on the order.
 fn push_defend_triggers(gs: &mut Gamestate) -> bool {
     let mut pushed = false;
     let defender = gs.active_player;
     // Only the turn player attacks, so the link being defended is the current
     // link of the turn player's chain.
-    let attacker = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let link = current_chain_link(attacker);
-    let player = if defender == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let link = current_chain_link(gs.player(gs.turn_player));
+    let player = gs.player(defender);
+    let blockers = player.chain_link[link];
+    let deck_kind = player.deck_kind;
 
-    // Walk the link by hand rather than with `chain_link_iter`: pushing to the
-    // stack needs `gs` mutably, so read each node's successor before pushing.
-    let mut cur = player.chain_link[link].map(|i| i.get());
-    while let Some(idx) = cur {
-        let next = gs.cards[idx].next_card.get();
-        if gs.cards[idx].card.data().defend_effect.is_some() {
+    for (id, copies) in blockers.iter() {
+        if deck_kind.card(id).data().defend_effect.is_none() {
+            continue;
+        }
+        for _ in 0..copies {
             gs.push_to_stack(PendingCard {
-                index: CardIdx::new(idx),
+                owner: defender,
+                card: id,
+                from: Zone::CombatChain,
                 typ: ActionType::DefendTrigger,
             });
             pushed = true;
         }
-        // A node whose `next_card` points at itself marks the end of the link.
-        cur = if next == idx { None } else { Some(next) };
     }
     pushed
 }
 
-/// Fire the "when you defend with this" trigger of `idx`, a blocker declared by
+/// Fire the "when you defend with this" trigger of `id`, a blocker declared by
 /// `pid`, as that trigger resolves off the stack. Cards without a
 /// `defend_effect` never get a trigger pushed in the first place.
-fn apply_defend_effect(gs: &mut Gamestate, pid: PlayerIndex, idx: usize) {
-    match gs.cards[idx].card.data().defend_effect {
+fn apply_defend_effect(gs: &mut Gamestate, pid: PlayerIndex, id: DeckCardId) {
+    match gs.player(pid).card(id).data().defend_effect {
         Some(DefendEffect::Reveal6BottomOtherwise) => reveal_top_keep_6(gs, pid),
         // `PitchToBlock` is unused and no card in the catalog carries it. It was
         // put here for Rally the Rearguard, whose "+3 block" turned out to be an
@@ -691,20 +658,24 @@ fn apply_defend_effect(gs: &mut Gamestate, pid: PlayerIndex, idx: usize) {
 }
 
 /// Resolve the effect of an ability activated while its card was defending, as
-/// that activation resolves off the stack. `idx` is the card on the combat
-/// chain; it stays there, so this only writes the card's own state.
+/// that activation resolves off the stack. `id` is `owner`'s card on the combat
+/// chain; it stays there.
 ///
 /// Rally the Rearguard's is the only such ability: "+3 block", which lands on
-/// `CardState::defense_bonus` and is counted when the block is totalled at
-/// combat damage. Two activations (one per copy) pump their own copies; the
-/// bonus is cleared as the card leaves the chain (see `close_combat_chain`).
-fn apply_defending_ability(gs: &mut Gamestate, idx: usize) {
-    let Some(ability) = &gs.cards[idx].card.data().ability else {
+/// the defended link's `Player::chain_defense_bonus` and is counted when the
+/// block is totalled at combat damage. Two activations (one per copy) add up;
+/// the bonus is cleared as the chain closes (see `close_combat_chain`).
+fn apply_defending_ability(gs: &mut Gamestate, owner: PlayerIndex, id: DeckCardId) {
+    let Some(ability) = &gs.player(owner).card(id).data().ability else {
         return;
     };
     match ability {
         Ability::DiscardCardPlusBlock => {
-            gs.cards[idx].defense_bonus = gs.cards[idx].defense_bonus.saturating_add(3);
+            // The card is blocking the turn player's current attack, so it is on
+            // that link.
+            let link = current_chain_link(gs.player(gs.turn_player));
+            let player = gs.player_mut(owner);
+            player.chain_defense_bonus[link] = player.chain_defense_bonus[link].saturating_add(3);
         }
         // Every other ability in the catalog is activated from an equipment or
         // weapon slot, never while defending, so none reaches this path.
@@ -720,15 +691,13 @@ fn apply_defending_ability(gs: &mut Gamestate, idx: usize) {
 /// Revealing nothing is a legal outcome: an empty deck is a no-op rather than a
 /// panic, since a player can be decked and still declare blockers.
 fn reveal_top_keep_6(gs: &mut Gamestate, pid: PlayerIndex) {
-    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let Some(top) = player.top_deck_idx else {
+    let player = gs.player(pid);
+    let Some(top) = player.deck.front() else {
         return;
     };
-    let top = top.get();
-    let card = gs.cards[top].card;
+    let card = player.card(top.card);
     let keeps_top = card.data().power >= 6;
 
-    gs.cards[top].visible = CardVisibleState::BothKnow;
     if gs.logging_enabled() {
         gs.log_public(format!(
             "{} reveals {:?} ({} power) from the top of their deck and puts it on the {}",
@@ -739,15 +708,14 @@ fn reveal_top_keep_6(gs: &mut Gamestate, pid: PlayerIndex) {
         ));
     }
 
+    let deck = &mut gs.player_mut(pid).deck;
     if keeps_top {
-        return;
+        deck.get_mut(0).expect("the deck has a top card").known = true;
+    } else {
+        // Move the top to the bottom: the deck is reordered, never resized.
+        deck.pop_front();
+        deck.push_back(DeckSlot::known(top.card));
     }
-
-    // Detaching fixes up both ends of the deck and its count; re-attaching at
-    // the bottom restores the count, so the deck is reordered, never resized.
-    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-    detach_from_current_zone(player, &mut gs.cards, top);
-    attach_to_bottom_of_deck(player, &mut gs.cards, top);
 }
 
 /// Move a defense reaction that has just resolved off the stack onto the
@@ -755,25 +723,17 @@ fn reveal_top_keep_6(gs: &mut Gamestate, pid: PlayerIndex) {
 /// declared in the defend step sit on — the attacker's current link — so its
 /// block is summed with theirs against this attack alone. Unlike `commit_blocker`
 /// the card comes from the stack, which `resolve_top_of_stack` has already popped
-/// it from, so there is no zone to detach it from first.
-fn commit_defense_reaction(gs: &mut Gamestate, owner: PlayerIndex, idx: usize) {
+/// it from, so there is no zone to take it out of first.
+fn commit_defense_reaction(gs: &mut Gamestate, owner: PlayerIndex, id: DeckCardId) {
     // Only the turn player attacks, so the link being defended is the current
     // link of the turn player's chain.
-    let attacker = if gs.turn_player == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let link = current_chain_link(attacker);
-
-    gs.cards[idx].location = CardLocation::combat_chain(owner);
-    // The reaction is played face-up onto the chain, so it is known to both.
-    gs.cards[idx].visible = CardVisibleState::BothKnow;
-
-    let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-    attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[link], None, None, idx);
+    let link = current_chain_link(gs.player(gs.turn_player));
+    gs.player_mut(owner).chain_link[link].add(id);
 }
 
-/// Resolve the card at the top of the stack (its most recently added card),
-/// detaching it from the stack and routing it by the action that committed it
-/// (carried on the `PendingCard`). The owner is implied by which half of the
-/// shared `cards` array the slot falls in. A no-op when the stack is empty.
+/// Resolve the layer at the top of the stack (its most recently added one),
+/// popping it and routing its card by the action that committed it (carried on
+/// the `PendingCard`, with the card's owner). A no-op when the stack is empty.
 ///
 /// - A **played attack action card**, or a **weapon swing** (the weapon card
 ///   itself), moves onto the next free link of its owner's combat chain, and we
@@ -787,10 +747,10 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     let Some(pending) = gs.pop_stack() else {
         return;
     };
-    let top = pending.index.get();
-    let owner = if top < PLAYER_CARDS { PlayerIndex::P1 } else { PlayerIndex::P2 };
-
-    let data = gs.cards[top].card.data();
+    let owner = pending.owner;
+    let top = pending.card;
+    let card = gs.player(owner).card(top);
+    let data = card.data();
 
     // A "when you defend with" trigger: only the effect resolves. The card
     // itself was put on the combat chain when it was declared as a blocker and
@@ -802,13 +762,11 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     // chain from when it was declared as a blocker and stays there, so nothing
     // changes zones, no action point is spent, and the card's own keywords and
     // on-play effect are not fired — it was never played, only activated.
-    if pending.typ == ActionType::Activate
-        && gs.cards[top].location == CardLocation::combat_chain(owner) {
+    if pending.typ == ActionType::Activate && pending.from == Zone::CombatChain {
         if gs.logging_enabled() {
-            let card = gs.cards[top].card;
             gs.log_public(format!("{}'s {:?} ability resolves", player_name(owner), card));
         }
-        apply_defending_ability(gs, top);
+        apply_defending_ability(gs, owner, top);
         if gs.stack_is_empty() {
             close_priority_window(gs);
         } else {
@@ -821,7 +779,6 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
 
     if pending.typ == ActionType::DefendTrigger {
         if gs.logging_enabled() {
-            let card = gs.cards[top].card;
             gs.log_public(format!("{}'s {:?} defend trigger resolves", player_name(owner), card));
         }
         apply_defend_effect(gs, owner, top);
@@ -836,7 +793,6 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     }
 
     if gs.logging_enabled() {
-        let card = gs.cards[top].card;
         let msg = if commits_as_attack(pending.typ, data) {
             format!("{} attacks with {:?}", player_name(owner), card)
         } else {
@@ -874,21 +830,16 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
         // outgrown the chain, which is a bug in the engine rather than a game
         // state to paper over: fail loudly instead of quietly reusing a link and
         // mis-scoring the attack.
-        let attacker_ref = if owner == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-        let link = next_free_chain_link(attacker_ref).unwrap_or_else(|| {
+        let attacker = gs.player_mut(owner);
+        let link = next_free_chain_link(attacker).unwrap_or_else(|| {
             panic!(
                 "combat chain overflowed: {} attacks on one chain, but Player::chain_link \
                  holds only {} links",
-                attacker_ref.chain_link.len() + 1,
-                attacker_ref.chain_link.len(),
+                attacker.chain_link.len() + 1,
+                attacker.chain_link.len(),
             )
         });
-        gs.cards[top].location = CardLocation::combat_chain(owner);
-        let attacker = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-        // Attach through the linked-list helper so the attacker's chain link is
-        // well-terminated (its `next_card` points at itself), letting the chain
-        // be walked the same way as the defender's blockers when combat resolves.
-        attach_to_front_of_zone(&mut gs.cards, &mut attacker.chain_link[link], None, None, top);
+        attacker.chain_link[link].add(top);
         gs.phase = Phase::Defend;
     } else if commits_as_defense(pending.typ, data, owner, gs.turn_player) {
         // A defense reaction resolving in the defender's reaction window joins
@@ -903,10 +854,8 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
             gs.active_player = gs.turn_player;
         }
     } else {
-        let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-        place_in_zone(player, &mut gs.cards, top, CardLocation::graveyard(owner));
-        // A resolved card sits face-up in the graveyard, known to both players.
-        gs.cards[top].visible = CardVisibleState::BothKnow;
+        // A resolved card goes to the graveyard, face up.
+        gs.player_mut(owner).add_to(Zone::Graveyard, top);
         // A resolving non-attack action — an action card, or an activated
         // action-speed ability — spends the owner's action point unless it has
         // Go Again. Attacks are handled when combat damage resolves; instants and
@@ -925,20 +874,18 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     }
 }
 
-/// The global slot of a card chosen uniformly at random from `pid`'s hand, or
-/// `None` when the hand is empty. Reads the hand size from the bitfield, draws
-/// one index from the rng, then walks the linked list to it, rather than
-/// collecting the hand into a `Vec`, so the random hand picks made by Intimidate and the
-/// discard effects allocate nothing.
-fn random_hand_card(gs: &mut Gamestate, pid: PlayerIndex) -> Option<usize> {
-    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let len = player.hand_size() as usize;
+/// A card chosen uniformly at random from `pid`'s hand — every copy equally
+/// likely — or `None` when the hand is empty. Draws one index from the rng and
+/// reads that copy off the bitfield (`CardCounts::nth`), so the random hand
+/// picks made by Intimidate and the discard effects allocate nothing.
+fn random_hand_card(gs: &mut Gamestate, pid: PlayerIndex) -> Option<DeckCardId> {
+    let hand = gs.player(pid).hand;
+    let len = hand.len() as usize;
     if len == 0 {
         return None;
     }
     let k = gs.rng.random_range(0..len);
-    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    player.hand_iter(&gs.cards).nth(k).map(|(idx, _)| idx)
+    hand.nth(k)
 }
 
 /// Resolve an Intimidate trigger: the opponent of `attacker` (the player whose
@@ -961,7 +908,7 @@ fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
     };
 
     if gs.logging_enabled() {
-        let card = gs.cards[pick].card;
+        let card = gs.player(victim).card(pick);
         let full = format!("{} banishes {:?} to Intimidate", player_name(victim), card);
         let hidden = format!("{} banishes a card to Intimidate", player_name(victim));
         let (p1_view, p2_view) = if victim == PlayerIndex::P1 {
@@ -972,10 +919,7 @@ fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
         gs.log_views(full, p1_view, p2_view);
     }
 
-    let player = if victim == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-    detach_from_current_zone(player, &mut gs.cards, pick);
-    place_in_zone(player, &mut gs.cards, pick, CardLocation::intimidate_banish(victim));
-    attach_to_front_of_zone(&mut gs.cards, &mut player.intimidate_banish_idx, None, None, pick);
+    move_card(gs.player_mut(victim), pick, Zone::Hand, Zone::IntimidateBanish);
 }
 
 /// Pay a "discard a card" additional cost (e.g. Alpha Rampage, Wrecker Romp):
@@ -989,21 +933,15 @@ fn apply_discard_cost(gs: &mut Gamestate, owner: PlayerIndex) {
     let Some(pick) = random_hand_card(gs, owner) else {
         return;
     };
-    let discarded_power = gs.cards[pick].card.data().power;
+    let card = gs.player(owner).card(pick);
+    let discarded_power = card.data().power;
 
     // The discard lands face-up in the graveyard, so it is public.
     if gs.logging_enabled() {
-        let card = gs.cards[pick].card;
         gs.log_public(format!("{} discards {:?}", player_name(owner), card));
     }
 
-    // Move the discarded card from hand to graveyard. The graveyard has no
-    // head pointer — its `CardCounts` bitfield and the cards' `location`s are
-    // the whole zone — so detaching from the hand and placing it is all that
-    // is required.
-    let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-    detach_from_current_zone(player, &mut gs.cards, pick);
-    place_in_zone(player, &mut gs.cards, pick, CardLocation::graveyard(owner));
+    move_card(gs.player_mut(owner), pick, Zone::Hand, Zone::Graveyard);
 
     maybe_discard6_intimidate(gs, owner, discarded_power);
 }
@@ -1070,12 +1008,12 @@ fn maybe_play6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, played_power: 
     if played_power < 6 {
         return;
     }
-    let player = if owner == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let Some(arsenal) = player.arsenal_idx else {
+    let player = gs.player(owner);
+    let Some(mentor) = player.arsenal else {
         return;
     };
-    let mentor = arsenal.get();
-    let data = gs.cards[mentor].card.data();
+    let card = player.card(mentor);
+    let data = card.data();
     if !player.arsenal_face_up
         || !matches!(data.constant_effect, Some(ConstantEffect::OnPlay6Intimidate))
     {
@@ -1083,12 +1021,11 @@ fn maybe_play6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, played_power: 
     }
 
     if gs.logging_enabled() {
-        let card = gs.cards[mentor].card;
         gs.log_public(format!("{}'s {:?} triggers", player_name(owner), card));
     }
     apply_intimidate(gs, owner);
     match data.mentor_effect {
-        Some(MentorEffect::AlphaRampageSearch) => mentor_alpha_rampage_search(gs, owner, mentor),
+        Some(MentorEffect::AlphaRampageSearch) => mentor_alpha_rampage_search(gs, owner),
         None => {}
     }
 }
@@ -1096,41 +1033,37 @@ fn maybe_play6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, played_power: 
 /// Chief Ruk'utan's lesson (`MentorEffect::AlphaRampageSearch`), run each time
 /// his constant effect triggers: "put a lesson counter on Chief Ruk'utan. Then
 /// if there are 2 or more lesson counters on him, banish him, search your deck
-/// for Alpha Rampage, put it face up in arsenal and shuffle." `mentor` is
-/// Ruk'utan, in `owner`'s arsenal; the counters are the arsenal's
+/// for Alpha Rampage, put it face up in arsenal and shuffle." Ruk'utan is in
+/// `owner`'s arsenal; the counters are the arsenal's
 /// (`Player::arsenal_lesson_counters`).
-fn mentor_alpha_rampage_search(gs: &mut Gamestate, owner: PlayerIndex, mentor: usize) {
-    let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+fn mentor_alpha_rampage_search(gs: &mut Gamestate, owner: PlayerIndex) {
+    let player = gs.player_mut(owner);
     player.arsenal_lesson_counters = player.arsenal_lesson_counters.saturating_add(1);
     if player.arsenal_lesson_counters >= 2 {
-        graduate_mentor(gs, owner, mentor, Card::AlphaRampageR);
+        graduate_mentor(gs, owner, Card::AlphaRampageR);
     }
 }
 
-/// A mentor's lesson is complete: banish the mentor (`mentor`, the card in
-/// `owner`'s arsenal), search `owner`'s deck for `fetch`, put it face up into the
+/// A mentor's lesson is complete: banish the mentor (the card in `owner`'s
+/// arsenal), search `owner`'s deck for `fetch`, put it face up into the
 /// arsenal the mentor just left, and shuffle the deck. Banishing happens whether
 /// or not the search finds anything — `fetch` may already have been drawn — and
 /// the deck is shuffled either way, as searching it entitles the player to.
 ///
 /// The fetched card arrives face up and is public; like any arsenal card it can
 /// be played this very turn, paid for out of hand.
-fn graduate_mentor(gs: &mut Gamestate, owner: PlayerIndex, mentor: usize, fetch: Card) {
+fn graduate_mentor(gs: &mut Gamestate, owner: PlayerIndex, fetch: Card) {
     // Leaving the arsenal clears its face-up state and lesson counters: they
     // belonged to the mentor while it sat there, and do not follow it.
-    let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-    detach_from_current_zone(player, &mut gs.cards, mentor);
-    place_in_zone(player, &mut gs.cards, mentor, CardLocation::banish(owner));
-    gs.cards[mentor].visible = CardVisibleState::BothKnow;
-    attach_to_front_of_zone(&mut gs.cards, &mut player.banish_idx, None, None, mentor);
+    let player = gs.player_mut(owner);
+    let mentor = player.arsenal.expect("the mentor is in the arsenal");
+    move_card(player, mentor, Zone::Arsenal, Zone::Banish);
 
-    let deck = CardLocation::deck(owner);
-    let base = owner.index() * PLAYER_CARDS;
-    let found = (base..base + PLAYER_CARDS)
-        .find(|&i| gs.cards[i].location == deck && gs.cards[i].card == fetch);
+    let fetch_id = player.deck_kind.id_of(fetch);
+    let found = fetch_id.and_then(|id| player.deck.iter().position(|slot| slot.card == id));
 
     if gs.logging_enabled() {
-        let card = gs.cards[mentor].card;
+        let card = gs.player(owner).card(mentor);
         let outcome = match found {
             Some(_) => format!("puts {:?} face up in their arsenal", fetch),
             None => format!("finds no {:?}", fetch),
@@ -1141,18 +1074,17 @@ fn graduate_mentor(gs: &mut Gamestate, owner: PlayerIndex, mentor: usize, fetch:
         ));
     }
 
-    let (player, cards, rng) = if owner == PlayerIndex::P1 {
-        (&mut gs.p1, &mut gs.cards, &mut gs.rng)
+    let (player, rng) = if owner == PlayerIndex::P1 {
+        (&mut gs.p1, &mut gs.rng)
     } else {
-        (&mut gs.p2, &mut gs.cards, &mut gs.rng)
+        (&mut gs.p2, &mut gs.rng)
     };
-    if let Some(idx) = found {
-        detach_from_current_zone(player, cards, idx);
-        cards[idx].location = CardLocation::arsenal(owner);
-        player.arsenal_idx = Some(CardIdx::new(idx));
-        set_arsenal_face_up(player, cards, idx);
+    if let Some(pos) = found {
+        let slot = player.deck.remove(pos).expect("the search found this card");
+        put_in_zone(player, slot.card, Zone::Arsenal);
+        set_arsenal_face_up(player);
     }
-    shuffle_deck_for(player, cards, rng);
+    shuffle_deck_for(player, rng);
 }
 
 /// Resolve a card's "when you play" effect as it resolves off the stack. The
@@ -1263,39 +1195,22 @@ fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayE
 /// threshold; returns `false` if the hand is empty after drawing (nothing to
 /// discard, e.g. an empty deck and hand).
 fn draw_then_discard_hit6(gs: &mut Gamestate, owner: PlayerIndex) -> bool {
-    // Draw a card. Borrow the owning player and the shared cards array as
-    // disjoint fields so both can be mutated in the same call.
-    {
-        let (player, cards) = if owner == PlayerIndex::P1 {
-            (&mut gs.p1, &mut gs.cards)
-        } else {
-            (&mut gs.p2, &mut gs.cards)
-        };
-        draw_cards(player, cards, 1);
-    }
+    // Draw a card.
+    draw_cards(gs.player_mut(owner), 1);
 
     // Pick a card to discard at random.
     let Some(pick) = random_hand_card(gs, owner) else {
         return false;
     };
-    let discarded_power = gs.cards[pick].card.data().power;
+    let card = gs.player(owner).card(pick);
+    let discarded_power = card.data().power;
 
     // The discard lands face-up in the graveyard, so it is public.
     if gs.logging_enabled() {
-        let card = gs.cards[pick].card;
         gs.log_public(format!("{} discards {:?}", player_name(owner), card));
     }
 
-    // Move the discarded card from hand to graveyard. The graveyard has no
-    // head pointer — its `CardCounts` bitfield and the cards' `location`s are
-    // the whole zone — so detaching from the hand and placing it is all that
-    // is required.
-    let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-    detach_from_current_zone(player, &mut gs.cards, pick);
-    place_in_zone(player, &mut gs.cards, pick, CardLocation::graveyard(owner));
-    // A discard lands face-up in the graveyard, so it becomes known to both
-    // players.
-    gs.cards[pick].visible = CardVisibleState::BothKnow;
+    move_card(gs.player_mut(owner), pick, Zone::Hand, Zone::Graveyard);
 
     // Rhinar's constant ability also triggers off this discard: a power-6 discard
     // intimidates, on top of whatever the play effect itself does.
@@ -1312,28 +1227,22 @@ fn draw_then_discard_hit6(gs: &mut Gamestate, owner: PlayerIndex) -> bool {
 /// intimidated during the turn.
 fn return_intimidate_banished_to_hands(gs: &mut Gamestate) {
     for pid in [PlayerIndex::P1, PlayerIndex::P2] {
-        // Drain the zone from its head; each move advances `intimidate_banish_idx`
-        // to the next card, so the loop ends once the zone is empty.
-        loop {
-            let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-            let Some(head) = player.intimidate_banish_idx else { break };
-            let idx = head.get();
-
-            if gs.logging_enabled() {
-                let card = gs.cards[idx].card;
-                let full = format!("{} returns {:?} from Intimidate banish to hand", player_name(pid), card);
-                let hidden = format!("{} returns a card from Intimidate banish to hand", player_name(pid));
-                let (p1_view, p2_view) = if pid == PlayerIndex::P1 {
-                    (full.clone(), hidden)
-                } else {
-                    (hidden, full.clone())
-                };
-                gs.log_views(full, p1_view, p2_view);
+        let banished = gs.player(pid).intimidate_banished;
+        for (id, copies) in banished.iter() {
+            for _ in 0..copies {
+                if gs.logging_enabled() {
+                    let card = gs.player(pid).card(id);
+                    let full = format!("{} returns {:?} from Intimidate banish to hand", player_name(pid), card);
+                    let hidden = format!("{} returns a card from Intimidate banish to hand", player_name(pid));
+                    let (p1_view, p2_view) = if pid == PlayerIndex::P1 {
+                        (full.clone(), hidden)
+                    } else {
+                        (hidden, full.clone())
+                    };
+                    gs.log_views(full, p1_view, p2_view);
+                }
+                move_card(gs.player_mut(pid), id, Zone::IntimidateBanish, Zone::Hand);
             }
-
-            let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-            detach_from_current_zone(player, &mut gs.cards, idx);
-            attach_to_hand(player, &mut gs.cards, idx);
         }
     }
 }
@@ -1405,30 +1314,26 @@ fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
     }
 
     let pid = gs.active_player;
-    let card_idx = act.card_index();
-    let pitch_val = gs.cards[card_idx].card.data().pitch;
+    let id = act.card_ref().id;
+    let card = gs.player(pid).card(id);
+    let pitch_val = card.data().pitch;
 
     // Pitched cards land face-up in the pitch zone, so the pitch is public.
     if gs.logging_enabled() {
-        gs.log_public(format!("{} pitches {:?}", player_name(pid), gs.cards[card_idx].card));
+        gs.log_public(format!("{} pitches {:?}", player_name(pid), card));
     }
 
     // Move the pitched card out of the hand and into the pitch zone, banking the
     // resources it produces.
-    let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-    detach_from_current_zone(player, &mut gs.cards, card_idx);
-    place_in_zone(player, &mut gs.cards, card_idx, CardLocation::pitch(pid));
-    // A pitched card lands face-up in the pitch zone, so it becomes known to both
-    // players.
-    gs.cards[card_idx].visible = CardVisibleState::BothKnow;
-    attach_to_front_of_zone(&mut gs.cards, &mut player.pitch_idx, None, None, card_idx);
+    let player = gs.player_mut(pid);
+    move_card(player, id, Zone::Hand, Zone::Pitch);
     player.resources += pitch_val;
     let resources = player.resources;
 
     // Cost still owed on the pending card; once we can cover it, commit it.
     let pending = gs.pending_card.expect("pitch phase requires a pending card");
-    let pcs = gs.cards[pending.index.get()];
-    let cost = action_cost(pending.typ, pcs.card.data());
+    let pending_card = gs.player(pending.owner).card(pending.card);
+    let cost = action_cost(pending.typ, pending_card.data());
     if resources >= cost {
         commit_pending_to_stack(gs);
     }
@@ -1437,9 +1342,10 @@ fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
 /// Move the pending card onto the stack, pay its cost from the active player's
 /// banked resources, and re-enter the live priority window. Shared by both the
 /// affordable path (straight from the Action phase) and a pitch phase (once
-/// enough has been pitched). The card is detached from its source zone — the
-/// hand for a played card, the weapon/armor slot for an activation — and
-/// prepended to the stack. Assumes the player can already cover the cost.
+/// enough has been pitched). The card is taken out of its source zone — the
+/// hand or arsenal for a played card, the weapon/equipment zone for an
+/// activation — and pushed onto the stack. Assumes the player can already
+/// cover the cost.
 fn commit_pending_to_stack(gs: &mut Gamestate) {
     let Some(pending) = gs.pending_card else {
         return;
@@ -1447,9 +1353,9 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
 
     // Recompute the cost from the pending action's type, mirroring the
     // affordability check that let us get here.
-    let pending_idx = pending.index.get();
-    let cs = gs.cards[pending_idx];
-    let cost = action_cost(pending.typ, cs.card.data());
+    let owner = pending.owner;
+    let data = gs.player(owner).card(pending.card).data();
+    let cost = action_cost(pending.typ, data);
 
     // Activating the ability of a card that is *defending* (Rally the Rearguard)
     // does not move the card: it is on its controller's combat chain as a
@@ -1458,16 +1364,13 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     // entry pointing back at the card — the same shape as a defend trigger,
     // whose card likewise stays put (see `resolve_top_of_stack`).
     let activated_while_defending = pending.typ == ActionType::Activate
-        && cs.location == CardLocation::combat_chain(gs.active_player);
+        && pending.from == Zone::CombatChain;
 
-    let player = if gs.active_player == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    let player = gs.player_mut(owner);
     player.resources -= cost;
     if !activated_while_defending {
-        detach_from_current_zone(player, &mut gs.cards, pending_idx);
-        gs.cards[pending_idx].location = CardLocation::Stack;
-        // Playing a card puts it on the shared stack face-up, so it becomes known
-        // to both players.
-        gs.cards[pending_idx].visible = CardVisibleState::BothKnow;
+        // The card itself goes on the shared stack, face up.
+        take_from_zone(player, pending.card, pending.from);
     }
     gs.push_to_stack(pending);
 
@@ -1476,8 +1379,7 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     // stack and out of hand, so the discard is drawn from the rest of the hand.
     // The play/pitch legal-action gates guarantee a card was held back to satisfy
     // it. Only played cards carry this cost; activations have no additional cost.
-    if matches!(cs.card.data().additional_cost, Some(AdditionalCostType::DiscardCard)) {
-        let owner = gs.active_player;
+    if matches!(data.additional_cost, Some(AdditionalCostType::DiscardCard)) {
         apply_discard_cost(gs, owner);
     }
 
@@ -1485,8 +1387,7 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     // after its additional costs are paid. Only a played card counts: swinging a
     // weapon or activating an ability is not playing a card.
     if pending.typ == ActionType::PlayCard {
-        let owner = gs.active_player;
-        maybe_play6_intimidate(gs, owner, cs.card.data().power);
+        maybe_play6_intimidate(gs, owner, data.power);
     }
 
     // An activated ability pays its own costs here for the same reason: the
@@ -1494,12 +1395,11 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     // turn" ability is marked used at the same moment — the cost has been paid,
     // so responding to the activation cannot hand the card its use back.
     if pending.typ == ActionType::Activate {
-        if let Some(ability) = &cs.card.data().ability {
+        if let Some(ability) = &data.ability {
             if ability.once_per_turn() {
-                gs.cards[pending_idx].ability_used_this_turn = true;
+                gs.player_mut(owner).abilities_used.add(pending.card);
             }
             if ability.discards_a_card() {
-                let owner = gs.active_player;
                 apply_discard_cost(gs, owner);
             }
         }
@@ -1534,30 +1434,30 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     let attacker_id = gs.turn_player;
     let defender_id = attacker_id.opponent();
 
-    let attacker = if attacker_id == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let defender = if defender_id == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let attacker = gs.player(attacker_id);
+    let defender = gs.player(defender_id);
     // The chain link this attack occupies. Damage is calculated for that link
     // alone, so an earlier attack this turn — and the blockers that stopped it —
     // sit on their own link and count for nothing here.
     let link = current_chain_link(attacker);
+    // The attacking card: the attacker's side of a link holds the attack alone.
+    let attack_card = attacker.attack_on_link(link).map(|id| attacker.card(id));
+    let attack_data = attack_card.map(|c| c.data());
     // Whether the attacking card (this link's) is a Brute *attack action card*,
     // which gates the banked "next brute attack" power bonus (e.g. Awakening
     // Bellow's +3): the card text targets brute attack action cards specifically,
     // so a non-brute attack — or a brute *weapon* swing like Bone Basher — does
     // not get it, and leaves it banked for a later brute attack action.
-    let attack_is_brute = attacker.chain_link[link]
-        .map(|idx| {
-            let data = gs.cards[idx.get()].card.data();
-            data.card_class == CardClass::Brute && data.typ == CardType::AttackAction
-        })
+    let attack_is_brute = attack_data
+        .map(|data| data.card_class == CardClass::Brute && data.typ == CardType::AttackAction)
         .unwrap_or(false);
     let brute_bonus = if attack_is_brute { attacker.next_brute_attack_action_bonus } else { 0 };
     // Whether the attacking card is an attack action card of any class, which
     // gates the banked "next attack action card" bonus (e.g. Come to Fight's +1).
     // A weapon swing is not an attack action card, so it leaves the bonus banked
     // for a later attack action this turn.
-    let attack_is_attack_action = attacker.chain_link[link]
-        .map(|idx| gs.cards[idx.get()].card.data().typ == CardType::AttackAction)
+    let attack_is_attack_action = attack_data
+        .map(|data| data.typ == CardType::AttackAction)
         .unwrap_or(false);
     let attack_action_bonus = if attack_is_attack_action { attacker.next_attack_action_bonus } else { 0 };
     // Whether the attacking card is a Brute *attack* of any kind, which gates
@@ -1565,9 +1465,8 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // `attack_is_brute` above this covers a brute weapon swing as well as a
     // brute attack action card: "your next Brute attack" names the attack, not
     // the card type it is made with, so Bone Basher qualifies.
-    let attack_is_brute_attack = attacker.chain_link[link]
-        .map(|idx| {
-            let data = gs.cards[idx.get()].card.data();
+    let attack_is_brute_attack = attack_data
+        .map(|data| {
             data.card_class == CardClass::Brute
                 && matches!(data.typ, CardType::AttackAction | CardType::Weapon)
         })
@@ -1577,7 +1476,7 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // yet, so nothing puts an equipment card here today, but the text names the
     // exclusion and the rule is stated where it belongs rather than left to
     // emerge from that gap.
-    let non_equipment_blockers = chain_link_count(defender, &gs.cards, link, |d| {
+    let non_equipment_blockers = chain_link_count(defender, link, |d| {
         d.typ != CardType::Equipment
     });
     // The conditional bonus pays out only while fewer than two non-equipment
@@ -1591,16 +1490,15 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // Total attack power is the cards on this chain link plus any banked on-play
     // bonus (e.g. Bare Fangs's conditional +2 power, Awakening Bellow's brute +3,
     // Come to Fight's +1, Barraging Beatdown's conditional +3).
-    let power = chain_link_total(attacker, &gs.cards, link, |cs| cs.card.data().power)
+    let power = chain_link_total(attacker, link, |d| d.power)
         .saturating_add(attacker.attack_power_bonus)
         .saturating_add(brute_bonus)
         .saturating_add(attack_action_bonus)
         .saturating_add(brute_conditional_bonus);
-    // A blocker's contribution is its printed defense plus whatever was granted
-    // to that copy during the combat (Rally the Rearguard's +3 block).
-    let blocked = chain_link_total(defender, &gs.cards, link, |cs| {
-        cs.card.data().defense.saturating_add(cs.defense_bonus)
-    });
+    // The block is the blockers' printed defense plus whatever was granted to
+    // them during the combat (Rally the Rearguard's +3 block).
+    let blocked = chain_link_total(defender, link, |d| d.defense)
+        .saturating_add(defender.chain_defense_bonus[link]);
     let damage = power.saturating_sub(blocked);
 
     // Whether the attacking card (link 0 of the attacker's chain) has Go Again;
@@ -1608,13 +1506,11 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // effect may have conditionally granted Go Again (e.g. Wild Ride after
     // discarding a 6-power card), banked on the player.
     let attack_has_go_again = attacker.attack_go_again_bonus
-        || attacker.chain_link[link]
-            .map(|idx| gs.cards[idx.get()].card.data().keyword.contains(Keyword::GoAgain))
+        || attack_data
+            .map(|data| data.keyword.contains(Keyword::GoAgain))
             .unwrap_or(false);
-    // The attacking card, for the damage log message.
-    let attack_card = attacker.chain_link[link].map(|idx| gs.cards[idx.get()].card);
 
-    let defender = if defender_id == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    let defender = gs.player_mut(defender_id);
     let life_before = defender.life;
     defender.life = defender.life.saturating_sub(damage);
     let life_after = defender.life;
@@ -1641,7 +1537,7 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
 
     // The on-play power bonus is single-use: consume it so a follow-up attack
     // (e.g. after Go Again) doesn't inherit it.
-    let attacker = if attacker_id == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+    let attacker = gs.player_mut(attacker_id);
     attacker.attack_power_bonus = 0;
     attacker.attack_go_again_bonus = false;
     // The brute power bonus is single-use, but only a brute attack consumes it:
@@ -1666,52 +1562,30 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
 /// Close the combat chain, either as the action phase ends or when the turn
 /// player breaks it mid-turn (`ActionType::CloseChain`). Every card still sitting on
 /// either player's chain leaves it: a weapon returns to its owner's weapon slot,
-/// every other card goes to its owner's graveyard. Each occupied chain link is
-/// the head of a linked list (all blockers against one attack share a link), so
-/// the whole list is walked before the link is cleared. Cards on a player's
+/// every other card goes to its owner's graveyard, and every link — with any
+/// block bonus granted on it — clears. Cards on a player's
 /// chain are owned by that player — attacks sit on the attacker's chain,
 /// blockers on the defender's — so the owner is the chain's player.
 fn close_combat_chain(gs: &mut Gamestate) {
-    let chain_occupied = gs.p1.chain_link.iter().chain(gs.p2.chain_link.iter())
-        .any(|link| link.is_some());
-    if chain_occupied && gs.logging_enabled() {
+    if (gs.p1.chain_occupied() || gs.p2.chain_occupied()) && gs.logging_enabled() {
         gs.log_public("combat chain closes".to_string());
     }
-    for pid in [PlayerIndex::P1, PlayerIndex::P2] {
-        // Borrow the player and the shared cards array as disjoint fields so the
-        // chain links and the card states can be updated in the same walk.
-        let (player, cards) = if pid == PlayerIndex::P1 {
-            (&mut gs.p1, &mut gs.cards)
-        } else {
-            (&mut gs.p2, &mut gs.cards)
-        };
-        // Walk the links by index: placing a card in the graveyard updates the
-        // player's graveyard bitfield, so the chain cannot stay borrowed.
+    for player in [&mut gs.p1, &mut gs.p2] {
         for link in 0..player.chain_link.len() {
-            let Some(head) = player.chain_link[link].take() else { continue };
-            let mut cur = head.get();
-            loop {
-                let next = cards[cur].next_card.get();
-                // A block bonus granted during the combat (Rally the Rearguard's
-                // +3) belongs to that combat: it is cleared as the card leaves
-                // the chain, so a card that blocks again later — or comes back
-                // as an attack — carries only its printed defense.
-                cards[cur].defense_bonus = 0;
-                if is_weapon(cards[cur].card.data()) {
-                    // A weapon on the chain returns to the slot it swung from.
-                    cards[cur].location = CardLocation::weapon(pid);
-                    player.weapon_idx = Some(CardIdx::new(cur));
-                } else {
-                    place_in_zone(player, cards, cur, CardLocation::graveyard(pid));
-                    // The graveyard is a public zone, so a card landing there is
-                    // known to both players.
-                    cards[cur].visible = CardVisibleState::BothKnow;
+            let cards = std::mem::take(&mut player.chain_link[link]);
+            // A block bonus granted during the combat (Rally the Rearguard's +3)
+            // belongs to that combat, so it goes with the link.
+            player.chain_defense_bonus[link] = 0;
+            for (id, copies) in cards.iter() {
+                for _ in 0..copies {
+                    if is_weapon(player.card(id).data()) {
+                        // A weapon on the chain returns to the slot it swung from.
+                        put_in_zone(player, id, Zone::Weapon);
+                    } else {
+                        // The graveyard is a public zone.
+                        player.add_to(Zone::Graveyard, id);
+                    }
                 }
-                // A node whose next_card points at itself ends the list.
-                if next == cur {
-                    break;
-                }
-                cur = next;
             }
         }
     }
@@ -1731,63 +1605,28 @@ fn spend_action_point(gs: &mut Gamestate, player: PlayerIndex) {
 }
 
 /// How many cards on `player`'s chain link `link` satisfy `pred`. The companion
-/// of `chain_link_total`: it walks the same linked list, counting rather than
-/// summing, for rules that care about the number of cards defending an attack
+/// of `chain_link_total`: it counts copies rather than summing a stat, for
+/// rules that care about the number of cards defending an attack
 /// rather than the defense they add up to (e.g. Barraging Beatdown's "less than
 /// 2 non-equipment cards").
-fn chain_link_count(
-    player: &Player,
-    cards: &[CardState; TOTAL_CARDS],
-    link: usize,
-    pred: impl Fn(&CardData) -> bool,
-) -> u8 {
-    let Some(head) = player.chain_link[link] else {
-        return 0;
-    };
-    let mut count: u8 = 0;
-    let mut cur = head.get();
-    loop {
-        if pred(cards[cur].card.data()) {
-            count = count.saturating_add(1);
-        }
-        let next = cards[cur].next_card.get();
-        if next == cur {
-            break;
-        }
-        cur = next;
-    }
-    count
+fn chain_link_count(player: &Player, link: usize, pred: impl Fn(&CardData) -> bool) -> u8 {
+    player.chain_link[link]
+        .iter()
+        .filter(|&(id, _)| pred(player.card(id).data()))
+        .map(|(_, copies)| copies)
+        .sum()
 }
 
-/// Sum a per-card stat (`power` for the attacker, `defense` for the defender)
-/// over every card on `player`'s combat chain. Each occupied chain link is the
-/// head of a linked list — all blockers declared against one attack share a
-/// single link — walked via `next_card` until a node points at itself.
-///
-/// `stat` is handed the whole `CardState` rather than the printed `CardData`, so
-/// a total can include a bonus granted to that one copy (e.g. the +3 block Rally
-/// the Rearguard's ability writes to `CardState::defense_bonus`) as well as what
-/// the card catalog prints.
-fn chain_link_total(
-    player: &Player,
-    cards: &[CardState; TOTAL_CARDS],
-    link: usize,
-    stat: impl Fn(&CardState) -> u8,
-) -> u8 {
-    let Some(head) = player.chain_link[link] else {
-        return 0;
-    };
-    let mut total: u8 = 0;
-    let mut cur = head.get();
-    loop {
-        total = total.saturating_add(stat(&cards[cur]));
-        let next = cards[cur].next_card.get();
-        if next == cur {
-            break;
-        }
-        cur = next;
-    }
-    total
+/// Sum a printed per-card stat (`power` for the attacker, `defense` for the
+/// defender) over every copy on `player`'s chain link `link`. Bonuses granted
+/// during combat are kept per link (`Player::chain_defense_bonus`) and added
+/// by the caller.
+fn chain_link_total(player: &Player, link: usize, stat: impl Fn(&CardData) -> u8) -> u8 {
+    player.chain_link[link]
+        .iter()
+        .fold(0u8, |total, (id, copies)| {
+            total.saturating_add(stat(player.card(id).data()).saturating_mul(copies))
+        })
 }
 
 /// The link the attacking player's current attack occupies: the last occupied
@@ -1810,7 +1649,7 @@ pub(crate) fn current_chain_link(attacker: &Player) -> usize {
 /// attacking player's chain. `None` means every link is already occupied, so
 /// there is nowhere to put another attack — an engine bug the caller panics on.
 fn next_free_chain_link(attacker: &Player) -> Option<usize> {
-    attacker.chain_link.iter().position(|link| link.is_none())
+    attacker.chain_link.iter().position(|link| link.is_empty())
 }
 
 /// Resource cost of committing a card for the given action. An `Activate` (an
@@ -1830,202 +1669,79 @@ fn action_cost(typ: ActionType, data: &CardData) -> u8 {
     }
 }
 
-/// Prepend the card at global index `idx` to the front of a linked-list zone,
-/// making it the new `head`. The old head (if any) is linked as `idx`'s
-/// successor; an empty zone makes `idx` its own tail terminator (`next_card`
-/// points at itself).
-///
-/// `head` is the zone's head index (e.g. `hand_idx`, `pitch_idx`, or the stack
-/// head). `bottom`, when supplied, is the zone's tail pointer and is set to
-/// `idx` only when the zone was previously empty. `count`, when supplied, is the
-/// zone's size counter and is incremented. The caller is responsible for setting
-/// the card's `location`.
-fn attach_to_front_of_zone(
-    cards: &mut [CardState; TOTAL_CARDS],
-    head: &mut Option<CardIdx>,
-    bottom: Option<&mut Option<CardIdx>>,
-    count: Option<&mut u8>,
-    idx: usize,
-) {
-    if let Some(old_head) = *head {
-        cards[idx].next_card = old_head;
-        cards[old_head.get()].prev_card = CardIdx::new(idx);
-    } else {
-        // Empty zone: the card becomes the sole node, its own tail, and the
-        // zone's bottom.
-        cards[idx].next_card = CardIdx::new(idx);
-        if let Some(bottom) = bottom {
-            *bottom = Some(CardIdx::new(idx));
-        }
-    }
-    *head = Some(CardIdx::new(idx));
-    if let Some(count) = count {
-        *count += 1;
-    }
-}
-
-/// Remove the card at global index `idx` from the bookkeeping of its current
-/// location so it can be placed elsewhere. The card's `location` already encodes
-/// its owner, so the same `player` (its owner) handles both `P1*` and `P2*`
-/// variants. An unordered zone's `CardCounts` bitfield drops the card;
-/// linked-list zones (hand, deck, pitch, banish) are relinked via
-/// `detach_from_linked_list`; the weapon and equipment slots are single indices
-/// that simply clear.
-fn detach_from_current_zone(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], idx: usize) {
-    let location = cards[idx].location;
-    // Every unordered zone keeps a `CardCounts` bitfield; take the card out of
-    // it first. The match below then fixes up whatever list or slot the zone
-    // keeps alongside (the graveyard keeps none).
-    player.zone_remove(location, cards[idx].card);
-    match location {
-        CardLocation::P1Hand | CardLocation::P2Hand => {
-            detach_from_linked_list(cards, &mut player.hand_idx, None, None, idx);
-        }
-        CardLocation::P1Deck | CardLocation::P2Deck => {
-            // The deck tracks both ends and a count; let the helper fix them all.
-            detach_from_linked_list(
-                cards,
-                &mut player.top_deck_idx,
-                Some(&mut player.bottom_deck_idx),
-                Some(&mut player.deck_size),
-                idx,
-            );
-        }
-        CardLocation::P1Pitch | CardLocation::P2Pitch => {
-            detach_from_linked_list(cards, &mut player.pitch_idx, None, None, idx);
-        }
-        CardLocation::P1Weapon | CardLocation::P2Weapon => player.weapon_idx = None,
-        CardLocation::P1Head | CardLocation::P2Head => player.head_idx = None,
-        CardLocation::P1Chest | CardLocation::P2Chest => player.chest_idx = None,
-        CardLocation::P1Arms | CardLocation::P2Arms => player.arms_idx = None,
-        CardLocation::P1Legs | CardLocation::P2Legs => player.legs_idx = None,
-        CardLocation::P1Arsenal | CardLocation::P2Arsenal => {
-            player.arsenal_idx = None;
-            // Face up or down, and any lesson counters, belong to the arsenal
-            // slot's current occupant; an emptied arsenal starts afresh, and the
-            // card leaving takes neither with it.
+/// Take one copy of `id` out of `player`'s zone `zone`, so it can be put
+/// somewhere else. An unordered zone's bitfield drops the copy; the arsenal or
+/// weapon zone empties (an emptied arsenal also loses its face-up state and
+/// lesson counters, which belonged to the card that sat there); the deck gives
+/// up the first copy of `id` from the top. Panics when the zone does not hold
+/// the card, or for the combat chain and stack, which are not left this way.
+pub(crate) fn take_from_zone(player: &mut Player, id: DeckCardId, zone: Zone) {
+    match zone {
+        Zone::Arsenal => {
+            assert_eq!(player.arsenal, Some(id), "the arsenal does not hold that card");
+            player.arsenal = None;
             player.arsenal_face_up = false;
             player.arsenal_lesson_counters = 0;
         }
-        CardLocation::P1BanishZone | CardLocation::P2BanishZone => {
-            detach_from_linked_list(cards, &mut player.banish_idx, None, None, idx);
+        Zone::Weapon => {
+            assert_eq!(player.weapon, Some(id), "the weapon zone does not hold that card");
+            player.weapon = None;
         }
-        CardLocation::P1IntimidateBanish | CardLocation::P2IntimidateBanish => {
-            detach_from_linked_list(cards, &mut player.intimidate_banish_idx, None, None, idx);
+        Zone::Deck => {
+            let pos = player.deck.iter().position(|slot| slot.card == id)
+                .expect("the deck does not hold that card");
+            player.deck.remove(pos);
         }
-        _ => {}
+        Zone::CombatChain | Zone::Stack => panic!("cards are not taken out of the {:?} this way", zone),
+        _ => player.remove_from(zone, id),
     }
 }
 
-/// Unlink the card at global index `idx` from a doubly-linked list of
-/// `CardState`s, fixing up the `head` pointer, the neighbours' links and the
-/// tail terminator (a node whose `next_card` points at itself).
-///
-/// `head` is the zone's head index (e.g. `hand_idx` or `pitch_idx`). `bottom`,
-/// when supplied, is the zone's tail pointer and is updated when the removed
-/// card was the tail (or the only card). `count`, when supplied, is the zone's
-/// size counter and is decremented.
-fn detach_from_linked_list(
-    cards: &mut [CardState; TOTAL_CARDS],
-    head: &mut Option<CardIdx>,
-    bottom: Option<&mut Option<CardIdx>>,
-    count: Option<&mut u8>,
-    idx: usize,
-) {
-    let next = cards[idx].next_card.get();
-    let is_head = *head == Some(CardIdx::new(idx));
-    let is_tail = next == idx;
-
-    if is_head && is_tail {
-        // Only card in the list; both ends clear.
-        *head = None;
-        if let Some(bottom) = bottom {
-            *bottom = None;
+/// Put one copy of `id` into `player`'s zone `zone`: counted in an unordered
+/// zone's bitfield, or placed in the arsenal or weapon zone, which must be
+/// empty. A card put in the arsenal this way arrives face down. Cards reach the
+/// deck, combat chain and stack by their own routes (drawn order matters there),
+/// so those zones panic.
+pub(crate) fn put_in_zone(player: &mut Player, id: DeckCardId, zone: Zone) {
+    match zone {
+        Zone::Arsenal => {
+            assert!(player.arsenal.is_none(), "the arsenal already holds a card");
+            player.arsenal = Some(id);
         }
-    } else if is_head {
-        // Head of a multi-card list; the next card becomes the new head. The
-        // tail is unchanged.
-        *head = Some(CardIdx::new(next));
-    } else {
-        // Non-head node always has a valid prev_card.
-        let prev = cards[idx].prev_card.get();
-        if is_tail {
-            // Removing the tail: prev becomes the new tail (points to itself).
-            cards[prev].next_card = CardIdx::new(prev);
-            if let Some(bottom) = bottom {
-                *bottom = Some(CardIdx::new(prev));
-            }
-        } else {
-            // Middle node: splice prev and next together.
-            cards[prev].next_card = CardIdx::new(next);
-            cards[next].prev_card = CardIdx::new(prev);
+        Zone::Weapon => {
+            assert!(player.weapon.is_none(), "the weapon zone already holds a card");
+            player.weapon = Some(id);
         }
-    }
-    if let Some(count) = count {
-        *count -= 1;
+        Zone::Deck | Zone::CombatChain | Zone::Stack => panic!("cards are not put in the {:?} this way", zone),
+        _ => player.add_to(zone, id),
     }
 }
 
-fn draw_to_intellect(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
-    // Draw back up to intellect. `saturating_sub` guards the unsigned subtraction:
-    // if the hand is already at or over intellect there is nothing to draw (a
-    // plain `-` would underflow-panic, and `.max(0)` on a `u8` is a no-op).
+/// Move one copy of `id` from `player`'s zone `from` to their zone `to`.
+pub(crate) fn move_card(player: &mut Player, id: DeckCardId, from: Zone, to: Zone) {
+    take_from_zone(player, id, from);
+    put_in_zone(player, id, to);
+}
+
+/// Draw back up to intellect, returning how many cards were drawn. If the hand
+/// is already at or over intellect there is nothing to draw.
+fn draw_to_intellect(player: &mut Player) -> u8 {
     let need = player.intellect.saturating_sub(player.hand_size()) as usize;
-    draw_cards(player, cards, need);
+    draw_cards(player, need)
 }
 
-fn draw_cards(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], num: usize) {
+/// Draw up to `num` cards off the top of the deck into the hand, stopping early
+/// if the deck runs out. Returns how many were drawn.
+fn draw_cards(player: &mut Player, num: usize) -> u8 {
     let mut drawn = 0;
     while drawn < num {
-        // Re-read the top each iteration: drawing a card updates `top_deck_idx`,
-        // and it becomes `None` once the (formerly last) card is drawn.
-        let Some(current_idx) = player.top_deck_idx.map(|x| x.get()) else {
+        let Some(slot) = player.deck.pop_front() else {
             break; // deck is empty
         };
-        move_from_deck_to_hand(player, cards, current_idx);
+        player.add_to(Zone::Hand, slot.card);
         drawn += 1;
     }
-}
-
-/// Visibility of a card held in `pid`'s hand: cards in hand are known only to the
-/// player holding them, never to the opponent.
-fn hand_visibility(pid: PlayerIndex) -> CardVisibleState {
-    if pid == PlayerIndex::P1 {
-        CardVisibleState::P1Knows
-    } else {
-        CardVisibleState::P2Knows
-    }
-}
-
-fn move_from_deck_to_hand(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], card_idx : usize) {
-    // Pull the card off the deck (updates top/bottom pointers and deck_size),
-    // then prepend it to the hand and mark it as known to its owner.
-    detach_from_current_zone(player, cards, card_idx);
-    attach_to_hand(player, cards, card_idx);
-}
-
-/// Put the card at global index `idx`, already detached from its old zone, into
-/// its owner `player`'s hand: count it in the `hand` bitfield, link it to the
-/// front of the `hand_idx` list, and mark it as known to its owner. The single
-/// way a card enters a hand, so the bitfield and the list cannot drift apart.
-fn attach_to_hand(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], idx: usize) {
-    let pid = player.pid;
-    place_in_zone(player, cards, idx, CardLocation::hand(pid));
-    cards[idx].visible = hand_visibility(pid);
-    attach_to_front_of_zone(cards, &mut player.hand_idx, None, None, idx);
-}
-
-/// Set the location of the card at global index `idx`, already detached from
-/// its old zone, to `location`, one of its owner `player`'s zones, and count it
-/// in that zone's `CardCounts` bitfield when the zone is unordered (see
-/// `UnorderedZone`). The way a card enters the hand, pitch zone, graveyard or a
-/// banish zone, so a zone's bitfield and the cards' locations cannot drift
-/// apart; `detach_from_current_zone` is its counterpart. Linking the card into
-/// any list the zone also keeps (`pitch_idx`, `banish_idx`, ...) is left to the
-/// caller.
-fn place_in_zone(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], idx: usize, location: CardLocation) {
-    player.zone_add(location, cards[idx].card);
-    cards[idx].location = location;
+    drawn as u8
 }
 
 /// Per-card on-play effect unit tests live in their own file. Declared as a
@@ -2039,10 +1755,12 @@ mod card_tests;
 mod tests {
     use super::*;
     use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
-    use crate::fab_game::{gamestate_from_decklists,reset,get_card_states_from_location};
+    use crate::fab_game::{gamestate_from_decklists,reset};
+    use crate::game_state::CardVisibleState;
     use crate::cards::Card;
     use crate::deck_cards::{DorintheaCard, RhinarCard};
     use crate::legal_actions::legal_actions;
+    use crate::test_support::*;
 
     #[test]
     fn test_go_first_step() {
@@ -2084,22 +1802,19 @@ mod tests {
         // Play Muscle Mutt (cost 3). With no banked resources the player can't
         // afford it outright, so the pending card is recorded and the phase
         // advances to Pitch to pay for it.
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        let play = Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))};
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        let play = act(&gs, ActionType::PlayCard, mm);
         step(&mut gs, play);
 
         assert_eq!(gs.phase, Phase::ActionPitch);
         let pending = gs.pending_card.expect("pending card should be set");
-        assert_eq!(pending.index.get(), mm_idx);
+        assert_eq!(layer_card(&gs, &pending), mm);
         assert_eq!(pending.typ, ActionType::PlayCard);
 
         // The pending card is held off the stack and still sits in the hand
         // until it is actually paid for.
         assert_eq!(gs.stack_top(), None);
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Hand);
+        assert!(in_zone(&gs, PlayerIndex::P1, mm, Zone::Hand));
     }
 
     #[test]
@@ -2115,14 +1830,11 @@ mod tests {
         // (zero) to pay for it. Committing it should skip pitching and advance
         // straight to the Instant phase, moving the card onto the stack and
         // clearing the pending slot.
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
 
         let actions = legal_actions(&gs);
         let play = actions.into_iter()
-                .find(|a| a.typ == ActionType::PlayCard && a.card == Some(CardIdx::new(cb_idx)))
+                .find(|a| a.typ == ActionType::PlayCard && named(&gs, a) == Some(cb))
                 .expect("playing Clearing Bellow should be a legal action");
 
         step(&mut gs, play);
@@ -2130,8 +1842,8 @@ mod tests {
         assert_eq!(gs.phase, Phase::ActionInstant);
         // Once the card hits the stack it is no longer pending.
         assert_eq!(gs.pending_card, None);
-        assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(cb_idx));
+        assert!(on_stack(&gs, cb));
+        assert_eq!(stack_top_card(&gs), Some(cb));
     }
 
     #[test]
@@ -2144,29 +1856,23 @@ mod tests {
 
         // Play Muscle Mutt (cost 3) with no banked resources: it becomes pending
         // and we drop into the ActionPitch phase, with nothing on the stack yet.
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
         assert_eq!(gs.phase, Phase::ActionPitch);
         assert_eq!(gs.stack_top(), None);
 
         // Pitch Clearing Bellow (pitch 3) — exactly covers the cost. The pending
         // card is committed to the stack, the cost is paid (3 - 3 = 0 resources
         // left), and the game advances to the Instant phase.
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
 
         assert_eq!(gs.phase, Phase::ActionInstant);
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
+        assert_eq!(stack_top_card(&gs), Some(mm));
+        assert!(on_stack(&gs, mm));
         assert_eq!(gs.p1.resources, 0);
         // The pitched card now lives in the pitch zone, not the hand.
-        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Pitch);
+        assert!(in_zone(&gs, PlayerIndex::P1, cb, Zone::Pitch));
     }
 
     #[test]
@@ -2177,39 +1883,30 @@ mod tests {
 
         // Cards still in the deck are hidden from both players; cards drawn into a
         // hand are known only to the player holding them.
-        let deck_card = (0..PLAYER_CARDS)
-                .find(|&i| gs.cards[i].location == CardLocation::P1Deck)
-                .expect("p1 should still have cards in the deck");
-        assert_eq!(gs.cards[deck_card].visible, CardVisibleState::Hidden);
+        assert!(!gs.p1.deck.is_empty(), "p1 should still have cards in the deck");
+        assert_eq!(gs.p1.deck_slot_visibility(0), Some(CardVisibleState::Hidden));
+        assert_eq!(gs.p1.visibility(Zone::Deck), CardVisibleState::Hidden);
 
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Hand);
-        assert_eq!(gs.cards[mm_idx].visible, CardVisibleState::P1Knows);
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        assert_eq!(gs.p1.visibility(Zone::Hand), CardVisibleState::P1Knows);
+        assert_eq!(gs.p2.visibility(Zone::Hand), CardVisibleState::P2Knows);
 
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        assert_eq!(gs.cards[cb_idx].visible, CardVisibleState::P1Knows);
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
 
         // Play Muscle Mutt and pitch Clearing Bellow to pay for it.
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        step_card(&mut gs, ActionType::PlayCard, mm);
         // While the card is pending it is still in hand, so it stays known only to
         // its holder.
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Hand);
-        assert_eq!(gs.cards[mm_idx].visible, CardVisibleState::P1Knows);
+        assert!(in_zone(&gs, PlayerIndex::P1, mm, Zone::Hand));
 
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        step_card(&mut gs, ActionType::Pitch, cb);
 
         // Playing the card put it on the stack and pitching revealed the pitched
         // card; both are now known to both players.
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
-        assert_eq!(gs.cards[mm_idx].visible, CardVisibleState::BothKnow);
-        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Pitch);
-        assert_eq!(gs.cards[cb_idx].visible, CardVisibleState::BothKnow);
+        assert!(on_stack(&gs, mm));
+        assert_eq!(gs.p1.visibility(Zone::Stack), CardVisibleState::BothKnow);
+        assert!(in_zone(&gs, PlayerIndex::P1, cb, Zone::Pitch));
+        assert_eq!(gs.p1.visibility(Zone::Pitch), CardVisibleState::BothKnow);
     }
 
     #[test]
@@ -2220,23 +1917,21 @@ mod tests {
 
         // Pitch a card to pay for Muscle Mutt, then play through to the end of the
         // turn so the pitched card is bottomed back into the deck.
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
-        assert_eq!(gs.cards[cb_idx].visible, CardVisibleState::BothKnow);
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
+        step_card(&mut gs, ActionType::Pitch, cb);
+        assert_eq!(gs.p1.visibility(Zone::Pitch), CardVisibleState::BothKnow);
 
         // Bottom the pitched card directly; both players already saw it pitched, so
         // its visibility is preserved even though it is back in the deck.
-        bottom_pitched_card(&mut gs, cb_idx);
-        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Deck);
-        assert_eq!(gs.cards[cb_idx].visible, CardVisibleState::BothKnow);
+        let cb_id = gs.p1.deck_id(cb);
+        bottom_pitched_card(&mut gs, PlayerIndex::P1, cb_id);
+        let bottom = gs.p1.deck.len() - 1;
+        assert_eq!(gs.p1.deck.back().map(|s| s.card), Some(cb_id));
+        assert_eq!(gs.p1.deck_slot_visibility(bottom), Some(CardVisibleState::BothKnow));
+        // A card that was never seen stays hidden.
+        assert_eq!(gs.p1.deck_slot_visibility(0), Some(CardVisibleState::Hidden));
     }
 
     #[test]
@@ -2250,37 +1945,28 @@ mod tests {
         // Play Muscle Mutt (cost 3); pitching a single yellow attack action only
         // banks 2 resources, short of the cost, so the card stays pending and we
         // remain in the ActionPitch phase.
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
 
-        let pc_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::PackCallY)
-                .map(|(idx, _)| idx)
-                .expect("Pack Call should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pc_idx))});
+        let pc = expect_in(&gs, PlayerIndex::P1, Card::PackCallY, Zone::Hand, "Pack Call should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, pc);
 
         assert_eq!(gs.phase, Phase::ActionPitch);
         assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.p1.resources, 2);
         assert_eq!(gs.p1.pitch.len(), 1);
         assert_eq!(gs.p1.pitch.count_as(RhinarCard::PackCallY), 1);
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Hand);
-        assert_eq!(gs.pending_card.expect("still pending").index.get(), mm_idx);
+        assert!(in_zone(&gs, PlayerIndex::P1, mm, Zone::Hand));
+        assert_eq!(pending_card(&gs).expect("still pending"), mm);
 
         // Pitching a second yellow attack action banks a total of 4, now enough
         // to pay the cost of 3 and commit the card.
-        let ro_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::RagingOnslaughtY)
-                .map(|(idx, _)| idx)
-                .expect("Raging Onslaught should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(ro_idx))});
+        let ro = expect_in(&gs, PlayerIndex::P1, Card::RagingOnslaughtY, Zone::Hand, "Raging Onslaught should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, ro);
 
         assert_eq!(gs.phase, Phase::ActionInstant);
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
+        assert_eq!(stack_top_card(&gs), Some(mm));
+        assert!(on_stack(&gs, mm));
         assert_eq!(gs.p1.resources, 1);
     }
 
@@ -2293,24 +1979,21 @@ mod tests {
         step(&mut gs, go_first);
 
         // Swing Bone Basher (ability cost 2): pending, off the stack, Pitch phase.
-        let weapon_idx = gs.p1.weapon_idx.unwrap().get();
-        step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(weapon_idx))});
+        let weapon = weapon_card(&gs, PlayerIndex::P1);
+        step_card(&mut gs, ActionType::Activate, weapon);
         assert_eq!(gs.phase, Phase::ActionPitch);
         assert_eq!(gs.stack_top(), None);
-        assert_eq!(gs.p1.weapon_idx, Some(CardIdx::new(weapon_idx)));
+        assert!(in_zone(&gs, PlayerIndex::P1, weapon, Zone::Weapon));
 
         // Pitch Clearing Bellow (pitch 3) to cover the cost of 2. The weapon is
         // committed to the stack, its slot vacated, and 1 resource is left over.
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
 
         assert_eq!(gs.phase, Phase::ActionInstant);
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(weapon_idx));
-        assert_eq!(gs.cards[weapon_idx].location, CardLocation::Stack);
-        assert_eq!(gs.p1.weapon_idx, None);
+        assert_eq!(stack_top_card(&gs), Some(weapon));
+        assert!(on_stack(&gs, weapon));
+        assert_eq!(gs.p1.weapon, None);
         assert_eq!(gs.p1.resources, 1);
     }
 
@@ -2346,13 +2029,13 @@ mod tests {
         step(&mut gs, go_first);
 
         // Swing the equipped weapon. Same flow: record pending, go to Pitch.
-        let weapon_idx = gs.p1.weapon_idx.unwrap().get();
-        let attack = Action{ typ: ActionType::Activate, card: Some(CardIdx::new(weapon_idx))};
+        let weapon = weapon_card(&gs, PlayerIndex::P1);
+        let attack = act(&gs, ActionType::Activate, weapon);
         step(&mut gs, attack);
 
         assert_eq!(gs.phase, Phase::ActionPitch);
         let pending = gs.pending_card.expect("pending card should be set");
-        assert_eq!(pending.index.get(), weapon_idx);
+        assert_eq!(layer_card(&gs, &pending), weapon);
         assert_eq!(pending.typ, ActionType::Activate);
     }
 
@@ -2367,14 +2050,11 @@ mod tests {
 
         // Seed 42 deals Rhinar an opening hand containing Pack Call. Locate its
         // slot, then find the legal PlayCard action that targets it.
-        let packcall_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::PackCallY)
-                .map(|(idx, _)| idx)
-                .expect("Pack Call should be in the opening hand");
+        let packcall = expect_in(&gs, PlayerIndex::P1, Card::PackCallY, Zone::Hand, "Pack Call should be in the opening hand");
 
         let actions = legal_actions(&gs);
         let play = actions.into_iter()
-                .find(|a| a.typ == ActionType::PlayCard && a.card == Some(CardIdx::new(packcall_idx)))
+                .find(|a| a.typ == ActionType::PlayCard && named(&gs, a) == Some(packcall))
                 .expect("playing Pack Call should be a legal action");
 
         step(&mut gs, play);
@@ -2383,32 +2063,29 @@ mod tests {
         // game has advanced to the ActionPitch phase to pay for it.
         assert_eq!(gs.phase, Phase::ActionPitch);
         let pending = gs.pending_card.expect("pending card should be set");
-        assert_eq!(pending.index.get(), packcall_idx);
+        assert_eq!(layer_card(&gs, &pending), packcall);
         assert_eq!(pending.typ, ActionType::PlayCard);
-        assert_eq!(gs.cards[pending.index.get()].card, Card::PackCallY);
+        assert_eq!(layer_card(&gs, &pending), Card::PackCallY);
     }
 
     /// Drive a game to the Instant phase: Rhinar (p1) goes first, plays Clearing
     /// Bellow (cost 0, so it commits straight to the stack) and we land in the
     /// Instant phase with p1 as both turn and active player. Returns the gamestate
     /// and the stack slot the committed card occupies.
-    fn instant_phase_with_one_card() -> (Gamestate, usize) {
+    fn instant_phase_with_one_card() -> (Gamestate, Card) {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs, false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(cb_idx))});
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, cb);
 
         assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.turn_player, PlayerIndex::P1);
         assert_eq!(gs.active_player, PlayerIndex::P1);
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(cb_idx));
-        (gs, cb_idx)
+        assert_eq!(stack_top_card(&gs), Some(cb));
+        (gs, cb)
     }
 
     #[test]
@@ -2426,7 +2103,7 @@ mod tests {
 
     #[test]
     fn test_instant_pass_gives_priority_to_opponent() {
-        let (mut gs, cb_idx) = instant_phase_with_one_card();
+        let (mut gs, cb) = instant_phase_with_one_card();
 
         // The turn player passes: priority moves to the opponent, but nothing
         // resolves yet — the card stays on the stack and we remain in Instant.
@@ -2436,13 +2113,13 @@ mod tests {
         assert_eq!(gs.turn_player, PlayerIndex::P1);
         assert_eq!(gs.active_player, PlayerIndex::P2);
         assert_eq!(gs.passes, 1);
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(cb_idx));
-        assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
+        assert_eq!(stack_top_card(&gs), Some(cb));
+        assert!(on_stack(&gs, cb));
     }
 
     #[test]
     fn test_both_pass_resolves_top_of_stack() {
-        let (mut gs, cb_idx) = instant_phase_with_one_card();
+        let (mut gs, cb) = instant_phase_with_one_card();
 
         // Turn player passes (priority to opponent), then the opponent passes:
         // both have now passed, so the top of the stack resolves. The card moves
@@ -2456,7 +2133,7 @@ mod tests {
         assert_eq!(gs.turn_player, PlayerIndex::P1);
         assert_eq!(gs.passes, 0);
         assert_eq!(gs.stack_top(), None);
-        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Graveyard);
+        assert!(in_zone(&gs, PlayerIndex::P1, cb, Zone::Graveyard));
     }
 
     #[test]
@@ -2469,18 +2146,12 @@ mod tests {
         // Rhinar plays Muscle Mutt (an attack action, cost 3) and pitches
         // Clearing Bellow (pitch 3) to commit it to the stack, landing in the
         // Instant phase.
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
         assert_eq!(gs.phase, Phase::ActionInstant);
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
+        assert_eq!(stack_top_card(&gs), Some(mm));
 
         // Both players pass. Because Muscle Mutt is an attack action, resolving it
         // moves it off the stack onto link 0 of Rhinar's combat chain, makes the
@@ -2493,8 +2164,8 @@ mod tests {
         assert_eq!(gs.turn_player, PlayerIndex::P1);
         assert_eq!(gs.passes, 0);
         assert_eq!(gs.stack_top(), None);
-        assert_eq!(gs.p1.chain_link[0], Some(CardIdx::new(mm_idx)));
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
+        assert_eq!(link_cards(&gs, PlayerIndex::P1, 0), vec![mm]);
+        assert!(in_zone(&gs, PlayerIndex::P1, mm, Zone::CombatChain));
     }
 
     #[test]
@@ -2506,15 +2177,12 @@ mod tests {
 
         // Swing Bone Basher (ability cost 2) and pitch Clearing Bellow (pitch 3)
         // to commit the weapon to the stack, landing in the Instant phase.
-        let weapon_idx = gs.p1.weapon_idx.unwrap().get();
-        step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(weapon_idx))});
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let weapon = weapon_card(&gs, PlayerIndex::P1);
+        step_card(&mut gs, ActionType::Activate, weapon);
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
         assert_eq!(gs.phase, Phase::ActionInstant);
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(weapon_idx));
+        assert_eq!(stack_top_card(&gs), Some(weapon));
 
         // Both players pass. Because this is a weapon swing, resolving it puts
         // the weapon card itself on link 0 of Rhinar's combat chain, makes the
@@ -2526,8 +2194,8 @@ mod tests {
         assert_eq!(gs.active_player, PlayerIndex::P2);
         assert_eq!(gs.turn_player, PlayerIndex::P1);
         assert_eq!(gs.stack_top(), None);
-        assert_eq!(gs.p1.chain_link[0], Some(CardIdx::new(weapon_idx)));
-        assert_eq!(gs.cards[weapon_idx].location, CardLocation::P1CombatChain);
+        assert_eq!(link_cards(&gs, PlayerIndex::P1, 0), vec![weapon]);
+        assert!(in_zone(&gs, PlayerIndex::P1, weapon, Zone::CombatChain));
     }
 
     /// Drive a game until Dorinthea (p2) is on defense against Rhinar's Muscle
@@ -2539,17 +2207,11 @@ mod tests {
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
 
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
 
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
@@ -2566,57 +2228,40 @@ mod tests {
         // The defender commits a blocker from hand. It moves onto link 0 of the
         // defender's own combat chain (separate from the attacker's chain) and
         // leaves the hand; the phase stays on Defend so more blockers can follow.
-        let db_idx = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
-                .map(|(idx, _)| idx)
-                .expect("Driving Blade should be in Dorinthea's opening hand");
+        let db = expect_in(&gs, PlayerIndex::P2, Card::DrivingBladeY, Zone::Hand, "Driving Blade should be in Dorinthea's opening hand");
         let hand_before = gs.p2.hand_size();
 
-        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
+        step_card(&mut gs, ActionType::Defend, db);
 
         assert_eq!(gs.phase, Phase::Defend);
-        assert_eq!(gs.p2.chain_link[0], Some(CardIdx::new(db_idx)));
-        assert_eq!(gs.cards[db_idx].location, CardLocation::P2CombatChain);
+        assert_eq!(link_cards(&gs, PlayerIndex::P2, 0), vec![db]);
+        assert!(in_zone(&gs, PlayerIndex::P2, db, Zone::CombatChain));
         assert_eq!(gs.p2.hand_size(), hand_before - 1);
         // The blocker lands on the defender's chain, not the attacker's.
-        assert_eq!(gs.p1.chain_link[0].map(|i| gs.cards[i.get()].card), Some(Card::MuscleMuttY));
+        assert_eq!(link_cards(&gs, PlayerIndex::P1, 0).first().copied(), Some(Card::MuscleMuttY));
     }
 
     #[test]
     fn test_defend_multiple_blockers_share_one_chain_link() {
         let mut gs = step_to_dorinthea_defending();
 
-        // Two blockers committed in succession join the *same* chain link (link 0),
-        // chained together via next_card/prev_card. The link is the head of a
-        // linked list, so it can hold any number of blockers.
-        let first = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
-                .map(|(idx, _)| idx)
-                .expect("Driving Blade should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(first))});
+        // Two blockers committed in succession join the *same* chain link (link 0).
+        // The link is an unordered bitfield, so it can hold any number of
+        // blockers.
+        let first = expect_in(&gs, PlayerIndex::P2, Card::DrivingBladeY, Zone::Hand, "Driving Blade should be in Dorinthea's opening hand");
+        step_card(&mut gs, ActionType::Defend, first);
 
-        let second = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::InTheSwingR)
-                .map(|(idx, _)| idx)
-                .expect("In the Swing should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(second))});
+        let second = expect_in(&gs, PlayerIndex::P2, Card::InTheSwingR, Zone::Hand, "In the Swing should be in Dorinthea's opening hand");
+        step_card(&mut gs, ActionType::Defend, second);
 
         assert_eq!(gs.phase, Phase::Defend);
         // Both cards live on the combat chain and nowhere fills a second link.
-        assert_eq!(gs.cards[first].location, CardLocation::P2CombatChain);
-        assert_eq!(gs.cards[second].location, CardLocation::P2CombatChain);
-        assert_eq!(gs.p2.chain_link[1], None);
+        assert!(in_zone(&gs, PlayerIndex::P2, first, Zone::CombatChain));
+        assert!(in_zone(&gs, PlayerIndex::P2, second, Zone::CombatChain));
+        assert!(gs.p2.chain_link[1].is_empty());
 
-        // Walk link 0's linked list (head -> ... -> a node pointing at itself) and
-        // confirm it contains exactly the two blockers.
-        let mut on_link: Vec<usize> = Vec::new();
-        let mut cur = gs.p2.chain_link[0].expect("link 0 should hold the blockers").get();
-        loop {
-            on_link.push(cur);
-            let next = gs.cards[cur].next_card.get();
-            if next == cur { break; }
-            cur = next;
-        }
+        // Link 0 holds exactly the two blockers.
+        let on_link = link_cards(&gs, PlayerIndex::P2, 0);
         assert_eq!(on_link.len(), 2);
         assert!(on_link.contains(&first));
         assert!(on_link.contains(&second));
@@ -2686,11 +2331,8 @@ mod tests {
         assert_eq!(gs.p2.life, 20);
 
         // Defender commits Driving Blade as a blocker, then passes to finish.
-        let db_idx = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
-                .map(|(idx, _)| idx)
-                .expect("Driving Blade should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
+        let db = expect_in(&gs, PlayerIndex::P2, Card::DrivingBladeY, Zone::Hand, "Driving Blade should be in Dorinthea's opening hand");
+        step_card(&mut gs, ActionType::Defend, db);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Reaction);
@@ -2712,16 +2354,10 @@ mod tests {
         let mut gs = step_to_dorinthea_defending();
         assert_eq!(gs.p2.life, 20);
 
-        let db_idx = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
-                .map(|(idx, _)| idx)
-                .expect("Driving Blade should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
-        let its_idx = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::InTheSwingR)
-                .map(|(idx, _)| idx)
-                .expect("In the Swing should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(its_idx))});
+        let db = expect_in(&gs, PlayerIndex::P2, Card::DrivingBladeY, Zone::Hand, "Driving Blade should be in Dorinthea's opening hand");
+        step_card(&mut gs, ActionType::Defend, db);
+        let its = expect_in(&gs, PlayerIndex::P2, Card::InTheSwingR, Zone::Hand, "In the Swing should be in Dorinthea's opening hand");
+        step_card(&mut gs, ActionType::Defend, its);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Reaction);
@@ -2765,16 +2401,10 @@ mod tests {
         assert_eq!(gs.p1.action_points, 1);
 
         // Play Muscle Mutt (attack action) and pitch Clearing Bellow to pay for it.
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
 
         // The attack is on the stack but combat is not resolved yet, so the action
         // point is still in hand.
@@ -2808,18 +2438,18 @@ mod tests {
         // action-point cost, leaving only Pass.
         let actions = legal_actions(&gs);
         for a in &actions {
-            if let Some(idx) = a.card {
+            if let Some(card) = named(&gs, a) {
                 assert!(
-                    !uses_action_point(a.typ, gs.cards[idx.get()].card.data()),
+                    !uses_action_point(a.typ, card.data()),
                     "with 0 action points, {:?} of {:?} must not be offered",
-                    a.typ, gs.cards[idx.get()].card
+                    a.typ, card
                 );
             }
         }
         // No attack-action / action card is offered for play.
         let play_types: Vec<CardType> = actions.iter()
                 .filter(|a| a.typ == ActionType::PlayCard)
-                .map(|a| gs.cards[a.card_index()].card.data().typ)
+                .map(|a| card_of(&gs, a).data().typ)
                 .collect();
         assert!(!play_types.contains(&CardType::AttackAction));
         assert!(!play_types.contains(&CardType::Action));
@@ -2845,24 +2475,18 @@ mod tests {
         assert_eq!(gs.p2.life, 20);
 
         // ── Action phase: play Muscle Mutt ─────────────────────────────────
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in Rhinar's opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in Rhinar's opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
         assert_eq!(gs.phase, Phase::ActionPitch);
-        assert_eq!(gs.pending_card.expect("pending Muscle Mutt").index.get(), mm_idx);
+        assert_eq!(pending_card(&gs).expect("pending Muscle Mutt"), mm);
 
         // ── Pitch phase: pitch Clearing Bellow (pitch 3) to pay the cost of 3 ─
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in Rhinar's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in Rhinar's opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
         assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, PlayerIndex::P1);
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
+        assert_eq!(stack_top_card(&gs), Some(mm));
+        assert!(on_stack(&gs, mm));
 
         // ── Instant phase (attack on the stack): both pass to resolve it ───
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Rhinar passes
@@ -2872,19 +2496,16 @@ mod tests {
         // The attack resolves onto Rhinar's combat chain and play enters Defend.
         assert_eq!(gs.phase, Phase::Defend);
         assert_eq!(gs.active_player, PlayerIndex::P2);
-        assert_eq!(gs.p1.chain_link[0], Some(CardIdx::new(mm_idx)));
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
+        assert_eq!(link_cards(&gs, PlayerIndex::P1, 0), vec![mm]);
+        assert!(in_zone(&gs, PlayerIndex::P1, mm, Zone::CombatChain));
         assert!(gs.stack_is_empty());
 
         // ── Defend phase: Dorinthea blocks with Driving Blade (defense 3) ──
-        let db_idx = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
-                .map(|(idx, _)| idx)
-                .expect("Driving Blade should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
+        let db = expect_in(&gs, PlayerIndex::P2, Card::DrivingBladeY, Zone::Hand, "Driving Blade should be in Dorinthea's opening hand");
+        step_card(&mut gs, ActionType::Defend, db);
         assert_eq!(gs.phase, Phase::Defend);
-        assert_eq!(gs.p2.chain_link[0], Some(CardIdx::new(db_idx)));
-        assert_eq!(gs.cards[db_idx].location, CardLocation::P2CombatChain);
+        assert_eq!(link_cards(&gs, PlayerIndex::P2, 0), vec![db]);
+        assert!(in_zone(&gs, PlayerIndex::P2, db, Zone::CombatChain));
         // Done blocking.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
@@ -2921,52 +2542,37 @@ mod tests {
         assert_eq!(gs.p2.life, 20);
 
         // ── Action phase: play Muscle Mutt ─────────────────────────────────
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in Rhinar's opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in Rhinar's opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
         assert_eq!(gs.phase, Phase::ActionPitch);
 
         // ── Pitch phase: pay for it with Clearing Bellow ───────────────────
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in Rhinar's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in Rhinar's opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
         assert_eq!(gs.phase, Phase::ActionInstant);
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(mm_idx));
+        assert_eq!(stack_top_card(&gs), Some(mm));
 
         // ── Instant phase: both pass to resolve the attack onto the chain ──
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Rhinar
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});  // Dorinthea
         assert_eq!(gs.phase, Phase::Defend);
         assert_eq!(gs.active_player, PlayerIndex::P2);
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
+        assert!(in_zone(&gs, PlayerIndex::P1, mm, Zone::CombatChain));
 
         // ── Defend phase: Dorinthea commits three defense-3 blockers ───────
-        let db_idx = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
-                .map(|(idx, _)| idx)
-                .expect("Driving Blade should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
+        let db = expect_in(&gs, PlayerIndex::P2, Card::DrivingBladeY, Zone::Hand, "Driving Blade should be in Dorinthea's opening hand");
+        step_card(&mut gs, ActionType::Defend, db);
         assert_eq!(gs.phase, Phase::Defend);
-        let its_idx = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::InTheSwingR)
-                .map(|(idx, _)| idx)
-                .expect("In the Swing should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(its_idx))});
+        let its = expect_in(&gs, PlayerIndex::P2, Card::InTheSwingR, Zone::Hand, "In the Swing should be in Dorinthea's opening hand");
+        step_card(&mut gs, ActionType::Defend, its);
         assert_eq!(gs.phase, Phase::Defend);
-        let ss_idx = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::SecondSwingR)
-                .map(|(idx, _)| idx)
-                .expect("Second Swing should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(ss_idx))});
+        let ss = expect_in(&gs, PlayerIndex::P2, Card::SecondSwingR, Zone::Hand, "Second Swing should be in Dorinthea's opening hand");
+        step_card(&mut gs, ActionType::Defend, ss);
         assert_eq!(gs.phase, Phase::Defend);
         // All three blockers now sit on Dorinthea's combat chain.
-        assert_eq!(gs.cards[db_idx].location, CardLocation::P2CombatChain);
-        assert_eq!(gs.cards[its_idx].location, CardLocation::P2CombatChain);
-        assert_eq!(gs.cards[ss_idx].location, CardLocation::P2CombatChain);
+        assert!(in_zone(&gs, PlayerIndex::P2, db, Zone::CombatChain));
+        assert!(in_zone(&gs, PlayerIndex::P2, its, Zone::CombatChain));
+        assert!(in_zone(&gs, PlayerIndex::P2, ss, Zone::CombatChain));
         // Done blocking.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
@@ -3001,22 +2607,21 @@ mod tests {
         // her deck, cost 0) and play it as a reaction. It commits straight to the
         // stack and we remain in the Reaction phase (not the Instant phase) with
         // the responder keeping priority — the live priority window is preserved.
-        let sigil_idx = gs.p2.hand_iter(&gs.cards)
-                .map(|(idx, _)| idx)
-                .next()
+        let held = *hand_cards(&gs, PlayerIndex::P2).first()
                 .expect("p2 should hold a card in the reaction phase");
-        gs.set_card(sigil_idx, Card::SigilofSolaceB);
+        relabel(&mut gs, PlayerIndex::P2, Zone::Hand, held, Card::SigilofSolaceB);
+        let sigil = Card::SigilofSolaceB;
 
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
+        step_card(&mut gs, ActionType::PlayCard, sigil);
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, PlayerIndex::P2);
-        assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
+        assert!(on_stack(&gs, sigil));
 
         // Both players pass: the reaction resolves to its owner's graveyard, the
         // stack empties, and play returns to the turn player's Action phase.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.cards[sigil_idx].location, CardLocation::P2Graveyard);
+        assert!(in_zone(&gs, PlayerIndex::P2, sigil, Zone::Graveyard));
         assert!(gs.stack_is_empty());
         assert_eq!(gs.phase, Phase::Action);
         assert_eq!(gs.active_player, gs.turn_player);
@@ -3046,30 +2651,32 @@ mod tests {
         // reaction to play, cost 2) and one to Hit and Run (pitch 3) to pay
         // for it. Seed 42 doesn't guarantee this exact pairing, so set it up
         // explicitly — only the card stats matter here, the zones are untouched.
-        let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
-        let tu_idx = hand[0];
-        let pitch_idx = hand[1];
-        gs.set_card(tu_idx, Card::ToughenUpB);
-        gs.set_card(pitch_idx, Card::HitAndRunB);
+        let hand = hand_cards(&gs, PlayerIndex::P2);
+        let tu = hand[0];
+        let pitch = hand[1];
+        relabel(&mut gs, PlayerIndex::P2, Zone::Hand, tu, Card::ToughenUpB);
+        let tu = Card::ToughenUpB;
+        relabel(&mut gs, PlayerIndex::P2, Zone::Hand, pitch, Card::HitAndRunB);
+        let pitch = Card::HitAndRunB;
         assert_eq!(Card::HitAndRunB.data().pitch, 3);
 
         // Play Toughen Up. It costs 2 and the defender has no banked resources,
         // so instead of committing to the stack we drop into the ReactionPitch
         // phase with Toughen Up held pending in hand and nothing on the stack.
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(tu_idx))});
+        step_card(&mut gs, ActionType::PlayCard, tu);
         assert_eq!(gs.phase, Phase::ReactionPitch);
-        assert_eq!(gs.pending_card.expect("Toughen Up pending").index.get(), tu_idx);
+        assert_eq!(pending_card(&gs).expect("Toughen Up pending"), tu);
         assert!(gs.stack_is_empty());
 
         // Pitch Hit and Run (pitch 3) to cover the cost of 2. That commits
         // Toughen Up to the stack and returns to the Reaction window — not the
         // ActionInstant window — with the responder (p2) keeping priority.
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitch_idx))});
+        step_card(&mut gs, ActionType::Pitch, pitch);
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, PlayerIndex::P2);
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(tu_idx));
-        assert_eq!(gs.cards[tu_idx].location, CardLocation::Stack);
-        assert_eq!(gs.cards[pitch_idx].location, CardLocation::P2Pitch);
+        assert_eq!(stack_top_card(&gs), Some(tu));
+        assert!(on_stack(&gs, tu));
+        assert!(in_zone(&gs, PlayerIndex::P2, pitch, Zone::Pitch));
     }
 
     #[test]
@@ -3085,16 +2692,10 @@ mod tests {
 
         // Rhinar plays Muscle Mutt (an attack action) and pitches Clearing Bellow
         // to pay for it, opening the Instant window with the attack on the stack.
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
         assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, tp);
 
@@ -3122,26 +2723,17 @@ mod tests {
 
     #[test]
     fn test_opponent_plays_instant_in_response() {
-        let (mut gs, cb_idx) = instant_phase_with_one_card();
+        let (mut gs, cb) = instant_phase_with_one_card();
 
         // Seed 42 doesn't deal Dorinthea an instant in her opening hand, so move
         // a Sigil of Solace (an Instant) from her deck into her hand to set up
-        // the response. The same detach/attach helpers the engine uses keep the
-        // zone bookkeeping consistent.
-        let sigil_idx = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::SigilofSolaceB)
-                .map(|(idx, _)| idx)
-                .or_else(|| {
-                    // Not already in hand: pull one out of the deck.
-                    let from_deck = (PLAYER_CARDS..TOTAL_CARDS)
-                        .find(|&i| gs.cards[i].card == Card::SigilofSolaceB
-                            && gs.cards[i].location == CardLocation::P2Deck)
-                        .expect("Dorinthea's deck should contain Sigil of Solace");
-                    detach_from_current_zone(&mut gs.p2, &mut gs.cards, from_deck);
-                    attach_to_hand(&mut gs.p2, &mut gs.cards, from_deck);
-                    Some(from_deck)
-                })
-                .unwrap();
+        // the response, with the same zone helpers the engine uses.
+        let sigil = Card::SigilofSolaceB;
+        if !in_zone(&gs, PlayerIndex::P2, sigil, Zone::Hand) {
+            let id = gs.p2.deck_id(sigil);
+            take_from_zone(&mut gs.p2, id, Zone::Deck);
+            put_in_zone(&mut gs.p2, id, Zone::Hand);
+        }
 
         // Turn player passes; priority moves to the opponent (Dorinthea, p2).
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
@@ -3151,15 +2743,15 @@ mod tests {
         // (cost 0) commits straight to the stack on top of Clearing Bellow; the
         // responder keeps priority, so they remain the active player. Adding this
         // layer resets the consecutive-pass count.
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
+        step_card(&mut gs, ActionType::PlayCard, sigil);
 
         assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, PlayerIndex::P2);
         assert_eq!(gs.passes, 0);
         // Sigil is now on top of the stack, above Clearing Bellow.
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(sigil_idx));
-        assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
-        assert_eq!(gs.cards[cb_idx].location, CardLocation::Stack);
+        assert_eq!(stack_top_card(&gs), Some(sigil));
+        assert!(on_stack(&gs, sigil));
+        assert!(on_stack(&gs, cb));
 
         // The opponent passes (1 pass). Because Sigil reset the count, this does
         // not resolve anything — priority simply returns to the turn player, who
@@ -3168,8 +2760,8 @@ mod tests {
         assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, PlayerIndex::P1);
         assert_eq!(gs.passes, 1);
-        assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(sigil_idx));
+        assert!(on_stack(&gs, sigil));
+        assert_eq!(stack_top_card(&gs), Some(sigil));
 
         // The turn player also passes (2 passes in succession): the top card
         // (Sigil) resolves to its owner's graveyard. Clearing Bellow remains on
@@ -3178,8 +2770,8 @@ mod tests {
         assert_eq!(gs.phase, Phase::ActionInstant);
         assert_eq!(gs.active_player, PlayerIndex::P1);
         assert_eq!(gs.passes, 0);
-        assert_eq!(gs.cards[sigil_idx].location, CardLocation::P2Graveyard);
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(cb_idx));
+        assert!(in_zone(&gs, PlayerIndex::P2, sigil, Zone::Graveyard));
+        assert_eq!(stack_top_card(&gs), Some(cb));
     }
 
     #[test]
@@ -3210,8 +2802,8 @@ mod tests {
 
         assert_eq!(gs.phase, Phase::Arsenal);
         assert_eq!(gs.turn_player, PlayerIndex::P1);
-        assert!(gs.p1.chain_link.iter().all(|l| l.is_none()));
-        assert!(gs.p2.chain_link.iter().all(|l| l.is_none()));
+        assert!(gs.p1.chain_link.iter().all(|l| l.is_empty()));
+        assert!(gs.p2.chain_link.iter().all(|l| l.is_empty()));
     }
 
     #[test]
@@ -3219,18 +2811,15 @@ mod tests {
         // Run a full Muscle Mutt attack blocked by Driving Blade, returning to
         // the Action phase with both cards still sitting on the combat chain.
         let mut gs = step_to_dorinthea_defending();
-        let mm_idx = gs.p1.chain_link[0].expect("attack on p1's chain").get();
-        let db_idx = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
-                .map(|(idx, _)| idx)
-                .expect("Driving Blade should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
+        let mm = *link_cards(&gs, PlayerIndex::P1, 0).first().expect("attack on p1's chain");
+        let db = expect_in(&gs, PlayerIndex::P2, Card::DrivingBladeY, Zone::Hand, "Driving Blade should be in Dorinthea's opening hand");
+        step_card(&mut gs, ActionType::Defend, db);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Action);
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
-        assert_eq!(gs.cards[db_idx].location, CardLocation::P2CombatChain);
+        assert!(in_zone(&gs, PlayerIndex::P1, mm, Zone::CombatChain));
+        assert!(in_zone(&gs, PlayerIndex::P2, db, Zone::CombatChain));
 
         // The turn player passes: the chain breaks. Each card on it goes to its
         // owner's graveyard — the attack to the attacker's, the blocker to the
@@ -3238,30 +2827,24 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Arsenal);
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Graveyard);
-        assert_eq!(gs.cards[db_idx].location, CardLocation::P2Graveyard);
+        assert!(in_zone(&gs, PlayerIndex::P1, mm, Zone::Graveyard));
+        assert!(in_zone(&gs, PlayerIndex::P2, db, Zone::Graveyard));
         // Each graveyard's bitfield counts the card that landed in it.
         assert_eq!(gs.p1.graveyard.count_as(RhinarCard::MuscleMuttY), 1);
         assert_eq!(gs.p2.graveyard.count_as(DorintheaCard::DrivingBladeY), 1);
-        assert!(gs.p1.chain_link.iter().all(|l| l.is_none()));
-        assert!(gs.p2.chain_link.iter().all(|l| l.is_none()));
+        assert!(gs.p1.chain_link.iter().all(|l| l.is_empty()));
+        assert!(gs.p2.chain_link.iter().all(|l| l.is_empty()));
     }
 
     #[test]
     fn test_action_phase_pass_closes_chain_multiple_blockers() {
-        // Two blockers share chain link 0 as a linked list; closing the chain
-        // must walk the whole list, not just the head.
+        // Two blockers share chain link 0; closing the chain must send every
+        // card on it to the graveyard, not just one.
         let mut gs = step_to_dorinthea_defending();
-        let first = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
-                .map(|(idx, _)| idx)
-                .expect("Driving Blade should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(first))});
-        let second = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::InTheSwingR)
-                .map(|(idx, _)| idx)
-                .expect("In the Swing should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(second))});
+        let first = expect_in(&gs, PlayerIndex::P2, Card::DrivingBladeY, Zone::Hand, "Driving Blade should be in Dorinthea's opening hand");
+        step_card(&mut gs, ActionType::Defend, first);
+        let second = expect_in(&gs, PlayerIndex::P2, Card::InTheSwingR, Zone::Hand, "In the Swing should be in Dorinthea's opening hand");
+        step_card(&mut gs, ActionType::Defend, second);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
@@ -3270,9 +2853,9 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Arsenal);
-        assert_eq!(gs.cards[first].location, CardLocation::P2Graveyard);
-        assert_eq!(gs.cards[second].location, CardLocation::P2Graveyard);
-        assert!(gs.p2.chain_link.iter().all(|l| l.is_none()));
+        assert!(in_zone(&gs, PlayerIndex::P2, first, Zone::Graveyard));
+        assert!(in_zone(&gs, PlayerIndex::P2, second, Zone::Graveyard));
+        assert!(gs.p2.chain_link.iter().all(|l| l.is_empty()));
     }
 
     #[test]
@@ -3283,13 +2866,10 @@ mod tests {
         reset(&mut gs, false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
-        let weapon_idx = gs.p1.weapon_idx.unwrap().get();
-        step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(weapon_idx))});
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let weapon = weapon_card(&gs, PlayerIndex::P1);
+        step_card(&mut gs, ActionType::Activate, weapon);
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Defend);
@@ -3297,17 +2877,17 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Action);
-        assert_eq!(gs.cards[weapon_idx].location, CardLocation::P1CombatChain);
-        assert_eq!(gs.p1.weapon_idx, None);
+        assert!(in_zone(&gs, PlayerIndex::P1, weapon, Zone::CombatChain));
+        assert_eq!(gs.p1.weapon, None);
 
         // The turn player passes: the chain breaks, and the weapon goes back to
         // the weapon slot it swung from rather than the graveyard.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Arsenal);
-        assert_eq!(gs.cards[weapon_idx].location, CardLocation::P1Weapon);
-        assert_eq!(gs.p1.weapon_idx, Some(CardIdx::new(weapon_idx)));
-        assert!(gs.p1.chain_link.iter().all(|l| l.is_none()));
+        assert!(in_zone(&gs, PlayerIndex::P1, weapon, Zone::Weapon));
+        assert!(in_zone(&gs, PlayerIndex::P1, weapon, Zone::Weapon));
+        assert!(gs.p1.chain_link.iter().all(|l| l.is_empty()));
     }
 
     #[test]
@@ -3318,20 +2898,17 @@ mod tests {
         // Rhinar passes his action phase and sets Muscle Mutt into his arsenal.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Arsenal);
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Arsenal, card: Some(CardIdx::new(mm_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::Arsenal, mm);
 
         // The card left the hand for the arsenal slot.
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Arsenal);
-        assert_eq!(gs.p1.arsenal_idx, Some(CardIdx::new(mm_idx)));
+        assert!(in_zone(&gs, PlayerIndex::P1, mm, Zone::Arsenal));
+        assert_eq!(arsenal_card(&gs, PlayerIndex::P1), Some(mm));
 
         // Arsenaling dropped the hand to 3; the end-of-turn draw refills it to
         // intellect (4), taking one card off the deck.
         assert_eq!(gs.p1.hand_size(), 4);
-        assert_eq!(gs.p1.deck_size, 35);
+        assert_eq!(gs.p1.deck_size(), 35);
 
         // The opponent's turn begins: both the turn and active player flip, play
         // is back in the Action phase, and the new turn player has their action
@@ -3354,9 +2931,9 @@ mod tests {
 
         // Nothing was arsenaled, and the hand was already at intellect so
         // nothing was drawn.
-        assert_eq!(gs.p1.arsenal_idx, None);
+        assert_eq!(gs.p1.arsenal, None);
         assert_eq!(gs.p1.hand_size(), 4);
-        assert_eq!(gs.p1.deck_size, 36);
+        assert_eq!(gs.p1.deck_size(), 36);
 
         // The opponent's turn still begins.
         assert_eq!(gs.turn_player, PlayerIndex::P2);
@@ -3374,11 +2951,8 @@ mod tests {
         // order to choose, so it goes to the bottom of the deck automatically
         // and the turn ends without entering the PitchOrder phase.
         let mut gs = step_to_dorinthea_defending();
-        let cb_idx = gs.p1.pitch_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should sit in the pitch zone");
-        assert_eq!(gs.p1.deck_size, 36);
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Pitch, "Clearing Bellow should sit in the pitch zone");
+        assert_eq!(gs.p1.deck_size(), 36);
 
         // Defender declares no blocks → Reaction window → combat resolves →
         // Action phase; the turn player passes through Arsenal to end the turn.
@@ -3396,10 +2970,10 @@ mod tests {
 
         // Clearing Bellow left the pitch zone for the bottom of the deck. The
         // deck went 36 → 37, then the end-of-turn draw (hand 2 → 4) left 35.
-        assert_eq!(gs.p1.pitch_idx, None);
-        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Deck);
-        assert_eq!(gs.p1.bottom_deck_idx, Some(CardIdx::new(cb_idx)));
-        assert_eq!(gs.p1.deck_size, 35);
+        assert!(gs.p1.pitch.is_empty());
+        assert!(in_zone(&gs, PlayerIndex::P1, cb, Zone::Deck));
+        assert_eq!(deck_cards(&gs, PlayerIndex::P1).last().copied(), Some(cb));
+        assert_eq!(gs.p1.deck_size(), 35);
         assert_eq!(gs.p1.hand_size(), 4);
     }
 
@@ -3407,24 +2981,15 @@ mod tests {
     /// cards (Pack Call and Raging Onslaught, pitch 2 each, against the cost of
     /// 3), then run the turn out to the Arsenal pass. Ends with the game in the
     /// PitchOrder phase and returns the gamestate plus the two pitched slots.
-    fn step_to_pitch_order() -> (Gamestate, usize, usize) {
+    fn step_to_pitch_order() -> (Gamestate, Card, Card) {
         let mut gs = fresh_game();
 
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        let pc_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::PackCallY)
-                .map(|(idx, _)| idx)
-                .expect("Pack Call should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pc_idx))});
-        let ro_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::RagingOnslaughtY)
-                .map(|(idx, _)| idx)
-                .expect("Raging Onslaught should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(ro_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
+        let pc = expect_in(&gs, PlayerIndex::P1, Card::PackCallY, Zone::Hand, "Pack Call should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, pc);
+        let ro = expect_in(&gs, PlayerIndex::P1, Card::RagingOnslaughtY, Zone::Hand, "Raging Onslaught should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, ro);
         assert_eq!(gs.phase, Phase::ActionInstant);
 
         // Resolve the attack onto the chain, decline blocks, run out the
@@ -3446,60 +3011,61 @@ mod tests {
         assert_eq!(gs.turn_player, PlayerIndex::P1);
         assert_eq!(gs.active_player, PlayerIndex::P1);
 
-        (gs, pc_idx, ro_idx)
+        (gs, pc, ro)
     }
 
     #[test]
     fn test_two_pitched_cards_enter_pitch_order_phase() {
-        let (gs, pc_idx, ro_idx) = step_to_pitch_order();
+        let (gs, pc, ro) = step_to_pitch_order();
 
         // Both pitched cards are still in the pitch zone, and each is offered
         // as a BottomPitch action — nothing else, no pass.
-        assert_eq!(gs.cards[pc_idx].location, CardLocation::P1Pitch);
-        assert_eq!(gs.cards[ro_idx].location, CardLocation::P1Pitch);
+        assert!(in_zone(&gs, PlayerIndex::P1, pc, Zone::Pitch));
+        assert!(in_zone(&gs, PlayerIndex::P1, ro, Zone::Pitch));
         let actions = legal_actions(&gs);
         assert_eq!(actions.len(), 2);
         assert!(actions.iter().all(|a| a.typ == ActionType::BottomPitch));
-        let offered: Vec<usize> = actions.iter().map(|a| a.card_index()).collect();
-        assert!(offered.contains(&pc_idx));
-        assert!(offered.contains(&ro_idx));
+        let offered: Vec<Card> = actions.iter().map(|a| card_of(&gs, a)).collect();
+        assert!(offered.contains(&pc));
+        assert!(offered.contains(&ro));
     }
 
     #[test]
     fn test_bottom_pitch_orders_cards_and_ends_turn() {
-        let (mut gs, pc_idx, ro_idx) = step_to_pitch_order();
-        assert_eq!(gs.p1.deck_size, 36);
+        let (mut gs, pc, ro) = step_to_pitch_order();
+        assert_eq!(gs.p1.deck_size(), 36);
 
         // Bottom Pack Call first: it leaves the pitch zone for the bottom of
         // the deck, and with Raging Onslaught still pitched the phase stays on
         // PitchOrder with the turn not yet over.
-        step(&mut gs, Action{ typ: ActionType::BottomPitch, card: Some(CardIdx::new(pc_idx))});
+        step_card(&mut gs, ActionType::BottomPitch, pc);
         assert_eq!(gs.phase, Phase::PitchOrder);
         assert_eq!(gs.turn_player, PlayerIndex::P1);
-        assert_eq!(gs.cards[pc_idx].location, CardLocation::P1Deck);
-        assert_eq!(gs.p1.bottom_deck_idx, Some(CardIdx::new(pc_idx)));
-        assert_eq!(gs.p1.deck_size, 37);
+        assert!(in_zone(&gs, PlayerIndex::P1, pc, Zone::Deck));
+        assert_eq!(deck_cards(&gs, PlayerIndex::P1).last().copied(), Some(pc));
+        assert_eq!(gs.p1.deck_size(), 37);
 
         // Only the remaining pitched card is offered now.
         let actions = legal_actions(&gs);
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].typ, ActionType::BottomPitch);
-        assert_eq!(actions[0].card_index(), ro_idx);
+        assert_eq!(card_of(&gs, &actions[0]), ro);
 
         // Bottom Raging Onslaught: the pitch zone empties and the turn ends
         // normally — Raging Onslaught is the new bottom card, sitting below
         // Pack Call, and the opponent's turn begins.
-        step(&mut gs, Action{ typ: ActionType::BottomPitch, card: Some(CardIdx::new(ro_idx))});
-        assert_eq!(gs.p1.pitch_idx, None);
-        assert_eq!(gs.cards[ro_idx].location, CardLocation::P1Deck);
-        assert_eq!(gs.p1.bottom_deck_idx, Some(CardIdx::new(ro_idx)));
-        assert_eq!(gs.cards[pc_idx].next_card, CardIdx::new(ro_idx));
+        step_card(&mut gs, ActionType::BottomPitch, ro);
+        assert!(gs.p1.pitch.is_empty());
+        assert!(in_zone(&gs, PlayerIndex::P1, ro, Zone::Deck));
+        // Raging Onslaught is the new bottom card, just below Pack Call.
+        let deck = deck_cards(&gs, PlayerIndex::P1);
+        assert_eq!(deck[deck.len() - 2..], [pc, ro]);
 
         // End-of-turn bookkeeping ran as usual: the hand (1 card after playing
         // and pitching three) drew back to intellect, 38 - 3 = 35 cards remain
         // in the deck, and the turn flipped to Dorinthea.
         assert_eq!(gs.p1.hand_size(), 4);
-        assert_eq!(gs.p1.deck_size, 35);
+        assert_eq!(gs.p1.deck_size(), 35);
         assert_eq!(gs.turn_player, PlayerIndex::P2);
         assert_eq!(gs.active_player, PlayerIndex::P2);
         assert_eq!(gs.phase, Phase::Action);
@@ -3509,9 +3075,9 @@ mod tests {
     /// From the Reaction phase with the attacker (p1) holding priority, make
     /// the defender (Dorinthea, p2) pitch two cards: her hand is relabeled so
     /// she plays Toughen Up (a defense reaction, cost 2) paid for with two
-    /// pitch-1 reds, then both players pass the window out so combat resolves
+    /// different pitch-1 reds (Sharpen Steel and Thrust), then both players pass the window out so combat resolves
     /// and play returns to the Action phase.
-    fn defender_pitches_two_in_reaction(gs: &mut Gamestate) -> (usize, usize) {
+    fn defender_pitches_two_in_reaction(gs: &mut Gamestate) -> (Card, Card) {
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, gs.turn_player);
 
@@ -3521,17 +3087,20 @@ mod tests {
 
         // Relabel three of the defender's hand cards: the reaction to play and
         // two pitch-1 reds to pay its cost of 2 with two separate pitches.
-        let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+        let mut hand = hand_cards(gs, PlayerIndex::P2);
         assert!(hand.len() >= 3, "expected Dorinthea to hold three cards in reaction");
-        gs.set_card(hand[0], Card::ToughenUpB);
-        gs.set_card(hand[1], Card::SharpenSteelR);
-        gs.set_card(hand[2], Card::SharpenSteelR);
+        relabel(gs, PlayerIndex::P2, Zone::Hand, hand[0], Card::ToughenUpB);
+        hand[0] = Card::ToughenUpB;
+        relabel(gs, PlayerIndex::P2, Zone::Hand, hand[1], Card::SharpenSteelR);
+        hand[1] = Card::SharpenSteelR;
+        relabel(gs, PlayerIndex::P2, Zone::Hand, hand[2], Card::ThrustR);
+        hand[2] = Card::ThrustR;
 
-        step(gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(hand[0]))});
+        step_card(gs, ActionType::PlayCard, hand[0]);
         assert_eq!(gs.phase, Phase::ReactionPitch);
-        step(gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(hand[1]))});
+        step_card(gs, ActionType::Pitch, hand[1]);
         assert_eq!(gs.phase, Phase::ReactionPitch);
-        step(gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(hand[2]))});
+        step_card(gs, ActionType::Pitch, hand[2]);
         assert_eq!(gs.phase, Phase::Reaction);
 
         // Both pass: Toughen Up resolves onto the defender's side of the combat
@@ -3551,13 +3120,11 @@ mod tests {
         // card bottoms automatically, then the PitchOrder phase opens for the
         // *defender* to order hers — the turn player goes first.
         let mut gs = step_to_dorinthea_defending();
-        let cb_idx = gs.p1.pitch_iter(&gs.cards)
-                .map(|(idx, _)| idx)
-                .next()
-                .expect("Clearing Bellow should sit in p1's pitch zone");
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Pitch,
+                "Clearing Bellow should sit in p1's pitch zone");
 
         step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // declare no blocks
-        let (d1_idx, d2_idx) = defender_pitches_two_in_reaction(&mut gs);
+        let (d1, d2) = defender_pitches_two_in_reaction(&mut gs);
 
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Arsenal);
@@ -3569,28 +3136,28 @@ mod tests {
         assert_eq!(gs.phase, Phase::PitchOrder);
         assert_eq!(gs.active_player, PlayerIndex::P2);
         assert_eq!(gs.turn_player, PlayerIndex::P1);
-        assert_eq!(gs.p1.pitch_idx, None);
-        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Deck);
-        assert_eq!(gs.p1.bottom_deck_idx, Some(CardIdx::new(cb_idx)));
+        assert!(gs.p1.pitch.is_empty());
+        assert!(in_zone(&gs, PlayerIndex::P1, cb, Zone::Deck));
+        assert_eq!(deck_cards(&gs, PlayerIndex::P1).last().copied(), Some(cb));
 
         // Only the defender's pitched cards are offered.
         let actions = legal_actions(&gs);
         assert_eq!(actions.len(), 2);
         assert!(actions.iter().all(|a| a.typ == ActionType::BottomPitch));
-        let offered: Vec<usize> = actions.iter().map(|a| a.card_index()).collect();
-        assert!(offered.contains(&d1_idx));
-        assert!(offered.contains(&d2_idx));
+        let offered: Vec<Card> = actions.iter().map(|a| card_of(&gs, a)).collect();
+        assert!(offered.contains(&d1));
+        assert!(offered.contains(&d2));
 
         // She orders both to the bottom of her own deck; the turn then ends.
-        step(&mut gs, Action{ typ: ActionType::BottomPitch, card: Some(CardIdx::new(d1_idx))});
+        step_card(&mut gs, ActionType::BottomPitch, d1);
         assert_eq!(gs.phase, Phase::PitchOrder);
-        step(&mut gs, Action{ typ: ActionType::BottomPitch, card: Some(CardIdx::new(d2_idx))});
+        step_card(&mut gs, ActionType::BottomPitch, d2);
 
-        assert_eq!(gs.p2.pitch_idx, None);
-        assert_eq!(gs.cards[d1_idx].location, CardLocation::P2Deck);
-        assert_eq!(gs.cards[d2_idx].location, CardLocation::P2Deck);
-        assert_eq!(gs.p2.bottom_deck_idx, Some(CardIdx::new(d2_idx)));
-        assert_eq!(gs.cards[d1_idx].next_card, CardIdx::new(d2_idx));
+        assert!(gs.p2.pitch.is_empty());
+        assert!(in_zone(&gs, PlayerIndex::P2, d1, Zone::Deck));
+        assert!(in_zone(&gs, PlayerIndex::P2, d2, Zone::Deck));
+        let deck = deck_cards(&gs, PlayerIndex::P2);
+        assert_eq!(deck[deck.len() - 2..], [d1, d2]);
         assert_eq!(gs.turn_player, PlayerIndex::P2);
         assert_eq!(gs.active_player, PlayerIndex::P2);
         assert_eq!(gs.phase, Phase::Action);
@@ -3604,28 +3171,19 @@ mod tests {
         // stays on PitchOrder while the active player flips to Dorinthea.
         let mut gs = fresh_game();
 
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        let pc_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::PackCallY)
-                .map(|(idx, _)| idx)
-                .expect("Pack Call should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pc_idx))});
-        let ro_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::RagingOnslaughtY)
-                .map(|(idx, _)| idx)
-                .expect("Raging Onslaught should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(ro_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
+        let pc = expect_in(&gs, PlayerIndex::P1, Card::PackCallY, Zone::Hand, "Pack Call should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, pc);
+        let ro = expect_in(&gs, PlayerIndex::P1, Card::RagingOnslaughtY, Zone::Hand, "Raging Onslaught should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, ro);
 
         // Resolve the attack onto the chain; the defender declares no blocks.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Defend);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        let (d1_idx, d2_idx) = defender_pitches_two_in_reaction(&mut gs);
+        let (d1, d2) = defender_pitches_two_in_reaction(&mut gs);
 
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Arsenal);
@@ -3634,49 +3192,71 @@ mod tests {
         // The turn player orders first.
         assert_eq!(gs.phase, Phase::PitchOrder);
         assert_eq!(gs.active_player, PlayerIndex::P1);
-        let offered: Vec<usize> = legal_actions(&gs).iter().map(|a| a.card_index()).collect();
-        assert!(offered.contains(&pc_idx));
-        assert!(offered.contains(&ro_idx));
+        let offered: Vec<Card> = legal_actions(&gs).iter().map(|a| card_of(&gs, a)).collect();
+        assert!(offered.contains(&pc));
+        assert!(offered.contains(&ro));
 
-        step(&mut gs, Action{ typ: ActionType::BottomPitch, card: Some(CardIdx::new(pc_idx))});
+        step_card(&mut gs, ActionType::BottomPitch, pc);
         assert_eq!(gs.phase, Phase::PitchOrder);
         assert_eq!(gs.active_player, PlayerIndex::P1);
-        step(&mut gs, Action{ typ: ActionType::BottomPitch, card: Some(CardIdx::new(ro_idx))});
+        step_card(&mut gs, ActionType::BottomPitch, ro);
 
         // Rhinar's zone is empty but Dorinthea's is not: the phase stays on
         // PitchOrder, the active player flips to her, and the turn is not over.
         assert_eq!(gs.phase, Phase::PitchOrder);
         assert_eq!(gs.active_player, PlayerIndex::P2);
         assert_eq!(gs.turn_player, PlayerIndex::P1);
-        assert_eq!(gs.p1.pitch_idx, None);
-        assert_eq!(gs.p1.bottom_deck_idx, Some(CardIdx::new(ro_idx)));
-        let offered: Vec<usize> = legal_actions(&gs).iter().map(|a| a.card_index()).collect();
-        assert!(offered.contains(&d1_idx));
-        assert!(offered.contains(&d2_idx));
+        assert!(gs.p1.pitch.is_empty());
+        assert_eq!(deck_cards(&gs, PlayerIndex::P1).last().copied(), Some(ro));
+        let offered: Vec<Card> = legal_actions(&gs).iter().map(|a| card_of(&gs, a)).collect();
+        assert!(offered.contains(&d1));
+        assert!(offered.contains(&d2));
 
         // Dorinthea orders hers; only then does the turn end.
-        step(&mut gs, Action{ typ: ActionType::BottomPitch, card: Some(CardIdx::new(d2_idx))});
+        step_card(&mut gs, ActionType::BottomPitch, d2);
         assert_eq!(gs.phase, Phase::PitchOrder);
-        step(&mut gs, Action{ typ: ActionType::BottomPitch, card: Some(CardIdx::new(d1_idx))});
+        step_card(&mut gs, ActionType::BottomPitch, d1);
 
-        assert_eq!(gs.p2.pitch_idx, None);
-        assert_eq!(gs.p2.bottom_deck_idx, Some(CardIdx::new(d1_idx)));
-        assert_eq!(gs.cards[d2_idx].next_card, CardIdx::new(d1_idx));
+        assert!(gs.p2.pitch.is_empty());
+        let deck = deck_cards(&gs, PlayerIndex::P2);
+        assert_eq!(deck[deck.len() - 2..], [d2, d1]);
         assert_eq!(gs.turn_player, PlayerIndex::P2);
         assert_eq!(gs.phase, Phase::Action);
         assert_eq!(gs.turn_count, 2);
     }
 
     #[test]
+    fn test_identical_pitched_copies_are_one_bottom_pitch_choice() {
+        // The pitch zone is unordered and copies of a card are interchangeable,
+        // so two pitched copies of the same card are a single choice — but the
+        // phase still asks once per copy, since both must go to the bottom.
+        let (mut gs, pc, ro) = step_to_pitch_order();
+        relabel(&mut gs, PlayerIndex::P1, Zone::Pitch, ro, pc);
+        assert_eq!(count_in(&gs, PlayerIndex::P1, pc, Zone::Pitch), 2);
+
+        let actions = legal_actions(&gs);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(card_of(&gs, &actions[0]), pc);
+
+        step_card(&mut gs, ActionType::BottomPitch, pc);
+        assert_eq!(gs.phase, Phase::PitchOrder, "one copy is still pitched");
+        step_card(&mut gs, ActionType::BottomPitch, pc);
+        assert!(gs.p1.pitch.is_empty());
+        let deck = deck_cards(&gs, PlayerIndex::P1);
+        assert_eq!(gs.phase, Phase::Action);
+        assert!(deck.iter().filter(|&&c| c == pc).count() >= 2);
+    }
+
+    #[test]
     fn test_pitch_order_ignores_non_bottom_pitch_actions() {
-        let (mut gs, pc_idx, ro_idx) = step_to_pitch_order();
+        let (mut gs, pc, ro) = step_to_pitch_order();
 
         // A stray Pass (or any other action type) is a no-op in the PitchOrder
         // phase: the phase, the pitch zone, and the turn are all untouched.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::PitchOrder);
-        assert_eq!(gs.cards[pc_idx].location, CardLocation::P1Pitch);
-        assert_eq!(gs.cards[ro_idx].location, CardLocation::P1Pitch);
+        assert!(in_zone(&gs, PlayerIndex::P1, pc, Zone::Pitch));
+        assert!(in_zone(&gs, PlayerIndex::P1, ro, Zone::Pitch));
         assert_eq!(gs.turn_player, PlayerIndex::P1);
     }
 
@@ -3687,11 +3267,8 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Arsenal, card: Some(CardIdx::new(mm_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::Arsenal, mm);
 
         // The arsenal is face-down and the end-of-turn draw is hidden: the
         // omniscient log and the owner's log name the cards, the opponent's log
@@ -3717,16 +3294,10 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs, true);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
@@ -3757,27 +3328,17 @@ mod tests {
         step(&mut gs, go_first);
 
         assert_eq!(gs.p1.hand_size(), 4);
-        assert_eq!(gs.p1.deck_size, 36);
+        assert_eq!(gs.p1.deck_size(), 36);
         assert_eq!(gs.p2.hand_size(), 4);
-        assert_eq!(gs.p2.deck_size, 36);
+        assert_eq!(gs.p2.deck_size(), 36);
 
-        let hand = get_card_states_from_location(&gs, PlayerIndex::P1, CardLocation::P1Hand);
-
-        assert_eq!(hand.len(), 4);
-
-        assert_eq!(hand[0].card, Card::MuscleMuttY);
-        assert_eq!(hand[1].card, Card::PackCallY);
-        assert_eq!(hand[2].card, Card::RagingOnslaughtY);
-        assert_eq!(hand[3].card, Card::ClearingBellowB);
-
-        let hand2 = get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2Hand);
-
-        assert_eq!(hand2.len(), 4);
-
-        assert_eq!(hand2[0].card, Card::InTheSwingR);
-        assert_eq!(hand2[1].card, Card::SecondSwingR);
-        assert_eq!(hand2[2].card, Card::SharpenSteelR);
-        assert_eq!(hand2[3].card, Card::DrivingBladeY);
+        // The hand is unordered; `hand_cards` lists it in deck-id order.
+        assert_eq!(hand_cards(&gs, PlayerIndex::P1), vec![
+            Card::MuscleMuttY, Card::PackCallY, Card::RagingOnslaughtY, Card::ClearingBellowB,
+        ]);
+        assert_eq!(hand_cards(&gs, PlayerIndex::P2), vec![
+            Card::InTheSwingR, Card::SecondSwingR, Card::SharpenSteelR, Card::DrivingBladeY,
+        ]);
     }
 
     #[test]
@@ -3789,23 +3350,22 @@ mod tests {
         step(&mut gs, go_first);
 
         // After the opening draw p1 has 36 cards left in the deck.
-        let deck_before = gs.p1.deck_size;
+        let deck_before = gs.p1.deck_size();
         assert_eq!(deck_before, 36);
         let hand_before = gs.p1.hand_size();
 
         // Draw the entire deck, including the final (tail) card.
-        draw_cards(&mut gs.p1, &mut gs.cards, deck_before as usize);
+        let drawn = draw_cards(&mut gs.p1, deck_before as usize);
 
-        // The whole deck moved to hand; nothing is left behind and the head
-        // pointer is cleared.
-        assert_eq!(gs.p1.deck_size, 0);
-        assert_eq!(gs.p1.top_deck_idx, None);
-        assert_eq!(gs.p1.bottom_deck_idx, None);
+        // The whole deck moved to hand; nothing is left behind.
+        assert_eq!(drawn, deck_before);
+        assert_eq!(gs.p1.deck_size(), 0);
+        assert!(gs.p1.deck.is_empty());
         assert_eq!(gs.p1.hand_size(), hand_before + deck_before);
 
         // Drawing further from an empty deck is a safe no-op.
-        draw_cards(&mut gs.p1, &mut gs.cards, 5);
-        assert_eq!(gs.p1.deck_size, 0);
+        assert_eq!(draw_cards(&mut gs.p1, 5), 0);
+        assert_eq!(gs.p1.deck_size(), 0);
         assert_eq!(gs.p1.hand_size(), hand_before + deck_before);
     }
 
@@ -3985,11 +3545,8 @@ mod tests {
         let mut gs = step_to_dorinthea_defending();
         gs.p2.life = 6;
 
-        let db_idx = gs.p2.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::DrivingBladeY)
-                .map(|(idx, _)| idx)
-                .expect("Driving Blade should be in Dorinthea's opening hand");
-        step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
+        let db = expect_in(&gs, PlayerIndex::P2, Card::DrivingBladeY, Zone::Hand, "Driving Blade should be in Dorinthea's opening hand");
+        step_card(&mut gs, ActionType::Defend, db);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
@@ -4050,16 +3607,10 @@ mod tests {
 
         // Playing and pitching each log one public event, identical in all
         // three logs.
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
 
         for log in [&gs.log, &gs.p1.log, &gs.p2.log] {
             let log = log.as_ref().expect("logging is enabled");
@@ -4075,16 +3626,10 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs, true);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
         assert_eq!(gs.phase, Phase::ActionInstant);
 
         // First pass logs only the pass.
@@ -4132,16 +3677,10 @@ mod tests {
         // Re-drive step_to_dorinthea_defending with logging on, then run out the
         // reaction window so Muscle Mutt's 6 damage lands.
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
-        let mm_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::MuscleMuttY)
-                .map(|(idx, _)| idx)
-                .expect("Muscle Mutt should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
-        let cb_idx = gs.p1.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == Card::ClearingBellowB)
-                .map(|(idx, _)| idx)
-                .expect("Clearing Bellow should be in the opening hand");
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        step_card(&mut gs, ActionType::PlayCard, mm);
+        let cb = expect_in(&gs, PlayerIndex::P1, Card::ClearingBellowB, Zone::Hand, "Clearing Bellow should be in the opening hand");
+        step_card(&mut gs, ActionType::Pitch, cb);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Defend);
@@ -4178,24 +3717,26 @@ mod tests {
         // Relabel two of Rhinar's (p1) hand cards: one to Pack Hunt (the attack
         // action to play, cost 2) and one to Clearing Bellow (pitch 3) to pay for
         // it. Only the card stats matter here; the zones stay untouched.
-        let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
-        let ph_idx = hand[0];
-        let pitch_idx = hand[1];
-        gs.set_card(ph_idx, Card::PackHuntR);
-        gs.set_card(pitch_idx, Card::ClearingBellowB);
+        let hand = hand_cards(&gs, PlayerIndex::P1);
+        let ph = hand[0];
+        let pitch = hand[1];
+        relabel(&mut gs, PlayerIndex::P1, Zone::Hand, ph, Card::PackHuntR);
+        let ph = Card::PackHuntR;
+        relabel(&mut gs, PlayerIndex::P1, Zone::Hand, pitch, Card::ClearingBellowB);
 
         // The opponent (p2) starts with a full opening hand to banish from.
+        let pitch = Card::ClearingBellowB;
         let victim_hand_before = gs.p2.hand_size();
         assert!(victim_hand_before > 0);
-        assert_eq!(gs.p2.intimidate_banish_idx, None);
+        assert!(gs.p2.intimidate_banished.is_empty());
 
         // Play Pack Hunt and pitch Clearing Bellow to cover its cost, opening the
         // instant window with the attack on the stack.
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(ph_idx))});
+        step_card(&mut gs, ActionType::PlayCard, ph);
         assert_eq!(gs.phase, Phase::ActionPitch);
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitch_idx))});
+        step_card(&mut gs, ActionType::Pitch, pitch);
         assert_eq!(gs.phase, Phase::ActionInstant);
-        assert_eq!(gs.stack_top().map(|p| p.index.get()), Some(ph_idx));
+        assert_eq!(stack_top_card(&gs), Some(ph));
 
         // Both players pass: Pack Hunt resolves onto p1's combat chain and its
         // Intimidate fires, forcing p2 to banish one card from hand.
@@ -4203,14 +3744,11 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Defend);
-        assert_eq!(gs.cards[ph_idx].location, CardLocation::P1CombatChain);
+        assert!(in_zone(&gs, PlayerIndex::P1, ph, Zone::CombatChain));
 
         // Exactly one card left p2's hand for the Intimidate banish zone.
         assert_eq!(gs.p2.hand_size(), victim_hand_before - 1);
-        let banished_idx = gs.p2.intimidate_banish_idx.expect("a card was banished to Intimidate");
-        assert_eq!(gs.cards[banished_idx.get()].location, CardLocation::P2IntimidateBanish);
-        let banished = get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2IntimidateBanish);
-        assert_eq!(banished.len(), 1);
+        assert_eq!(gs.p2.intimidate_banished.len(), 1, "a card was banished to Intimidate");
     }
 
     #[test]
@@ -4219,25 +3757,22 @@ mod tests {
         // resolves (to the graveyard) its Intimidate still fires, forcing the
         // opponent to banish a random card from hand into their Intimidate banish
         // zone.
-        let (mut gs, cb_idx) = instant_phase_with_one_card();
+        let (mut gs, cb) = instant_phase_with_one_card();
 
         let victim_hand_before = gs.p2.hand_size();
         assert!(victim_hand_before > 0);
-        assert_eq!(gs.p2.intimidate_banish_idx, None);
+        assert!(gs.p2.intimidate_banished.is_empty());
 
         // Both players pass: Clearing Bellow resolves to p1's graveyard and its
         // Intimidate fires.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
-        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Graveyard);
+        assert!(in_zone(&gs, PlayerIndex::P1, cb, Zone::Graveyard));
 
         // Exactly one card left p2's hand for the Intimidate banish zone.
         assert_eq!(gs.p2.hand_size(), victim_hand_before - 1);
-        let banished_idx = gs.p2.intimidate_banish_idx.expect("a card was banished to Intimidate");
-        assert_eq!(gs.cards[banished_idx.get()].location, CardLocation::P2IntimidateBanish);
-        let banished = get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2IntimidateBanish);
-        assert_eq!(banished.len(), 1);
+        assert_eq!(gs.p2.intimidate_banished.len(), 1, "a card was banished to Intimidate");
     }
 
     #[test]
@@ -4247,7 +3782,7 @@ mod tests {
         // untouched. Clearing Bellow (a non-attack action with Intimidate and Go
         // Again) is convenient: after it resolves play returns to p1's Action
         // phase, and one more pass closes the turn into the Arsenal phase.
-        let (mut gs, cb_idx) = instant_phase_with_one_card();
+        let (mut gs, cb) = instant_phase_with_one_card();
         let victim_hand_before = gs.p2.hand_size();
 
         // Both players pass: Clearing Bellow resolves and its Intimidate banishes a
@@ -4255,15 +3790,14 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Action);
-        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Graveyard);
+        assert!(in_zone(&gs, PlayerIndex::P1, cb, Zone::Graveyard));
 
-        let banished_idx = gs.p2.intimidate_banish_idx
-            .expect("a card was banished to Intimidate")
-            .get();
-        assert_eq!(gs.cards[banished_idx].location, CardLocation::P2IntimidateBanish);
+        let banished = *cards_in(&gs, PlayerIndex::P2, gs.p2.intimidate_banished).first()
+            .expect("a card was banished to Intimidate");
+        let hand_copies_before = count_in(&gs, PlayerIndex::P2, banished, Zone::Hand);
         assert_eq!(gs.p2.hand_size(), victim_hand_before - 1);
         assert_eq!(gs.p2.intimidate_banished.len(), 1);
-        let banished_id = gs.p2.deck_id(gs.cards[banished_idx].card);
+        let banished_id = gs.p2.deck_id(banished);
         assert_eq!(gs.p2.intimidate_banished.count(banished_id), 1);
 
         // p1 passes, closing the turn into the Arsenal phase. Entering it returns
@@ -4271,26 +3805,21 @@ mod tests {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Arsenal);
 
-        assert_eq!(gs.p2.intimidate_banish_idx, None);
         assert!(gs.p2.intimidate_banished.is_empty());
-        assert_eq!(gs.cards[banished_idx].location, CardLocation::P2Hand);
+        assert_eq!(count_in(&gs, PlayerIndex::P2, banished, Zone::Hand), hand_copies_before + 1);
         assert_eq!(gs.p2.hand_size(), victim_hand_before);
-        assert!(get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2IntimidateBanish).is_empty());
-        // The returned card is reachable again by walking p2's hand.
-        assert!(gs.p2.hand_iter(&gs.cards).any(|(idx, _)| idx == banished_idx));
     }
 
     // ── Multiple attacks in one turn: one chain link each ──────────────────
 
-    /// Overwrite the turn player's hand with `desired`, in order, by relabelling
-    /// the cards already in it. The opening hand is four cards, so `desired` may
+    /// Overwrite the turn player's hand with `desired` by relabelling the cards
+    /// already in it. The opening hand is four cards, so `desired` may
     /// hold at most four.
     fn relabel_hand(gs: &mut Gamestate, pid: PlayerIndex, desired: &[Card]) {
-        let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-        let hand: Vec<usize> = player.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+        let hand = hand_cards(gs, pid);
         assert!(hand.len() >= desired.len(), "hand too small to relabel");
-        for (slot, &card) in hand.iter().zip(desired) {
-            gs.set_card(*slot, card);
+        for (&from, &to) in hand.iter().zip(desired) {
+            relabel(gs, pid, Zone::Hand, from, to);
         }
     }
 
@@ -4302,24 +3831,20 @@ mod tests {
     /// attack again this turn.
     fn run_one_attack(gs: &mut Gamestate, attack: Card, pitch: Card, blocks: &[Card], go_again: bool) {
         let find = |gs: &Gamestate, pid: PlayerIndex, want: Card| {
-            let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-            player.hand_iter(&gs.cards)
-                .find(|(_, cs)| cs.card == want)
-                .map(|(idx, _)| idx)
-                .unwrap_or_else(|| panic!("{:?} should be in hand", want))
+            expect_in(gs, pid, want, Zone::Hand, "should be in hand")
         };
 
-        let attack_idx = find(gs, PlayerIndex::P1, attack);
-        step(gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(attack_idx))});
-        let pitch_idx = find(gs, PlayerIndex::P1, pitch);
-        step(gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitch_idx))});
+        let attack = find(gs, PlayerIndex::P1, attack);
+        step_card(gs, ActionType::PlayCard, attack);
+        let pitch = find(gs, PlayerIndex::P1, pitch);
+        step_card(gs, ActionType::Pitch, pitch);
         step(gs, Action{ typ: ActionType::Pass, card: None});   // attacker passes
         step(gs, Action{ typ: ActionType::Pass, card: None});   // defender passes
         assert_eq!(gs.phase, Phase::Defend);
 
         for &block in blocks {
-            let block_idx = find(gs, PlayerIndex::P2, block);
-            step(gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(block_idx))});
+            let block = find(gs, PlayerIndex::P2, block);
+            step_card(gs, ActionType::Defend, block);
         }
         step(gs, Action{ typ: ActionType::Pass, card: None});   // done blocking
 
@@ -4352,10 +3877,11 @@ mod tests {
 
         // Each attack took a link of its own, and both are still on the chain
         // until it closes.
-        assert!(gs.p1.chain_link[0].is_some());
-        assert!(gs.p1.chain_link[1].is_some());
-        assert_ne!(gs.p1.chain_link[0], gs.p1.chain_link[1]);
-        assert!(gs.p1.chain_link[2].is_none());
+        assert!(!gs.p1.chain_link[0].is_empty());
+        assert!(!gs.p1.chain_link[1].is_empty());
+        assert_eq!(gs.p1.chain_link[0].len(), 1);
+        assert_eq!(gs.p1.chain_link[1].len(), 1);
+        assert!(gs.p1.chain_link[2].is_empty());
     }
 
     #[test]
@@ -4381,8 +3907,8 @@ mod tests {
 
         // The blocker sits on the link of the attack it blocked; the second
         // attack's link is empty on the defender's side, having gone unblocked.
-        assert_eq!(gs.p2.chain_link[0].map(|i| gs.cards[i.get()].card), Some(Card::DrivingBladeY));
-        assert!(gs.p2.chain_link[1].is_none());
+        assert_eq!(link_cards(&gs, PlayerIndex::P2, 0).first().copied(), Some(Card::DrivingBladeY));
+        assert!(gs.p2.chain_link[1].is_empty());
     }
 
     #[test]
@@ -4397,15 +3923,15 @@ mod tests {
 
         run_one_attack(&mut gs, Card::MuscleMuttY, Card::ClearingBellowB, &[], true);
         run_one_attack(&mut gs, Card::MuscleMuttY, Card::ClearingBellowB, &[], false);
-        let first = gs.p1.chain_link[0].expect("first attack on link 0").get();
-        let second = gs.p1.chain_link[1].expect("second attack on link 1").get();
+        let first = *link_cards(&gs, PlayerIndex::P1, 0).first().expect("first attack on link 0");
+        let second = *link_cards(&gs, PlayerIndex::P1, 1).first().expect("second attack on link 1");
 
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
         assert_eq!(gs.phase, Phase::Arsenal);
-        assert_eq!(gs.cards[first].location, CardLocation::P1Graveyard);
-        assert_eq!(gs.cards[second].location, CardLocation::P1Graveyard);
-        assert!(gs.p1.chain_link.iter().all(|l| l.is_none()));
+        assert!(in_zone(&gs, PlayerIndex::P1, first, Zone::Graveyard));
+        assert!(in_zone(&gs, PlayerIndex::P1, second, Zone::Graveyard));
+        assert!(gs.p1.chain_link.iter().all(|l| l.is_empty()));
     }
 
     #[test]
@@ -4423,31 +3949,16 @@ mod tests {
             &[Card::MuscleMuttY, Card::ClearingBellowB, Card::MuscleMuttY, Card::ClearingBellowB]);
 
         for link in 0..gs.p1.chain_link.len() {
-            let idx = gs.p1.top_deck_idx.expect("deck should not run dry").get();
-            detach_from_current_zone(&mut gs.p1, &mut gs.cards, idx);
-            gs.cards[idx].location = CardLocation::P1CombatChain;
-            // A card alone on a link terminates its own list.
-            gs.cards[idx].next_card = CardIdx::new(idx);
-            gs.cards[idx].prev_card = CardIdx::new(idx);
-            gs.p1.chain_link[link] = Some(CardIdx::new(idx));
+            let slot = gs.p1.deck.pop_front().expect("deck should not run dry");
+            gs.p1.chain_link[link].add(slot.card);
         }
 
         run_one_attack(&mut gs, Card::MuscleMuttY, Card::ClearingBellowB, &[], false);
     }
 
-    /// Seat `card` in `pid`'s empty arsenal, taken from the head of their hand.
-    fn seat_in_arsenal(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
-        let idx = {
-            let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-            assert!(player.arsenal_idx.is_none(), "the arsenal slot should be free");
-            player.hand_idx.expect("hand should hold a card to arsenal").get()
-        };
-        gs.set_card(idx, card);
-        let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-        detach_from_current_zone(player, &mut gs.cards, idx);
-        gs.cards[idx].location = CardLocation::arsenal(pid);
-        player.arsenal_idx = Some(CardIdx::new(idx));
-        idx
+    /// Seat `card` in `pid`'s empty arsenal, in place of a card from their hand.
+    fn seat_in_arsenal(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> Card {
+        put_in_arsenal(gs, pid, card)
     }
 
     #[test]
@@ -4456,28 +3967,29 @@ mod tests {
 
         // Muscle Mutt (cost 3) waits in the arsenal; Clearing Bellow (pitch 3)
         // in hand pays for it, since the arsenal card can't pitch for itself.
-        let mm_idx = seat_in_arsenal(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
-        let cb_idx = gs.p1.hand_idx.expect("hand should not be empty").get();
-        gs.set_card(cb_idx, Card::ClearingBellowB);
+        let mm = seat_in_arsenal(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
+        let held = *hand_cards(&gs, PlayerIndex::P1).first().expect("hand should not be empty");
+        relabel(&mut gs, PlayerIndex::P1, Zone::Hand, held, Card::ClearingBellowB);
+        let cb = Card::ClearingBellowB;
 
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
+        step_card(&mut gs, ActionType::PlayCard, mm);
         assert_eq!(gs.phase, Phase::ActionPitch);
         // Still in the arsenal while it is only pending.
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Arsenal);
-        assert_eq!(gs.p1.arsenal_idx, Some(CardIdx::new(mm_idx)));
+        assert!(in_zone(&gs, PlayerIndex::P1, mm, Zone::Arsenal));
+        assert_eq!(arsenal_card(&gs, PlayerIndex::P1), Some(mm));
 
-        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(cb_idx))});
+        step_card(&mut gs, ActionType::Pitch, cb);
         assert_eq!(gs.phase, Phase::ActionInstant);
         // Paid for: it leaves the arsenal for the stack, freeing the slot.
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::Stack);
-        assert_eq!(gs.p1.arsenal_idx, None);
+        assert!(on_stack(&gs, mm));
+        assert_eq!(gs.p1.arsenal, None);
 
         // Both pass and it resolves onto the chain like any other attack,
         // sending the defender to the Defend phase.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.cards[mm_idx].location, CardLocation::P1CombatChain);
-        assert_eq!(gs.p1.chain_link[0], Some(CardIdx::new(mm_idx)));
+        assert!(in_zone(&gs, PlayerIndex::P1, mm, Zone::CombatChain));
+        assert_eq!(link_cards(&gs, PlayerIndex::P1, 0), vec![mm]);
         assert_eq!(gs.phase, Phase::Defend);
         assert_eq!(gs.active_player, PlayerIndex::P2);
     }
@@ -4487,12 +3999,12 @@ mod tests {
         let mut gs = fresh_game();
 
         // Play the 0-cost action out of the arsenal, emptying the slot.
-        let cb_idx = seat_in_arsenal(&mut gs, PlayerIndex::P1, Card::ClearingBellowB);
-        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(cb_idx))});
+        let cb = seat_in_arsenal(&mut gs, PlayerIndex::P1, Card::ClearingBellowB);
+        step_card(&mut gs, ActionType::PlayCard, cb);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.p1.arsenal_idx, None);
-        assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Graveyard);
+        assert_eq!(gs.p1.arsenal, None);
+        assert!(in_zone(&gs, PlayerIndex::P1, cb, Zone::Graveyard));
 
         // Clearing Bellow has Go Again, so the action phase continues; passing
         // it out reaches the Arsenal phase, where the freed slot means a card

@@ -122,6 +122,29 @@ impl CardCounts {
         })
     }
 
+    /// The zone with one copy of `id` taken out, leaving `self` unchanged:
+    /// for asking about "the rest of the hand" once a card is set aside.
+    /// Panics if the zone holds no copy of `id`.
+    #[inline]
+    pub fn without(mut self, id: DeckCardId) -> CardCounts {
+        self.remove(id);
+        self
+    }
+
+    /// The card of the `k`th copy in the zone, counting copies in id order
+    /// (so `0..len()` names every copy once). `None` when `k >= len()`. Used to
+    /// pick a card uniformly at random: draw `k` from `0..len()`.
+    pub fn nth(self, k: usize) -> Option<DeckCardId> {
+        let mut k = k;
+        for (id, n) in self.iter() {
+            if k < n as usize {
+                return Some(id);
+            }
+            k -= n as usize;
+        }
+        None
+    }
+
     /// `count`, taking a card from deck `D`'s enum.
     #[inline]
     pub fn count_as<D: DeckCard>(self, card: D) -> u8 {
@@ -203,6 +226,21 @@ mod tests {
         assert_eq!(z.count_as(RhinarCard::PackHuntR), 0);
         let got: Vec<(RhinarCard, u8)> = z.iter_as().collect();
         assert_eq!(got, vec![(RhinarCard::AlphaRampageR, 1), (RhinarCard::DodgeB, 2)]);
+    }
+
+    #[test]
+    fn nth_names_every_copy_once_and_without_leaves_self_alone() {
+        let mut z = CardCounts::EMPTY;
+        z.add(B);
+        z.add(B);
+        z.add(A);
+        z.add(TOP);
+        let picks: Vec<usize> = (0..z.len() as usize).map(|k| z.nth(k).unwrap().get()).collect();
+        assert_eq!(picks, vec![0, 5, 5, MAX_DECK_IDS - 1]);
+        assert_eq!(z.nth(4), None);
+        let rest = z.without(B);
+        assert_eq!(rest.count(B), 1);
+        assert_eq!(z.count(B), 2);
     }
 
     #[test]

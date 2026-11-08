@@ -2,31 +2,8 @@ use crate::cards::Card;
 use crate::action::ActionType;
 use crate::card_counts::{CardCounts, DeckCardId};
 use crate::deck_cards::{DeckCard, DeckKind};
+use crate::ring_buffer::RingBuffer;
 use rand::rngs::SmallRng;
-
-/// A global index into `Gamestate::cards`. Wrapping the raw `u8` in a newtype
-/// keeps card indices from being silently confused with the many other small
-/// integers in the engine that share the same representation — counts
-/// (`hand_size()`, `deck_size`), player ids (`pid`, `active_player`), or pitch
-/// values. Construct with `CardIdx::new` from a `usize` slot; read back the
-/// `usize` with `get` when indexing `Gamestate::cards`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-pub struct CardIdx(pub u8);
-
-impl CardIdx {
-    /// Wrap a `usize` slot position. The shared `cards` array is only
-    /// `TOTAL_CARDS` long, so every valid slot fits in a `u8`.
-    #[inline]
-    pub const fn new(i: usize) -> Self {
-        CardIdx(i as u8)
-    }
-
-    /// The slot as a `usize`, for indexing `Gamestate::cards`.
-    #[inline]
-    pub const fn get(self) -> usize {
-        self.0 as usize
-    }
-}
 
 /// One of the two players (0 or 1), wrapped in a newtype so a player id is never
 /// silently confused with the many other small integers in the engine — card
@@ -69,18 +46,31 @@ impl PlayerIndex {
     }
 }
 
-/// Number of (non-hero) cards each player owns. The unified `Gamestate::cards`
-/// array is `2 * PLAYER_CARDS` long: player 0 owns slots `0..PLAYER_CARDS` and
-/// player 1 owns slots `PLAYER_CARDS..2*PLAYER_CARDS`.
+/// Number of (non-hero) cards each player owns: the 40-card deck plus a weapon
+/// and four pieces of equipment. Every one of them is in exactly one zone at
+/// any time — the conservation `Gamestate::debug_check_card_totals` checks.
 pub const PLAYER_CARDS: usize = 45;
-pub const TOTAL_CARDS: usize = PLAYER_CARDS * 2;
-/// Maximum number of cards the stack can hold at once. Committing a card beyond
-/// this limit panics (see `Gamestate::push_to_stack`). Both players may keep
-/// adding instants, reactions and activations without passing, so a single
+/// Maximum number of layers the stack can hold at once. Committing a card
+/// beyond this limit panics (see `Gamestate::push_to_stack`). Both players may
+/// keep adding instants, reactions and activations without passing, so a single
 /// reaction window can legitimately stack six or more layers (e.g. four attack
 /// reactions answered by two Dodges); 16 leaves ample headroom.
 pub const STACK_SIZE: usize = 16;
+/// Capacity of a deck's circular buffer: the smallest power of two that holds
+/// every card a player owns.
+pub const DECK_CAPACITY: usize = 64;
+/// How many links a combat chain can hold. A single combat chain is very
+/// unlikely to grow longer than that; a turn that does produce a sixth attack
+/// panics rather than reusing a link and mis-scoring the attack.
+pub const CHAIN_LINKS: usize = 5;
 
+/// Who can see a card. Cards carry no visibility of their own: it follows from
+/// the zone they are in (see `Player::visibility`), except in the deck, where
+/// each slot remembers whether both players have seen that card (a pitched
+/// card put on the bottom, or a revealed one).
+// Read by tests and, later, by observation encoding; the engine itself never
+// needs to ask who can see a card.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
 pub enum CardVisibleState {
@@ -90,137 +80,101 @@ pub enum CardVisibleState {
     BothKnow,
 }
 
-/// Where a card currently sits. Every zone is split per player (`P1*` / `P2*`)
-/// so a card's owner is encoded in its location; the only shared zone is the
-/// `Stack`, which both players can add to before it resolves.
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[repr(u8)]
-pub enum CardLocation {
-    P1Hand,
-    P2Hand,
-    P1Deck,
-    P2Deck,
-    P1Pitch,
-    P2Pitch,
-    P1Graveyard,
-    P2Graveyard,
-    P1Arsenal,
-    P2Arsenal,
-    P1BanishZone,
-    P2BanishZone,
-    /// Cards a player was forced to banish to an opponent's Intimidate. Kept
-    /// separate from the ordinary banish zone so an Intimidate banish can be
-    /// tracked and (later) returned/cleared on its own.
-    P1IntimidateBanish,
-    P2IntimidateBanish,
-    P1Head,
-    P2Head,
-    P1Chest,
-    P2Chest,
-    P1Arms,
-    P2Arms,
-    P1Legs,
-    P2Legs,
-    P1Weapon,
-    P2Weapon,
-    P1CombatChain,
-    P2CombatChain,
-    Stack,
-}
-
-// A complete, symmetric set of per-player zone constructors; some are not
-// referenced yet as the engine is still being built out.
 #[allow(dead_code)]
-impl CardLocation {
-    /// Per-player zone constructors. `pid` is the owning player; each returns
-    /// that player's variant of the zone.
-    pub const fn hand(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Hand } else { Self::P2Hand } }
-    pub const fn deck(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Deck } else { Self::P2Deck } }
-    pub const fn pitch(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Pitch } else { Self::P2Pitch } }
-    pub const fn graveyard(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Graveyard } else { Self::P2Graveyard } }
-    pub const fn arsenal(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Arsenal } else { Self::P2Arsenal } }
-    pub const fn banish(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1BanishZone } else { Self::P2BanishZone } }
-    pub const fn intimidate_banish(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1IntimidateBanish } else { Self::P2IntimidateBanish } }
-    pub const fn head(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Head } else { Self::P2Head } }
-    pub const fn chest(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Chest } else { Self::P2Chest } }
-    pub const fn arms(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Arms } else { Self::P2Arms } }
-    pub const fn legs(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Legs } else { Self::P2Legs } }
-    pub const fn weapon(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1Weapon } else { Self::P2Weapon } }
-    pub const fn combat_chain(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1CombatChain } else { Self::P2CombatChain } }
-}
-
-/// The zones whose cards are unordered, each tracked on its `Player` as a
-/// `CardCounts` bitfield (see `Player::zone`). A zone is per player — the
-/// owner is the `Player` holding the bitfield — so this names the kind of zone
-/// only. The four equipment zones (head, chest, arms, legs) share one
-/// `Equipment` bitfield: each holds at most one card, and which slot a piece
-/// sits in follows from the card itself.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-#[repr(u8)]
-pub enum UnorderedZone {
-    Hand,
-    Pitch,
-    Graveyard,
-    Banish,
-    IntimidateBanish,
-    Equipment,
-}
-
-impl UnorderedZone {
-    pub const ALL: [UnorderedZone; 6] = [
-        UnorderedZone::Hand,
-        UnorderedZone::Pitch,
-        UnorderedZone::Graveyard,
-        UnorderedZone::Banish,
-        UnorderedZone::IntimidateBanish,
-        UnorderedZone::Equipment,
-    ];
-
-    /// The unordered zone `location` belongs to (for either player), or `None`
-    /// for the ordered and single-card zones: the deck, arsenal, weapon,
-    /// combat chain and stack.
-    pub const fn of(location: CardLocation) -> Option<Self> {
-        use CardLocation::*;
-        match location {
-            P1Hand | P2Hand => Some(UnorderedZone::Hand),
-            P1Pitch | P2Pitch => Some(UnorderedZone::Pitch),
-            P1Graveyard | P2Graveyard => Some(UnorderedZone::Graveyard),
-            P1BanishZone | P2BanishZone => Some(UnorderedZone::Banish),
-            P1IntimidateBanish | P2IntimidateBanish => Some(UnorderedZone::IntimidateBanish),
-            P1Head | P2Head | P1Chest | P2Chest | P1Arms | P2Arms | P1Legs | P2Legs => {
-                Some(UnorderedZone::Equipment)
-            }
-            P1Deck | P2Deck | P1Arsenal | P2Arsenal | P1Weapon | P2Weapon
-            | P1CombatChain | P2CombatChain | Stack => None,
-        }
+impl CardVisibleState {
+    /// Known to `pid` alone.
+    pub const fn owner_only(pid: PlayerIndex) -> Self {
+        if pid.get() == 0 { CardVisibleState::P1Knows } else { CardVisibleState::P2Knows }
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct CardState {
-    pub visible :CardVisibleState,
-    pub location: CardLocation,
-    pub card : Card,
-    pub next_card : CardIdx,
-    pub prev_card : CardIdx,
-    /// Extra defense granted to *this copy* of the card on top of its printed
-    /// `defense`, by an effect that pumps one card rather than the player (e.g.
-    /// Rally the Rearguard's "gains +3 block"). Unlike the power bonuses, which
-    /// are banked on the `Player` because they belong to whichever attack comes
-    /// next, this rides the card itself: two copies blocking the same attack are
-    /// pumped independently. Counted by `chain_link_total` when the block is
-    /// totalled, and cleared as the card leaves the combat chain, so the buff
-    /// lasts exactly as long as the combat it was granted in.
-    pub defense_bonus : u8,
-    /// Whether this copy's activated ability has been used so far this turn, for
-    /// the "once per turn" limit on abilities that carry one (e.g. Rally the
-    /// Rearguard). Per card rather than per player, so a second copy has its own
-    /// activation. Set when the ability is put on the stack — the cost is paid
-    /// then, so a countered activation still counts as used — and cleared for
-    /// every card at the start of each turn.
-    pub ability_used_this_turn : bool,
+/// The zones a player's cards can be in. Zones are per player — the owner is
+/// the `Player` holding the zone — so this names the kind of zone only; the
+/// stack is the one zone shared by both players.
+///
+/// How each zone is stored:
+/// - **Unordered** zones are a `CardCounts` bitfield on the player: `Hand`,
+///   `Pitch`, `Graveyard`, `Banish`, `IntimidateBanish`, `Equipment` (the four
+///   equipment zones share one bitfield), and each link of the combat chain
+///   (`Player::chain_link`).
+/// - **Ordered** zones are circular buffers: the `Deck` (`Player::deck`) and the
+///   `Stack` (`Gamestate::stack`).
+/// - **Single-card** zones are an `Option<DeckCardId>`: the `Arsenal` and the
+///   `Weapon`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[repr(u8)]
+pub enum Zone {
+    Hand,
+    Deck,
+    Pitch,
+    Graveyard,
+    Arsenal,
+    Banish,
+    /// Cards a player was forced to banish to an opponent's Intimidate. Kept
+    /// separate from the ordinary banish zone because they return to hand at
+    /// the end of the turn.
+    IntimidateBanish,
+    Equipment,
+    Weapon,
+    CombatChain,
+    Stack,
 }
 
+impl Zone {
+    /// Whether the zone is one of the `CardCounts` zones `Player::counts`
+    /// returns. The combat chain is unordered too, but it is split into links
+    /// and reached through `Player::chain_link` instead.
+    pub const fn is_unordered(self) -> bool {
+        matches!(
+            self,
+            Zone::Hand | Zone::Pitch | Zone::Graveyard | Zone::Banish
+                | Zone::IntimidateBanish | Zone::Equipment
+        )
+    }
+}
+
+/// One card in a deck: which card it is, and whether both players know it is
+/// there. A card is hidden in the deck unless it went in face up — a pitched
+/// card put on the bottom, or a card revealed and kept or bottomed — and loses
+/// that the moment the deck is shuffled.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DeckSlot {
+    pub card: DeckCardId,
+    pub known: bool,
+}
+
+impl DeckSlot {
+    pub const fn hidden(card: DeckCardId) -> Self {
+        DeckSlot { card, known: false }
+    }
+
+    pub const fn known(card: DeckCardId) -> Self {
+        DeckSlot { card, known: true }
+    }
+}
+
+/// A deck: a circular buffer of cards, the top (the next card drawn) at the
+/// front and the bottom at the back.
+pub type Deck = RingBuffer<DeckSlot, DECK_CAPACITY>;
+
+/// An empty deck.
+pub const fn empty_deck() -> Deck {
+    RingBuffer::new(DeckSlot::hidden(DeckCardId::new(0)))
+}
+
+/// The stack: a circular buffer of layers waiting to resolve, the bottom at the
+/// front and the top (the next layer to resolve) at the back.
+pub type Stack = RingBuffer<PendingCard, STACK_SIZE>;
+
+/// An empty stack.
+pub const fn empty_stack() -> Stack {
+    RingBuffer::new(PendingCard {
+        owner: PlayerIndex::P1,
+        card: DeckCardId::new(0),
+        from: Zone::Stack,
+        typ: ActionType::Pass,
+    })
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
@@ -289,69 +243,56 @@ impl Phase {
 /// ends in `Phase::Draw`.
 pub const MAX_TURNS: u8 = 40;
 
-/// Per-player state. The cards themselves live in `Gamestate::cards`; a player
-/// only holds the (global) head/tail indices into that shared array for each of
-/// its zones, plus its turn resources. Player 0's cards occupy global slots
-/// `0..PLAYER_CARDS`, player 1's occupy `PLAYER_CARDS..2*PLAYER_CARDS`.
+/// Per-player state: every zone the player's cards can be in, plus the player's
+/// turn resources and the bonuses banked for their attacks. Cards are stored by
+/// their `DeckCardId` (see `deck_cards`), which only means something together
+/// with `deck_kind`.
+#[derive(Clone)]
 pub struct Player {
-    /// Which player this is (0 or 1), and equivalently which half of
-    /// `Gamestate::cards` it owns: player 0 owns slots `0..PLAYER_CARDS`,
-    /// player 1 owns `PLAYER_CARDS..2*PLAYER_CARDS`. Stored here so the pid
-    /// travels with the player rather than being passed as a parallel argument
-    /// that could drift out of sync.
+    /// Which player this is (0 or 1). Stored here so the pid travels with the
+    /// player rather than being passed as a parallel argument that could drift
+    /// out of sync.
     pub pid: PlayerIndex,
     pub life: u8,
     pub intellect: u8,
     pub hero : Card,
     /// Which deck card enum this player's `DeckCardId`s belong to — the deck
     /// `hero` plays. Fixed when the game is built.
-    pub deck : DeckKind,
-    /// The hand's contents as a bitfield: how many copies of each of `deck`'s
-    /// cards are in hand (see `CardCounts`). The hand is unordered, so this is
-    /// all the rules need to know about it. Kept in step with the `hand_idx`
-    /// linked list by the engine's attach/detach helpers; the list still exists
-    /// so per-copy state (`CardState`) can be reached, and may go away later.
+    pub deck_kind : DeckKind,
+    /// The cards the player starts the game with, in decklist order: the
+    /// deck before it is shuffled, the worn equipment, and the weapon. `reset`
+    /// deals the zones out from these.
+    pub starting_deck : Deck,
+    pub starting_equipment : CardCounts,
+    pub starting_weapon : Option<DeckCardId>,
+    /// The deck, top first. Drawn from the front; pitched cards go on the back.
+    pub deck : Deck,
+    /// The hand: how many copies of each card are in it. The hand is
+    /// unordered, so the counts are all there is to know about it.
     pub hand : CardCounts,
-    /// The pitch zone's contents as a bitfield, kept in step with the
-    /// `pitch_idx` list the same way `hand` is with `hand_idx`. The pitch zone
-    /// is unordered; the order pitched cards go to the bottom of the deck is
-    /// chosen as they leave it (the `PitchOrder` phase), not stored here.
+    /// The pitch zone. It is unordered; the order pitched cards go to the
+    /// bottom of the deck is chosen as they leave it (the `PitchOrder` phase).
     pub pitch : CardCounts,
-    /// The graveyard's contents. The graveyard has no linked list: a card is in
-    /// it when its `location` says so, and this bitfield is the zone itself.
     pub graveyard : CardCounts,
-    /// The (permanent) banish zone's contents, kept in step with `banish_idx`.
+    /// The (permanent) banish zone.
     pub banished : CardCounts,
-    /// The Intimidate banish zone's contents, kept in step with
-    /// `intimidate_banish_idx`.
+    /// The Intimidate banish zone, emptied back into the hand as the turn
+    /// passes into the Arsenal phase.
     pub intimidate_banished : CardCounts,
     /// The worn equipment still in play across the four equipment zones (head,
-    /// chest, arms, legs), kept in step with `head_idx`..`legs_idx`. The slot
-    /// indices still exist because activating a piece names the copy; this is
-    /// the unordered view of what the player is wearing. The weapon zone is not
-    /// an equipment zone and is not counted here.
+    /// chest, arms, legs). Each zone holds at most one piece and which zone a
+    /// piece sits in follows from the card itself, so one bitfield covers all
+    /// four. The weapon zone is not an equipment zone; see `weapon`.
     pub equipment : CardCounts,
-    pub resources: u8,
-    pub action_points: u8,
-    pub top_deck_idx: Option<CardIdx>,
-    pub bottom_deck_idx: Option<CardIdx>,
-    pub pitch_idx : Option<CardIdx>,
-    pub arsenal_idx : Option<CardIdx>,
-    pub hand_idx : Option<CardIdx>,
-    pub banish_idx : Option<CardIdx>,
-    /// Head of the linked list of cards this player was forced to banish to an
-    /// opponent's Intimidate. `None` when no such card has been banished.
-    pub intimidate_banish_idx : Option<CardIdx>,
-    pub weapon_idx : Option<CardIdx>,
-    pub head_idx : Option<CardIdx>,
-    pub chest_idx : Option<CardIdx>,
-    pub arms_idx : Option<CardIdx>,
-    pub legs_idx : Option<CardIdx>,
-    /// The combat chain, link by link. Each slot holds the head of the linked
-    /// list of cards occupying that chain link, or `None` if the link is empty.
-    /// Sized at 5 since a single combat chain is very unlikely to grow longer
-    /// than that; a turn that does produce a sixth attack panics rather than
-    /// reusing a link and mis-scoring the attack.
+    /// The card in the arsenal, if any.
+    pub arsenal : Option<DeckCardId>,
+    /// The weapon in the weapon zone. Empty while the weapon is on the stack or
+    /// the combat chain after being swung; it returns when the chain closes.
+    pub weapon : Option<DeckCardId>,
+    /// The combat chain, link by link, in order. Each link holds this player's
+    /// cards on it as an unordered bitfield: the attacking card on the
+    /// attacker's side, the blockers on the defender's. Empty links are
+    /// `CardCounts::EMPTY`.
     ///
     /// Each attack in a turn takes a link of its own — the attacker's first
     /// attack goes to link 0, a follow-up after Go Again to link 1, and so on —
@@ -360,8 +301,22 @@ pub struct Player {
     /// this turn adds nothing to a later one's power and the cards that blocked
     /// it do not blunt it. A defender's links can therefore have gaps, where an
     /// attack went unblocked.
-    pub chain_link : [Option<CardIdx>; 5],
-    pub deck_size : u8,
+    pub chain_link : [CardCounts; CHAIN_LINKS],
+    /// Extra defense granted to this player's cards on each chain link on top
+    /// of their printed defense, by effects that pump a blocker (Rally the
+    /// Rearguard's "gains +3 block"). Only the link's total block matters to
+    /// combat damage, so the bonus is kept per link rather than per copy. It
+    /// lasts as long as the link, and is cleared as the chain closes.
+    pub chain_defense_bonus : [u8; CHAIN_LINKS],
+    /// How many copies of each card have used their "once per turn" ability
+    /// this turn (a weapon swing, Rally the Rearguard). Another copy may still
+    /// activate while fewer have been used than there are copies in the zone it
+    /// activates from. Set when the activation goes on the stack — the cost is
+    /// paid then, so a countered activation still counts — and cleared at the
+    /// start of each turn.
+    pub abilities_used : CardCounts,
+    pub resources: u8,
+    pub action_points: u8,
     /// Extra power added to this player's current attack on top of the cards on
     /// the combat chain. Set by on-play effects that conditionally pump the
     /// attacking card (e.g. Bare Fangs's "+2 power if you discarded a card with
@@ -411,14 +366,14 @@ pub struct Player {
     /// intimidated this turn" (e.g. Beast Mode's conditional +2 power). Cleared
     /// at the start of each turn so it never carries into a later turn.
     pub has_intimidated : bool,
-    /// Whether the card in this player's arsenal (`arsenal_idx`) is face up. A
+    /// Whether the card in this player's arsenal (`arsenal`) is face up. A
     /// card arsenaled at the end of a turn goes in face down; a mentor may be
     /// turned face up at the start of its owner's turn (the `MentorFlip` phase),
     /// and a card an effect puts into the arsenal "face up" (Chief Ruk'utan
     /// fetching Alpha Rampage) arrives that way. Face up and down only exist in
     /// the arsenal, which holds one card, so this lives on the player rather
     /// than on every card; it is cleared whenever the arsenal empties (see
-    /// `detach_from_current_zone`).
+    /// `take_from_zone`).
     pub arsenal_face_up : bool,
     /// Lesson counters on the mentor in this player's arsenal (Chief Ruk'utan
     /// gains one each time his ability triggers and graduates at two). A mentor
@@ -435,15 +390,10 @@ pub struct Player {
     pub log : Option<Vec<String>>,
 }
 
+#[derive(Clone)]
 pub struct Gamestate {
     pub p1 : Player,
     pub p2 : Player,
-    /// All cards in the game, in one flat array shared by both players. Player 0
-    /// owns slots `0..PLAYER_CARDS`, player 1 owns `PLAYER_CARDS..2*PLAYER_CARDS`.
-    /// Every index stored anywhere (zone heads, `next_card`/`prev_card`, the
-    /// stack, the combat chain) is a global index into this array, so the owner
-    /// of any card is implied by which half it falls in.
-    pub cards : [CardState; TOTAL_CARDS],
     /// The player who currently holds priority and whose action `step` will
     /// apply. During a turn's action/pitch flow this is the turn player; during
     /// the ActionInstant phase it ping-pongs between the players as each passes
@@ -465,18 +415,16 @@ pub struct Gamestate {
     /// in a draw (see `check_game_end`).
     pub turn_count : u8,
     pub rng : SmallRng,
-    /// The stack: cards currently waiting to resolve, each paired with the
-    /// `ActionType` that committed it (so we know how to resolve it). Slot 0 is
-    /// the bottom of the stack and slots fill upward; the topmost occupied slot
-    /// is the card that resolves next. Empty slots are `None`. Because the stored
-    /// indices are global, the stack can hold cards owned by either player.
-    /// Committing a card when all `STACK_SIZE` slots are full panics.
-    pub stack : [Option<PendingCard>; STACK_SIZE],
+    /// The stack: layers waiting to resolve, each a `PendingCard` naming the
+    /// card, its owner, the zone it came from and the action that committed it.
+    /// A circular buffer with the bottom of the stack at the front and the top —
+    /// the layer that resolves next — at the back.
+    pub stack : Stack,
     /// The card the active player has chosen to play or activate and is now
     /// paying for. Set when leaving the `Action` phase for the `ActionPitch`
-    /// phase (or the `Reaction` phase for the `ReactionPitch` phase);
-    /// holds the global slot index into `cards` together with the location it is
-    /// being played/activated from. `None` outside the pay-for-a-card flow.
+    /// phase (or the `Reaction` phase for the `ReactionPitch` phase). The card
+    /// stays in the zone it is played from until it is paid for. `None` outside
+    /// the pay-for-a-card flow.
     pub pending_card : Option<PendingCard>,
     /// The omniscient game log: every logged event with nothing redacted (the
     /// per-player views with hidden information removed live on `Player::log`).
@@ -488,6 +436,18 @@ pub struct Gamestate {
 }
 
 impl Gamestate {
+    /// The player `pid`.
+    #[inline]
+    pub fn player(&self, pid: PlayerIndex) -> &Player {
+        if pid == PlayerIndex::P1 { &self.p1 } else { &self.p2 }
+    }
+
+    /// The player `pid`, mutably.
+    #[inline]
+    pub fn player_mut(&mut self, pid: PlayerIndex) -> &mut Player {
+        if pid == PlayerIndex::P1 { &mut self.p1 } else { &mut self.p2 }
+    }
+
     /// True once the game has reached a terminal phase (a win for either player
     /// or a draw). When this holds, `step` is a no-op and there are no legal
     /// actions.
@@ -522,58 +482,48 @@ impl Gamestate {
         false
     }
 
-    /// Slot index of the topmost (next-to-resolve) card on the stack, or `None`
-    /// when the stack is empty. The stack fills from slot 0 upward, so this is
-    /// the highest occupied slot.
-    pub fn stack_top_slot(&self) -> Option<usize> {
-        self.stack.iter().rposition(|slot| slot.is_some())
-    }
-
-    /// The `PendingCard` on top of the stack, or `None` when the stack is empty.
+    /// The layer on top of the stack (the next to resolve), or `None` when the
+    /// stack is empty.
+    #[allow(dead_code)]
     pub fn stack_top(&self) -> Option<PendingCard> {
-        self.stack_top_slot().and_then(|i| self.stack[i])
+        self.stack.back()
     }
 
-    /// True when no cards are on the stack.
+    /// True when nothing is on the stack.
     pub fn stack_is_empty(&self) -> bool {
-        self.stack.iter().all(|slot| slot.is_none())
+        self.stack.is_empty()
     }
 
-    /// Push a committed card onto the top of the stack. Panics with
-    /// "stack size ran out" if all `STACK_SIZE` slots are already occupied.
+    /// Push a committed layer onto the top of the stack. Panics with
+    /// "stack size ran out" if the stack already holds `STACK_SIZE` layers.
     pub fn push_to_stack(&mut self, pending: PendingCard) {
-        for slot in self.stack.iter_mut() {
-            if slot.is_none() {
-                *slot = Some(pending);
-                return;
-            }
+        if self.stack.try_push_back(pending).is_err() {
+            panic!("stack size ran out");
         }
-        panic!("stack size ran out");
     }
 
-    /// Remove and return the card on top of the stack, or `None` when empty.
+    /// Remove and return the layer on top of the stack, or `None` when empty.
     pub fn pop_stack(&mut self) -> Option<PendingCard> {
-        let top = self.stack_top_slot()?;
-        self.stack[top].take()
+        self.stack.pop_back()
     }
 
-    /// Turn the copy in global slot `idx` into `card`, as tests do to stage a
-    /// specific hand or deck. If the copy is in one of its owner's unordered
-    /// zones (hand, pitch, graveyard, ...) that zone's bitfield is relabelled
-    /// too, so it stays in step with the cards' locations. `card` must be in
-    /// the owner's deck wherever the copy is, so a test can never stage a zone
-    /// the per-deck `CardCounts` could not represent.
-    #[cfg(test)]
-    pub fn set_card(&mut self, idx: usize, card: Card) {
-        let owner = if idx < PLAYER_CARDS { &mut self.p1 } else { &mut self.p2 };
-        let old = self.cards[idx].card;
-        let location = self.cards[idx].location;
-        assert!(owner.deck.id_of(card).is_some(),
-            "tests may only stage cards from the owner's deck: {:?} is not in the {:?} deck (at {:?})",
-            card, owner.deck, location);
-        owner.zone_remove(location, old);
-        owner.zone_add(location, card);
-        self.cards[idx].card = card;
+    /// Check that each player still has exactly `PLAYER_CARDS` cards across all
+    /// of their zones and the stack. Cards are only ever moved, never created
+    /// or lost, so a different total means some path took a card out of one
+    /// zone without putting it in another (or the reverse). Called by `step`
+    /// and `legal_actions` in debug builds.
+    pub fn debug_check_card_totals(&self) {
+        for player in [&self.p1, &self.p2] {
+            let on_stack = self.stack.iter()
+                .filter(|p| p.owner == player.pid && p.holds_card())
+                .count();
+            let total = player.cards_in_zones() + on_stack;
+            assert_eq!(
+                total, PLAYER_CARDS,
+                "P{} has {} cards across its zones and the stack, not {}",
+                player.pid.get() + 1, total, PLAYER_CARDS,
+            );
+        }
     }
 
     /// True when logging was enabled by `reset(gs, true)`. Callers should check
@@ -620,226 +570,224 @@ impl Gamestate {
     }
 }
 
-/// A card the active player has committed to play, activate, or attack with,
-/// pending payment during a pitch phase. `index` is the global slot into
-/// `Gamestate::cards`; `typ` is the action that committed it (`PlayCard`,
-/// `Activate`, or `Attack`), which determines how the card resolves once paid
-/// for.
+
+/// A card committed to play, activate, or attack with, pending payment during a
+/// pitch phase or waiting on the stack. `card` is the card and `owner` the
+/// player whose deck it belongs to; `from` is the zone it was in when it was
+/// committed, and `typ` the action that committed it (`PlayCard`, `Activate`,
+/// or `DefendTrigger`), which determines how it resolves.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PendingCard {
-    pub index : CardIdx,
+    pub owner : PlayerIndex,
+    pub card : DeckCardId,
+    pub from : Zone,
     pub typ : ActionType,
 }
 
-/// Iterator over the cards in a player's hand.
-///
-/// The hand is stored as a singly-linked list inside `Gamestate::cards`,
-/// starting at `Player::hand_idx`. Following the `next_card` indices, the list
-/// terminates when a node's `next_card` points back to its own index. This
-/// iterator yields `(slot_index, CardState)` for each card in order until (and
-/// including) that terminal node, where `slot_index` is the card's global
-/// position in `Gamestate::cards`.
-pub struct HandIter<'a> {
-    cards: &'a [CardState; TOTAL_CARDS],
-    current: Option<usize>,
-}
-
-impl<'a> Iterator for HandIter<'a> {
-    type Item = (usize, CardState);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let idx = self.current?;
-        let card = self.cards[idx];
-        let next = card.next_card.get();
-        // A node whose `next_card` points at itself marks the end of the list.
-        self.current = if next == idx { None } else { Some(next) };
-        Some((idx, card))
+impl PendingCard {
+    /// Whether the layer holds the card itself, rather than pointing at a card
+    /// that stays in its zone: a defend trigger, or an ability activated while
+    /// its card is defending, puts only the effect on the stack and leaves the
+    /// card on the combat chain.
+    pub fn holds_card(&self) -> bool {
+        self.typ != ActionType::DefendTrigger && self.from != Zone::CombatChain
     }
 }
 
 impl Player {
+    /// A player with every zone empty, playing `hero`'s deck. `reset` deals the
+    /// starting cards out.
+    pub fn new(pid: PlayerIndex, hero: Card) -> Player {
+        Player {
+            pid,
+            // Populated by `reset` (see `set_life_and_intellect`); 0 until then.
+            life: 0,
+            intellect: 0,
+            hero,
+            deck_kind: DeckKind::for_hero(hero),
+            starting_deck: empty_deck(),
+            starting_equipment: CardCounts::EMPTY,
+            starting_weapon: None,
+            deck: empty_deck(),
+            hand: CardCounts::EMPTY,
+            pitch: CardCounts::EMPTY,
+            graveyard: CardCounts::EMPTY,
+            banished: CardCounts::EMPTY,
+            intimidate_banished: CardCounts::EMPTY,
+            equipment: CardCounts::EMPTY,
+            arsenal: None,
+            weapon: None,
+            chain_link: [CardCounts::EMPTY; CHAIN_LINKS],
+            chain_defense_bonus: [0; CHAIN_LINKS],
+            abilities_used: CardCounts::EMPTY,
+            resources: 0,
+            action_points: 0,
+            attack_power_bonus: 0,
+            attack_go_again_bonus: false,
+            next_brute_attack_action_bonus: 0,
+            next_attack_action_bonus: 0,
+            next_brute_attack_conditional_bonus: 0,
+            has_intimidated: false,
+            arsenal_face_up: false,
+            arsenal_lesson_counters: 0,
+            // Logging is opted into via `reset(gs, true)`; off until then.
+            log: None,
+        }
+    }
+
     /// Number of cards in hand, counting every copy.
     #[inline]
     pub const fn hand_size(&self) -> u8 {
         self.hand.len()
     }
 
+    /// Number of cards in the deck.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn deck_size(&self) -> u8 {
+        self.deck.len() as u8
+    }
+
     /// `card`'s id in this player's deck. Panics if the deck does not contain
-    /// it, since such a card can never be in this player's hand.
+    /// it, since such a card can never be in any of this player's zones.
     #[inline]
     pub fn deck_id(&self, card: Card) -> DeckCardId {
-        match self.deck.id_of(card) {
+        match self.deck_kind.id_of(card) {
             Some(id) => id,
-            None => panic!("{:?} is not in the {:?} deck", card, self.deck),
+            None => panic!("{:?} is not in the {:?} deck", card, self.deck_kind),
         }
     }
 
-    /// Record one more copy of `card` in the hand bitfield. Only updates the
-    /// counts; the caller links the copy into `hand_idx`.
+    /// The `Card` a `DeckCardId` of this player's stands for.
     #[inline]
-    pub fn hand_add(&mut self, card: Card) {
-        self.zone_add(CardLocation::hand(self.pid), card);
+    pub fn card(&self, id: DeckCardId) -> Card {
+        self.deck_kind.card(id)
     }
 
-    /// Record one copy of `card` leaving the hand bitfield. Only updates the
-    /// counts; the caller unlinks the copy from `hand_idx`.
+    /// The bitfield holding an unordered zone, or `None` for the zones stored
+    /// some other way (see `Zone`).
+    #[allow(dead_code)]
+    pub fn counts(&self, zone: Zone) -> Option<CardCounts> {
+        match zone {
+            Zone::Hand => Some(self.hand),
+            Zone::Pitch => Some(self.pitch),
+            Zone::Graveyard => Some(self.graveyard),
+            Zone::Banish => Some(self.banished),
+            Zone::IntimidateBanish => Some(self.intimidate_banished),
+            Zone::Equipment => Some(self.equipment),
+            Zone::Deck | Zone::Arsenal | Zone::Weapon | Zone::CombatChain | Zone::Stack => None,
+        }
+    }
+
+    /// Mutable form of `counts`.
+    pub fn counts_mut(&mut self, zone: Zone) -> Option<&mut CardCounts> {
+        match zone {
+            Zone::Hand => Some(&mut self.hand),
+            Zone::Pitch => Some(&mut self.pitch),
+            Zone::Graveyard => Some(&mut self.graveyard),
+            Zone::Banish => Some(&mut self.banished),
+            Zone::IntimidateBanish => Some(&mut self.intimidate_banished),
+            Zone::Equipment => Some(&mut self.equipment),
+            Zone::Deck | Zone::Arsenal | Zone::Weapon | Zone::CombatChain | Zone::Stack => None,
+        }
+    }
+
+    /// Put one copy of `id` into the unordered zone `zone`. Panics for a zone
+    /// that is not one of `counts`'s.
     #[inline]
-    pub fn hand_remove(&mut self, card: Card) {
-        self.zone_remove(CardLocation::hand(self.pid), card);
+    pub fn add_to(&mut self, zone: Zone, id: DeckCardId) {
+        self.counts_mut(zone)
+            .unwrap_or_else(|| panic!("{:?} is not an unordered zone", zone))
+            .add(id);
+    }
+
+    /// Take one copy of `id` out of the unordered zone `zone`. Panics for a
+    /// zone that is not one of `counts`'s, or when the zone holds no copy.
+    #[inline]
+    pub fn remove_from(&mut self, zone: Zone, id: DeckCardId) {
+        self.counts_mut(zone)
+            .unwrap_or_else(|| panic!("{:?} is not an unordered zone", zone))
+            .remove(id);
     }
 
     /// How many copies of `card` are in hand, for code that knows which deck
     /// this player has. Debug builds check that `D` is this player's deck.
     #[inline]
+    #[allow(dead_code)]
     pub fn hand_count<D: DeckCard>(&self, card: D) -> u8 {
-        debug_assert_eq!(D::KIND, self.deck, "{:?} is not this player's deck enum", card);
+        debug_assert_eq!(D::KIND, self.deck_kind, "{:?} is not this player's deck enum", card);
         self.hand.count_as(card)
     }
 
     /// How many copies of `card` are in hand, for code that does not know the
     /// deck. A card outside the deck is never in hand, so it counts 0.
     #[inline]
+    #[allow(dead_code)]
     pub fn hand_count_card(&self, card: Card) -> u8 {
-        match self.deck.id_of(card) {
+        match self.deck_kind.id_of(card) {
             Some(id) => self.hand.count(id),
             None => 0,
         }
     }
 
-    /// The pitch value of every card in hand added up, read from the bitfield:
-    /// one catalog lookup per distinct card rather than one per copy.
-    pub fn hand_pitch_total(&self) -> u8 {
-        self.hand
+    /// The pitch value of every card in `counts` added up: one catalog lookup
+    /// per distinct card rather than one per copy.
+    pub fn pitch_total(&self, counts: CardCounts) -> u8 {
+        counts
             .iter()
-            .map(|(id, n)| self.deck.card(id).data().pitch * n)
+            .map(|(id, n)| self.card(id).data().pitch * n)
             .sum()
     }
 
-    /// The bitfield for one of this player's unordered zones.
-    #[inline]
-    pub fn zone(&self, zone: UnorderedZone) -> CardCounts {
+    /// The pitch value of every card in hand added up.
+    pub fn hand_pitch_total(&self) -> u8 {
+        self.pitch_total(self.hand)
+    }
+
+    /// The card attacking on link `link` of this (attacking) player's chain:
+    /// the attacker's side of a link holds the attack alone. `None` for an
+    /// empty link.
+    pub fn attack_on_link(&self, link: usize) -> Option<DeckCardId> {
+        self.chain_link[link].iter().next().map(|(id, _)| id)
+    }
+
+    /// Whether any of this player's chain links holds a card.
+    pub fn chain_occupied(&self) -> bool {
+        self.chain_link.iter().any(|link| !link.is_empty())
+    }
+
+    /// How many of this player's cards are in their zones (the stack aside).
+    pub fn cards_in_zones(&self) -> usize {
+        let counted = [
+            self.hand, self.pitch, self.graveyard, self.banished,
+            self.intimidate_banished, self.equipment,
+        ];
+        counted.iter().map(|c| c.len() as usize).sum::<usize>()
+            + self.chain_link.iter().map(|c| c.len() as usize).sum::<usize>()
+            + self.deck.len()
+            + self.arsenal.is_some() as usize
+            + self.weapon.is_some() as usize
+    }
+
+    /// Who can see the cards this player has in `zone`. The hand, the
+    /// Intimidate banish zone and a face-down arsenal card are known to their
+    /// owner alone; a deck card is hidden unless its slot is known (see
+    /// `DeckSlot`, and `deck_slot_visibility`); everything else is public.
+    #[allow(dead_code)]
+    pub fn visibility(&self, zone: Zone) -> CardVisibleState {
         match zone {
-            UnorderedZone::Hand => self.hand,
-            UnorderedZone::Pitch => self.pitch,
-            UnorderedZone::Graveyard => self.graveyard,
-            UnorderedZone::Banish => self.banished,
-            UnorderedZone::IntimidateBanish => self.intimidate_banished,
-            UnorderedZone::Equipment => self.equipment,
+            Zone::Hand | Zone::IntimidateBanish => CardVisibleState::owner_only(self.pid),
+            Zone::Arsenal if !self.arsenal_face_up => CardVisibleState::owner_only(self.pid),
+            Zone::Deck => CardVisibleState::Hidden,
+            _ => CardVisibleState::BothKnow,
         }
     }
 
-    /// Mutable form of `zone`.
-    #[inline]
-    pub fn zone_mut(&mut self, zone: UnorderedZone) -> &mut CardCounts {
-        match zone {
-            UnorderedZone::Hand => &mut self.hand,
-            UnorderedZone::Pitch => &mut self.pitch,
-            UnorderedZone::Graveyard => &mut self.graveyard,
-            UnorderedZone::Banish => &mut self.banished,
-            UnorderedZone::IntimidateBanish => &mut self.intimidate_banished,
-            UnorderedZone::Equipment => &mut self.equipment,
-        }
-    }
-
-    /// Record one more copy of `card` in the bitfield for `location`. A no-op
-    /// when `location` is not an unordered zone. Only
-    /// updates the counts; the caller sets the card's `location` and links it
-    /// into any list the zone keeps.
-    #[inline]
-    pub fn zone_add(&mut self, location: CardLocation, card: Card) {
-        if let Some(zone) = UnorderedZone::of(location) {
-            let id = self.deck_id(card);
-            self.zone_mut(zone).add(id);
-        }
-    }
-
-    /// Record one copy of `card` leaving the bitfield for `location`. A no-op
-    /// when `location` is not an unordered zone.
-    #[inline]
-    pub fn zone_remove(&mut self, location: CardLocation, card: Card) {
-        if let Some(zone) = UnorderedZone::of(location) {
-            let id = self.deck_id(card);
-            self.zone_mut(zone).remove(id);
-        }
-    }
-
-    /// Check that the `hand` bitfield matches the `hand_idx` linked list:
-    /// every copy linked into the hand counted once, and nothing else.
-    pub fn debug_check_hand(&self, cards: &[CardState; TOTAL_CARDS]) {
-        let mut expected = CardCounts::EMPTY;
-        for (_, cs) in self.hand_iter(cards) {
-            expected.add(self.deck_id(cs.card));
-        }
-        assert_eq!(
-            self.hand, expected,
-            "P{} hand bitfield is out of step with its linked list", self.pid.get() + 1,
-        );
-    }
-
-    /// Check every unordered-zone bitfield against the cards themselves: walk
-    /// this player's half of `cards` and recount each zone from the cards'
-    /// `location`s, and check the hand and pitch bitfields against their
-    /// linked lists too. Called by `step` and `legal_actions` in debug builds,
-    /// so any path that moves a card without going through the engine's
-    /// helpers is caught.
-    pub fn debug_check_zones(&self, cards: &[CardState; TOTAL_CARDS]) {
-        self.debug_check_hand(cards);
-
-        let mut expected = CardCounts::EMPTY;
-        for (_, cs) in self.pitch_iter(cards) {
-            expected.add(self.deck_id(cs.card));
-        }
-        assert_eq!(
-            self.pitch, expected,
-            "P{} pitch bitfield is out of step with its linked list", self.pid.get() + 1,
-        );
-
-        let mut recount = [CardCounts::EMPTY; UnorderedZone::ALL.len()];
-        let base = self.pid.index() * PLAYER_CARDS;
-        for cs in &cards[base..base + PLAYER_CARDS] {
-            if let Some(zone) = UnorderedZone::of(cs.location) {
-                recount[zone as usize].add(self.deck_id(cs.card));
-            }
-        }
-        for zone in UnorderedZone::ALL {
-            assert_eq!(
-                self.zone(zone), recount[zone as usize],
-                "P{} {:?} bitfield is out of step with the cards' locations", self.pid.get() + 1, zone,
-            );
-        }
-    }
-
-    /// Iterate over this player's hand as `(slot_index, CardState)` pairs,
-    /// starting at `hand_idx` and following `next_card` until a node points to
-    /// itself. `cards` is the shared `Gamestate::cards` array the indices refer
-    /// into. Yields nothing if the hand is empty (`hand_idx` is `None`).
-    pub fn hand_iter<'a>(&self, cards: &'a [CardState; TOTAL_CARDS]) -> HandIter<'a> {
-        HandIter {
-            cards,
-            current: self.hand_idx.map(|i| i.get()),
-        }
-    }
-
-    /// Iterate over this player's pitch zone as `(slot_index, CardState)` pairs,
-    /// starting at `pitch_idx` and following `next_card` until a node points to
-    /// itself. The pitch zone is a linked list just like the hand, so the same
-    /// iterator walks it. Yields nothing if the pitch zone is empty.
-    pub fn pitch_iter<'a>(&self, cards: &'a [CardState; TOTAL_CARDS]) -> HandIter<'a> {
-        HandIter {
-            cards,
-            current: self.pitch_idx.map(|i| i.get()),
-        }
-    }
-
-    /// Iterate over the cards on this player's combat chain link `link` as
-    /// `(slot_index, CardState)` pairs, head (most recently added) first. Like
-    /// the hand, a chain link is a linked list ending at a self-pointing node,
-    /// so the same iterator walks it without collecting into a `Vec`. Yields
-    /// nothing if the link is empty.
-    pub fn chain_link_iter<'a>(&self, link: usize, cards: &'a [CardState; TOTAL_CARDS]) -> HandIter<'a> {
-        HandIter {
-            cards,
-            current: self.chain_link[link].map(|i| i.get()),
-        }
+    /// Who can see the deck card at position `i` (0 is the top).
+    #[allow(dead_code)]
+    pub fn deck_slot_visibility(&self, i: usize) -> Option<CardVisibleState> {
+        self.deck.get(i).map(|slot| {
+            if slot.known { CardVisibleState::BothKnow } else { CardVisibleState::Hidden }
+        })
     }
 }

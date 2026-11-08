@@ -1,35 +1,13 @@
 use crate::action::{Action, LegalActions};
-use crate::card_counts::CardCounts;
-use crate::cards::{Card, CardType, EquipmentSlot};
-use crate::deck_cards::DeckKind;
+use crate::cards::{Card, CardType};
 use crate::game_state::{
-    CardIdx, CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase, PlayerIndex,
-    PLAYER_CARDS,  STACK_SIZE, TOTAL_CARDS,
+    empty_deck, empty_stack, Deck, DeckSlot, Gamestate, Player, Phase, PlayerIndex, CHAIN_LINKS, PLAYER_CARDS,
 };
+use crate::card_counts::CardCounts;
 use rand::RngExt;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
-
-/// The `CardLocation` a piece of worn equipment occupies, derived from its
-/// armor slot and the owning player `pid`. Only called for
-/// `CardType::Equipment`, which always carries one of the four armor slots;
-/// weapons are placed in `Weapon` via their card type, so anything else falls
-/// back to that player's weapon zone.
-fn equipment_zone(slot: &Option<EquipmentSlot>, pid: PlayerIndex) -> CardLocation {
-    match slot {
-        Some(EquipmentSlot::Head) => CardLocation::head(pid),
-        Some(EquipmentSlot::Chest) => CardLocation::chest(pid),
-        Some(EquipmentSlot::Arms) => CardLocation::arms(pid),
-        Some(EquipmentSlot::Legs) => CardLocation::legs(pid),
-        Some(EquipmentSlot::Weapon) | None => CardLocation::weapon(pid),
-    }
-}
-
-/// The base offset into `Gamestate::cards` for player `pid`'s cards.
-fn player_base(pid: PlayerIndex) -> usize {
-    pid.index() * PLAYER_CARDS
-}
 
 /// Build a `Gamestate` from two decklists.
 /// Pass `Some(seed)` for a reproducible game, or `None` for a random seed.
@@ -39,137 +17,55 @@ pub fn gamestate_from_decklists(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: 
         None => rand::make_rng(),
     };
 
-    let (p1, p1_cards) = player_from_decklist(p1_deck, PlayerIndex::P1);
-    let (p2, p2_cards) = player_from_decklist(p2_deck, PlayerIndex::P2);
-
-    // Concatenate each player's 45 card states into the single shared array:
-    // player 0 first, then player 1.
-    let mut all: Vec<CardState> = Vec::with_capacity(TOTAL_CARDS);
-    all.extend_from_slice(&p1_cards);
-    all.extend_from_slice(&p2_cards);
-    let cards: [CardState; TOTAL_CARDS] = all
-        .try_into()
-        .unwrap_or_else(|_| panic!("expected exactly {} cards", TOTAL_CARDS));
-
     Gamestate {
-        p1,
-        p2,
-        cards,
+        p1: player_from_decklist(p1_deck, PlayerIndex::P1),
+        p2: player_from_decklist(p2_deck, PlayerIndex::P2),
         active_player: PlayerIndex::P1,
         turn_player: PlayerIndex::P1,
         passes: 0,
         phase: Phase::Start,
         turn_count: 0,
         rng,
-        stack: [None; STACK_SIZE],
+        stack: empty_stack(),
         pending_card: None,
         // Logging is opted into via `reset(gs, true)`; off until then.
         log: None,
     }
 }
 
-/// Build a player's metadata and its `PLAYER_CARDS` card states from a decklist.
-/// `pid` is the player this deck belongs to; it determines the per-player
-/// `CardLocation` each card starts in. The returned card states are later copied
-/// into the shared `Gamestate::cards` array (and reset by `place_cards`).
-///
-/// Life and intellect are left at 0 here: `reset` is the single source of truth
-/// for them (via `set_life_and_intellect`), so they are populated when the game
-/// is initialized — and re-populated whenever `reset` is run again on a
-/// played-out state. A `Gamestate` is not playable until `reset` has run.
-fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardState; PLAYER_CARDS]) {
-    let mut hero_opt: Option<Card> = None;
-    let mut card_states: Vec<CardState> = Vec::with_capacity(PLAYER_CARDS);
+/// Build a player from a decklist: the hero, plus the starting cards `reset`
+/// deals out — the deck in decklist order, the worn equipment and the weapon.
+/// Every zone starts empty; a `Gamestate` is not playable until `reset` has
+/// run, which is also the single source of truth for life and intellect.
+fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> Player {
+    let hero = deck
+        .iter()
+        .copied()
+        .find(|c| c.data().typ == CardType::Hero)
+        .expect("no hero in decklist");
+    let mut player = Player::new(pid, hero);
 
+    let mut starting_deck: Deck = empty_deck();
+    let mut equipment = CardCounts::EMPTY;
+    let mut weapon = None;
+    let mut owned = 0;
     for card in deck {
-        let data = card.data();
-        match data.typ {
-            CardType::Hero => {
-                hero_opt = Some(card);
-            }
+        match card.data().typ {
+            CardType::Hero => continue,
             CardType::Weapon => {
-                card_states.push(CardState {
-                    visible: CardVisibleState::Hidden,
-                    location: CardLocation::weapon(pid),
-                    card,
-                    next_card: CardIdx(0),
-                    prev_card: CardIdx(0),
-                    defense_bonus: 0,
-                    ability_used_this_turn: false,
-                });
+                assert!(weapon.is_none(), "a decklist holds a single weapon");
+                weapon = Some(player.deck_id(card));
             }
-            CardType::Equipment => {
-                card_states.push(CardState {
-                    visible: CardVisibleState::Hidden,
-                    location: equipment_zone(&data.slot, pid),
-                    card,
-                    next_card: CardIdx(0),
-                    prev_card: CardIdx(0),
-                    defense_bonus: 0,
-                    ability_used_this_turn: false,
-                });
-            }
-            _ => {
-                card_states.push(CardState {
-                    visible: CardVisibleState::Hidden,
-                    location: CardLocation::deck(pid),
-                    card,
-                    next_card: CardIdx(0),
-                    prev_card: CardIdx(0),
-                    defense_bonus: 0,
-                    ability_used_this_turn: false,
-                });
-            }
+            CardType::Equipment => equipment.add(player.deck_id(card)),
+            _ => starting_deck.push_back(DeckSlot::hidden(player.deck_id(card))),
         }
+        owned += 1;
     }
-
-    let hero = hero_opt.expect("no hero in decklist");
-    let cards: [CardState; PLAYER_CARDS] = card_states
-        .try_into()
-        .unwrap_or_else(|_| panic!("expected exactly {} non-hero cards", PLAYER_CARDS));
-
-    let player = Player {
-        pid,
-        // Populated by `reset` (see `set_life_and_intellect`); 0 until then.
-        life: 0,
-        intellect: 0,
-        hero,
-        deck: DeckKind::for_hero(hero),
-        hand: CardCounts::EMPTY,
-        pitch: CardCounts::EMPTY,
-        graveyard: CardCounts::EMPTY,
-        banished: CardCounts::EMPTY,
-        intimidate_banished: CardCounts::EMPTY,
-        equipment: CardCounts::EMPTY,
-        resources: 0,
-        action_points: 0,
-        top_deck_idx: None,
-        bottom_deck_idx: None,
-        pitch_idx: None,
-        arsenal_idx: None,
-        hand_idx: None,
-        banish_idx : None,
-        intimidate_banish_idx : None,
-        weapon_idx : None,
-        head_idx : None,
-        chest_idx : None,
-        arms_idx : None,
-        legs_idx : None,
-        chain_link : [None; 5],
-        deck_size : 0,
-        attack_power_bonus : 0,
-        attack_go_again_bonus : false,
-        next_brute_attack_action_bonus : 0,
-        next_attack_action_bonus : 0,
-        next_brute_attack_conditional_bonus : 0,
-        has_intimidated : false,
-        arsenal_face_up : false,
-        arsenal_lesson_counters : 0,
-        // Logging is opted into via `reset(gs, true)`; off until then.
-        log: None,
-    };
-
-    (player, cards)
+    assert_eq!(owned, PLAYER_CARDS, "expected exactly {} non-hero cards", PLAYER_CARDS);
+    player.starting_deck = starting_deck;
+    player.starting_equipment = equipment;
+    player.starting_weapon = weapon;
+    player
 }
 
 
@@ -180,7 +76,7 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
 /// for simulation or heavy gamestate cloning.
 pub fn reset(gs: &mut Gamestate, logging: bool) {
     gs.phase = Phase::ChooseFirst;
-    gs.stack = [None; STACK_SIZE];
+    gs.stack.clear();
     gs.turn_count = 0;
     gs.pending_card = None;
     gs.passes = 0;
@@ -206,117 +102,48 @@ pub fn set_life_and_intellect(gs: &mut Gamestate) {
 }
 
 pub fn shuffle_decks(gs: &mut Gamestate) {
-    // p1, p2, and the shared cards array are disjoint fields, so each call can
-    // borrow the relevant player, the cards array, and the rng together.
-    shuffle_deck_for(&mut gs.p1, &mut gs.cards, &mut gs.rng);
-    shuffle_deck_for(&mut gs.p2, &mut gs.cards, &mut gs.rng);
+    shuffle_deck_for(&mut gs.p1, &mut gs.rng);
+    shuffle_deck_for(&mut gs.p2, &mut gs.rng);
 }
 
-/// Shuffle `player`'s deck: every card of theirs tagged as in the deck is put in
-/// a random order and relinked, top to bottom. Also used mid-game by effects
-/// that search the deck and then shuffle it (Chief Ruk'utan).
-pub(crate) fn shuffle_deck_for(
-    player: &mut Player,
-    cards: &mut [CardState; TOTAL_CARDS],
-    rng: &mut SmallRng,
-) {
-    let base = player_base(player.pid);
-    let deck_loc = CardLocation::deck(player.pid);
-    // Gather the deck into a fixed array on the stack rather than a `Vec`: a
-    // player owns only `PLAYER_CARDS` cards, so it always fits, and resetting a
-    // game allocates nothing.
-    let mut slots = [0usize; PLAYER_CARDS];
-    let mut len = 0;
-    for i in base..base + PLAYER_CARDS {
-        if cards[i].location == deck_loc {
-            slots[len] = i;
-            len += 1;
-        }
-    }
-    let cards_in_deck = &mut slots[..len];
-    cards_in_deck.shuffle(rng);
-
-    if !cards_in_deck.is_empty() {
-        player.top_deck_idx = cards_in_deck.first().copied().map(CardIdx::new);
-        player.bottom_deck_idx = cards_in_deck.last().copied().map(CardIdx::new);
-        for (i, c) in cards_in_deck.iter().copied().enumerate() {
-            let prev = if i > 0 { cards_in_deck[i - 1] } else { c };
-            let next = if i < cards_in_deck.len() - 1 { cards_in_deck[i + 1] } else { c };
-            cards[c].prev_card = CardIdx::new(prev);
-            cards[c].next_card = CardIdx::new(next);
-        }
+/// Shuffle `player`'s deck into a random order. Shuffling hides every card in
+/// it: a card both players saw go in has an unknown position now. Also used
+/// mid-game by effects that search the deck and then shuffle it (Chief
+/// Ruk'utan).
+pub(crate) fn shuffle_deck_for(player: &mut Player, rng: &mut SmallRng) {
+    let cards = player.deck.make_contiguous();
+    cards.shuffle(rng);
+    for slot in cards.iter_mut() {
+        slot.known = false;
     }
 }
 
 pub fn place_cards(gs: &mut Gamestate) {
-    place_cards_for(&mut gs.p1, &mut gs.cards);
-    place_cards_for(&mut gs.p2, &mut gs.cards);
+    place_cards_for(&mut gs.p1);
+    place_cards_for(&mut gs.p2);
 }
 
-fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
-    let pid = player.pid;
-    let base = player_base(pid);
-    // Every unordered zone empties; worn equipment is counted back in below.
+/// Deal `player`'s starting cards back out: every deck card into the deck (in
+/// decklist order; `shuffle_decks` shuffles it), the equipment worn and the
+/// weapon in its zone, and every other zone emptied, along with the turn
+/// resources left over from a played-out game.
+fn place_cards_for(player: &mut Player) {
+    player.deck = player.starting_deck;
+    player.equipment = player.starting_equipment;
+    player.weapon = player.starting_weapon;
     player.hand = CardCounts::EMPTY;
     player.pitch = CardCounts::EMPTY;
     player.graveyard = CardCounts::EMPTY;
     player.banished = CardCounts::EMPTY;
     player.intimidate_banished = CardCounts::EMPTY;
-    player.equipment = CardCounts::EMPTY;
-    player.deck_size = 0;
-    // Reset the worn-equipment / weapon slots; they are repopulated below.
-    player.weapon_idx = None;
-    player.head_idx = None;
-    player.chest_idx = None;
-    player.arms_idx = None;
-    player.legs_idx = None;
-    player.chain_link = [None; 5];
-    // Clear the zone heads and turn resources left over from a played-out
-    // game; every non-equipment card returns to the deck below (the deck's
-    // own head/tail are rebuilt by `shuffle_decks`).
-    player.hand_idx = None;
-    player.pitch_idx = None;
-    player.arsenal_idx = None;
+    player.arsenal = None;
     player.arsenal_face_up = false;
     player.arsenal_lesson_counters = 0;
-    player.banish_idx = None;
-    player.intimidate_banish_idx = None;
+    player.chain_link = [CardCounts::EMPTY; CHAIN_LINKS];
+    player.chain_defense_bonus = [0; CHAIN_LINKS];
+    player.abilities_used = CardCounts::EMPTY;
     player.resources = 0;
     player.action_points = 0;
-    // Walk only this player's half of the shared array, recording each card's
-    // global slot position alongside mutating its CardState.
-    for idx in base..base + PLAYER_CARDS {
-        let data = cards[idx].card.data();
-        match data.typ {
-            CardType::Equipment => {
-                let zone = equipment_zone(&data.slot, pid);
-                cards[idx].location = zone;
-                cards[idx].visible = CardVisibleState::BothKnow;
-                player.zone_add(zone, cards[idx].card);
-                match data.slot {
-                    Some(EquipmentSlot::Head) => player.head_idx = Some(CardIdx::new(idx)),
-                    Some(EquipmentSlot::Chest) => player.chest_idx = Some(CardIdx::new(idx)),
-                    Some(EquipmentSlot::Arms) => player.arms_idx = Some(CardIdx::new(idx)),
-                    Some(EquipmentSlot::Legs) => player.legs_idx = Some(CardIdx::new(idx)),
-                    _ => {}
-                }
-            }
-            CardType::Weapon => {
-                cards[idx].location = CardLocation::weapon(pid);
-                cards[idx].visible = CardVisibleState::BothKnow;
-                player.weapon_idx = Some(CardIdx::new(idx));
-            }
-            CardType::Hero => {
-                // do nothing
-            }
-            _ => {
-                cards[idx].location = CardLocation::deck(pid);
-                cards[idx].visible = CardVisibleState::Hidden;
-                player.deck_size += 1;
-                // everything else
-            }
-        }
-    }
 }
 
 /// The generic `simulator::Game` view of the FaB gamestate, bridging the
@@ -348,112 +175,97 @@ impl crate::simulator::Game for Gamestate {
     }
 }
 
-// helper function to get the CardStates owned by player `pid` matching `card`.
-pub fn get_card_states_from_card(gs: &Gamestate, pid: PlayerIndex, card: Card) -> Vec<CardState> {
-    let base = player_base(pid);
-    gs.cards[base..base + PLAYER_CARDS]
-        .iter()
-        .filter(|cs| cs.card == card)
-        .copied()
-        .collect()
-}
-
-// helper function to get the CardStates owned by player `pid` in `location`.
-pub fn get_card_states_from_location(gs: &Gamestate, pid: PlayerIndex, location: CardLocation) -> Vec<CardState> {
-    let base = player_base(pid);
-    gs.cards[base..base + PLAYER_CARDS]
-        .iter()
-        .filter(|cs| cs.location == location)
-        .copied()
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
-    use crate::fab_game::{gamestate_from_decklists,reset};
+    use crate::deck_cards::{DorintheaCard, RhinarCard};
+    use crate::game_state::{CardVisibleState, Zone, STACK_SIZE};
 
     #[test]
     fn test_reset_cards() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), None);
         reset(&mut gs, false);
 
-        // check bonebasher on p1
-        let bb = get_card_states_from_card(&gs, PlayerIndex::P1, Card::BoneBasher);
+        // Each weapon is in its weapon zone, public.
+        assert_eq!(gs.p1.weapon, Some(RhinarCard::BoneBasher.id()));
+        assert_eq!(gs.p2.weapon, Some(DorintheaCard::Dawnblade.id()));
+        assert_eq!(gs.p1.visibility(Zone::Weapon), CardVisibleState::BothKnow);
 
-        assert_eq!(bb.len(), 1);
-        assert_eq!(bb[0].location, CardLocation::P1Weapon);
-        assert_eq!(bb[0].visible, CardVisibleState::BothKnow);
+        // Equipment is worn and public.
+        assert_eq!(gs.p1.equipment.count_as(RhinarCard::IronhideLegs), 1);
+        assert_eq!(gs.p2.equipment.count_as(DorintheaCard::IronrotLegs), 1);
+        assert_eq!(gs.p2.equipment.count_as(DorintheaCard::GallantryGold), 1);
+        assert_eq!(gs.p2.visibility(Zone::Equipment), CardVisibleState::BothKnow);
 
-        // check dawnblade on p2
-        let db = get_card_states_from_card(&gs, PlayerIndex::P2, Card::Dawnblade);
-
-        assert_eq!(db.len(), 1);
-        assert_eq!(db[0].location, CardLocation::P2Weapon);
-        assert_eq!(db[0].visible, CardVisibleState::BothKnow);
-
-        // check one piece of equipment from rhinar
-        let ih = get_card_states_from_card(&gs, PlayerIndex::P1, Card::IronhideLegs);
-
-        assert_eq!(ih.len(), 1);
-        assert_eq!(ih[0].location, CardLocation::P1Legs);
-        assert_eq!(ih[0].visible, CardVisibleState::BothKnow);
-
-        // check one piece of equipment from dorinthea
-        let ih = get_card_states_from_card(&gs, PlayerIndex::P2, Card::IronrotLegs);
-
-        assert_eq!(ih.len(), 1);
-        assert_eq!(ih[0].location, CardLocation::P2Legs);
-        assert_eq!(ih[0].visible, CardVisibleState::BothKnow);
-
-        // weapon / equipment slot indices point at the right cards
-        assert_eq!(gs.cards[gs.p1.weapon_idx.unwrap().get()].card, Card::BoneBasher);
-        assert_eq!(gs.cards[gs.p1.legs_idx.unwrap().get()].card, Card::IronhideLegs);
-        assert_eq!(gs.cards[gs.p2.weapon_idx.unwrap().get()].card, Card::Dawnblade);
-        assert_eq!(gs.cards[gs.p2.arms_idx.unwrap().get()].card, Card::GallantryGold);
-
-        // check deck from rhinar
-        let rhinardeck = get_card_states_from_location(&gs, PlayerIndex::P1, CardLocation::P1Deck);
-
-        assert_eq!(rhinardeck.len(), 40);
-        assert_eq!(gs.p1.deck_size, 40);
-
-        // check deck from dorinthea
-        let dorintheadeck = get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2Deck);
-
-        assert_eq!(dorintheadeck.len(), 40);
-        assert_eq!(gs.p2.deck_size, 40);
+        // The rest of each decklist is in the deck, hidden.
+        assert_eq!(gs.p1.deck_size(), 40);
+        assert_eq!(gs.p2.deck_size(), 40);
+        assert!(gs.p1.deck.iter().all(|slot| !slot.known));
+        assert_eq!(gs.p1.deck_slot_visibility(0), Some(CardVisibleState::Hidden));
+        gs.debug_check_card_totals();
     }
 
     #[test]
     fn reset_counts_worn_equipment_and_empties_other_zones() {
-        use crate::deck_cards::{DorintheaCard, RhinarCard};
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs, false);
         // Four pieces of worn equipment each; the weapon zone is not counted.
         assert_eq!(gs.p1.equipment.len(), 4);
-        assert_eq!(gs.p1.equipment.count_as(RhinarCard::IronhideLegs), 1);
         assert_eq!(gs.p1.equipment.count_as(RhinarCard::BoneBasher), 0);
         assert_eq!(gs.p2.equipment.len(), 4);
-        assert_eq!(gs.p2.equipment.count_as(DorintheaCard::GallantryGold), 1);
         for p in [&gs.p1, &gs.p2] {
+            assert!(p.hand.is_empty());
             assert!(p.pitch.is_empty());
             assert!(p.graveyard.is_empty());
             assert!(p.banished.is_empty());
             assert!(p.intimidate_banished.is_empty());
-            p.debug_check_zones(&gs.cards);
+            assert!(p.arsenal.is_none());
+            assert!(!p.chain_occupied());
         }
     }
 
     #[test]
-    #[should_panic(expected = "Graveyard bitfield is out of step")]
-    fn moving_a_card_without_its_bitfield_is_caught() {
+    fn reset_restores_a_played_out_game() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(7));
+        reset(&mut gs, false);
+        // Scatter some cards, then reset: everything is dealt out afresh.
+        let top = gs.p1.deck.pop_front().unwrap().card;
+        gs.p1.graveyard.add(top);
+        gs.p1.weapon = None;
+        gs.p1.arsenal = Some(top);
+        reset(&mut gs, false);
+        assert_eq!(gs.p1.deck_size(), 40);
+        assert!(gs.p1.graveyard.is_empty());
+        assert!(gs.p1.arsenal.is_none());
+        assert_eq!(gs.p1.weapon, Some(RhinarCard::BoneBasher.id()));
+        gs.debug_check_card_totals();
+    }
+
+    #[test]
+    fn the_same_seed_deals_the_same_decks() {
+        let deal = |seed| {
+            let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+            reset(&mut gs, false);
+            gs.p1.deck.iter().map(|s| s.card.get()).collect::<Vec<_>>()
+        };
+        assert_eq!(deal(42), deal(42));
+        assert_ne!(deal(42), deal(43));
+    }
+
+    #[test]
+    #[should_panic(expected = "cards across its zones and the stack")]
+    fn losing_a_card_is_caught() {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
         reset(&mut gs, false);
-        // Retag a deck card to the graveyard behind the engine's back.
-        let idx = gs.p1.top_deck_idx.unwrap().get();
-        gs.cards[idx].location = CardLocation::P1Graveyard;
-        gs.p1.debug_check_zones(&gs.cards);
+        // Take a card off the deck without putting it anywhere.
+        gs.p1.deck.pop_front();
+        gs.debug_check_card_totals();
+    }
+
+    #[test]
+    fn stack_capacity_is_the_stack_size() {
+        let gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        assert_eq!(gs.stack.capacity(), STACK_SIZE);
     }
 }

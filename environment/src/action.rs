@@ -1,4 +1,5 @@
-use crate::game_state::CardIdx;
+use crate::card_counts::DeckCardId;
+use crate::game_state::Zone;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
@@ -32,24 +33,45 @@ pub enum ActionType {
     Pass
 }
 
-/// A chosen action. `card` is the slot into the shared `cards` array the action
-/// refers to, or `None` for actions that reference no card (e.g. `Pass`,
-/// `ChooseFirst`) — making "no card" explicit rather than overloading slot 0,
-/// which is itself a valid card. The card's zone is not stored here; it is
-/// always derivable from `cards[card].location`.
-#[derive(Clone, Copy, Debug)]
+/// The card an action refers to: which of the acting player's cards it is, and
+/// the zone it is in. Cards are named by their `DeckCardId`, not by copy — two
+/// copies of a card in the same zone are the same choice — so the zone is what
+/// tells, say, a card played from hand apart from a copy played from the
+/// arsenal. The owner is always the active player.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CardRef {
+    pub id : DeckCardId,
+    pub zone : Zone,
+}
+
+impl CardRef {
+    pub const fn new(id: DeckCardId, zone: Zone) -> Self {
+        CardRef { id, zone }
+    }
+}
+
+/// A chosen action. `card` is the card the action refers to, or `None` for
+/// actions that reference no card (e.g. `Pass`, `ChooseFirst`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Action {
     pub typ : ActionType,
-    pub card : Option<CardIdx>,
+    pub card : Option<CardRef>,
 }
 
 impl Action {
-    /// The `cards` slot this action refers to, as a `usize` for indexing.
-    /// Panics if the action carries no card, so only call it for
-    /// card-referencing actions (`PlayCard`, `Activate`, `Pitch`,
-    /// `BottomPitch`, `Defend`, `Arsenal`).
-    pub fn card_index(&self) -> usize {
-        self.card.expect("action carries no card").get()
+    pub const fn new(typ: ActionType, card: CardRef) -> Self {
+        Action { typ, card: Some(card) }
+    }
+
+    pub const fn no_card(typ: ActionType) -> Self {
+        Action { typ, card: None }
+    }
+
+    /// The card this action refers to. Panics if the action carries no card,
+    /// so only call it for card-referencing actions (`PlayCard`, `Activate`,
+    /// `Pitch`, `BottomPitch`, `Defend`, `Arsenal`, `FlipFaceUp`).
+    pub fn card_ref(&self) -> CardRef {
+        self.card.expect("action carries no card")
     }
 }
 

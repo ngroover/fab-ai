@@ -1,4 +1,5 @@
 mod action;
+mod ring_buffer;
 mod agents;
 mod card_counts;
 mod cards;
@@ -11,6 +12,8 @@ mod game_state;
 mod legal_actions;
 mod fab_step;
 mod simulator;
+#[cfg(test)]
+mod test_support;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

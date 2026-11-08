@@ -67,8 +67,8 @@ impl Ability {
         matches!(self, Ability::DiscardCardPlusBlock)
     }
 
-    /// Whether this ability may be used only once per turn, tracked per card on
-    /// `CardState::ability_used_this_turn`. Both weapon swings are "Once per
+    /// Whether this ability may be used only once per turn, tracked per copy
+    /// in `Player::abilities_used`. Both weapon swings are "Once per
     /// Turn Action": the weapon returns to its slot whenever the combat chain
     /// closes, which the turn player can do mid-turn (`ActionType::CloseChain`),
     /// so its being back in the slot says nothing about whether it has swung.
