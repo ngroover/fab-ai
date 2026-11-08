@@ -2965,31 +2965,34 @@ mod tests {
     fn test_reaction_played_resolves_and_returns_to_action() {
         let mut gs = step_to_dorinthea_defending();
 
-        // Defend pass → post-defend Instant window (defender p2 holds priority).
+        // Defend pass → post-defend Reaction window, turn player first; his pass
+        // hands priority to the defender (Dorinthea, p2).
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, gs.turn_player);
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.active_player, PlayerIndex::P2);
 
-        // Relabel a card in p1's hand to Sigil of Solace (an Instant, cost 0) and
-        // play it as a reaction. It commits straight to the stack and we remain in
-        // the Reaction phase (not the Instant phase) with the responder keeping
-        // priority — the live priority window is preserved.
-        let sigil_idx = gs.p1.hand_iter(&gs.cards)
+        // Relabel a card in Dorinthea's hand to Sigil of Solace (an Instant from
+        // her deck, cost 0) and play it as a reaction. It commits straight to the
+        // stack and we remain in the Reaction phase (not the Instant phase) with
+        // the responder keeping priority — the live priority window is preserved.
+        let sigil_idx = gs.p2.hand_iter(&gs.cards)
                 .map(|(idx, _)| idx)
                 .next()
-                .expect("p1 should hold a card in the reaction phase");
-        gs.cards[sigil_idx].card = Card::SigilofSolaceB;
+                .expect("p2 should hold a card in the reaction phase");
+        gs.set_card(sigil_idx, Card::SigilofSolaceB);
 
         step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
         assert_eq!(gs.phase, Phase::Reaction);
-        assert_eq!(gs.active_player, PlayerIndex::P1);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
         assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
 
         // Both players pass: the reaction resolves to its owner's graveyard, the
         // stack empties, and play returns to the turn player's Action phase.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-        assert_eq!(gs.cards[sigil_idx].location, CardLocation::P1Graveyard);
+        assert_eq!(gs.cards[sigil_idx].location, CardLocation::P2Graveyard);
         assert!(gs.stack_is_empty());
         assert_eq!(gs.phase, Phase::Action);
         assert_eq!(gs.active_player, gs.turn_player);
@@ -3016,14 +3019,15 @@ mod tests {
         assert_eq!(gs.active_player, PlayerIndex::P2);
 
         // Relabel two cards in the defender's hand: one to Toughen Up (the
-        // reaction to play, cost 2) and one to Clearing Bellow (pitch 3) to pay
+        // reaction to play, cost 2) and one to Hit and Run (pitch 3) to pay
         // for it. Seed 42 doesn't guarantee this exact pairing, so set it up
         // explicitly — only the card stats matter here, the zones are untouched.
         let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
         let tu_idx = hand[0];
         let pitch_idx = hand[1];
-        gs.cards[tu_idx].card = Card::ToughenUpB;
-        gs.cards[pitch_idx].card = Card::ClearingBellowB;
+        gs.set_card(tu_idx, Card::ToughenUpB);
+        gs.set_card(pitch_idx, Card::HitAndRunB);
+        assert_eq!(Card::HitAndRunB.data().pitch, 3);
 
         // Play Toughen Up. It costs 2 and the defender has no banked resources,
         // so instead of committing to the stack we drop into the ReactionPitch
@@ -3033,7 +3037,7 @@ mod tests {
         assert_eq!(gs.pending_card.expect("Toughen Up pending").index.get(), tu_idx);
         assert!(gs.stack_is_empty());
 
-        // Pitch Clearing Bellow (pitch 3) to cover the cost of 2. That commits
+        // Pitch Hit and Run (pitch 3) to cover the cost of 2. That commits
         // Toughen Up to the stack and returns to the Reaction window — not the
         // ActionInstant window — with the responder (p2) keeping priority.
         step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(pitch_idx))});
@@ -3492,9 +3496,9 @@ mod tests {
         // two pitch-1 reds to pay its cost of 2 with two separate pitches.
         let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
         assert!(hand.len() >= 3, "expected Dorinthea to hold three cards in reaction");
-        gs.cards[hand[0]].card = Card::ToughenUpB;
-        gs.cards[hand[1]].card = Card::SharpenSteelR;
-        gs.cards[hand[2]].card = Card::SharpenSteelR;
+        gs.set_card(hand[0], Card::ToughenUpB);
+        gs.set_card(hand[1], Card::SharpenSteelR);
+        gs.set_card(hand[2], Card::SharpenSteelR);
 
         step(gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(hand[0]))});
         assert_eq!(gs.phase, Phase::ReactionPitch);
@@ -4150,8 +4154,8 @@ mod tests {
         let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
         let ph_idx = hand[0];
         let pitch_idx = hand[1];
-        gs.cards[ph_idx].card = Card::PackHuntR;
-        gs.cards[pitch_idx].card = Card::ClearingBellowB;
+        gs.set_card(ph_idx, Card::PackHuntR);
+        gs.set_card(pitch_idx, Card::ClearingBellowB);
 
         // The opponent (p2) starts with a full opening hand to banish from.
         let victim_hand_before = gs.p2.hand_size();
@@ -4255,7 +4259,7 @@ mod tests {
         let hand: Vec<usize> = player.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
         assert!(hand.len() >= desired.len(), "hand too small to relabel");
         for (slot, &card) in hand.iter().zip(desired) {
-            gs.cards[*slot].card = card;
+            gs.set_card(*slot, card);
         }
     }
 
@@ -4407,7 +4411,7 @@ mod tests {
             assert!(player.arsenal_idx.is_none(), "the arsenal slot should be free");
             player.hand_idx.expect("hand should hold a card to arsenal").get()
         };
-        gs.cards[idx].card = card;
+        gs.set_card(idx, card);
         let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
         detach_from_current_zone(player, &mut gs.cards, idx);
         gs.cards[idx].location = CardLocation::arsenal(pid);
@@ -4423,7 +4427,7 @@ mod tests {
         // in hand pays for it, since the arsenal card can't pitch for itself.
         let mm_idx = seat_in_arsenal(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
         let cb_idx = gs.p1.hand_idx.expect("hand should not be empty").get();
-        gs.cards[cb_idx].card = Card::ClearingBellowB;
+        gs.set_card(cb_idx, Card::ClearingBellowB);
 
         step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(mm_idx))});
         assert_eq!(gs.phase, Phase::ActionPitch);

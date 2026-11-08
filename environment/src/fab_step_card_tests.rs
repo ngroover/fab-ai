@@ -209,6 +209,30 @@ fn setup_rhinar_action_phase() -> Gamestate {
     gs
 }
 
+/// The seat-swapped `setup_rhinar_action_phase`: Dorinthea (p1) on her action
+/// phase against Rhinar (p2). For tests that need Dorinthea's cards — the
+/// instants and attack reactions Rhinar's deck has none of — on the turn
+/// player's side.
+fn setup_dorinthea_action_phase() -> Gamestate {
+    let mut gs = gamestate_from_decklists(build_dorinthea_deck(), build_rhinar_deck(), Some(42));
+    reset(&mut gs, false);
+    step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    gs
+}
+
+/// `setup_rhinar_action_phase` in a Rhinar mirror: both players are Rhinar,
+/// so either side can hold any Rhinar card from their own deck.
+fn setup_rhinar_mirror_action_phase() -> Gamestate {
+    let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_rhinar_deck(), Some(42));
+    reset(&mut gs, false);
+    step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    gs
+}
+
 /// Replace `pid`'s hand with exactly `desired`, in order. The opening hand is
 /// trimmed from the front — surplus cards are parked in the graveyard — down to
 /// `desired.len()` cards, then the survivors are relabelled. Panics if the hand
@@ -216,17 +240,17 @@ fn setup_rhinar_action_phase() -> Gamestate {
 fn set_hand(gs: &mut Gamestate, pid: PlayerIndex, desired: &[Card]) {
     {
         let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-        assert!(player.hand_size as usize >= desired.len(),
+        assert!(player.hand_size() as usize >= desired.len(),
             "opening hand too small to set to the requested cards");
         // Pop cards off the front of the hand list until only `desired.len()`
         // remain. The hand is a singly-linked list whose tail points at itself;
         // advancing `hand_idx` to the head's `next_card` drops the head, mirroring
         // how the engine detaches a hand card.
-        while player.hand_size as usize > desired.len() {
+        while player.hand_size() as usize > desired.len() {
             let head = player.hand_idx.expect("hand non-empty while trimming").get();
             let next = gs.cards[head].next_card.get();
             player.hand_idx = if next == head { None } else { Some(CardIdx::new(next)) };
-            player.hand_size -= 1;
+            player.hand_remove(gs.cards[head].card);
             gs.cards[head].location = CardLocation::graveyard(pid);
         }
     }
@@ -236,7 +260,7 @@ fn set_hand(gs: &mut Gamestate, pid: PlayerIndex, desired: &[Card]) {
     };
     assert_eq!(survivors.len(), desired.len());
     for (slot, &card) in survivors.iter().zip(desired) {
-        gs.cards[*slot].card = card;
+        gs.set_card(*slot, card);
     }
 }
 
@@ -361,7 +385,7 @@ fn discard_cost_card_discards_a_hand_card_when_played() {
             .find(|(_, cs)| cs.card == Card::MuscleMuttY)
             .map(|(idx, _)| idx)
             .expect("Muscle Mutt should be in the opening hand");
-    gs.cards[ar_idx].card = Card::AlphaRampageR;
+    gs.set_card(ar_idx, Card::AlphaRampageR);
 
     // The two cards that will be left in hand once Alpha Rampage is committed and
     // Clearing Bellow is pitched — the discard must land on one of them.
@@ -403,7 +427,7 @@ fn discard_cost_card_discards_a_hand_card_when_played() {
             .filter(|&idx| gs.cards[idx].location == CardLocation::P1Graveyard)
             .count();
     assert_eq!(discarded_at_play, 1, "exactly one hand card should be discarded when played");
-    assert_eq!(gs.p1.hand_size, 1);
+    assert_eq!(gs.p1.hand_size(), 1);
 
     // Both players pass: Alpha Rampage resolves onto the combat chain. No further
     // discard happens at resolution — the cost was already paid.
@@ -418,7 +442,7 @@ fn discard_cost_card_discards_a_hand_card_when_played() {
             .filter(|&idx| gs.cards[idx].location == CardLocation::P1Graveyard)
             .count();
     assert_eq!(discarded_after_resolve, 1, "the discard cost is paid once, at play time");
-    assert_eq!(gs.p1.hand_size, 1);
+    assert_eq!(gs.p1.hand_size(), 1);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -439,11 +463,27 @@ fn place_attacker_on_chain(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> 
         let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
         player.hand_idx.expect("hand should have a card to seat as the attacker").get()
     };
-    gs.cards[idx].card = card;
+    gs.set_card(idx, card);
+    move_to_chain(gs, pid, idx);
+    idx
+}
+
+/// Move the card in global slot `idx` — wherever `pid` has it — onto `pid`'s
+/// combat-chain link 0, unchanged.
+fn move_to_chain(gs: &mut Gamestate, pid: PlayerIndex, idx: usize) {
     let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     detach_from_current_zone(player, &mut gs.cards, idx);
     gs.cards[idx].location = CardLocation::combat_chain(pid);
     attach_to_front_of_zone(&mut gs.cards, &mut player.chain_link[0], None, None, idx);
+}
+
+/// Seat `pid`'s own weapon on chain link 0 as the attacking card, as a swing
+/// would put it there, and return its global index. Weapons are never in hand,
+/// so this moves the real one rather than relabelling a hand card.
+fn place_weapon_on_chain(gs: &mut Gamestate, pid: PlayerIndex) -> usize {
+    let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+    let idx = player.weapon_idx.expect("the hero should start with a weapon").get();
+    move_to_chain(gs, pid, idx);
     idx
 }
 
@@ -524,8 +564,9 @@ fn awakening_bellow_brute_weapon_swing_does_not_get_plus3() {
     // Bone Basher is a Brute, but it is a *weapon* (not an attack action card),
     // so swinging it does not qualify for the bonus. Seat it on the chain (4
     // power) against an undefended opponent and resolve.
-    let attacker = place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BoneBasher);
+    let attacker = place_weapon_on_chain(&mut gs, PlayerIndex::P1);
     let data = gs.cards[attacker].card.data();
+    assert_eq!(gs.cards[attacker].card, Card::BoneBasher);
     assert_eq!(data.card_class, CardClass::Brute);
     assert_eq!(data.typ, CardType::Weapon);
     let life_before = gs.p2.life;
@@ -629,7 +670,7 @@ fn discard_cost_of_power6_card_triggers_intimidate() {
     // is forced to discard it. Wrecker Romp is power 6.
     set_hand(&mut gs, PlayerIndex::P1, &[Card::WreckerRompB]);
     assert!(Card::WreckerRompB.data().power >= 6);
-    assert!(gs.p2.hand_size > 0, "opponent needs a card to be intimidated");
+    assert!(gs.p2.hand_size() > 0, "opponent needs a card to be intimidated");
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
 
     apply_discard_cost(&mut gs, PlayerIndex::P1);
@@ -676,15 +717,16 @@ fn bare_fangs_play_effect_power6_discard_also_intimidates() {
 }
 
 #[test]
-fn non_rhinar_hero_power6_discard_does_not_intimidate() {
+fn non_rhinar_hero_discard_does_not_intimidate() {
     // The constant ability keys off the discarding hero, not the discard itself.
-    // Dorinthea (p2) discarding a 6-power card does not intimidate p1.
-    let mut gs = setup_rhinar_action_phase();
+    // Dorinthea's deck holds no 6-power card, so the closest she can come is
+    // discarding her biggest attack, Flock of the Feather Walkers (5).
     assert!(Card::Dorinthea.data().constant_effect.is_none());
+    assert!(build_dorinthea_deck().iter().all(|c| c.data().power < 6),
+        "Dorinthea's deck has no 6-power card to discard");
 
-    set_hand(&mut gs, PlayerIndex::P2, &[Card::WreckerRompB]);
-    assert!(Card::WreckerRompB.data().power >= 6);
-
+    let mut gs = setup_rhinar_action_phase();
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::FlockOfTheFeatherWalkersR]);
     apply_discard_cost(&mut gs, PlayerIndex::P2);
 
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P1), 0);
@@ -707,10 +749,10 @@ fn alpha_rampage_power6_discard_intimidates_twice() {
     let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
     for (slot, &idx) in hand.iter().enumerate() {
         if slot == 0 {
-            gs.cards[idx].card = Card::AlphaRampageR;
+            gs.set_card(idx, Card::AlphaRampageR);
             ar_idx = Some(idx);
         } else {
-            gs.cards[idx].card = Card::WreckerRompB; // power 6
+            gs.set_card(idx, Card::WreckerRompB); // power 6
         }
     }
     let ar_idx = ar_idx.expect("opening hand should be non-empty");
@@ -718,7 +760,7 @@ fn alpha_rampage_power6_discard_intimidates_twice() {
 
     // Pay the cost 3 outright so no pitching disturbs the hand.
     gs.p1.resources = 3;
-    assert!(gs.p2.hand_size >= 2, "opponent needs two cards to be intimidated twice");
+    assert!(gs.p2.hand_size() >= 2, "opponent needs two cards to be intimidated twice");
 
     // Play Alpha Rampage: paid from resources, it commits to the stack and the
     // discard cost is paid from the (all power-6) remainder of the hand — the
@@ -754,15 +796,22 @@ fn alpha_rampage_power6_discard_intimidates_twice() {
 /// then pass so the attack resolves. Returns the game and the played card's
 /// global index.
 fn play_and_resolve_attack(card: Card) -> (Gamestate, usize) {
-    let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+    play_and_resolve_attack_against(build_dorinthea_deck(), card)
+}
+
+/// `play_and_resolve_attack` with `defender_deck` as p2's decklist, for tests
+/// whose defender needs cards only that deck holds — a Rhinar mirror when the
+/// defender blocks or reacts with Rhinar's own cards.
+fn play_and_resolve_attack_against(defender_deck: [Card; 46], card: Card) -> (Gamestate, usize) {
+    let mut gs = gamestate_from_decklists(build_rhinar_deck(), defender_deck, Some(42));
     reset(&mut gs, false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
     let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
     let atk_idx = hand[0];
     let pitch_idx = hand[1];
-    gs.cards[atk_idx].card = card;
-    gs.cards[pitch_idx].card = Card::ClearingBellowB; // pitch 3 covers cost <= 3
+    gs.set_card(atk_idx, card);
+    gs.set_card(pitch_idx, Card::ClearingBellowB); // pitch 3 covers cost <= 3
     assert!(card.data().cost <= 3, "helper only pays costs up to a single pitch-3 card");
 
     // Play the attack, pitch to cover its cost, then both players pass so it
@@ -829,7 +878,7 @@ fn wrecking_ball_discarding_power6_intimidates_twice_under_rhinar() {
     move_hand_to_graveyard(&mut gs, PlayerIndex::P1);
     let pick = find_p1_deck_card(&gs, |power| power >= 6);
     put_on_top_of_deck(&mut gs, PlayerIndex::P1, pick);
-    assert!(gs.p2.hand_size >= 2, "opponent needs two cards to be intimidated twice");
+    assert!(gs.p2.hand_size() >= 2, "opponent needs two cards to be intimidated twice");
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
 
     let effect = Card::WreckingBallR
@@ -932,12 +981,9 @@ fn smash_with_big_tree_is_a_vanilla_6_power_brute_attack() {
 fn smash_with_big_tree_cannot_be_used_to_block() {
     // Smash with Big Tree has 0 defense and `no_block`, so it must not be
     // offered as a Defend action even while sitting in the defender's hand.
-    let (mut gs, _) = play_and_resolve_attack(Card::MuscleMuttY);
-    assert_eq!(gs.phase, Phase::Defend);
-    assert_eq!(gs.active_player, PlayerIndex::P2);
-
-    let blocker = gs.p2.hand_idx.expect("defender should have a hand card").get();
-    gs.cards[blocker].card = Card::SmashWithBigTreeY;
+    // A Rhinar mirror, so the defender holds the card from her own deck.
+    let mut gs = rhinar_defending_muscle_mutt();
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::SmashWithBigTreeY, Card::RagingOnslaughtY]);
     assert!(Card::SmashWithBigTreeY.data().no_block);
 
     let defends: Vec<Card> = legal_actions(&gs).iter()
@@ -970,7 +1016,7 @@ fn play_and_resolve_zero_cost_action(card: Card) -> (Gamestate, usize) {
     assert_eq!(card.data().cost, 0, "helper only plays 0-cost cards");
 
     let idx = gs.p1.hand_idx.expect("hand should have a card to relabel").get();
-    gs.cards[idx].card = card;
+    gs.set_card(idx, card);
 
     step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(idx))});
     assert_eq!(gs.phase, Phase::ActionInstant);
@@ -1134,9 +1180,9 @@ fn sigil_of_solace_effect_is_gain_1_life() {
 
 #[test]
 fn sigil_of_solace_gains_1_life_on_resolve() {
-    let mut gs = setup_rhinar_action_phase();
+    let mut gs = setup_dorinthea_action_phase();
     let idx = gs.p1.hand_idx.expect("hand should have a card to relabel").get();
-    gs.cards[idx].card = Card::SigilofSolaceB;
+    gs.set_card(idx, Card::SigilofSolaceB);
 
     // An instant is playable at action speed, so it is offered here.
     assert!(playable_cards(&gs).contains(&Card::SigilofSolaceB));
@@ -1147,13 +1193,13 @@ fn sigil_of_solace_gains_1_life_on_resolve() {
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
-    // Resolved to the graveyard, one life richer. Rhinar starts at his full 20,
-    // so this also pins down that there is no maximum life total to cap at.
+    // Resolved to the graveyard, one life richer. Dorinthea starts at her full
+    // 20, so this also pins down that there is no maximum life total to cap at.
     assert_eq!(gs.cards[idx].location, CardLocation::P1Graveyard);
     assert_eq!(life_before, 20);
     assert_eq!(gs.p1.life, life_before + 1);
 
-    // An instant costs no action point, so Rhinar may still act.
+    // An instant costs no action point, so Dorinthea may still act.
     assert_eq!(gs.p1.action_points, 1);
     assert_eq!(gs.phase, Phase::Action);
     assert_eq!(gs.active_player, PlayerIndex::P1);
@@ -1259,7 +1305,8 @@ fn come_to_fight_weapon_swing_does_not_get_plus1() {
 
     // Bone Basher is an attack, but a *weapon* rather than an attack action
     // card, so the text does not cover it. Seat it (4 power) and resolve.
-    let attacker = place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BoneBasher);
+    let attacker = place_weapon_on_chain(&mut gs, PlayerIndex::P1);
+    assert_eq!(gs.cards[attacker].card, Card::BoneBasher);
     assert_eq!(gs.cards[attacker].card.data().typ, CardType::Weapon);
     let life_before = gs.p2.life;
     resolve_combat_damage(&mut gs);
@@ -1292,7 +1339,7 @@ fn come_to_fight_played_from_hand_banks_the_bonus_and_keeps_the_action_point() {
             .find(|(_, cs)| cs.card == Card::MuscleMuttY)
             .map(|(idx, _)| idx)
             .expect("Muscle Mutt should be in the opening hand");
-    gs.cards[ctf_idx].card = Card::ComeToFightB;
+    gs.set_card(ctf_idx, Card::ComeToFightB);
 
     // Cost 1 isn't covered outright, so it waits on a pitch.
     step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(ctf_idx))});
@@ -1376,6 +1423,41 @@ fn dorinthea_defending_muscle_mutt() -> Gamestate {
     gs
 }
 
+/// `dorinthea_defending_muscle_mutt` in a Rhinar mirror: Rhinar (p1) attacks
+/// with Muscle Mutt and a second Rhinar (p2) defends, so the defender can block
+/// and react with Rhinar's cards — Dodge, Pack Call, Rally the Rearguard — from
+/// her own deck. Same Defend-phase starting point, same 6 power into 20 life.
+fn rhinar_defending_muscle_mutt() -> Gamestate {
+    let (gs, _) = play_and_resolve_attack_against(build_rhinar_deck(), Card::MuscleMuttY);
+    assert_eq!(gs.phase, Phase::Defend);
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    assert_eq!(gs.p2.hero, Card::Rhinar);
+    assert_eq!(gs.p2.life, 20);
+    gs
+}
+
+/// Dorinthea (p1) attacks with Flock of the Feather Walkers (a vanilla 5-power
+/// attack, her only attack action card) and Rhinar (p2) defends, in the Defend
+/// phase with the attack on link 0. For tests that need Rhinar's defensive
+/// cards on one side and Dorinthea's instants or attack reactions on the other.
+fn rhinar_defending_flock() -> Gamestate {
+    let mut gs = setup_dorinthea_action_phase();
+    set_hand(&mut gs, PlayerIndex::P1,
+        &[Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR, Card::SharpenSteelR, Card::SharpenSteelR]);
+    let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+    // Cost 1, paid with a single pitch-1 card.
+    step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(hand[0]))});
+    assert_eq!(gs.phase, Phase::ActionPitch);
+    step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(hand[1]))});
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.phase, Phase::Defend);
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    assert_eq!(gs.p2.life, 20);
+    gs
+}
+
 /// Step from the Defend phase into the defend reaction step with the defender
 /// (p2) holding priority: she declares no blockers, then the attacker passes
 /// his first crack at the reaction window.
@@ -1408,53 +1490,61 @@ fn toughen_up_is_a_vanilla_2_cost_4_block_defense_reaction() {
 
 #[test]
 fn defense_reactions_cannot_be_declared_as_blockers() {
-    let mut gs = dorinthea_defending_muscle_mutt();
-
-    // Dorinthea holds both defense reactions and one ordinary blocker.
-    set_hand(&mut gs, PlayerIndex::P2,
-        &[Card::DodgeB, Card::ToughenUpB, Card::DrivingBladeY]);
-
     // Neither reaction is a legal block, however much defense it prints: a
-    // defense reaction is played in the reaction step, never declared here.
+    // defense reaction is played in the reaction step, never declared here. Each
+    // is checked in the hand of the hero whose deck holds it, next to an
+    // ordinary card from the same deck that does still block — so the reaction
+    // is excluded by its card type rather than the defend options having gone
+    // empty.
+
+    // Dorinthea with Toughen Up and Driving Blade.
+    let mut gs = dorinthea_defending_muscle_mutt();
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::ToughenUpB, Card::DrivingBladeY]);
+    let blocks = blockable_cards(&gs);
+    assert!(!blocks.contains(&Card::ToughenUpB),
+        "Toughen Up is a defense reaction and must not be offered as a block");
+    assert!(blocks.contains(&Card::DrivingBladeY));
+
+    // Rhinar with Dodge and Raging Onslaught.
+    let mut gs = rhinar_defending_muscle_mutt();
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::DodgeB, Card::RagingOnslaughtY]);
     let blocks = blockable_cards(&gs);
     assert!(!blocks.contains(&Card::DodgeB),
         "Dodge is a defense reaction and must not be offered as a block");
-    assert!(!blocks.contains(&Card::ToughenUpB),
-        "Toughen Up is a defense reaction and must not be offered as a block");
-    // The ordinary attack action in the same hand still blocks, so the two are
-    // excluded by their card type rather than the defend options having gone
-    // empty.
-    assert!(blocks.contains(&Card::DrivingBladeY));
+    assert!(blocks.contains(&Card::RagingOnslaughtY));
 }
 
 #[test]
 fn only_the_defender_is_offered_defense_reactions_in_the_reaction_step() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    // Dorinthea attacks, so the attacker can hold both kinds of reaction from
+    // her own deck; Rhinar defends with his.
+    let mut gs = rhinar_defending_flock();
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // no blockers
     assert_eq!(gs.phase, Phase::Reaction);
 
-    // The attacker (p1) holds priority first. Hand him a defense reaction and
-    // an attack reaction: only the attack reaction is his to play.
+    // The attacker (p1) holds priority first. Hand her a defense reaction and
+    // an attack reaction: only the attack reaction is hers to play. She can
+    // afford Toughen Up's 2, so cost is not what rules it out.
     assert_eq!(gs.active_player, PlayerIndex::P1);
-    set_hand(&mut gs, PlayerIndex::P1, &[Card::DodgeB, Card::InTheSwingR]);
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::ToughenUpB, Card::InTheSwingR]);
+    gs.p1.resources = 2;
     let attacker_options = playable_cards(&gs);
-    assert!(!attacker_options.contains(&Card::DodgeB),
+    assert!(!attacker_options.contains(&Card::ToughenUpB),
         "the attacking player must not be offered a defense reaction");
     assert!(attacker_options.contains(&Card::InTheSwingR),
-        "the attacking player keeps his own attack reactions");
+        "the attacking player keeps her own attack reactions");
 
-    // Priority passes to the defender, who is offered both of hers.
+    // Priority passes to the defender, who is offered his.
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     assert_eq!(gs.active_player, PlayerIndex::P2);
-    set_hand(&mut gs, PlayerIndex::P2, &[Card::DodgeB, Card::ToughenUpB]);
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::DodgeB]);
     let defender_options = playable_cards(&gs);
     assert!(defender_options.contains(&Card::DodgeB));
-    assert!(defender_options.contains(&Card::ToughenUpB));
 }
 
 #[test]
 fn dodge_is_free_and_commits_straight_to_the_stack() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     pass_to_defender_reaction(&mut gs);
 
     set_hand(&mut gs, PlayerIndex::P2, &[Card::DodgeB]);
@@ -1516,7 +1606,7 @@ fn defender_reacts_with(gs: &mut Gamestate, card: Card) -> usize {
 
 #[test]
 fn dodge_adds_its_block_to_the_combat_chain() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     pass_to_defender_reaction(&mut gs);
     let dodge_idx = defender_reacts_with(&mut gs, Card::DodgeB);
 
@@ -1557,13 +1647,13 @@ fn toughen_up_adds_its_block_to_the_combat_chain() {
 
 #[test]
 fn a_defense_reaction_stacks_with_a_declared_blocker() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
 
-    // Declare Driving Blade (defense 3) as a blocker in the defend step...
-    set_hand(&mut gs, PlayerIndex::P2, &[Card::DrivingBladeY, Card::DodgeB]);
+    // Declare Raging Onslaught (defense 3) as a blocker in the defend step...
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::RagingOnslaughtY, Card::DodgeB]);
     let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
     let (blocker_idx, dodge_idx) = (hand[0], hand[1]);
-    assert_eq!(Card::DrivingBladeY.data().defense, 3);
+    assert_eq!(Card::RagingOnslaughtY.data().defense, 3);
     step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(blocker_idx))});
     assert_eq!(gs.cards[blocker_idx].location, CardLocation::P2CombatChain);
 
@@ -1584,7 +1674,7 @@ fn a_defense_reaction_stacks_with_a_declared_blocker() {
 
 #[test]
 fn a_defense_reaction_leaves_the_chain_for_the_graveyard_when_it_closes() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     pass_to_defender_reaction(&mut gs);
     let dodge_idx = defender_reacts_with(&mut gs, Card::DodgeB);
     assert_eq!(gs.cards[dodge_idx].location, CardLocation::P2CombatChain);
@@ -1616,7 +1706,7 @@ fn put_in_arsenal(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
         assert!(player.arsenal_idx.is_none(), "the arsenal slot should be free");
         player.hand_idx.expect("hand should hold a card to arsenal").get()
     };
-    gs.cards[idx].card = card;
+    gs.set_card(idx, card);
     let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     detach_from_current_zone(player, &mut gs.cards, idx);
     gs.cards[idx].location = CardLocation::arsenal(pid);
@@ -1626,7 +1716,7 @@ fn put_in_arsenal(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
 
 #[test]
 fn dodge_can_be_played_from_the_arsenal() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     pass_to_defender_reaction(&mut gs);
 
     // Dodge waits in the arsenal rather than the hand, and is free to play.
@@ -1749,7 +1839,7 @@ fn titanium_bauble_is_never_offered_as_a_play_from_the_arsenal() {
 
     // Relabel that same arsenal slot to Titanium Bauble — nothing else about the
     // game changes — and the offer disappears. The type is what rules it out.
-    gs.cards[idx].card = Card::TitaniumBaubleB;
+    gs.set_card(idx, Card::TitaniumBaubleB);
     let offered: Vec<usize> = legal_actions(&gs).iter()
         .filter(|a| a.typ == ActionType::PlayCard)
         .map(|a| a.card_index())
@@ -1760,7 +1850,7 @@ fn titanium_bauble_is_never_offered_as_a_play_from_the_arsenal() {
 
 #[test]
 fn titanium_bauble_is_not_offered_in_the_defender_reaction_window() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     pass_to_defender_reaction(&mut gs);
 
     // Dodge is free and legal here, so the reaction window is live.
@@ -1854,7 +1944,7 @@ fn deck_order(gs: &Gamestate, pid: PlayerIndex) -> Vec<usize> {
 fn set_top_of_deck(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
     let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
     let idx = player.top_deck_idx.expect("deck should not be empty").get();
-    gs.cards[idx].card = card;
+    gs.set_card(idx, card);
     idx
 }
 
@@ -1918,7 +2008,7 @@ fn pack_call_is_a_6_power_brute_attack_with_a_defend_trigger() {
 
 #[test]
 fn pack_call_trigger_waits_on_the_stack_instead_of_firing_on_declaration() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
     let before = deck_order(&gs, PlayerIndex::P2);
 
@@ -1948,7 +2038,7 @@ fn pack_call_trigger_waits_on_the_stack_instead_of_firing_on_declaration() {
 
 #[test]
 fn pack_call_trigger_resolves_leaving_the_card_on_the_combat_chain() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
     let pc_idx = declare_blockers(&mut gs, &[Card::PackCallY])[0];
 
@@ -1962,7 +2052,7 @@ fn pack_call_trigger_resolves_leaving_the_card_on_the_combat_chain() {
 
 #[test]
 fn pack_call_keeps_a_power6_card_on_top() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     // Wounded Bull sits exactly on the 6-power boundary, which is inclusive.
     let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::WoundedBullY);
     assert_eq!(Card::WoundedBullY.data().power, 6);
@@ -1979,7 +2069,7 @@ fn pack_call_keeps_a_power6_card_on_top() {
 
 #[test]
 fn pack_call_bottoms_a_sub_power6_card() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     // Rally the Rearguard has 4 power — under the line, so it is bottomed.
     let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
     assert_eq!(Card::RallyTheRearguardB.data().power, 4);
@@ -2007,7 +2097,7 @@ fn pack_call_bottoms_a_sub_power6_card() {
 
 #[test]
 fn pack_call_reveals_its_own_controllers_deck() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     // The defender (p2) is not the turn player, so wiring the reveal to the
     // wrong side would show up here.
     set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
@@ -2026,7 +2116,7 @@ fn pack_call_reveals_its_own_controllers_deck() {
 #[test]
 fn pack_call_reveal_is_public_whichever_way_it_goes() {
     // Kept on top: revealing it tells both players what is there.
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     let kept = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::WoundedBullY);
     gs.cards[kept].visible = CardVisibleState::Hidden;
     declare_blockers(&mut gs, &[Card::PackCallY]);
@@ -2034,7 +2124,7 @@ fn pack_call_reveal_is_public_whichever_way_it_goes() {
     assert_eq!(gs.cards[kept].visible, CardVisibleState::BothKnow);
 
     // Bottomed: it stays known there, as a face-up pitched card does.
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     let bottomed = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
     gs.cards[bottomed].visible = CardVisibleState::Hidden;
     declare_blockers(&mut gs, &[Card::PackCallY]);
@@ -2044,7 +2134,7 @@ fn pack_call_reveal_is_public_whichever_way_it_goes() {
 
 #[test]
 fn pack_call_on_an_empty_deck_does_nothing() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     // A decked player can still declare blockers, so an empty deck is a legal
     // state for the trigger to resolve in — it must no-op rather than panic.
     gs.p2.top_deck_idx = None;
@@ -2063,15 +2153,15 @@ fn pack_call_on_an_empty_deck_does_nothing() {
 
 #[test]
 fn a_blocker_without_a_defend_trigger_puts_nothing_on_the_stack() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     // The same sub-6-power top card that Pack Call would bottom.
     set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
     let before = deck_order(&gs, PlayerIndex::P2);
 
-    // Driving Blade has no defend effect, so an ordinary block costs no extra
+    // Raging Onslaught has no defend effect, so an ordinary block costs no extra
     // priority round and leaves the deck alone.
-    assert!(Card::DrivingBladeY.data().defend_effect.is_none());
-    declare_blockers(&mut gs, &[Card::DrivingBladeY]);
+    assert!(Card::RagingOnslaughtY.data().defend_effect.is_none());
+    declare_blockers(&mut gs, &[Card::RagingOnslaughtY]);
 
     assert!(gs.stack_is_empty(), "an ordinary blocker puts no trigger on the stack");
     assert_eq!(deck_order(&gs, PlayerIndex::P2), before);
@@ -2079,14 +2169,14 @@ fn a_blocker_without_a_defend_trigger_puts_nothing_on_the_stack() {
 
 #[test]
 fn defending_with_two_pack_calls_fires_the_effect_twice() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
 
     // Two sub-6-power cards on top, so each Pack Call bottoms one in turn and
     // the two reveals are told apart by which card moved.
     let order = deck_order(&gs, PlayerIndex::P2);
     let (first_top, second_top) = (order[0], order[1]);
-    gs.cards[first_top].card = Card::RallyTheRearguardB;
-    gs.cards[second_top].card = Card::RallyTheRearguardB;
+    gs.set_card(first_top, Card::RallyTheRearguardB);
+    gs.set_card(second_top, Card::RallyTheRearguardB);
 
     let blockers = declare_blockers(&mut gs, &[Card::PackCallY, Card::PackCallY]);
     assert_eq!(blockers.len(), 2);
@@ -2124,10 +2214,14 @@ fn defending_with_two_pack_calls_fires_the_effect_twice() {
 
 #[test]
 fn only_instants_are_offered_while_a_defend_trigger_is_on_the_stack() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    // Dorinthea attacks so that the attacker holds an instant and an attack
+    // reaction from her own deck; Rhinar defends with Pack Call and Dodge from
+    // his. (Rhinar's deck has no instant, so the defender's side is checked
+    // with the defense reaction alone.)
+    let mut gs = rhinar_defending_flock();
 
-    // Pack Call blocks, leaving the defender a defense reaction and an instant.
-    set_hand(&mut gs, PlayerIndex::P2, &[Card::PackCallY, Card::DodgeB, Card::SigilofSolaceB]);
+    // Pack Call blocks, leaving the defender a defense reaction.
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::PackCallY, Card::DodgeB]);
     let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
     step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(hand[0]))});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
@@ -2145,38 +2239,36 @@ fn only_instants_are_offered_while_a_defend_trigger_is_on_the_stack() {
     assert!(!attacker.contains(&Card::BladeFlashB),
         "an attack reaction may not");
 
-    // Same for the defender: her instant, not her defense reaction.
-    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-    assert_eq!(gs.active_player, PlayerIndex::P2);
-    gs.p2.resources = 5;
-    let defender = playable_cards(&gs);
-    assert!(defender.contains(&Card::SigilofSolaceB),
-        "an instant may be played above a pending defend trigger");
-    assert!(!defender.contains(&Card::DodgeB),
-        "a defense reaction may not");
-
     // Playing that instant does not reopen the window. The trigger is no longer
     // the *top* of the stack, but it is still on it, and the gate asks whether
     // one is pending anywhere rather than whether it is next to resolve.
-    let sigil_idx = gs.p2.hand_iter(&gs.cards)
+    let sigil_idx = gs.p1.hand_iter(&gs.cards)
         .find(|(_, cs)| cs.card == Card::SigilofSolaceB)
         .expect("Sigil of Solace should still be in hand").0;
     step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
     assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
-    assert_eq!(gs.active_player, PlayerIndex::P2, "playing a card keeps priority");
+    assert_eq!(gs.active_player, PlayerIndex::P1, "playing a card keeps priority");
     assert_ne!(gs.stack_top().map(|p| p.typ), Some(ActionType::DefendTrigger),
         "the instant is on top now, the trigger underneath");
+    assert!(!playable_cards(&gs).contains(&Card::BladeFlashB),
+        "an attack reaction stays shut out while a trigger is anywhere on the stack");
+
+    // Same for the defender, given priority over the instant: no defense
+    // reaction while the trigger waits underneath.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    gs.p2.resources = 5;
     assert!(!playable_cards(&gs).contains(&Card::DodgeB),
-        "a reaction stays shut out while a trigger is anywhere on the stack");
+        "a defense reaction may not be played above a pending defend trigger");
 }
 
 #[test]
 fn reactions_are_offered_again_when_no_defend_trigger_is_pending() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
 
     // An ordinary blocker puts no trigger on the stack, so the reaction window
     // is the usual one — the narrowing above is specific to a pending trigger.
-    set_hand(&mut gs, PlayerIndex::P2, &[Card::DrivingBladeY, Card::DodgeB]);
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::RagingOnslaughtY, Card::DodgeB]);
     let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
     step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(hand[0]))});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
@@ -2190,33 +2282,38 @@ fn reactions_are_offered_again_when_no_defend_trigger_is_pending() {
 
 #[test]
 fn an_instant_resolves_above_a_defend_trigger_without_closing_the_window() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    // Dorinthea attacks with Flock (5) so the instant comes from her deck;
+    // Rhinar blocks with Pack Call from his.
+    let mut gs = rhinar_defending_flock();
     let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
 
     // Pack Call blocks; its trigger is on the stack, not yet resolved.
-    set_hand(&mut gs, PlayerIndex::P2, &[Card::PackCallY, Card::SigilofSolaceB]);
-    let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
-    let (pc_idx, sigil_idx) = (hand[0], hand[1]);
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::PackCallY]);
+    let pc_idx = gs.p2.hand_idx.expect("Pack Call should be in hand").get();
     step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(pc_idx))});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done blocking
-    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker passes
     assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY]);
 
-    // The defender answers the trigger with a free instant.
-    let life_before = gs.p2.life;
+    // The attacker, holding priority first, answers the trigger with a free
+    // instant.
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::SigilofSolaceB]);
+    let sigil_idx = gs.p1.hand_idx.expect("Sigil should be in hand").get();
+    let attacker_life_before = gs.p1.life;
     step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(sigil_idx))});
     assert_eq!(gs.cards[sigil_idx].location, CardLocation::Stack);
 
     // Last on, first off: the instant resolves while the trigger waits below,
     // and the window stays open instead of closing into combat damage.
     pass_once_each(&mut gs);
-    assert_eq!(gs.p2.life, life_before + 1, "Sigil of Solace resolved");
-    assert_eq!(gs.cards[sigil_idx].location, CardLocation::P2Graveyard);
+    assert_eq!(gs.p1.life, attacker_life_before + 1, "Sigil of Solace resolved");
+    assert_eq!(gs.cards[sigil_idx].location, CardLocation::P1Graveyard);
     assert_eq!(stacked_defend_triggers(&gs), vec![Card::PackCallY],
         "the trigger is still waiting underneath");
     assert_eq!(gs.phase, Phase::DefendTriggers, "the window must not close early");
     assert_ne!(*deck_order(&gs, PlayerIndex::P2).last().unwrap(), top,
         "the trigger has not resolved yet");
+    assert_eq!(gs.p2.life, 20);
 
     // Then the trigger resolves and its window hands over to the reaction
     // window — still no damage.
@@ -2224,16 +2321,16 @@ fn an_instant_resolves_above_a_defend_trigger_without_closing_the_window() {
     assert!(gs.stack_is_empty());
     assert_eq!(gs.phase, Phase::Reaction);
     assert_eq!(*deck_order(&gs, PlayerIndex::P2).last().unwrap(), top);
-    assert_eq!(gs.p2.life, life_before + 1, "damage waits for the reaction window");
+    assert_eq!(gs.p2.life, 20, "damage waits for the reaction window");
 
-    // Closing that window deals it: Pack Call's 3 block against 6 power.
+    // Closing that window deals it: Pack Call's 3 block against Flock's 5.
     pass_once_each(&mut gs);
-    assert_eq!(gs.p2.life, life_before + 1 - 3);
+    assert_eq!(gs.p2.life, 20 - 2);
 }
 
 #[test]
 fn pack_call_still_blocks_for_3() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
     let pc_idx = declare_blockers(&mut gs, &[Card::PackCallY])[0];
     assert_eq!(gs.cards[pc_idx].location, CardLocation::P2CombatChain);
@@ -2256,7 +2353,7 @@ fn pack_call_still_blocks_for_3() {
 
 #[test]
 fn the_defend_trigger_window_hands_over_to_the_reaction_window_not_to_damage() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
 
     // Pack Call blocks, and the defender keeps a defense reaction in hand — one
@@ -2319,7 +2416,7 @@ fn pitching_inside_the_defend_trigger_window_returns_to_it() {
     // phase plumbing for the first costed instant that comes along: without
     // `DefendPitch`, pitching here would fall through to `ActionPitch`
     // and return to the wrong window.
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
     set_hand(&mut gs, PlayerIndex::P2,
         &[Card::PackCallY, Card::MuscleMuttY, Card::ClearingBellowB]);
     let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
@@ -2483,9 +2580,15 @@ fn barraging_beatdown_does_not_count_equipment_toward_the_two() {
     // Three cards defend, but two of them are equipment (1 defense each) and the
     // text counts only non-equipment cards — so the count is 1 and the bonus
     // still pays out.
+    // The equipment is Dorinthea's own Ironrot Helm and Legs, moved from her
+    // head and legs slots onto the chain as a block would put them there.
     place_blocker_on_chain(&mut gs, PlayerIndex::P2, Card::OnAKnifeEdgeY);
-    place_blocker_on_chain(&mut gs, PlayerIndex::P2, Card::IronrotHelm);
-    place_blocker_on_chain(&mut gs, PlayerIndex::P2, Card::IronrotLegs);
+    let helm = gs.p2.head_idx.expect("Dorinthea should wear a helm").get();
+    let legs = gs.p2.legs_idx.expect("Dorinthea should wear legs").get();
+    assert_eq!(gs.cards[helm].card, Card::IronrotHelm);
+    assert_eq!(gs.cards[legs].card, Card::IronrotLegs);
+    move_to_chain(&mut gs, PlayerIndex::P2, helm);
+    move_to_chain(&mut gs, PlayerIndex::P2, legs);
     let life_before = gs.p2.life;
     resolve_combat_damage(&mut gs);
 
@@ -2502,15 +2605,15 @@ fn barraging_beatdown_counts_a_defense_reaction_toward_the_two() {
     place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BareFangsR);
     // A defense reaction joins the chain link the attack sits on when it
     // resolves (see `commit_defense_reaction`), and it is not equipment — so a
-    // declared blocker plus a Dodge is two non-equipment cards and nullifies the
-    // bonus just as two declared blockers would.
+    // declared blocker plus a Toughen Up is two non-equipment cards and
+    // nullifies the bonus just as two declared blockers would.
     place_blocker_on_chain(&mut gs, PlayerIndex::P2, Card::OnAKnifeEdgeY);
-    place_blocker_on_chain(&mut gs, PlayerIndex::P2, Card::DodgeB);
+    place_blocker_on_chain(&mut gs, PlayerIndex::P2, Card::ToughenUpB);
     let life_before = gs.p2.life;
     resolve_combat_damage(&mut gs);
 
-    // 6 - (2 + 2) = 2 damage.
-    assert_eq!(gs.p2.life, life_before - 2);
+    // 6 - (2 + 4) = 0 damage; with the bonus it would have been 3.
+    assert_eq!(gs.p2.life, life_before);
     assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 0);
 }
 
@@ -2522,7 +2625,8 @@ fn barraging_beatdown_bonus_applies_to_a_brute_weapon_swing() {
     // Brute attack" names the attack rather than the card type it is made with,
     // so a swing takes the bonus — where Awakening Bellow's and Come to Fight's
     // bonuses would both sit and wait.
-    let attacker = place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BoneBasher);
+    let attacker = place_weapon_on_chain(&mut gs, PlayerIndex::P1);
+    assert_eq!(gs.cards[attacker].card, Card::BoneBasher);
     assert_eq!(gs.cards[attacker].card.data().typ, CardType::Weapon);
     assert_eq!(gs.cards[attacker].card.data().card_class, CardClass::Brute);
     let life_before = gs.p2.life;
@@ -2643,13 +2747,19 @@ fn activatable_cards(gs: &Gamestate) -> HashSet<Card> {
         .collect()
 }
 
-/// Rhinar (p1) attacks with Muscle Mutt and Dorinthea (p2) blocks with Rally the
-/// Rearguard, leaving her holding `spare` as the card her ability can discard.
-/// Priority has passed to her in the reaction window, so the activation is the
-/// next thing she may do. Returns the game and Rally's global index.
+/// Rhinar (p1) attacks with Muscle Mutt and a mirror Rhinar (p2) blocks with
+/// Rally the Rearguard, leaving her holding `spare` as the card her ability can
+/// discard. Priority has passed to her in the reaction window, so the
+/// activation is the next thing she may do. Returns the game and Rally's global
+/// index.
 fn rally_blocking_muscle_mutt(spare: &[Card]) -> (Gamestate, usize) {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    rally_blocking(rhinar_defending_muscle_mutt(), spare)
+}
 
+/// Block the attack in `gs` (Defend phase, p2 defending with a Rhinar deck)
+/// with Rally the Rearguard, keeping `spare` in hand, and pass priority to the
+/// defender in the reaction window. Returns the game and Rally's global index.
+fn rally_blocking(mut gs: Gamestate, spare: &[Card]) -> (Gamestate, usize) {
     let mut hand = vec![Card::RallyTheRearguardB];
     hand.extend_from_slice(spare);
     set_hand(&mut gs, PlayerIndex::P2, &hand);
@@ -2737,7 +2847,9 @@ fn rally_ability_is_not_offered_without_a_card_to_discard() {
 
 #[test]
 fn rally_ability_is_not_offered_once_its_combat_is_over() {
-    let mut gs = setup_rhinar_action_phase();
+    // Dorinthea's turn, so the turn player has an instant to open a window with
+    // and the Rhinar opposite her holds Rally and Dodge from his own deck.
+    let mut gs = setup_dorinthea_action_phase();
 
     // Seat Rally on the *defender's* chain, as a blocker whose attack has
     // already resolved: blockers stay on the chain until the action phase ends,
@@ -2827,7 +2939,7 @@ fn rally_without_its_ability_blocks_only_its_printed_2() {
 fn rally_ability_is_once_per_turn() {
     // Two spare cards, so the discard cost can be paid twice over and only the
     // once-per-turn limit stands between her and a second +3.
-    let (mut gs, rally_idx) = rally_blocking_muscle_mutt(&[Card::DodgeB, Card::ToughenUpB]);
+    let (mut gs, rally_idx) = rally_blocking_muscle_mutt(&[Card::DodgeB, Card::ClearingBellowB]);
     assert!(activatable_cards(&gs).contains(&Card::RallyTheRearguardB));
 
     // Activating keeps priority with the activator, so the second offer can be
@@ -2848,7 +2960,9 @@ fn rally_ability_is_once_per_turn() {
 
 #[test]
 fn rally_ability_can_be_responded_to_before_it_resolves() {
-    let (mut gs, rally_idx) = rally_blocking_muscle_mutt(&[Card::DodgeB]);
+    // Dorinthea attacks so the responding attacker has an instant from her own
+    // deck; Rhinar blocks with Rally from his.
+    let (mut gs, rally_idx) = rally_blocking(rhinar_defending_flock(), &[Card::DodgeB]);
     step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(rally_idx))});
 
     // An instant-speed activation sits on the stack rather than applying
@@ -2929,7 +3043,7 @@ fn rally_once_per_turn_limit_lifts_at_the_turn_boundary() {
 
 #[test]
 fn two_blocking_rallies_are_pumped_independently() {
-    let mut gs = dorinthea_defending_muscle_mutt();
+    let mut gs = rhinar_defending_muscle_mutt();
 
     // Both copies block, leaving one card in hand — enough to pay for exactly
     // one activation, so the two copies' bonuses can be told apart.
@@ -3014,7 +3128,7 @@ fn every_power6_discard_intimidates_there_is_no_once_per_turn_limit() {
     set_hand(&mut gs, PlayerIndex::P1, &[Card::SmashInstinctY, Card::PackHuntR]);
     assert!(gs.p1.hand_iter(&gs.cards).all(|(_, cs)| cs.card.data().power >= 6));
     // The opponent needs cards to banish for both triggers to be observable.
-    assert!(gs.p2.hand_size >= 2);
+    assert!(gs.p2.hand_size() >= 2);
 
     apply_discard_cost(&mut gs, PlayerIndex::P1);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
@@ -3043,14 +3157,14 @@ fn power6_discard_on_the_opponents_turn_does_not_intimidate() {
     assert!(!gs.p1.has_intimidated);
 }
 
-/// Dorinthea (p2) attacks with Muscle Mutt and Rhinar (p1) blocks with Rally the
-/// Rearguard, holding `spare` as the card his ability can discard. The mirror of
-/// `rally_blocking_muscle_mutt`, with Rhinar on defense so his hero ability is in
-/// play. Priority has passed to him in the reaction window. Returns the game and
-/// Rally's global index.
+/// In a Rhinar mirror, p2 attacks with Muscle Mutt and p1 blocks with Rally the
+/// Rearguard, holding `spare` as the card his ability can discard. The seat swap
+/// of `rally_blocking_muscle_mutt`, with p1 on defense so the hero ability being
+/// tested is the defender's. Priority has passed to him in the reaction window.
+/// Returns the game and Rally's global index.
 fn rhinar_blocking_with_rally(spare: &[Card]) -> (Gamestate, usize) {
-    let mut gs = setup_rhinar_action_phase();
-    // Rhinar passes his turn out; Dorinthea takes hers.
+    let mut gs = setup_rhinar_mirror_action_phase();
+    // p1 passes his turn out; p2 takes hers.
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     assert_eq!(gs.turn_player, PlayerIndex::P2);
@@ -3097,8 +3211,8 @@ fn rally_ability_discarding_a_power6_card_does_not_intimidate() {
     step(&mut gs, Action{ typ: ActionType::Activate, card: Some(CardIdx::new(rally_idx))});
 
     // The discard happened and cleared the power threshold, but it was made
-    // while defending — on Dorinthea's turn — so Rhinar's action-speed ability
-    // does not trigger and she banishes nothing.
+    // while defending — on p2's turn — so p1's action-speed ability does not
+    // trigger and p2 banishes nothing.
     assert_eq!(gs.cards[spare].location, CardLocation::P1Graveyard);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
     assert!(!gs.p1.has_intimidated);
@@ -3174,8 +3288,9 @@ fn rukutan_blocks_for_3_like_hala() {
     assert_eq!(Card::ChiefRukutan.data().defense, Card::HalaGoldenhelm.data().defense);
     assert!(!Card::ChiefRukutan.data().no_block);
 
-    // Dorinthea attacks with Muscle Mutt (6); Rhinar blocks with Ruk'utan alone.
-    let mut gs = setup_rhinar_action_phase();
+    // In a Rhinar mirror, p2 attacks with Muscle Mutt (6); p1 blocks with
+    // Ruk'utan alone.
+    let mut gs = setup_rhinar_mirror_action_phase();
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // Rhinar's action phase
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // and his arsenal
     set_hand(&mut gs, PlayerIndex::P2, &[Card::MuscleMuttY, Card::ClearingBellowB]);
@@ -3221,7 +3336,7 @@ fn chief_rukutan_is_a_brute_mentor_with_play6_intimidate_and_alpha_rampage_searc
 fn rhinar_second_turn_with_face_down_rukutan() -> (Gamestate, usize) {
     let mut gs = setup_rhinar_action_phase();
     let ruk = gs.p1.hand_idx.expect("opening hand").get();
-    gs.cards[ruk].card = Card::ChiefRukutan;
+    gs.set_card(ruk, Card::ChiefRukutan);
 
     // Rhinar passes his action phase and arsenals Ruk'utan: it goes in face down.
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
@@ -3315,7 +3430,7 @@ fn declining_the_flip_is_not_logged_to_the_opponent() {
     reset(&mut gs, true);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
     let ruk = gs.p1.hand_idx.expect("opening hand").get();
-    gs.cards[ruk].card = Card::ChiefRukutan;
+    gs.set_card(ruk, Card::ChiefRukutan);
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     step(&mut gs, Action{ typ: ActionType::Arsenal, card: Some(CardIdx::new(ruk))});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
@@ -3340,7 +3455,7 @@ fn flipping_is_logged_publicly() {
     reset(&mut gs, true);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
     let ruk = gs.p1.hand_idx.expect("opening hand").get();
-    gs.cards[ruk].card = Card::ChiefRukutan;
+    gs.set_card(ruk, Card::ChiefRukutan);
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     step(&mut gs, Action{ typ: ActionType::Arsenal, card: Some(CardIdx::new(ruk))});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
@@ -3486,7 +3601,7 @@ fn rukutan_graduates_even_with_no_alpha_rampage_left_to_find() {
     gs.p1.arsenal_lesson_counters = 1;
     // Alpha Rampage has already left the deck (here: relabelled away).
     let rampage = p1_deck_copy_of(&gs, Card::AlphaRampageR).expect("Alpha Rampage should be in the deck");
-    gs.cards[rampage].card = Card::MuscleMuttY;
+    gs.set_card(rampage, Card::MuscleMuttY);
     let deck_before = gs.p1.deck_size;
 
     maybe_play6_intimidate(&mut gs, PlayerIndex::P1, 6);

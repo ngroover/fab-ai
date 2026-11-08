@@ -493,12 +493,16 @@ impl Gamestate {
 
     /// Turn the copy in global slot `idx` into `card`, as tests do to stage a
     /// specific hand or deck. If the copy is in its owner's hand the hand
-    /// bitfield is relabelled too, so it stays in step with the linked list;
-    /// `card` must then be in the owner's deck.
+    /// bitfield is relabelled too, so it stays in step with the linked list.
+    /// `card` must be in the owner's deck wherever the copy is, so a test can
+    /// never stage a zone the per-deck `CardCounts` could not represent.
     #[cfg(test)]
     pub fn set_card(&mut self, idx: usize, card: Card) {
         let owner = if idx < PLAYER_CARDS { &mut self.p1 } else { &mut self.p2 };
         let old = self.cards[idx].card;
+        assert!(owner.deck.id_of(card).is_some(),
+            "tests may only stage cards from the owner's deck: {:?} is not in the {:?} deck (at {:?})",
+            card, owner.deck, self.cards[idx].location);
         if self.cards[idx].location == CardLocation::hand(owner.pid) {
             owner.hand_remove(old);
             owner.hand_add(card);

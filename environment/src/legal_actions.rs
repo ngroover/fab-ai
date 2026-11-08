@@ -771,6 +771,31 @@ mod tests {
         gs
     }
 
+    /// The seat-swapped `step_to_dorinthea_defending`: Dorinthea (p1) attacks
+    /// Rhinar (p2) with Flock of the Feather Walkers (cost 1), paid with a
+    /// pitch-1 Sharpen Steel, leaving two cards in her hand and Rhinar to defend.
+    fn step_to_rhinar_defending() -> Gamestate {
+        let mut gs = gamestate_from_decklists(build_dorinthea_deck(), build_rhinar_deck(), Some(42));
+        reset(&mut gs, false);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+        assert_eq!(gs.active_player, PlayerIndex::P1);
+
+        let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
+        assert_eq!(hand.len(), 4);
+        gs.set_card(hand[0], Card::FlockOfTheFeatherWalkersR);
+        gs.set_card(hand[1], Card::SharpenSteelR);
+        step(&mut gs, Action{ typ: ActionType::PlayCard, card: Some(CardIdx::new(hand[0]))});
+        step(&mut gs, Action{ typ: ActionType::Pitch, card: Some(CardIdx::new(hand[1]))});
+
+        // Both players pass; the attack resolves to the chain and Rhinar must
+        // now defend.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.phase, Phase::Defend);
+        assert_eq!(gs.active_player, PlayerIndex::P2);
+        gs
+    }
+
     #[test]
     fn legal_actions_in_defend_phase() {
         let gs = step_to_dorinthea_defending();
@@ -806,15 +831,16 @@ mod tests {
     fn legal_actions_in_defend_phase_excludes_no_block() {
         let mut gs = step_to_dorinthea_defending();
 
-        // Turn one of Dorinthea's hand cards into Dodge, a defense reaction —
-        // played in the reaction step, never declared as a blocker — that also
+        // Turn one of Dorinthea's hand cards into Toughen Up, a defense reaction
+        // — played in the reaction step, never declared as a blocker — that also
         // carries no_block. It must drop out of the defend options while the
         // rest of the hand is still offered.
         let db_idx = gs.p2.hand_iter(&gs.cards)
                 .find(|(_, cs)| cs.card == Card::DrivingBladeY)
                 .map(|(idx, _)| idx)
                 .expect("Driving Blade should be in the opening hand");
-        gs.cards[db_idx].card = Card::DodgeB;
+        gs.set_card(db_idx, Card::ToughenUpB);
+        assert!(Card::ToughenUpB.data().no_block);
 
         let actions = legal_actions(&gs);
 
@@ -974,24 +1000,26 @@ mod tests {
 
     #[test]
     fn legal_actions_in_reaction_phase_offers_reactions_not_attack_actions() {
-        let mut gs = step_to_dorinthea_defending();
+        // Dorinthea attacks here: the attack reactions and the instant this test
+        // needs on the attacker's side are all in her deck, none in Rhinar's.
+        let mut gs = step_to_rhinar_defending();
 
         // Finish declaring blocks: passing the Defend phase opens the post-defend
         // Instant window. Double pass closes it, advancing to the Reaction phase
-        // with the turn player (Rhinar, p1) holding priority.
+        // with the turn player (Dorinthea, p1) holding priority.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, PlayerIndex::P1);
 
-        // After committing the attack Rhinar holds two cards. Rhinar is the
+        // After committing the attack Dorinthea holds two cards. She is the
         // attacker here, so relabel them to an attack reaction (In the Swing)
-        // and a non-reaction (Pack Call, an AttackAction) so we can see the
-        // predicate filter at work: only the attack reaction is offered as a
-        // PlayCard.
+        // and a non-reaction (Flock of the Feather Walkers, an AttackAction) so
+        // we can see the predicate filter at work: only the attack reaction is
+        // offered as a PlayCard.
         let hand: Vec<usize> = gs.p1.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
-        assert_eq!(hand.len(), 2, "expected Rhinar to hold two cards in reaction");
-        gs.cards[hand[0]].card = Card::InTheSwingR;
-        gs.cards[hand[1]].card = Card::PackCallY;
+        assert_eq!(hand.len(), 2, "expected Dorinthea to hold two cards in reaction");
+        gs.set_card(hand[0], Card::InTheSwingR);
+        gs.set_card(hand[1], Card::FlockOfTheFeatherWalkersR);
 
         let actions = legal_actions(&gs);
 
@@ -1000,18 +1028,21 @@ mod tests {
                 .map(|a| gs.cards[a.card_index()].card)
                 .collect();
         assert!(playable.contains(&Card::InTheSwingR));
-        assert!(!playable.contains(&Card::PackCallY));
+        assert!(!playable.contains(&Card::FlockOfTheFeatherWalkersR));
 
-        // A defense reaction (Dodge) is not the attacker's to play: relabeled
-        // to one, the card drops out of the offered plays.
-        gs.cards[hand[0]].card = Card::DodgeB;
+        // A defense reaction (Toughen Up) is not the attacker's to play:
+        // relabeled to one, the card drops out of the offered plays — even with
+        // its cost of 2 already banked.
+        gs.set_card(hand[0], Card::ToughenUpB);
+        gs.p1.resources = 2;
         let actions = legal_actions(&gs);
         assert!(actions.iter().all(|a| a.typ != ActionType::PlayCard
-                || gs.cards[a.card_index()].card != Card::DodgeB));
+                || gs.cards[a.card_index()].card != Card::ToughenUpB));
+        gs.p1.resources = 0;
 
         // Relabel the reaction to an Instant (Sigil of Solace) — still a reaction-
         // speed card, so it stays offered.
-        gs.cards[hand[0]].card = Card::SigilofSolaceB;
+        gs.set_card(hand[0], Card::SigilofSolaceB);
         let actions = legal_actions(&gs);
         let playable: HashSet<Card> = actions.iter()
                 .filter(|a| a.typ == ActionType::PlayCard)
@@ -1037,13 +1068,14 @@ mod tests {
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, PlayerIndex::P2);
 
-        // Relabel two of Dorinthea's hand cards to a defense reaction (Dodge)
-        // and an attack reaction (Thrust): as the defender she is offered the
-        // defense reaction but not the attack reaction.
+        // Relabel two of Dorinthea's hand cards to a defense reaction (Toughen
+        // Up) and an attack reaction (Thrust): as the defender she is offered the
+        // defense reaction but not the attack reaction. The rest of her hand
+        // pitches for Toughen Up's 2, so cost is not what decides it.
         let hand: Vec<usize> = gs.p2.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
-        assert!(hand.len() >= 2, "expected Dorinthea to hold cards in reaction");
-        gs.cards[hand[0]].card = Card::DodgeB;
-        gs.cards[hand[1]].card = Card::ThrustR;
+        assert!(hand.len() >= 4, "expected Dorinthea to hold her opening hand in reaction");
+        gs.set_card(hand[0], Card::ToughenUpB);
+        gs.set_card(hand[1], Card::ThrustR);
 
         let actions = legal_actions(&gs);
 
@@ -1051,7 +1083,7 @@ mod tests {
                 .filter(|a| a.typ == ActionType::PlayCard)
                 .map(|a| gs.cards[a.card_index()].card)
                 .collect();
-        assert!(playable.contains(&Card::DodgeB));
+        assert!(playable.contains(&Card::ToughenUpB));
         assert!(!playable.contains(&Card::ThrustR));
     }
 
@@ -1235,26 +1267,34 @@ mod tests {
     /// `card`, and return its global index. Mirrors what the Arsenal phase does
     /// at the end of a turn, without having to play one out.
     fn put_in_arsenal(gs: &mut Gamestate, pid: PlayerIndex, card: Card) -> usize {
+        let head = {
+            let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
+            assert!(player.arsenal_idx.is_none(), "the arsenal slot should be free");
+            player.hand_idx.expect("hand should hold a card to arsenal").get()
+        };
+        // Relabel while still in hand, so the hand bitfield follows along.
+        gs.set_card(head, card);
         let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-        assert!(player.arsenal_idx.is_none(), "the arsenal slot should be free");
-        let head = player.hand_idx.expect("hand should hold a card to arsenal").get();
         // The hand is a singly-linked list whose tail points at itself, so
         // advancing past the head drops it, as the engine's own detach does.
         let next = gs.cards[head].next_card.get();
         player.hand_idx = if next == head { None } else { Some(CardIdx::new(next)) };
-        player.hand_size -= 1;
+        player.hand_remove(card);
         player.arsenal_idx = Some(CardIdx::new(head));
-        gs.cards[head].card = card;
         gs.cards[head].location = CardLocation::arsenal(pid);
         head
     }
 
-    /// Relabel every card in `pid`'s hand as `card`.
-    fn relabel_hand(gs: &mut Gamestate, pid: PlayerIndex, card: Card) {
-        let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-        let hand: Vec<usize> = player.hand_iter(&gs.cards).map(|(idx, _)| idx).collect();
-        for idx in hand {
-            gs.cards[idx].card = card;
+    /// Drop cards off the front of `pid`'s hand into the graveyard until only
+    /// `n` remain.
+    fn trim_hand(gs: &mut Gamestate, pid: PlayerIndex, n: usize) {
+        let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+        while player.hand_size() as usize > n {
+            let head = player.hand_idx.expect("hand non-empty while trimming").get();
+            let next = gs.cards[head].next_card.get();
+            player.hand_idx = if next == head { None } else { Some(CardIdx::new(next)) };
+            player.hand_remove(gs.cards[head].card);
+            gs.cards[head].location = CardLocation::graveyard(pid);
         }
     }
 
@@ -1307,11 +1347,14 @@ mod tests {
 
         // Muscle Mutt costs 3 and the arsenal card cannot pitch for itself, so
         // the cost has to come out of hand. With a hand that pitches for
-        // nothing, it is unaffordable and drops out of the options.
+        // nothing — a lone Chief Ruk'utan, the deck's one pitch-0 card — it is
+        // unaffordable and drops out of the options.
         let arsenal_idx = put_in_arsenal(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
         assert_eq!(Card::MuscleMuttY.data().cost, 3);
-        relabel_hand(&mut gs, PlayerIndex::P1, Card::BoneBasher); // pitch 0
-        assert_eq!(Card::BoneBasher.data().pitch, 0);
+        trim_hand(&mut gs, PlayerIndex::P1, 1);
+        let hand_head = gs.p1.hand_idx.expect("hand should not be empty").get();
+        gs.set_card(hand_head, Card::ChiefRukutan); // pitch 0
+        assert_eq!(Card::ChiefRukutan.data().pitch, 0);
         let offered: Vec<usize> = legal_actions(&gs).iter()
             .filter(|a| a.typ == ActionType::PlayCard)
             .map(|a| a.card_index())
@@ -1321,8 +1364,7 @@ mod tests {
 
         // Give the hand a single pitch-3 card and it becomes affordable — the
         // whole hand pays, since none of it is the card being played.
-        let hand_head = gs.p1.hand_idx.expect("hand should not be empty").get();
-        gs.cards[hand_head].card = Card::ClearingBellowB; // pitch 3
+        gs.set_card(hand_head, Card::ClearingBellowB); // pitch 3
         assert_eq!(Card::ClearingBellowB.data().pitch, 3);
         let offered: Vec<usize> = legal_actions(&gs).iter()
             .filter(|a| a.typ == ActionType::PlayCard)
@@ -1347,7 +1389,9 @@ mod tests {
         // Priority passes to the defender, who may play hers.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert_eq!(gs.active_player, PlayerIndex::P2);
-        let arsenal_idx = put_in_arsenal(&mut gs, PlayerIndex::P2, Card::DodgeB);
+        // Dorinthea's defense reaction is Toughen Up; the three cards left in
+        // her hand pitch for its 2.
+        let arsenal_idx = put_in_arsenal(&mut gs, PlayerIndex::P2, Card::ToughenUpB);
         let offered: Vec<usize> = legal_actions(&gs).iter()
             .filter(|a| a.typ == ActionType::PlayCard)
             .map(|a| a.card_index())
