@@ -43,8 +43,9 @@ impl DeckCardId {
 
 /// A multiset of one player's cards: for each `DeckCardId`, a 2-bit count of
 /// how many copies are present, packed into one `u64` at bit `2 * deck_id`.
-/// Used for the hand, whose cards are unordered, so the counts alone are its
-/// contents; the other unordered zones (graveyard, pitch, banish) can follow.
+/// Used for every unordered zone — the hand, pitch zone, graveyard, banish
+/// zones and worn equipment — since for an unordered zone the counts alone are
+/// its contents.
 ///
 /// The counts are untyped so that `Player` need not be generic over its deck.
 /// The `_as` methods take a deck card enum directly.

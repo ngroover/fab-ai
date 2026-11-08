@@ -8,8 +8,8 @@ use crate::fab_step::{current_chain_link, face_down_mentor_in_arsenal, uses_acti
 pub fn legal_actions(gs: &Gamestate) -> LegalActions {
     #[cfg(debug_assertions)]
     {
-        gs.p1.debug_check_hand(&gs.cards);
-        gs.p2.debug_check_hand(&gs.cards);
+        gs.p1.debug_check_zones(&gs.cards);
+        gs.p2.debug_check_zones(&gs.cards);
     }
     match gs.phase {
         Phase::ChooseFirst => {
@@ -1294,6 +1294,7 @@ mod tests {
             let next = gs.cards[head].next_card.get();
             player.hand_idx = if next == head { None } else { Some(CardIdx::new(next)) };
             player.hand_remove(gs.cards[head].card);
+            player.zone_add(CardLocation::graveyard(pid), gs.cards[head].card);
             gs.cards[head].location = CardLocation::graveyard(pid);
         }
     }

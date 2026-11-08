@@ -13,8 +13,8 @@ pub fn step(gs: &mut Gamestate, act: Action) {
     }
     #[cfg(debug_assertions)]
     {
-        gs.p1.debug_check_hand(&gs.cards);
-        gs.p2.debug_check_hand(&gs.cards);
+        gs.p1.debug_check_zones(&gs.cards);
+        gs.p2.debug_check_zones(&gs.cards);
     }
     match gs.phase {
         Phase::ChooseFirst => handle_choose_first(gs, act),
@@ -456,7 +456,7 @@ fn start_pitch_order(gs: &mut Gamestate) {
 /// `pid` active (they own the cards being ordered) and `false` is returned.
 fn resolve_pitch_zone(gs: &mut Gamestate, pid: PlayerIndex) -> bool {
     let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let pitch_count = player.pitch_iter(&gs.cards).count();
+    let pitch_count = player.pitch.len();
     let pitch_head = player.pitch_idx;
     match pitch_count {
         0 => true,
@@ -486,7 +486,7 @@ fn handle_pitch_order_phase(gs: &mut Gamestate, act: Action) {
 
     let pid = gs.active_player;
     let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    if player.pitch_idx.is_some() {
+    if !player.pitch.is_empty() {
         // More pitched cards to order; stay in the PitchOrder phase.
         return;
     }
@@ -903,7 +903,8 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
             gs.active_player = gs.turn_player;
         }
     } else {
-        gs.cards[top].location = CardLocation::graveyard(owner);
+        let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
+        place_in_zone(player, &mut gs.cards, top, CardLocation::graveyard(owner));
         // A resolved card sits face-up in the graveyard, known to both players.
         gs.cards[top].visible = CardVisibleState::BothKnow;
         // A resolving non-attack action — an action card, or an activated
@@ -973,7 +974,7 @@ fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
 
     let player = if victim == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     detach_from_current_zone(player, &mut gs.cards, pick);
-    gs.cards[pick].location = CardLocation::intimidate_banish(victim);
+    place_in_zone(player, &mut gs.cards, pick, CardLocation::intimidate_banish(victim));
     attach_to_front_of_zone(&mut gs.cards, &mut player.intimidate_banish_idx, None, None, pick);
 }
 
@@ -996,12 +997,13 @@ fn apply_discard_cost(gs: &mut Gamestate, owner: PlayerIndex) {
         gs.log_public(format!("{} discards {:?}", player_name(owner), card));
     }
 
-    // Move the discarded card from hand to graveyard. The graveyard is tracked
-    // purely by `location` (it has no head pointer), so detaching from the hand
-    // and retagging the location is all that is required.
+    // Move the discarded card from hand to graveyard. The graveyard has no
+    // head pointer — its `CardCounts` bitfield and the cards' `location`s are
+    // the whole zone — so detaching from the hand and placing it is all that
+    // is required.
     let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     detach_from_current_zone(player, &mut gs.cards, pick);
-    gs.cards[pick].location = CardLocation::graveyard(owner);
+    place_in_zone(player, &mut gs.cards, pick, CardLocation::graveyard(owner));
 
     maybe_discard6_intimidate(gs, owner, discarded_power);
 }
@@ -1118,7 +1120,7 @@ fn graduate_mentor(gs: &mut Gamestate, owner: PlayerIndex, mentor: usize, fetch:
     // belonged to the mentor while it sat there, and do not follow it.
     let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     detach_from_current_zone(player, &mut gs.cards, mentor);
-    gs.cards[mentor].location = CardLocation::banish(owner);
+    place_in_zone(player, &mut gs.cards, mentor, CardLocation::banish(owner));
     gs.cards[mentor].visible = CardVisibleState::BothKnow;
     attach_to_front_of_zone(&mut gs.cards, &mut player.banish_idx, None, None, mentor);
 
@@ -1284,12 +1286,13 @@ fn draw_then_discard_hit6(gs: &mut Gamestate, owner: PlayerIndex) -> bool {
         gs.log_public(format!("{} discards {:?}", player_name(owner), card));
     }
 
-    // Move the discarded card from hand to graveyard. The graveyard is tracked
-    // purely by `location` (it has no head pointer), so detaching from the hand
-    // and retagging the location is all that is required.
+    // Move the discarded card from hand to graveyard. The graveyard has no
+    // head pointer — its `CardCounts` bitfield and the cards' `location`s are
+    // the whole zone — so detaching from the hand and placing it is all that
+    // is required.
     let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     detach_from_current_zone(player, &mut gs.cards, pick);
-    gs.cards[pick].location = CardLocation::graveyard(owner);
+    place_in_zone(player, &mut gs.cards, pick, CardLocation::graveyard(owner));
     // A discard lands face-up in the graveyard, so it becomes known to both
     // players.
     gs.cards[pick].visible = CardVisibleState::BothKnow;
@@ -1414,7 +1417,7 @@ fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
     // resources it produces.
     let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     detach_from_current_zone(player, &mut gs.cards, card_idx);
-    gs.cards[card_idx].location = CardLocation::pitch(pid);
+    place_in_zone(player, &mut gs.cards, card_idx, CardLocation::pitch(pid));
     // A pitched card lands face-up in the pitch zone, so it becomes known to both
     // players.
     gs.cards[card_idx].visible = CardVisibleState::BothKnow;
@@ -1682,8 +1685,10 @@ fn close_combat_chain(gs: &mut Gamestate) {
         } else {
             (&mut gs.p2, &mut gs.cards)
         };
-        for link in player.chain_link.iter_mut() {
-            let Some(head) = link.take() else { continue };
+        // Walk the links by index: placing a card in the graveyard updates the
+        // player's graveyard bitfield, so the chain cannot stay borrowed.
+        for link in 0..player.chain_link.len() {
+            let Some(head) = player.chain_link[link].take() else { continue };
             let mut cur = head.get();
             loop {
                 let next = cards[cur].next_card.get();
@@ -1697,7 +1702,7 @@ fn close_combat_chain(gs: &mut Gamestate) {
                     cards[cur].location = CardLocation::weapon(pid);
                     player.weapon_idx = Some(CardIdx::new(cur));
                 } else {
-                    cards[cur].location = CardLocation::graveyard(pid);
+                    place_in_zone(player, cards, cur, CardLocation::graveyard(pid));
                     // The graveyard is a public zone, so a card landing there is
                     // known to both players.
                     cards[cur].visible = CardVisibleState::BothKnow;
@@ -1862,14 +1867,18 @@ fn attach_to_front_of_zone(
 /// Remove the card at global index `idx` from the bookkeeping of its current
 /// location so it can be placed elsewhere. The card's `location` already encodes
 /// its owner, so the same `player` (its owner) handles both `P1*` and `P2*`
-/// variants. Linked-list zones (hand, deck, pitch) are relinked via
+/// variants. An unordered zone's `CardCounts` bitfield drops the card;
+/// linked-list zones (hand, deck, pitch, banish) are relinked via
 /// `detach_from_linked_list`; the weapon and equipment slots are single indices
 /// that simply clear.
 fn detach_from_current_zone(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], idx: usize) {
     let location = cards[idx].location;
+    // Every unordered zone keeps a `CardCounts` bitfield; take the card out of
+    // it first. The match below then fixes up whatever list or slot the zone
+    // keeps alongside (the graveyard keeps none).
+    player.zone_remove(location, cards[idx].card);
     match location {
         CardLocation::P1Hand | CardLocation::P2Hand => {
-            player.hand_remove(cards[idx].card);
             detach_from_linked_list(cards, &mut player.hand_idx, None, None, idx);
         }
         CardLocation::P1Deck | CardLocation::P2Deck => {
@@ -2001,10 +2010,22 @@ fn move_from_deck_to_hand(player: &mut Player, cards: &mut [CardState; TOTAL_CAR
 /// way a card enters a hand, so the bitfield and the list cannot drift apart.
 fn attach_to_hand(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], idx: usize) {
     let pid = player.pid;
-    player.hand_add(cards[idx].card);
-    cards[idx].location = CardLocation::hand(pid);
+    place_in_zone(player, cards, idx, CardLocation::hand(pid));
     cards[idx].visible = hand_visibility(pid);
     attach_to_front_of_zone(cards, &mut player.hand_idx, None, None, idx);
+}
+
+/// Set the location of the card at global index `idx`, already detached from
+/// its old zone, to `location`, one of its owner `player`'s zones, and count it
+/// in that zone's `CardCounts` bitfield when the zone is unordered (see
+/// `UnorderedZone`). The way a card enters the hand, pitch zone, graveyard or a
+/// banish zone, so a zone's bitfield and the cards' locations cannot drift
+/// apart; `detach_from_current_zone` is its counterpart. Linking the card into
+/// any list the zone also keeps (`pitch_idx`, `banish_idx`, ...) is left to the
+/// caller.
+fn place_in_zone(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], idx: usize, location: CardLocation) {
+    player.zone_add(location, cards[idx].card);
+    cards[idx].location = location;
 }
 
 /// Per-card on-play effect unit tests live in their own file. Declared as a
@@ -2020,6 +2041,7 @@ mod tests {
     use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
     use crate::fab_game::{gamestate_from_decklists,reset,get_card_states_from_location};
     use crate::cards::Card;
+    use crate::deck_cards::{DorintheaCard, RhinarCard};
     use crate::legal_actions::legal_actions;
 
     #[test]
@@ -2243,6 +2265,8 @@ mod tests {
         assert_eq!(gs.phase, Phase::ActionPitch);
         assert_eq!(gs.stack_top(), None);
         assert_eq!(gs.p1.resources, 2);
+        assert_eq!(gs.p1.pitch.len(), 1);
+        assert_eq!(gs.p1.pitch.count_as(RhinarCard::PackCallY), 1);
         assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Hand);
         assert_eq!(gs.pending_card.expect("still pending").index.get(), mm_idx);
 
@@ -3216,6 +3240,9 @@ mod tests {
         assert_eq!(gs.phase, Phase::Arsenal);
         assert_eq!(gs.cards[mm_idx].location, CardLocation::P1Graveyard);
         assert_eq!(gs.cards[db_idx].location, CardLocation::P2Graveyard);
+        // Each graveyard's bitfield counts the card that landed in it.
+        assert_eq!(gs.p1.graveyard.count_as(RhinarCard::MuscleMuttY), 1);
+        assert_eq!(gs.p2.graveyard.count_as(DorintheaCard::DrivingBladeY), 1);
         assert!(gs.p1.chain_link.iter().all(|l| l.is_none()));
         assert!(gs.p2.chain_link.iter().all(|l| l.is_none()));
     }
@@ -4235,6 +4262,9 @@ mod tests {
             .get();
         assert_eq!(gs.cards[banished_idx].location, CardLocation::P2IntimidateBanish);
         assert_eq!(gs.p2.hand_size(), victim_hand_before - 1);
+        assert_eq!(gs.p2.intimidate_banished.len(), 1);
+        let banished_id = gs.p2.deck_id(gs.cards[banished_idx].card);
+        assert_eq!(gs.p2.intimidate_banished.count(banished_id), 1);
 
         // p1 passes, closing the turn into the Arsenal phase. Entering it returns
         // the Intimidate-banished card to p2's hand and empties the zone.
@@ -4242,6 +4272,7 @@ mod tests {
         assert_eq!(gs.phase, Phase::Arsenal);
 
         assert_eq!(gs.p2.intimidate_banish_idx, None);
+        assert!(gs.p2.intimidate_banished.is_empty());
         assert_eq!(gs.cards[banished_idx].location, CardLocation::P2Hand);
         assert_eq!(gs.p2.hand_size(), victim_hand_before);
         assert!(get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2IntimidateBanish).is_empty());

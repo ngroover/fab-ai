@@ -149,6 +149,53 @@ impl CardLocation {
     pub const fn combat_chain(pid: PlayerIndex) -> Self { if pid.get() == 0 { Self::P1CombatChain } else { Self::P2CombatChain } }
 }
 
+/// The zones whose cards are unordered, each tracked on its `Player` as a
+/// `CardCounts` bitfield (see `Player::zone`). A zone is per player — the
+/// owner is the `Player` holding the bitfield — so this names the kind of zone
+/// only. The four equipment zones (head, chest, arms, legs) share one
+/// `Equipment` bitfield: each holds at most one card, and which slot a piece
+/// sits in follows from the card itself.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[repr(u8)]
+pub enum UnorderedZone {
+    Hand,
+    Pitch,
+    Graveyard,
+    Banish,
+    IntimidateBanish,
+    Equipment,
+}
+
+impl UnorderedZone {
+    pub const ALL: [UnorderedZone; 6] = [
+        UnorderedZone::Hand,
+        UnorderedZone::Pitch,
+        UnorderedZone::Graveyard,
+        UnorderedZone::Banish,
+        UnorderedZone::IntimidateBanish,
+        UnorderedZone::Equipment,
+    ];
+
+    /// The unordered zone `location` belongs to (for either player), or `None`
+    /// for the ordered and single-card zones: the deck, arsenal, weapon,
+    /// combat chain and stack.
+    pub const fn of(location: CardLocation) -> Option<Self> {
+        use CardLocation::*;
+        match location {
+            P1Hand | P2Hand => Some(UnorderedZone::Hand),
+            P1Pitch | P2Pitch => Some(UnorderedZone::Pitch),
+            P1Graveyard | P2Graveyard => Some(UnorderedZone::Graveyard),
+            P1BanishZone | P2BanishZone => Some(UnorderedZone::Banish),
+            P1IntimidateBanish | P2IntimidateBanish => Some(UnorderedZone::IntimidateBanish),
+            P1Head | P2Head | P1Chest | P2Chest | P1Arms | P2Arms | P1Legs | P2Legs => {
+                Some(UnorderedZone::Equipment)
+            }
+            P1Deck | P2Deck | P1Arsenal | P2Arsenal | P1Weapon | P2Weapon
+            | P1CombatChain | P2CombatChain | Stack => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct CardState {
     pub visible :CardVisibleState,
@@ -265,6 +312,25 @@ pub struct Player {
     /// linked list by the engine's attach/detach helpers; the list still exists
     /// so per-copy state (`CardState`) can be reached, and may go away later.
     pub hand : CardCounts,
+    /// The pitch zone's contents as a bitfield, kept in step with the
+    /// `pitch_idx` list the same way `hand` is with `hand_idx`. The pitch zone
+    /// is unordered; the order pitched cards go to the bottom of the deck is
+    /// chosen as they leave it (the `PitchOrder` phase), not stored here.
+    pub pitch : CardCounts,
+    /// The graveyard's contents. The graveyard has no linked list: a card is in
+    /// it when its `location` says so, and this bitfield is the zone itself.
+    pub graveyard : CardCounts,
+    /// The (permanent) banish zone's contents, kept in step with `banish_idx`.
+    pub banished : CardCounts,
+    /// The Intimidate banish zone's contents, kept in step with
+    /// `intimidate_banish_idx`.
+    pub intimidate_banished : CardCounts,
+    /// The worn equipment still in play across the four equipment zones (head,
+    /// chest, arms, legs), kept in step with `head_idx`..`legs_idx`. The slot
+    /// indices still exist because activating a piece names the copy; this is
+    /// the unordered view of what the player is wearing. The weapon zone is not
+    /// an equipment zone and is not counted here.
+    pub equipment : CardCounts,
     pub resources: u8,
     pub action_points: u8,
     pub top_deck_idx: Option<CardIdx>,
@@ -492,21 +558,21 @@ impl Gamestate {
     }
 
     /// Turn the copy in global slot `idx` into `card`, as tests do to stage a
-    /// specific hand or deck. If the copy is in its owner's hand the hand
-    /// bitfield is relabelled too, so it stays in step with the linked list.
-    /// `card` must be in the owner's deck wherever the copy is, so a test can
-    /// never stage a zone the per-deck `CardCounts` could not represent.
+    /// specific hand or deck. If the copy is in one of its owner's unordered
+    /// zones (hand, pitch, graveyard, ...) that zone's bitfield is relabelled
+    /// too, so it stays in step with the cards' locations. `card` must be in
+    /// the owner's deck wherever the copy is, so a test can never stage a zone
+    /// the per-deck `CardCounts` could not represent.
     #[cfg(test)]
     pub fn set_card(&mut self, idx: usize, card: Card) {
         let owner = if idx < PLAYER_CARDS { &mut self.p1 } else { &mut self.p2 };
         let old = self.cards[idx].card;
+        let location = self.cards[idx].location;
         assert!(owner.deck.id_of(card).is_some(),
             "tests may only stage cards from the owner's deck: {:?} is not in the {:?} deck (at {:?})",
-            card, owner.deck, self.cards[idx].location);
-        if self.cards[idx].location == CardLocation::hand(owner.pid) {
-            owner.hand_remove(old);
-            owner.hand_add(card);
-        }
+            card, owner.deck, location);
+        owner.zone_remove(location, old);
+        owner.zone_add(location, card);
         self.cards[idx].card = card;
     }
 
@@ -612,16 +678,14 @@ impl Player {
     /// counts; the caller links the copy into `hand_idx`.
     #[inline]
     pub fn hand_add(&mut self, card: Card) {
-        let id = self.deck_id(card);
-        self.hand.add(id);
+        self.zone_add(CardLocation::hand(self.pid), card);
     }
 
     /// Record one copy of `card` leaving the hand bitfield. Only updates the
     /// counts; the caller unlinks the copy from `hand_idx`.
     #[inline]
     pub fn hand_remove(&mut self, card: Card) {
-        let id = self.deck_id(card);
-        self.hand.remove(id);
+        self.zone_remove(CardLocation::hand(self.pid), card);
     }
 
     /// How many copies of `card` are in hand, for code that knows which deck
@@ -651,10 +715,56 @@ impl Player {
             .sum()
     }
 
+    /// The bitfield for one of this player's unordered zones.
+    #[inline]
+    pub fn zone(&self, zone: UnorderedZone) -> CardCounts {
+        match zone {
+            UnorderedZone::Hand => self.hand,
+            UnorderedZone::Pitch => self.pitch,
+            UnorderedZone::Graveyard => self.graveyard,
+            UnorderedZone::Banish => self.banished,
+            UnorderedZone::IntimidateBanish => self.intimidate_banished,
+            UnorderedZone::Equipment => self.equipment,
+        }
+    }
+
+    /// Mutable form of `zone`.
+    #[inline]
+    pub fn zone_mut(&mut self, zone: UnorderedZone) -> &mut CardCounts {
+        match zone {
+            UnorderedZone::Hand => &mut self.hand,
+            UnorderedZone::Pitch => &mut self.pitch,
+            UnorderedZone::Graveyard => &mut self.graveyard,
+            UnorderedZone::Banish => &mut self.banished,
+            UnorderedZone::IntimidateBanish => &mut self.intimidate_banished,
+            UnorderedZone::Equipment => &mut self.equipment,
+        }
+    }
+
+    /// Record one more copy of `card` in the bitfield for `location`. A no-op
+    /// when `location` is not an unordered zone. Only
+    /// updates the counts; the caller sets the card's `location` and links it
+    /// into any list the zone keeps.
+    #[inline]
+    pub fn zone_add(&mut self, location: CardLocation, card: Card) {
+        if let Some(zone) = UnorderedZone::of(location) {
+            let id = self.deck_id(card);
+            self.zone_mut(zone).add(id);
+        }
+    }
+
+    /// Record one copy of `card` leaving the bitfield for `location`. A no-op
+    /// when `location` is not an unordered zone.
+    #[inline]
+    pub fn zone_remove(&mut self, location: CardLocation, card: Card) {
+        if let Some(zone) = UnorderedZone::of(location) {
+            let id = self.deck_id(card);
+            self.zone_mut(zone).remove(id);
+        }
+    }
+
     /// Check that the `hand` bitfield matches the `hand_idx` linked list:
     /// every copy linked into the hand counted once, and nothing else.
-    /// Called by `step` and `legal_actions` in debug builds, so any path that
-    /// changes the hand without going through the engine's helpers is caught.
     pub fn debug_check_hand(&self, cards: &[CardState; TOTAL_CARDS]) {
         let mut expected = CardCounts::EMPTY;
         for (_, cs) in self.hand_iter(cards) {
@@ -664,6 +774,39 @@ impl Player {
             self.hand, expected,
             "P{} hand bitfield is out of step with its linked list", self.pid.get() + 1,
         );
+    }
+
+    /// Check every unordered-zone bitfield against the cards themselves: walk
+    /// this player's half of `cards` and recount each zone from the cards'
+    /// `location`s, and check the hand and pitch bitfields against their
+    /// linked lists too. Called by `step` and `legal_actions` in debug builds,
+    /// so any path that moves a card without going through the engine's
+    /// helpers is caught.
+    pub fn debug_check_zones(&self, cards: &[CardState; TOTAL_CARDS]) {
+        self.debug_check_hand(cards);
+
+        let mut expected = CardCounts::EMPTY;
+        for (_, cs) in self.pitch_iter(cards) {
+            expected.add(self.deck_id(cs.card));
+        }
+        assert_eq!(
+            self.pitch, expected,
+            "P{} pitch bitfield is out of step with its linked list", self.pid.get() + 1,
+        );
+
+        let mut recount = [CardCounts::EMPTY; UnorderedZone::ALL.len()];
+        let base = self.pid.index() * PLAYER_CARDS;
+        for cs in &cards[base..base + PLAYER_CARDS] {
+            if let Some(zone) = UnorderedZone::of(cs.location) {
+                recount[zone as usize].add(self.deck_id(cs.card));
+            }
+        }
+        for zone in UnorderedZone::ALL {
+            assert_eq!(
+                self.zone(zone), recount[zone as usize],
+                "P{} {:?} bitfield is out of step with the cards' locations", self.pid.get() + 1, zone,
+            );
+        }
     }
 
     /// Iterate over this player's hand as `(slot_index, CardState)` pairs,

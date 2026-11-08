@@ -136,6 +136,11 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
         hero,
         deck: DeckKind::for_hero(hero),
         hand: CardCounts::EMPTY,
+        pitch: CardCounts::EMPTY,
+        graveyard: CardCounts::EMPTY,
+        banished: CardCounts::EMPTY,
+        intimidate_banished: CardCounts::EMPTY,
+        equipment: CardCounts::EMPTY,
         resources: 0,
         action_points: 0,
         top_deck_idx: None,
@@ -251,7 +256,13 @@ pub fn place_cards(gs: &mut Gamestate) {
 fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
     let pid = player.pid;
     let base = player_base(pid);
+    // Every unordered zone empties; worn equipment is counted back in below.
     player.hand = CardCounts::EMPTY;
+    player.pitch = CardCounts::EMPTY;
+    player.graveyard = CardCounts::EMPTY;
+    player.banished = CardCounts::EMPTY;
+    player.intimidate_banished = CardCounts::EMPTY;
+    player.equipment = CardCounts::EMPTY;
     player.deck_size = 0;
     // Reset the worn-equipment / weapon slots; they are repopulated below.
     player.weapon_idx = None;
@@ -278,8 +289,10 @@ fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
         let data = cards[idx].card.data();
         match data.typ {
             CardType::Equipment => {
-                cards[idx].location = equipment_zone(&data.slot, pid);
+                let zone = equipment_zone(&data.slot, pid);
+                cards[idx].location = zone;
                 cards[idx].visible = CardVisibleState::BothKnow;
+                player.zone_add(zone, cards[idx].card);
                 match data.slot {
                     Some(EquipmentSlot::Head) => player.head_idx = Some(CardIdx::new(idx)),
                     Some(EquipmentSlot::Chest) => player.chest_idx = Some(CardIdx::new(idx)),
@@ -411,5 +424,36 @@ mod tests {
 
         assert_eq!(dorintheadeck.len(), 40);
         assert_eq!(gs.p2.deck_size, 40);
+    }
+
+    #[test]
+    fn reset_counts_worn_equipment_and_empties_other_zones() {
+        use crate::deck_cards::{DorintheaCard, RhinarCard};
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        // Four pieces of worn equipment each; the weapon zone is not counted.
+        assert_eq!(gs.p1.equipment.len(), 4);
+        assert_eq!(gs.p1.equipment.count_as(RhinarCard::IronhideLegs), 1);
+        assert_eq!(gs.p1.equipment.count_as(RhinarCard::BoneBasher), 0);
+        assert_eq!(gs.p2.equipment.len(), 4);
+        assert_eq!(gs.p2.equipment.count_as(DorintheaCard::GallantryGold), 1);
+        for p in [&gs.p1, &gs.p2] {
+            assert!(p.pitch.is_empty());
+            assert!(p.graveyard.is_empty());
+            assert!(p.banished.is_empty());
+            assert!(p.intimidate_banished.is_empty());
+            p.debug_check_zones(&gs.cards);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Graveyard bitfield is out of step")]
+    fn moving_a_card_without_its_bitfield_is_caught() {
+        let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        reset(&mut gs, false);
+        // Retag a deck card to the graveyard behind the engine's back.
+        let idx = gs.p1.top_deck_idx.unwrap().get();
+        gs.cards[idx].location = CardLocation::P1Graveyard;
+        gs.p1.debug_check_zones(&gs.cards);
     }
 }

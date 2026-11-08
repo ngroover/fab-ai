@@ -40,14 +40,14 @@ use std::collections::HashSet;
 
 /// Empty `pid`'s hand into its graveyard so that a subsequent draw produces a
 /// single, known card. Each card is detached while still tagged as a hand
-/// card (so the hand list is fixed up) and then retagged to the graveyard,
-/// which is tracked purely by `location`.
+/// card (so the hand list is fixed up) and then placed in the graveyard, so
+/// both zones' bitfields follow along.
 fn move_hand_to_graveyard(gs: &mut Gamestate, pid: PlayerIndex) {
     let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     while let Some(head) = player.hand_idx {
         let idx = head.get();
         detach_from_current_zone(player, &mut gs.cards, idx);
-        gs.cards[idx].location = CardLocation::graveyard(pid);
+        place_in_zone(player, &mut gs.cards, idx, CardLocation::graveyard(pid));
     }
 }
 
@@ -251,6 +251,7 @@ fn set_hand(gs: &mut Gamestate, pid: PlayerIndex, desired: &[Card]) {
             let next = gs.cards[head].next_card.get();
             player.hand_idx = if next == head { None } else { Some(CardIdx::new(next)) };
             player.hand_remove(gs.cards[head].card);
+            player.zone_add(CardLocation::graveyard(pid), gs.cards[head].card);
             gs.cards[head].location = CardLocation::graveyard(pid);
         }
     }
