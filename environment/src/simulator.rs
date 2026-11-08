@@ -142,4 +142,60 @@ mod tests {
             assert!(sim.game.is_over(), "seed {} deadlocked (no legal actions before terminal state)", seed);
         }
     }
+
+    /// Play the random game for `seed` (the same seeding the other sweeps use)
+    /// to completion and return the deepest the stack got.
+    fn max_stack_depth(seed: u64) -> usize {
+        let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+        let mut sim = Simulator::new(game, RandomAgent::new(Some(seed + 1)), RandomAgent::new(Some(seed + 2)));
+        sim.game.reset(false);
+        let mut deepest = 0;
+        while !sim.game.is_over() {
+            let legal = sim.game.legal_actions();
+            assert!(!legal.is_empty(), "seed {} deadlocked", seed);
+            let action = if sim.game.player_to_act() == 0 {
+                sim.p1_agent.select_action(&sim.game, &legal)
+            } else {
+                sim.p2_agent.select_action(&sim.game, &legal)
+            };
+            sim.game.step(action);
+            deepest = deepest.max(sim.game.state.stack.len());
+        }
+        deepest
+    }
+
+    /// Random play never comes close to filling the stack: across many seeds
+    /// the deepest it gets leaves headroom below `STACK_SIZE` (overflowing it
+    /// would panic in `push_to_stack`, failing the sweep outright).
+    #[test]
+    fn random_games_stay_within_the_stack_size() {
+        use crate::game_state::STACK_SIZE;
+        let deepest = (0..2_000u64).map(max_stack_depth).max().unwrap();
+        assert!(deepest < STACK_SIZE, "random play reached {} stack layers (STACK_SIZE {})", deepest, STACK_SIZE);
+    }
+
+    /// A much larger sweep that prints how deep the stack gets, for checking
+    /// `STACK_SIZE` headroom. Slow, so ignored by default; run with
+    /// `cargo test --release stack_depth_histogram -- --ignored --nocapture`
+    /// (`STACK_SWEEP_GAMES` sets the game count, default 1,000,000).
+    #[test]
+    #[ignore]
+    fn stack_depth_histogram() {
+        use crate::game_state::STACK_SIZE;
+        let games: u64 = std::env::var("STACK_SWEEP_GAMES").ok().and_then(|v| v.parse().ok()).unwrap_or(1_000_000);
+        let mut hist = [0u64; STACK_SIZE + 1];
+        let mut deepest_seed = 0;
+        for seed in 0..games {
+            let d = max_stack_depth(seed);
+            if d > hist.iter().rposition(|&c| c > 0).unwrap_or(0) {
+                deepest_seed = seed;
+            }
+            hist[d] += 1;
+        }
+        println!("max stack depth per game over {} random games (STACK_SIZE {}):", games, STACK_SIZE);
+        for (depth, count) in hist.iter().enumerate().filter(|(_, c)| **c > 0) {
+            println!("  {:>2} layers: {}", depth, count);
+        }
+        println!("first game to reach the deepest: seed {}", deepest_seed);
+    }
 }

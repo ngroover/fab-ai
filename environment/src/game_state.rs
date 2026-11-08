@@ -54,8 +54,10 @@ pub const PLAYER_CARDS: usize = 45;
 /// beyond this limit panics (see `Gamestate::push_to_stack`). Both players may
 /// keep adding instants, reactions and activations without passing, so a single
 /// reaction window can legitimately stack six or more layers (e.g. four attack
-/// reactions answered by two Dodges); 16 leaves ample headroom.
-pub const STACK_SIZE: usize = 16;
+/// reactions answered by two Dodges). 10 leaves headroom over that: a sweep
+/// of 10 million random games never went deeper than 6 (see
+/// `simulator::tests::stack_depth_histogram`).
+pub const STACK_SIZE: usize = 10;
 /// How many cards a decklist puts in the deck: everything but the hero, the
 /// weapon and the four pieces of equipment.
 pub const DECK_CARDS: usize = 40;
