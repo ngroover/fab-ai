@@ -6,6 +6,11 @@ use crate::fab_step::{current_chain_link, face_down_mentor_in_arsenal, uses_acti
 
 
 pub fn legal_actions(gs: &Gamestate) -> LegalActions {
+    #[cfg(debug_assertions)]
+    {
+        gs.p1.debug_check_hand(&gs.cards);
+        gs.p2.debug_check_hand(&gs.cards);
+    }
     match gs.phase {
         Phase::ChooseFirst => {
             let mut actions = LegalActions::new();
@@ -280,9 +285,7 @@ fn legal_play_phase(gs: &Gamestate, is_playable: fn(CardType) -> bool) -> LegalA
     // Total pitch available across the whole hand. Computed once here and shared
     // by both the hand-card playability and equipment-activation affordability
     // checks, since pitching pays for either.
-    let total_pitch: u8 = player.hand_iter(&gs.cards)
-        .map(|(_, cs)| cs.card.data().pitch)
-        .sum();
+    let total_pitch = player.hand_pitch_total();
 
     push_playable_cards(&mut legal_actions, player, &gs.cards, total_pitch, is_playable);
     push_equipment_activations(&mut legal_actions, player, &gs.cards, total_pitch, is_playable);
@@ -353,16 +356,14 @@ fn push_defending_activations(actions: &mut LegalActions, gs: &Gamestate, is_pla
         // A cost that discards cannot be paid from an empty hand. The card
         // itself is on the chain rather than in hand, so it can never be the
         // card it discards.
-        if ability.discards_a_card() && defender.hand_idx.is_none() {
+        if ability.discards_a_card() && defender.hand.is_empty() {
             continue;
         }
         // Whatever resource cost the ability carries must also be payable. No
         // defending ability costs resources today, so this is the same
         // affordability rule as `push_equipment_activations`, stated so a future
         // costed one is not offered for free.
-        let total_pitch: u8 = defender.hand_iter(&gs.cards)
-            .map(|(_, cs)| cs.card.data().pitch)
-            .sum();
+        let total_pitch = defender.hand_pitch_total();
         if total_pitch < ability.resource_cost().saturating_sub(defender.resources) {
             continue;
         }

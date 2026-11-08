@@ -1,11 +1,13 @@
 use crate::cards::Card;
 use crate::action::ActionType;
+use crate::card_counts::{CardCounts, DeckCardId};
+use crate::deck_cards::{DeckCard, DeckKind};
 use rand::rngs::SmallRng;
 
 /// A global index into `Gamestate::cards`. Wrapping the raw `u8` in a newtype
 /// keeps card indices from being silently confused with the many other small
 /// integers in the engine that share the same representation — counts
-/// (`hand_size`, `deck_size`), player ids (`pid`, `active_player`), or pitch
+/// (`hand_size()`, `deck_size`), player ids (`pid`, `active_player`), or pitch
 /// values. Construct with `CardIdx::new` from a `usize` slot; read back the
 /// `usize` with `get` when indexing `Gamestate::cards`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -254,6 +256,15 @@ pub struct Player {
     pub life: u8,
     pub intellect: u8,
     pub hero : Card,
+    /// Which deck card enum this player's `DeckCardId`s belong to — the deck
+    /// `hero` plays. Fixed when the game is built.
+    pub deck : DeckKind,
+    /// The hand's contents as a bitfield: how many copies of each of `deck`'s
+    /// cards are in hand (see `CardCounts`). The hand is unordered, so this is
+    /// all the rules need to know about it. Kept in step with the `hand_idx`
+    /// linked list by the engine's attach/detach helpers; the list still exists
+    /// so per-copy state (`CardState`) can be reached, and may go away later.
+    pub hand : CardCounts,
     pub resources: u8,
     pub action_points: u8,
     pub top_deck_idx: Option<CardIdx>,
@@ -284,7 +295,6 @@ pub struct Player {
     /// it do not blunt it. A defender's links can therefore have gaps, where an
     /// attack went unblocked.
     pub chain_link : [Option<CardIdx>; 5],
-    pub hand_size : u8,
     pub deck_size : u8,
     /// Extra power added to this player's current attack on top of the cards on
     /// the combat chain. Set by on-play effects that conditionally pump the
@@ -481,6 +491,21 @@ impl Gamestate {
         self.stack[top].take()
     }
 
+    /// Turn the copy in global slot `idx` into `card`, as tests do to stage a
+    /// specific hand or deck. If the copy is in its owner's hand the hand
+    /// bitfield is relabelled too, so it stays in step with the linked list;
+    /// `card` must then be in the owner's deck.
+    #[cfg(test)]
+    pub fn set_card(&mut self, idx: usize, card: Card) {
+        let owner = if idx < PLAYER_CARDS { &mut self.p1 } else { &mut self.p2 };
+        let old = self.cards[idx].card;
+        if self.cards[idx].location == CardLocation::hand(owner.pid) {
+            owner.hand_remove(old);
+            owner.hand_add(card);
+        }
+        self.cards[idx].card = card;
+    }
+
     /// True when logging was enabled by `reset(gs, true)`. Callers should check
     /// this before building log strings so disabled logging costs nothing.
     pub fn logging_enabled(&self) -> bool {
@@ -563,6 +588,80 @@ impl<'a> Iterator for HandIter<'a> {
 }
 
 impl Player {
+    /// Number of cards in hand, counting every copy.
+    #[inline]
+    pub const fn hand_size(&self) -> u8 {
+        self.hand.len()
+    }
+
+    /// `card`'s id in this player's deck. Panics if the deck does not contain
+    /// it, since such a card can never be in this player's hand.
+    #[inline]
+    pub fn deck_id(&self, card: Card) -> DeckCardId {
+        match self.deck.id_of(card) {
+            Some(id) => id,
+            None => panic!("{:?} is not in the {:?} deck", card, self.deck),
+        }
+    }
+
+    /// Record one more copy of `card` in the hand bitfield. Only updates the
+    /// counts; the caller links the copy into `hand_idx`.
+    #[inline]
+    pub fn hand_add(&mut self, card: Card) {
+        let id = self.deck_id(card);
+        self.hand.add(id);
+    }
+
+    /// Record one copy of `card` leaving the hand bitfield. Only updates the
+    /// counts; the caller unlinks the copy from `hand_idx`.
+    #[inline]
+    pub fn hand_remove(&mut self, card: Card) {
+        let id = self.deck_id(card);
+        self.hand.remove(id);
+    }
+
+    /// How many copies of `card` are in hand, for code that knows which deck
+    /// this player has. Debug builds check that `D` is this player's deck.
+    #[inline]
+    pub fn hand_count<D: DeckCard>(&self, card: D) -> u8 {
+        debug_assert_eq!(D::KIND, self.deck, "{:?} is not this player's deck enum", card);
+        self.hand.count_as(card)
+    }
+
+    /// How many copies of `card` are in hand, for code that does not know the
+    /// deck. A card outside the deck is never in hand, so it counts 0.
+    #[inline]
+    pub fn hand_count_card(&self, card: Card) -> u8 {
+        match self.deck.id_of(card) {
+            Some(id) => self.hand.count(id),
+            None => 0,
+        }
+    }
+
+    /// The pitch value of every card in hand added up, read from the bitfield:
+    /// one catalog lookup per distinct card rather than one per copy.
+    pub fn hand_pitch_total(&self) -> u8 {
+        self.hand
+            .iter()
+            .map(|(id, n)| self.deck.card(id).data().pitch * n)
+            .sum()
+    }
+
+    /// Check that the `hand` bitfield matches the `hand_idx` linked list:
+    /// every copy linked into the hand counted once, and nothing else.
+    /// Called by `step` and `legal_actions` in debug builds, so any path that
+    /// changes the hand without going through the engine's helpers is caught.
+    pub fn debug_check_hand(&self, cards: &[CardState; TOTAL_CARDS]) {
+        let mut expected = CardCounts::EMPTY;
+        for (_, cs) in self.hand_iter(cards) {
+            expected.add(self.deck_id(cs.card));
+        }
+        assert_eq!(
+            self.hand, expected,
+            "P{} hand bitfield is out of step with its linked list", self.pid.get() + 1,
+        );
+    }
+
     /// Iterate over this player's hand as `(slot_index, CardState)` pairs,
     /// starting at `hand_idx` and following `next_card` until a node points to
     /// itself. `cards` is the shared `Gamestate::cards` array the indices refer

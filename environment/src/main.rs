@@ -1,8 +1,10 @@
 mod action;
 mod agents;
+mod card_counts;
 mod cards;
 mod card_effects;
 mod classic_battles;
+mod deck_cards;
 mod decks;
 mod fab_game;
 mod game_state;

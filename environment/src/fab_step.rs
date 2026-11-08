@@ -11,6 +11,11 @@ pub fn step(gs: &mut Gamestate, act: Action) {
     if gs.is_game_over() {
         return;
     }
+    #[cfg(debug_assertions)]
+    {
+        gs.p1.debug_check_hand(&gs.cards);
+        gs.p2.debug_check_hand(&gs.cards);
+    }
     match gs.phase {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::MentorFlip => handle_mentor_flip_phase(gs, act),
@@ -48,7 +53,7 @@ fn log_opening_hand(gs: &mut Gamestate, pid: PlayerIndex) {
     }
     let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
     let named = format!("{} draws [{}]", player_name(pid), hand_card_names(player, &gs.cards));
-    let hidden = format!("{} draws {} cards", player_name(pid), player.hand_size);
+    let hidden = format!("{} draws {} cards", player_name(pid), player.hand_size());
     let (p1_msg, p2_msg) = if pid == PlayerIndex::P1 {
         (named.clone(), hidden)
     } else {
@@ -538,9 +543,9 @@ fn attach_to_bottom_of_deck(player: &mut Player, cards: &mut [CardState; TOTAL_C
 fn end_turn(gs: &mut Gamestate) {
     let pid = gs.turn_player;
     let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-    let hand_before = player.hand_size;
+    let hand_before = player.hand_size();
     draw_to_intellect(player, &mut gs.cards);
-    let drawn = player.hand_size - hand_before;
+    let drawn = player.hand_size() - hand_before;
     log_end_of_turn_draw(gs, pid, drawn);
 
     gs.p1.resources = 0;
@@ -920,13 +925,13 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
 }
 
 /// The global slot of a card chosen uniformly at random from `pid`'s hand, or
-/// `None` when the hand is empty. Counts the hand, draws one index from the rng,
-/// then walks the linked list to it — two short walks instead of collecting the
-/// hand into a `Vec`, so the random hand picks made by Intimidate and the
+/// `None` when the hand is empty. Reads the hand size from the bitfield, draws
+/// one index from the rng, then walks the linked list to it, rather than
+/// collecting the hand into a `Vec`, so the random hand picks made by Intimidate and the
 /// discard effects allocate nothing.
 fn random_hand_card(gs: &mut Gamestate, pid: PlayerIndex) -> Option<usize> {
     let player = if pid == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-    let len = player.hand_iter(&gs.cards).count();
+    let len = player.hand_size() as usize;
     if len == 0 {
         return None;
     }
@@ -1325,15 +1330,7 @@ fn return_intimidate_banished_to_hands(gs: &mut Gamestate) {
 
             let player = if pid == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
             detach_from_current_zone(player, &mut gs.cards, idx);
-            gs.cards[idx].location = CardLocation::hand(pid);
-            gs.cards[idx].visible = hand_visibility(pid);
-            attach_to_front_of_zone(
-                &mut gs.cards,
-                &mut player.hand_idx,
-                None,
-                Some(&mut player.hand_size),
-                idx,
-            );
+            attach_to_hand(player, &mut gs.cards, idx);
         }
     }
 }
@@ -1872,13 +1869,8 @@ fn detach_from_current_zone(player: &mut Player, cards: &mut [CardState; TOTAL_C
     let location = cards[idx].location;
     match location {
         CardLocation::P1Hand | CardLocation::P2Hand => {
-            detach_from_linked_list(
-                cards,
-                &mut player.hand_idx,
-                None,
-                Some(&mut player.hand_size),
-                idx,
-            );
+            player.hand_remove(cards[idx].card);
+            detach_from_linked_list(cards, &mut player.hand_idx, None, None, idx);
         }
         CardLocation::P1Deck | CardLocation::P2Deck => {
             // The deck tracks both ends and a count; let the helper fix them all.
@@ -1969,7 +1961,7 @@ fn draw_to_intellect(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) 
     // Draw back up to intellect. `saturating_sub` guards the unsigned subtraction:
     // if the hand is already at or over intellect there is nothing to draw (a
     // plain `-` would underflow-panic, and `.max(0)` on a `u8` is a no-op).
-    let need = player.intellect.saturating_sub(player.hand_size) as usize;
+    let need = player.intellect.saturating_sub(player.hand_size()) as usize;
     draw_cards(player, cards, need);
 }
 
@@ -1999,17 +1991,20 @@ fn hand_visibility(pid: PlayerIndex) -> CardVisibleState {
 fn move_from_deck_to_hand(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], card_idx : usize) {
     // Pull the card off the deck (updates top/bottom pointers and deck_size),
     // then prepend it to the hand and mark it as known to its owner.
-    let pid = player.pid;
     detach_from_current_zone(player, cards, card_idx);
-    cards[card_idx].location = CardLocation::hand(pid);
-    cards[card_idx].visible = hand_visibility(pid);
-    attach_to_front_of_zone(
-        cards,
-        &mut player.hand_idx,
-        None,
-        Some(&mut player.hand_size),
-        card_idx,
-    );
+    attach_to_hand(player, cards, card_idx);
+}
+
+/// Put the card at global index `idx`, already detached from its old zone, into
+/// its owner `player`'s hand: count it in the `hand` bitfield, link it to the
+/// front of the `hand_idx` list, and mark it as known to its owner. The single
+/// way a card enters a hand, so the bitfield and the list cannot drift apart.
+fn attach_to_hand(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS], idx: usize) {
+    let pid = player.pid;
+    player.hand_add(cards[idx].card);
+    cards[idx].location = CardLocation::hand(pid);
+    cards[idx].visible = hand_visibility(pid);
+    attach_to_front_of_zone(cards, &mut player.hand_idx, None, None, idx);
 }
 
 /// Per-card on-play effect unit tests live in their own file. Declared as a
@@ -2551,14 +2546,14 @@ mod tests {
                 .find(|(_, cs)| cs.card == Card::DrivingBladeY)
                 .map(|(idx, _)| idx)
                 .expect("Driving Blade should be in Dorinthea's opening hand");
-        let hand_before = gs.p2.hand_size;
+        let hand_before = gs.p2.hand_size();
 
         step(&mut gs, Action{ typ: ActionType::Defend, card: Some(CardIdx::new(db_idx))});
 
         assert_eq!(gs.phase, Phase::Defend);
         assert_eq!(gs.p2.chain_link[0], Some(CardIdx::new(db_idx)));
         assert_eq!(gs.cards[db_idx].location, CardLocation::P2CombatChain);
-        assert_eq!(gs.p2.hand_size, hand_before - 1);
+        assert_eq!(gs.p2.hand_size(), hand_before - 1);
         // The blocker lands on the defender's chain, not the attacker's.
         assert_eq!(gs.p1.chain_link[0].map(|i| gs.cards[i.get()].card), Some(Card::MuscleMuttY));
     }
@@ -3115,14 +3110,7 @@ mod tests {
                             && gs.cards[i].location == CardLocation::P2Deck)
                         .expect("Dorinthea's deck should contain Sigil of Solace");
                     detach_from_current_zone(&mut gs.p2, &mut gs.cards, from_deck);
-                    gs.cards[from_deck].location = CardLocation::P2Hand;
-                    attach_to_front_of_zone(
-                        &mut gs.cards,
-                        &mut gs.p2.hand_idx,
-                        None,
-                        Some(&mut gs.p2.hand_size),
-                        from_deck,
-                    );
+                    attach_to_hand(&mut gs.p2, &mut gs.cards, from_deck);
                     Some(from_deck)
                 })
                 .unwrap();
@@ -3311,7 +3299,7 @@ mod tests {
 
         // Arsenaling dropped the hand to 3; the end-of-turn draw refills it to
         // intellect (4), taking one card off the deck.
-        assert_eq!(gs.p1.hand_size, 4);
+        assert_eq!(gs.p1.hand_size(), 4);
         assert_eq!(gs.p1.deck_size, 35);
 
         // The opponent's turn begins: both the turn and active player flip, play
@@ -3336,7 +3324,7 @@ mod tests {
         // Nothing was arsenaled, and the hand was already at intellect so
         // nothing was drawn.
         assert_eq!(gs.p1.arsenal_idx, None);
-        assert_eq!(gs.p1.hand_size, 4);
+        assert_eq!(gs.p1.hand_size(), 4);
         assert_eq!(gs.p1.deck_size, 36);
 
         // The opponent's turn still begins.
@@ -3381,7 +3369,7 @@ mod tests {
         assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Deck);
         assert_eq!(gs.p1.bottom_deck_idx, Some(CardIdx::new(cb_idx)));
         assert_eq!(gs.p1.deck_size, 35);
-        assert_eq!(gs.p1.hand_size, 4);
+        assert_eq!(gs.p1.hand_size(), 4);
     }
 
     /// Drive Rhinar through a Muscle Mutt attack paid for with *two* pitched
@@ -3479,7 +3467,7 @@ mod tests {
         // End-of-turn bookkeeping ran as usual: the hand (1 card after playing
         // and pitching three) drew back to intellect, 38 - 3 = 35 cards remain
         // in the deck, and the turn flipped to Dorinthea.
-        assert_eq!(gs.p1.hand_size, 4);
+        assert_eq!(gs.p1.hand_size(), 4);
         assert_eq!(gs.p1.deck_size, 35);
         assert_eq!(gs.turn_player, PlayerIndex::P2);
         assert_eq!(gs.active_player, PlayerIndex::P2);
@@ -3737,9 +3725,9 @@ mod tests {
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
 
-        assert_eq!(gs.p1.hand_size, 4);
+        assert_eq!(gs.p1.hand_size(), 4);
         assert_eq!(gs.p1.deck_size, 36);
-        assert_eq!(gs.p2.hand_size, 4);
+        assert_eq!(gs.p2.hand_size(), 4);
         assert_eq!(gs.p2.deck_size, 36);
 
         let hand = get_card_states_from_location(&gs, PlayerIndex::P1, CardLocation::P1Hand);
@@ -3772,7 +3760,7 @@ mod tests {
         // After the opening draw p1 has 36 cards left in the deck.
         let deck_before = gs.p1.deck_size;
         assert_eq!(deck_before, 36);
-        let hand_before = gs.p1.hand_size;
+        let hand_before = gs.p1.hand_size();
 
         // Draw the entire deck, including the final (tail) card.
         draw_cards(&mut gs.p1, &mut gs.cards, deck_before as usize);
@@ -3782,12 +3770,12 @@ mod tests {
         assert_eq!(gs.p1.deck_size, 0);
         assert_eq!(gs.p1.top_deck_idx, None);
         assert_eq!(gs.p1.bottom_deck_idx, None);
-        assert_eq!(gs.p1.hand_size, hand_before + deck_before);
+        assert_eq!(gs.p1.hand_size(), hand_before + deck_before);
 
         // Drawing further from an empty deck is a safe no-op.
         draw_cards(&mut gs.p1, &mut gs.cards, 5);
         assert_eq!(gs.p1.deck_size, 0);
-        assert_eq!(gs.p1.hand_size, hand_before + deck_before);
+        assert_eq!(gs.p1.hand_size(), hand_before + deck_before);
     }
 
     // ── Win / draw phases ──────────────────────────────────────────────────
@@ -4166,7 +4154,7 @@ mod tests {
         gs.cards[pitch_idx].card = Card::ClearingBellowB;
 
         // The opponent (p2) starts with a full opening hand to banish from.
-        let victim_hand_before = gs.p2.hand_size;
+        let victim_hand_before = gs.p2.hand_size();
         assert!(victim_hand_before > 0);
         assert_eq!(gs.p2.intimidate_banish_idx, None);
 
@@ -4187,7 +4175,7 @@ mod tests {
         assert_eq!(gs.cards[ph_idx].location, CardLocation::P1CombatChain);
 
         // Exactly one card left p2's hand for the Intimidate banish zone.
-        assert_eq!(gs.p2.hand_size, victim_hand_before - 1);
+        assert_eq!(gs.p2.hand_size(), victim_hand_before - 1);
         let banished_idx = gs.p2.intimidate_banish_idx.expect("a card was banished to Intimidate");
         assert_eq!(gs.cards[banished_idx.get()].location, CardLocation::P2IntimidateBanish);
         let banished = get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2IntimidateBanish);
@@ -4202,7 +4190,7 @@ mod tests {
         // zone.
         let (mut gs, cb_idx) = instant_phase_with_one_card();
 
-        let victim_hand_before = gs.p2.hand_size;
+        let victim_hand_before = gs.p2.hand_size();
         assert!(victim_hand_before > 0);
         assert_eq!(gs.p2.intimidate_banish_idx, None);
 
@@ -4214,7 +4202,7 @@ mod tests {
         assert_eq!(gs.cards[cb_idx].location, CardLocation::P1Graveyard);
 
         // Exactly one card left p2's hand for the Intimidate banish zone.
-        assert_eq!(gs.p2.hand_size, victim_hand_before - 1);
+        assert_eq!(gs.p2.hand_size(), victim_hand_before - 1);
         let banished_idx = gs.p2.intimidate_banish_idx.expect("a card was banished to Intimidate");
         assert_eq!(gs.cards[banished_idx.get()].location, CardLocation::P2IntimidateBanish);
         let banished = get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2IntimidateBanish);
@@ -4229,7 +4217,7 @@ mod tests {
         // Again) is convenient: after it resolves play returns to p1's Action
         // phase, and one more pass closes the turn into the Arsenal phase.
         let (mut gs, cb_idx) = instant_phase_with_one_card();
-        let victim_hand_before = gs.p2.hand_size;
+        let victim_hand_before = gs.p2.hand_size();
 
         // Both players pass: Clearing Bellow resolves and its Intimidate banishes a
         // random card from p2's hand. We are back in p1's Action phase.
@@ -4242,7 +4230,7 @@ mod tests {
             .expect("a card was banished to Intimidate")
             .get();
         assert_eq!(gs.cards[banished_idx].location, CardLocation::P2IntimidateBanish);
-        assert_eq!(gs.p2.hand_size, victim_hand_before - 1);
+        assert_eq!(gs.p2.hand_size(), victim_hand_before - 1);
 
         // p1 passes, closing the turn into the Arsenal phase. Entering it returns
         // the Intimidate-banished card to p2's hand and empties the zone.
@@ -4251,7 +4239,7 @@ mod tests {
 
         assert_eq!(gs.p2.intimidate_banish_idx, None);
         assert_eq!(gs.cards[banished_idx].location, CardLocation::P2Hand);
-        assert_eq!(gs.p2.hand_size, victim_hand_before);
+        assert_eq!(gs.p2.hand_size(), victim_hand_before);
         assert!(get_card_states_from_location(&gs, PlayerIndex::P2, CardLocation::P2IntimidateBanish).is_empty());
         // The returned card is reachable again by walking p2's hand.
         assert!(gs.p2.hand_iter(&gs.cards).any(|(idx, _)| idx == banished_idx));

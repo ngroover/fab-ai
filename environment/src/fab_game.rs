@@ -1,5 +1,7 @@
 use crate::action::{Action, LegalActions};
+use crate::card_counts::CardCounts;
 use crate::cards::{Card, CardType, EquipmentSlot};
+use crate::deck_cards::DeckKind;
 use crate::game_state::{
     CardIdx, CardLocation, CardState, CardVisibleState, Gamestate, Player, Phase, PlayerIndex,
     PLAYER_CARDS,  STACK_SIZE, TOTAL_CARDS,
@@ -132,6 +134,8 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
         life: 0,
         intellect: 0,
         hero,
+        deck: DeckKind::for_hero(hero),
+        hand: CardCounts::EMPTY,
         resources: 0,
         action_points: 0,
         top_deck_idx: None,
@@ -147,7 +151,6 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> (Player, [CardSta
         arms_idx : None,
         legs_idx : None,
         chain_link : [None; 5],
-        hand_size : 0,
         deck_size : 0,
         attack_power_bonus : 0,
         attack_go_again_bonus : false,
@@ -248,7 +251,7 @@ pub fn place_cards(gs: &mut Gamestate) {
 fn place_cards_for(player: &mut Player, cards: &mut [CardState; TOTAL_CARDS]) {
     let pid = player.pid;
     let base = player_base(pid);
-    player.hand_size = 0;
+    player.hand = CardCounts::EMPTY;
     player.deck_size = 0;
     // Reset the worn-equipment / weapon slots; they are repopulated below.
     player.weapon_idx = None;
