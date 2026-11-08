@@ -3256,6 +3256,7 @@ fn declining_leaves_the_mentor_face_down_and_it_is_offered_again_next_turn() {
     assert_eq!(face_down_mentor_in_arsenal(&gs, PlayerIndex::P1), Some(gs.p1.deck_id(ruk)));
 }
 
+#[cfg(feature = "logging")]
 #[test]
 fn declining_the_flip_is_not_logged_to_the_opponent() {
     // Same lead-up as `rhinar_second_turn_with_face_down_rukutan`, with logging
@@ -3282,6 +3283,7 @@ fn declining_the_flip_is_not_logged_to_the_opponent() {
     assert!(gs.p2.log.as_ref().unwrap().iter().all(|l| !l.contains("face down")));
 }
 
+#[cfg(feature = "logging")]
 #[test]
 fn flipping_is_logged_publicly() {
     // Turning the mentor face up reveals it anyway, so both players see it.

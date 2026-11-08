@@ -106,6 +106,7 @@ mod tests {
         assert!(steps > 0);
     }
 
+    #[cfg(feature = "logging")]
     #[test]
     fn run_with_logging_records_a_game_log() {
         let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(42));

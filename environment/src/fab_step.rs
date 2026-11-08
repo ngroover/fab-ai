@@ -3236,6 +3236,7 @@ mod tests {
         assert_eq!(gs.turn_player, PlayerIndex::P1);
     }
 
+    #[cfg(feature = "logging")]
     #[test]
     fn test_arsenal_logs_hide_card_from_opponent() {
         let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);
@@ -3262,6 +3263,7 @@ mod tests {
         ]);
     }
 
+    #[cfg(feature = "logging")]
     #[test]
     fn test_close_combat_chain_logs_once() {
         // With logging on, closing a populated chain logs a single public event
@@ -3556,6 +3558,7 @@ mod tests {
 
     // ── Logging ────────────────────────────────────────────────────────────
 
+    #[cfg(feature = "logging")]
     #[test]
     fn test_logging_disabled_leaves_logs_none() {
         let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
@@ -3567,6 +3570,7 @@ mod tests {
         assert!(gs.p2.log.is_none());
     }
 
+    #[cfg(feature = "logging")]
     #[test]
     fn test_logging_events_as_they_happen() {
         let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);
@@ -3592,6 +3596,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "logging")]
     #[test]
     fn test_logging_pass_and_stack_resolution_in_one_step() {
         // Drive Muscle Mutt onto the stack with logging on.
@@ -3618,6 +3623,7 @@ mod tests {
         assert_eq!(log[len + 2], "P1 attacks with MuscleMuttY");
     }
 
+    #[cfg(feature = "logging")]
     #[test]
     fn test_logging_hides_opponent_draws() {
         let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);
@@ -3640,6 +3646,7 @@ mod tests {
         assert_eq!(p2_view[1], "P1 draws 4 cards");
     }
 
+    #[cfg(feature = "logging")]
     #[test]
     fn test_logging_damage_message_includes_life_change() {
         let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);

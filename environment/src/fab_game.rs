@@ -100,6 +100,7 @@ pub fn gamestate_from_decklists(decks: &Decklists, seed: Option<u64>) -> Gamesta
         stack: empty_stack(),
         pending_card: None,
         // Logging is opted into via `reset(gs, decks, true)`; off until then.
+        #[cfg(feature = "logging")]
         log: None,
     }
 }
@@ -109,7 +110,8 @@ pub fn gamestate_from_decklists(decks: &Decklists, seed: Option<u64>) -> Gamesta
 /// when `true`, the omniscient `Gamestate::log` and the per-player
 /// `Player::log` views are allocated (empty) and `step` appends to them; when
 /// `false` all three are `None` and logging costs nothing — the right choice
-/// for simulation or heavy gamestate cloning.
+/// for simulation or heavy gamestate cloning. Without the `logging` Cargo
+/// feature the log fields do not exist and `logging` is ignored.
 pub fn reset(gs: &mut Gamestate, decks: &Decklists, logging: bool) {
     assert!(gs.p1.hero == decks.p1.hero && gs.p2.hero == decks.p2.hero,
         "reset with decklists for other heroes than the game was built with");
@@ -119,10 +121,15 @@ pub fn reset(gs: &mut Gamestate, decks: &Decklists, logging: bool) {
     gs.pending_card = None;
     gs.passes = 0;
 
-    let new_log = || if logging { Some(Vec::new()) } else { None };
-    gs.log = new_log();
-    gs.p1.log = new_log();
-    gs.p2.log = new_log();
+    #[cfg(feature = "logging")]
+    {
+        let new_log = || if logging { Some(Vec::new()) } else { None };
+        gs.log = new_log();
+        gs.p1.log = new_log();
+        gs.p2.log = new_log();
+    }
+    #[cfg(not(feature = "logging"))]
+    let _ = logging;
 
     place_cards(gs, decks);
     shuffle_decks(gs);

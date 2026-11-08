@@ -426,6 +426,8 @@ pub struct Player {
     /// and cloning pay nothing); `reset(gs, decks, true)` turns it on. Entries are
     /// pushed at the moment each event happens, so a single `step` may log
     /// several (e.g. a pass that also resolves the top of the stack).
+    /// Only present when built with the `logging` Cargo feature.
+    #[cfg(feature = "logging")]
     pub log : Option<Vec<String>>,
 }
 
@@ -471,6 +473,8 @@ pub struct Gamestate {
     /// pay nothing); `reset(gs, decks, true)` turns it on. Entries are pushed at the
     /// moment each event happens, so a single `step` may log several (e.g. a
     /// pass that also resolves the top of the stack).
+    /// Only present when built with the `logging` Cargo feature.
+    #[cfg(feature = "logging")]
     pub log : Option<Vec<String>>,
 }
 
@@ -568,28 +572,46 @@ impl Gamestate {
 
     /// True when logging was enabled by `reset(gs, decks, true)`. Callers should check
     /// this before building log strings so disabled logging costs nothing.
+    /// Always `false` without the `logging` Cargo feature, so every guarded
+    /// logging block compiles away.
+    #[cfg(feature = "logging")]
+    #[inline]
     pub fn logging_enabled(&self) -> bool {
         self.log.is_some()
+    }
+
+    /// Always `false`: the crate was built without the `logging` feature.
+    #[cfg(not(feature = "logging"))]
+    #[inline(always)]
+    pub const fn logging_enabled(&self) -> bool {
+        false
     }
 
     /// Append a fully-public event: the same message goes to the omniscient
     /// gamestate log and both players' logs. A no-op when logging is disabled.
     pub fn log_public(&mut self, msg: String) {
+        if !self.logging_enabled() {
+            return;
+        }
         self.log_views(msg.clone(), msg.clone(), msg);
     }
 
     /// Append an event involving hidden information: `full` (nothing redacted)
     /// goes to the omniscient gamestate log, while `p1` and `p2` carry each
     /// player's legitimate view of it. A no-op when logging is disabled.
+    #[cfg_attr(not(feature = "logging"), allow(unused_variables))]
     pub fn log_views(&mut self, full: String, p1: String, p2: String) {
-        if let Some(log) = &mut self.p1.log {
-            log.push(p1);
-        }
-        if let Some(log) = &mut self.p2.log {
-            log.push(p2);
-        }
-        if let Some(log) = &mut self.log {
-            log.push(full);
+        #[cfg(feature = "logging")]
+        {
+            if let Some(log) = &mut self.p1.log {
+                log.push(p1);
+            }
+            if let Some(log) = &mut self.p2.log {
+                log.push(p2);
+            }
+            if let Some(log) = &mut self.log {
+                log.push(full);
+            }
         }
     }
 
@@ -599,13 +621,17 @@ impl Gamestate {
     /// event happened would itself give something away (e.g. declining to flip a
     /// mentor reveals that there is a mentor in the arsenal). A no-op when
     /// logging is disabled.
+    #[cfg_attr(not(feature = "logging"), allow(unused_variables))]
     pub fn log_private(&mut self, pid: PlayerIndex, msg: String) {
-        let own = if pid == PlayerIndex::P1 { &mut self.p1.log } else { &mut self.p2.log };
-        if let Some(log) = own {
-            log.push(msg.clone());
-        }
-        if let Some(log) = &mut self.log {
-            log.push(msg);
+        #[cfg(feature = "logging")]
+        {
+            let own = if pid == PlayerIndex::P1 { &mut self.p1.log } else { &mut self.p2.log };
+            if let Some(log) = own {
+                log.push(msg.clone());
+            }
+            if let Some(log) = &mut self.log {
+                log.push(msg);
+            }
         }
     }
 }
@@ -669,6 +695,7 @@ impl Player {
             arsenal_face_up: false,
             arsenal_lesson_counters: 0,
             // Logging is opted into via `reset(gs, decks, true)`; off until then.
+            #[cfg(feature = "logging")]
             log: None,
         }
     }
