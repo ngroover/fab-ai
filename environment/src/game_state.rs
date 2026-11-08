@@ -147,8 +147,6 @@ pub struct DeckSlot(u8);
 
 impl DeckSlot {
     const KNOWN: u8 = 0x80;
-    // Every deck card id fits below the known bit.
-    const _FITS: () = assert!(MAX_DECK_IDS <= DeckSlot::KNOWN as usize);
 
     pub const fn hidden(card: DeckCardId) -> Self {
         DeckSlot(card.get() as u8)
@@ -182,6 +180,14 @@ impl DeckSlot {
         self.0 = (self.0 & Self::KNOWN) | card.get() as u8;
     }
 }
+
+// Every deck card id must fit below the known bit, or `known` would overwrite
+// part of the id. A free `const` item is always evaluated, unlike an
+// associated const, which is only checked where it is used.
+const _: () = assert!(
+    MAX_DECK_IDS <= DeckSlot::KNOWN as usize,
+    "deck card ids overlap DeckSlot's known bit",
+);
 
 impl std::fmt::Debug for DeckSlot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
