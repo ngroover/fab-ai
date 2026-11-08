@@ -287,6 +287,37 @@ impl Phase {
 /// ends in `Phase::Draw`.
 pub const MAX_TURNS: u8 = 40;
 
+bitflags::bitflags! {
+    /// A player's boolean state, packed into one byte so `Player` stays small.
+    /// Read and written through the `Player` accessors (`attack_go_again_bonus()`,
+    /// `set_attack_go_again_bonus(..)`, and so on).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct PlayerFlags : u8 {
+        /// Whether this player's current attack has been granted Go Again by an
+        /// on-play effect (e.g. Wild Ride's "if a card with 6 or more power is
+        /// discarded, this gains go again"). Like `Player::attack_power_bonus` this is banked
+        /// on the player while the attack is on the chain, folded into the Go Again
+        /// check when combat damage resolves, and cleared afterward (and at the start
+        /// of each turn) so it never leaks into a later attack.
+        const ATTACK_GO_AGAIN_BONUS = 1 << 0;
+        /// Whether this player has resolved an Intimidate trigger so far this turn.
+        /// Set when this player intimidates (an attack/action with the Intimidate
+        /// keyword resolves) and read by on-play effects gated on "if you've
+        /// intimidated this turn" (e.g. Beast Mode's conditional +2 power). Cleared
+        /// at the start of each turn so it never carries into a later turn.
+        const HAS_INTIMIDATED = 1 << 1;
+        /// Whether the card in this player's arsenal (`Player::arsenal`) is face up. A
+        /// card arsenaled at the end of a turn goes in face down; a mentor may be
+        /// turned face up at the start of its owner's turn (the `MentorFlip` phase),
+        /// and a card an effect puts into the arsenal "face up" (Chief Ruk'utan
+        /// fetching Alpha Rampage) arrives that way. Face up and down only exist in
+        /// the arsenal, which holds one card, so this lives on the player rather
+        /// than on every card; it is cleared whenever the arsenal empties (see
+        /// `take_from_zone`).
+        const ARSENAL_FACE_UP = 1 << 2;
+    }
+}
+
 /// Per-player state: every zone the player's cards can be in, plus the player's
 /// turn resources and the bonuses banked for their attacks. Cards are stored by
 /// their `DeckCardId` (see `deck_cards`), which only means something together
@@ -362,13 +393,6 @@ pub struct Player {
     /// afterward (and at the start of each turn) so it never leaks to a later
     /// attack.
     pub attack_power_bonus : u8,
-    /// Whether this player's current attack has been granted Go Again by an
-    /// on-play effect (e.g. Wild Ride's "if a card with 6 or more power is
-    /// discarded, this gains go again"). Like `attack_power_bonus` this is banked
-    /// on the player while the attack is on the chain, folded into the Go Again
-    /// check when combat damage resolves, and cleared afterward (and at the start
-    /// of each turn) so it never leaks into a later attack.
-    pub attack_go_again_bonus : bool,
     /// Extra power banked for the *next Brute attack* this player plays this
     /// turn, on top of the cards on the combat chain. Set by on-play effects
     /// that pump a follow-up brute (e.g. Awakening Bellow's "+3 power to the
@@ -398,21 +422,9 @@ pub struct Player {
     /// the blocker count let it pay out — and cleared at the start of each turn
     /// so it never leaks.
     pub next_brute_attack_conditional_bonus : u8,
-    /// Whether this player has resolved an Intimidate trigger so far this turn.
-    /// Set when this player intimidates (an attack/action with the Intimidate
-    /// keyword resolves) and read by on-play effects gated on "if you've
-    /// intimidated this turn" (e.g. Beast Mode's conditional +2 power). Cleared
-    /// at the start of each turn so it never carries into a later turn.
-    pub has_intimidated : bool,
-    /// Whether the card in this player's arsenal (`arsenal`) is face up. A
-    /// card arsenaled at the end of a turn goes in face down; a mentor may be
-    /// turned face up at the start of its owner's turn (the `MentorFlip` phase),
-    /// and a card an effect puts into the arsenal "face up" (Chief Ruk'utan
-    /// fetching Alpha Rampage) arrives that way. Face up and down only exist in
-    /// the arsenal, which holds one card, so this lives on the player rather
-    /// than on every card; it is cleared whenever the arsenal empties (see
-    /// `take_from_zone`).
-    pub arsenal_face_up : bool,
+    /// Per-player yes/no state packed into one byte: see `PlayerFlags` for
+    /// what each flag means, and the `Player` accessors of the same names.
+    pub flags : PlayerFlags,
     /// Lesson counters on the mentor in this player's arsenal (Chief Ruk'utan
     /// gains one each time his ability triggers and graduates at two). A mentor
     /// only collects them while in the arsenal, so like `arsenal_face_up` they
@@ -686,17 +698,51 @@ impl Player {
             resources: 0,
             action_points: 0,
             attack_power_bonus: 0,
-            attack_go_again_bonus: false,
             next_brute_attack_action_bonus: 0,
             next_attack_action_bonus: 0,
             next_brute_attack_conditional_bonus: 0,
-            has_intimidated: false,
-            arsenal_face_up: false,
+            flags: PlayerFlags::empty(),
             arsenal_lesson_counters: 0,
             // Logging is opted into via `reset(gs, decks, true)`; off until then.
             #[cfg(feature = "logging")]
             log: None,
         }
+    }
+
+    #[doc = concat!("Whether `PlayerFlags::", stringify!(ATTACK_GO_AGAIN_BONUS), "` is set.")]
+    #[inline]
+    pub const fn attack_go_again_bonus(&self) -> bool {
+        self.flags.contains(PlayerFlags::ATTACK_GO_AGAIN_BONUS)
+    }
+
+    #[doc = concat!("Set or clear `PlayerFlags::", stringify!(ATTACK_GO_AGAIN_BONUS), "`.")]
+    #[inline]
+    pub fn set_attack_go_again_bonus(&mut self, on: bool) {
+        self.flags.set(PlayerFlags::ATTACK_GO_AGAIN_BONUS, on);
+    }
+
+    #[doc = concat!("Whether `PlayerFlags::", stringify!(HAS_INTIMIDATED), "` is set.")]
+    #[inline]
+    pub const fn has_intimidated(&self) -> bool {
+        self.flags.contains(PlayerFlags::HAS_INTIMIDATED)
+    }
+
+    #[doc = concat!("Set or clear `PlayerFlags::", stringify!(HAS_INTIMIDATED), "`.")]
+    #[inline]
+    pub fn set_has_intimidated(&mut self, on: bool) {
+        self.flags.set(PlayerFlags::HAS_INTIMIDATED, on);
+    }
+
+    #[doc = concat!("Whether `PlayerFlags::", stringify!(ARSENAL_FACE_UP), "` is set.")]
+    #[inline]
+    pub const fn arsenal_face_up(&self) -> bool {
+        self.flags.contains(PlayerFlags::ARSENAL_FACE_UP)
+    }
+
+    #[doc = concat!("Set or clear `PlayerFlags::", stringify!(ARSENAL_FACE_UP), "`.")]
+    #[inline]
+    pub fn set_arsenal_face_up(&mut self, on: bool) {
+        self.flags.set(PlayerFlags::ARSENAL_FACE_UP, on);
     }
 
     /// Number of cards in hand, counting every copy.
@@ -843,7 +889,7 @@ impl Player {
     pub fn visibility(&self, zone: Zone) -> CardVisibleState {
         match zone {
             Zone::Hand | Zone::IntimidateBanish => CardVisibleState::owner_only(self.pid),
-            Zone::Arsenal if !self.arsenal_face_up => CardVisibleState::owner_only(self.pid),
+            Zone::Arsenal if !self.arsenal_face_up() => CardVisibleState::owner_only(self.pid),
             Zone::Deck => CardVisibleState::Hidden,
             _ => CardVisibleState::BothKnow,
         }

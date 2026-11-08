@@ -107,8 +107,8 @@ fn begin_turn(gs: &mut Gamestate) {
     gs.p2.attack_power_bonus = 0;
     // Likewise clear any unconsumed conditional Go Again so it cannot leak into
     // this turn's attacks.
-    gs.p1.attack_go_again_bonus = false;
-    gs.p2.attack_go_again_bonus = false;
+    gs.p1.set_attack_go_again_bonus(false);
+    gs.p2.set_attack_go_again_bonus(false);
     // Likewise clear any unconsumed "next brute attack" power bonus so it cannot
     // leak into this turn's attacks.
     gs.p1.next_brute_attack_action_bonus = 0;
@@ -123,8 +123,8 @@ fn begin_turn(gs: &mut Gamestate) {
     gs.p2.next_brute_attack_conditional_bonus = 0;
     // Clear the per-turn "has intimidated" flag so a prior turn's Intimidate
     // can never satisfy this turn's "if you've intimidated" conditions.
-    gs.p1.has_intimidated = false;
-    gs.p2.has_intimidated = false;
+    gs.p1.set_has_intimidated(false);
+    gs.p2.set_has_intimidated(false);
     // "Once per turn" activations are freed for both players at the same
     // boundary as the bonuses above.
     gs.p1.abilities_used = CardCounts::EMPTY;
@@ -150,7 +150,7 @@ fn begin_turn(gs: &mut Gamestate) {
 pub(crate) fn face_down_mentor_in_arsenal(gs: &Gamestate, pid: PlayerIndex) -> Option<DeckCardId> {
     let player = gs.player(pid);
     let id = player.arsenal?;
-    (player.card(id).data().typ == CardType::Mentor && !player.arsenal_face_up).then_some(id)
+    (player.card(id).data().typ == CardType::Mentor && !player.arsenal_face_up()).then_some(id)
 }
 
 /// Handle the turn player's decision in the `MentorFlip` phase: flip the
@@ -181,9 +181,9 @@ fn handle_mentor_flip_phase(gs: &mut Gamestate, act: Action) {
 /// Mark `player`'s arsenal card face up. A face-up card is public — both players
 /// can see what it is (see `Player::visibility`). Every place that turns a card
 /// face up goes through here.
-fn set_arsenal_face_up(player: &mut Player) {
+fn turn_arsenal_face_up(player: &mut Player) {
     debug_assert!(player.arsenal.is_some(), "only an arsenal card can be face up");
-    player.arsenal_face_up = true;
+    player.set_arsenal_face_up(true);
 }
 
 /// Turn the mentor face down in `pid`'s arsenal face up. It
@@ -191,7 +191,7 @@ fn set_arsenal_face_up(player: &mut Player) {
 /// (`Player::arsenal_face_up` is cleared only as the arsenal empties).
 fn turn_mentor_face_up(gs: &mut Gamestate, pid: PlayerIndex) {
     let player = gs.player_mut(pid);
-    set_arsenal_face_up(player);
+    turn_arsenal_face_up(player);
     if gs.logging_enabled() {
         let player = gs.player(pid);
         let card = player.card(player.arsenal.expect("a mentor is in the arsenal"));
@@ -901,7 +901,7 @@ fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
     // that "if you've intimidated this turn" conditions key off the keyword
     // triggering rather than off a card actually being banished.
     let intimidator = if attacker == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-    intimidator.has_intimidated = true;
+    intimidator.set_has_intimidated(true);
 
     let Some(pick) = random_hand_card(gs, victim) else {
         return;
@@ -1014,7 +1014,7 @@ fn maybe_play6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, played_power: 
     };
     let card = player.card(mentor);
     let data = card.data();
-    if !player.arsenal_face_up
+    if !player.arsenal_face_up()
         || !matches!(data.constant_effect, Some(ConstantEffect::OnPlay6Intimidate))
     {
         return;
@@ -1082,7 +1082,7 @@ fn graduate_mentor(gs: &mut Gamestate, owner: PlayerIndex, fetch: Card) {
     if let Some(pos) = found {
         let slot = player.deck.remove(pos).expect("the search found this card");
         put_in_zone(player, slot.card(), Zone::Arsenal);
-        set_arsenal_face_up(player);
+        turn_arsenal_face_up(player);
     }
     shuffle_deck_for(player, rng);
 }
@@ -1099,7 +1099,7 @@ fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayE
         // owner has resolved an Intimidate trigger earlier this turn.
         OnPlayConditionType::HasIntimidated => {
             let player = if owner == PlayerIndex::P1 { &gs.p1 } else { &gs.p2 };
-            player.has_intimidated
+            player.has_intimidated()
         }
         // "If you have less health than an opposing hero" (e.g. Wounded Bull):
         // compared at resolution, so life changes earlier in the turn count.
@@ -1129,7 +1129,7 @@ fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayE
         // player and folded into the Go Again check when combat damage resolves.
         OnPlayEffectType::ConditionalGoAgain => {
             let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
-            player.attack_go_again_bonus = true;
+            player.set_attack_go_again_bonus(true);
         }
         // The next Brute attack the owner plays this turn gains `magnitude` power
         // (e.g. Awakening Bellow). Banked on the player and applied only when a
@@ -1505,7 +1505,7 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // if so the turn player keeps their action point and may act again. An on-play
     // effect may have conditionally granted Go Again (e.g. Wild Ride after
     // discarding a 6-power card), banked on the player.
-    let attack_has_go_again = attacker.attack_go_again_bonus
+    let attack_has_go_again = attacker.attack_go_again_bonus()
         || attack_data
             .map(|data| data.keyword.contains(Keyword::GoAgain))
             .unwrap_or(false);
@@ -1539,7 +1539,7 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // (e.g. after Go Again) doesn't inherit it.
     let attacker = gs.player_mut(attacker_id);
     attacker.attack_power_bonus = 0;
-    attacker.attack_go_again_bonus = false;
+    attacker.set_attack_go_again_bonus(false);
     // The brute power bonus is single-use, but only a brute attack consumes it:
     // a non-brute attack leaves it banked for a later brute attack this turn.
     if attack_is_brute {
@@ -1680,7 +1680,7 @@ pub(crate) fn take_from_zone(player: &mut Player, id: DeckCardId, zone: Zone) {
         Zone::Arsenal => {
             assert_eq!(player.arsenal, Some(id), "the arsenal does not hold that card");
             player.arsenal = None;
-            player.arsenal_face_up = false;
+            player.set_arsenal_face_up(false);
             player.arsenal_lesson_counters = 0;
         }
         Zone::Weapon => {
@@ -3824,7 +3824,7 @@ mod tests {
         step(gs, Action{ typ: ActionType::Pass, card: None});   // done blocking
 
         if go_again {
-            gs.p1.attack_go_again_bonus = true;
+            gs.p1.set_attack_go_again_bonus(true);
         }
         step(gs, Action{ typ: ActionType::Pass, card: None});   // attacker passes
         step(gs, Action{ typ: ActionType::Pass, card: None});   // defender passes -> damage

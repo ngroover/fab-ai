@@ -185,7 +185,7 @@ fn place_cards_for(player: &mut Player, start: &StartingCards) {
     player.banished = CardCounts::EMPTY;
     player.intimidate_banished = CardCounts::EMPTY;
     player.arsenal = None;
-    player.arsenal_face_up = false;
+    player.set_arsenal_face_up(false);
     player.arsenal_lesson_counters = 0;
     player.chain_link = [CardCounts::EMPTY; CHAIN_LINKS];
     player.chain_defense_bonus = [0; CHAIN_LINKS];

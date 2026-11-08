@@ -119,7 +119,7 @@ fn wild_ride_discarding_power6_grants_go_again() {
     // Discarding a 6-power card satisfies the condition, banking Go Again for
     // the attack (and no power bonus); the discarded card is now in p1's
     // graveyard.
-    assert!(gs.p1.attack_go_again_bonus);
+    assert!(gs.p1.attack_go_again_bonus());
     assert_eq!(gs.p1.attack_power_bonus, 0);
     assert!(in_zone(&gs, PlayerIndex::P1, pick, Zone::Graveyard));
 }
@@ -145,7 +145,7 @@ fn wild_ride_discarding_below_power6_grants_no_go_again() {
 
     // The discard missed the power-6 threshold, so no Go Again is banked; the
     // card still moves to the graveyard.
-    assert!(!gs.p1.attack_go_again_bonus);
+    assert!(!gs.p1.attack_go_again_bonus());
     assert!(in_zone(&gs, PlayerIndex::P1, pick, Zone::Graveyard));
 }
 
@@ -487,7 +487,7 @@ fn beast_mode_gets_plus2_when_player_has_intimidated() {
     let mut gs = setup_rhinar_action_phase();
 
     // The owner intimidated earlier this turn.
-    gs.p1.has_intimidated = true;
+    gs.p1.set_has_intimidated(true);
 
     // Resolving Beast Mode's on-play effect banks +2 onto the resolving attack.
     let effect = Card::BeastModeR
@@ -514,7 +514,7 @@ fn beast_mode_no_bonus_when_player_has_not_intimidated() {
     let mut gs = setup_rhinar_action_phase();
 
     // The owner has not intimidated this turn (the flag starts cleared).
-    assert!(!gs.p1.has_intimidated);
+    assert!(!gs.p1.has_intimidated());
 
     // Resolving Beast Mode's on-play effect does nothing: the condition fails.
     let effect = Card::BeastModeR.data().play_effect.as_ref().unwrap();
@@ -932,7 +932,7 @@ fn clearing_bellow_intimidates_on_resolve_and_keeps_the_action_point() {
     // its Intimidate still fires on the way there.
     assert!(in_zone(&gs, PlayerIndex::P1, idx, Zone::Graveyard));
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
-    assert!(gs.p1.has_intimidated);
+    assert!(gs.p1.has_intimidated());
 
     // Go Again: the action point is not spent, so Rhinar may act again.
     assert_eq!(gs.p1.action_points, 1);
@@ -2531,7 +2531,7 @@ fn barraging_beatdown_played_from_hand_intimidates_banks_and_keeps_the_action_po
     // its Intimidate fires on the way there.
     assert!(in_zone(&gs, PlayerIndex::P1, idx, Zone::Graveyard));
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
-    assert!(gs.p1.has_intimidated);
+    assert!(gs.p1.has_intimidated());
 
     // The middle clause banked its +3 for the brute attack still to come.
     assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 3);
@@ -2953,7 +2953,7 @@ fn power6_discard_on_your_own_turn_still_intimidates() {
 
     assert!(in_zone(&gs, PlayerIndex::P1, pick, Zone::Graveyard));
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
-    assert!(gs.p1.has_intimidated);
+    assert!(gs.p1.has_intimidated());
 }
 
 #[test]
@@ -2990,7 +2990,7 @@ fn power6_discard_on_the_opponents_turn_does_not_intimidate() {
     // stops it.
     assert!(in_zone(&gs, PlayerIndex::P1, pick, Zone::Graveyard));
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
-    assert!(!gs.p1.has_intimidated);
+    assert!(!gs.p1.has_intimidated());
 }
 
 /// In a Rhinar mirror, p2 attacks with Muscle Mutt and p1 blocks with Rally the
@@ -3051,7 +3051,7 @@ fn rally_ability_discarding_a_power6_card_does_not_intimidate() {
     // trigger and p2 banishes nothing.
     assert!(in_zone(&gs, PlayerIndex::P1, spare, Zone::Graveyard));
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
-    assert!(!gs.p1.has_intimidated);
+    assert!(!gs.p1.has_intimidated());
 }
 
 #[test]
@@ -3095,7 +3095,7 @@ fn rhinar_with_rukutan(face_up: bool, hand: &[Card]) -> (Gamestate, Card) {
     let mentor = put_in_arsenal(&mut gs, PlayerIndex::P1, Card::ChiefRukutan);
     if face_up {
         turn_mentor_face_up(&mut gs, PlayerIndex::P1);
-        assert!(gs.p1.arsenal_face_up);
+        assert!(gs.p1.arsenal_face_up());
     }
     (gs, mentor)
 }
@@ -3182,7 +3182,7 @@ fn rhinar_second_turn_with_face_down_rukutan() -> (Gamestate, Card) {
     // Dorinthea's turn is not interrupted — the decision is on its owner's
     // turn — and Ruk'utan stays face down and hidden from her throughout.
     assert_eq!(gs.phase, Phase::Action);
-    assert!(!gs.p1.arsenal_face_up);
+    assert!(!gs.p1.arsenal_face_up());
     assert_eq!(gs.p1.visibility(Zone::Arsenal), CardVisibleState::P1Knows);
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // her action phase
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // and her arsenal
@@ -3221,7 +3221,7 @@ fn flipping_turns_the_mentor_face_up_and_starts_the_action_phase() {
 
     assert_eq!(gs.phase, Phase::Action);
     assert_eq!(gs.active_player, PlayerIndex::P1);
-    assert!(gs.p1.arsenal_face_up);
+    assert!(gs.p1.arsenal_face_up());
     assert_eq!(gs.p1.visibility(Zone::Arsenal), CardVisibleState::BothKnow);
     assert!(in_zone(&gs, PlayerIndex::P1, ruk, Zone::Arsenal));
 }
@@ -3236,7 +3236,7 @@ fn a_flipped_mentor_stays_face_up_and_is_never_offered_again() {
     for _ in 0..2 {
         pass_round_to_rhinars_next_turn(&mut gs);
         assert_eq!(gs.phase, Phase::Action);
-        assert!(gs.p1.arsenal_face_up);
+        assert!(gs.p1.arsenal_face_up());
         assert!(in_zone(&gs, PlayerIndex::P1, ruk, Zone::Arsenal));
     }
 }
@@ -3247,7 +3247,7 @@ fn declining_leaves_the_mentor_face_down_and_it_is_offered_again_next_turn() {
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
 
     assert_eq!(gs.phase, Phase::Action);
-    assert!(!gs.p1.arsenal_face_up);
+    assert!(!gs.p1.arsenal_face_up());
     assert_eq!(gs.p1.visibility(Zone::Arsenal), CardVisibleState::P1Knows, "a declined mentor stays hidden");
 
     // Still face down, so the next turn opens on the same decision.
@@ -3343,11 +3343,11 @@ fn face_up_rukutan_intimidates_and_takes_a_lesson_when_a_6_power_card_is_played(
     // and Dorinthea has already banished a card.
     assert_eq!(stack_top_card(&gs), Some(mutt));
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
-    assert!(gs.p1.has_intimidated, "a Ruk'utan intimidate counts for 'if you've intimidated'");
+    assert!(gs.p1.has_intimidated(), "a Ruk'utan intimidate counts for 'if you've intimidated'");
     assert_eq!(gs.p1.arsenal_lesson_counters, 1);
     // One lesson is not enough to graduate: Ruk'utan stays, face up.
     assert!(in_zone(&gs, PlayerIndex::P1, ruk, Zone::Arsenal));
-    assert!(gs.p1.arsenal_face_up);
+    assert!(gs.p1.arsenal_face_up());
 }
 
 #[test]
@@ -3398,7 +3398,7 @@ fn rukutan_graduates_on_his_second_lesson_fetching_alpha_rampage_face_up() {
     // Alpha Rampage now sits in the arsenal, face up and public.
     assert_eq!(arsenal_card(&gs, PlayerIndex::P1), Some(rampage));
     assert!(in_zone(&gs, PlayerIndex::P1, rampage, Zone::Arsenal));
-    assert!(gs.p1.arsenal_face_up);
+    assert!(gs.p1.arsenal_face_up());
     assert_eq!(gs.p1.visibility(Zone::Arsenal), CardVisibleState::BothKnow);
 
     // The deck lost exactly that card, and it was the deck's only copy.
@@ -3468,7 +3468,7 @@ fn alpha_rampage_fetched_by_rukutan_can_be_played_from_the_arsenal_that_turn() {
     step_card(&mut gs, ActionType::Pitch, bellow);
     assert!(on_stack(&gs, rampage));
     assert_eq!(gs.p1.arsenal, None);
-    assert!(!gs.p1.arsenal_face_up);
+    assert!(!gs.p1.arsenal_face_up());
 }
 
 #[test]
@@ -3503,13 +3503,13 @@ fn a_face_up_card_is_always_visible_to_both_players() {
             for player in [&gs.p1, &gs.p2] {
                 let Some(arsenal) = player.arsenal else {
                     // An empty arsenal has nothing face up and no counters.
-                    assert!(!player.arsenal_face_up);
+                    assert!(!player.arsenal_face_up());
                     assert_eq!(player.arsenal_lesson_counters, 0);
                     continue;
                 };
                 let card = player.card(arsenal);
                 let visible = player.visibility(Zone::Arsenal);
-                if player.arsenal_face_up {
+                if player.arsenal_face_up() {
                     face_up_seen += 1;
                     assert_eq!(visible, CardVisibleState::BothKnow,
                         "face-up {:?} should be visible to both players", card);
