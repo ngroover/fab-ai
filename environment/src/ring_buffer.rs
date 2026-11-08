@@ -2,60 +2,49 @@
 //! cards come and go at both ends: the deck (drawn from the top, pitched cards
 //! put on the bottom) and the stack (layers added and resolved at the top).
 //!
-//! `head` and `tail` are free-running `u8` counters: `head` is the position of
-//! the front element and `tail` one past the back, both reduced modulo the
-//! capacity `N` only when indexing. Because they never wrap at `N`, an empty
-//! buffer (`head == tail`) and a full one (`tail - head == N`) are told apart
-//! without giving up a slot. `N` must be a power of two no larger than 128, so
-//! that the `u8` counters wrap at a multiple of `N`.
+//! `head` is the slot of the front element (always `< N`) and `len` the number
+//! of elements, so an empty buffer and a full one are told apart without
+//! giving up a slot. The capacity `N` can be any size from 1 to 128 — it need
+//! not be a power of two, so a buffer can be sized exactly to what it must
+//! hold (the deck is 40). Wrapping past the end of the backing array is a
+//! compare-and-subtract rather than a modulo.
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct RingBuffer<T: Copy, const N: usize> {
     items: [T; N],
     head: u8,
-    tail: u8,
+    len: u8,
 }
 
 // A general-purpose container: not every accessor has an engine caller yet.
 #[allow(dead_code)]
 impl<T: Copy, const N: usize> RingBuffer<T, N> {
-    const MASK: u8 = {
-        assert!(N.is_power_of_two() && N <= 128, "RingBuffer capacity must be a power of two <= 128");
-        (N - 1) as u8
-    };
+    const CHECK_CAPACITY: () = assert!(N >= 1 && N <= 128, "RingBuffer capacity must be in 1..=128");
 
     /// An empty buffer. `fill` is only the value unused slots hold; it is
     /// never read back.
     pub const fn new(fill: T) -> Self {
-        let _ = Self::MASK;
-        RingBuffer { items: [fill; N], head: 0, tail: 0 }
+        let () = Self::CHECK_CAPACITY;
+        RingBuffer { items: [fill; N], head: 0, len: 0 }
     }
 
+    /// The backing-array slot of the `i`th element counting from the front.
+    /// `i` must be `< N` (callers only pass `i <= len`); since `head < N` too,
+    /// one conditional subtraction wraps it.
     #[inline]
-    fn slot(counter: u8) -> usize {
-        (counter & Self::MASK) as usize
-    }
-
-    /// The counter of the front element: where the buffer currently starts.
-    #[inline]
-    pub const fn head(&self) -> u8 {
-        self.head
-    }
-
-    /// One past the counter of the back element.
-    #[inline]
-    pub const fn tail(&self) -> u8 {
-        self.tail
+    fn slot(&self, i: usize) -> usize {
+        let s = self.head as usize + i;
+        if s >= N { s - N } else { s }
     }
 
     #[inline]
     pub const fn len(&self) -> usize {
-        self.tail.wrapping_sub(self.head) as usize
+        self.len as usize
     }
 
     #[inline]
     pub const fn is_empty(&self) -> bool {
-        self.head == self.tail
+        self.len == 0
     }
 
     #[inline]
@@ -66,7 +55,7 @@ impl<T: Copy, const N: usize> RingBuffer<T, N> {
     /// The `i`th element counting from the front, if there is one.
     #[inline]
     pub fn get(&self, i: usize) -> Option<T> {
-        (i < self.len()).then(|| self.items[Self::slot(self.head.wrapping_add(i as u8))])
+        (i < self.len()).then(|| self.items[self.slot(i)])
     }
 
     #[inline]
@@ -83,7 +72,8 @@ impl<T: Copy, const N: usize> RingBuffer<T, N> {
     #[inline]
     pub fn get_mut(&mut self, i: usize) -> Option<&mut T> {
         if i < self.len() {
-            Some(&mut self.items[Self::slot(self.head.wrapping_add(i as u8))])
+            let slot = self.slot(i);
+            Some(&mut self.items[slot])
         } else {
             None
         }
@@ -95,8 +85,9 @@ impl<T: Copy, const N: usize> RingBuffer<T, N> {
         if self.len() == N {
             return Err(item);
         }
-        self.items[Self::slot(self.tail)] = item;
-        self.tail = self.tail.wrapping_add(1);
+        let slot = self.slot(self.len());
+        self.items[slot] = item;
+        self.len += 1;
         Ok(())
     }
 
@@ -106,8 +97,9 @@ impl<T: Copy, const N: usize> RingBuffer<T, N> {
         if self.len() == N {
             return Err(item);
         }
-        self.head = self.head.wrapping_sub(1);
-        self.items[Self::slot(self.head)] = item;
+        self.head = if self.head == 0 { (N - 1) as u8 } else { self.head - 1 };
+        self.len += 1;
+        self.items[self.head as usize] = item;
         Ok(())
     }
 
@@ -132,8 +124,9 @@ impl<T: Copy, const N: usize> RingBuffer<T, N> {
         if self.is_empty() {
             return None;
         }
-        let item = self.items[Self::slot(self.head)];
-        self.head = self.head.wrapping_add(1);
+        let item = self.items[self.head as usize];
+        self.head = self.slot(1) as u8;
+        self.len -= 1;
         Some(item)
     }
 
@@ -142,8 +135,8 @@ impl<T: Copy, const N: usize> RingBuffer<T, N> {
         if self.is_empty() {
             return None;
         }
-        self.tail = self.tail.wrapping_sub(1);
-        Some(self.items[Self::slot(self.tail)])
+        self.len -= 1;
+        Some(self.items[self.slot(self.len())])
     }
 
     /// Remove and return the `i`th element counting from the front, closing
@@ -152,21 +145,22 @@ impl<T: Copy, const N: usize> RingBuffer<T, N> {
     pub fn remove(&mut self, i: usize) -> Option<T> {
         let item = self.get(i)?;
         for j in i..self.len() - 1 {
-            let next = self.items[Self::slot(self.head.wrapping_add(j as u8 + 1))];
-            self.items[Self::slot(self.head.wrapping_add(j as u8))] = next;
+            let next = self.items[self.slot(j + 1)];
+            let slot = self.slot(j);
+            self.items[slot] = next;
         }
-        self.tail = self.tail.wrapping_sub(1);
+        self.len -= 1;
         Some(item)
     }
 
     pub fn clear(&mut self) {
         self.head = 0;
-        self.tail = 0;
+        self.len = 0;
     }
 
     /// Every element, front to back.
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = T> + ExactSizeIterator + '_ {
-        (0..self.len()).map(move |i| self.items[Self::slot(self.head.wrapping_add(i as u8))])
+        (0..self.len()).map(move |i| self.items[self.slot(i)])
     }
 
     /// Rotate the elements to the start of the backing array and return them
@@ -174,10 +168,8 @@ impl<T: Copy, const N: usize> RingBuffer<T, N> {
     /// shuffled).
     pub fn make_contiguous(&mut self) -> &mut [T] {
         let len = self.len();
-        let start = Self::slot(self.head);
-        self.items.rotate_left(start);
+        self.items.rotate_left(self.head as usize);
         self.head = 0;
-        self.tail = len as u8;
         &mut self.items[..len]
     }
 }
@@ -229,6 +221,42 @@ mod tests {
             }
             assert!(b.is_empty());
         }
+    }
+
+    #[test]
+    fn non_power_of_two_capacity_wraps() {
+        let mut b: RingBuffer<u8, 5> = RingBuffer::new(0);
+        for round in 0..50u8 {
+            for i in 0..5 {
+                if i % 2 == 0 { b.push_back(i) } else { b.push_front(i) }
+            }
+            assert_eq!(contents(&b), vec![3, 1, 0, 2, 4]);
+            assert!(b.try_push_back(9).is_err());
+            assert!(b.try_push_front(9).is_err());
+            assert_eq!(b.remove(round as usize % 5).is_some(), true);
+            assert_eq!(b.len(), 4);
+            while b.pop_back().is_some() {}
+            assert!(b.is_empty());
+            // Shift the head so the next round starts at a different slot.
+            b.push_back(0);
+            b.pop_front();
+        }
+    }
+
+    #[test]
+    fn make_contiguous_from_a_wrapped_odd_buffer() {
+        let mut b: RingBuffer<u8, 6> = RingBuffer::new(0);
+        for _ in 0..4 {
+            b.push_back(0);
+            b.pop_front();
+        }
+        for i in 1..=6 {
+            b.push_back(i);
+        }
+        assert_eq!(b.make_contiguous(), &[1, 2, 3, 4, 5, 6]);
+        b.pop_front();
+        b.push_back(7);
+        assert_eq!(contents(&b), vec![2, 3, 4, 5, 6, 7]);
     }
 
     #[test]

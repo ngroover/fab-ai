@@ -59,9 +59,8 @@ pub const STACK_SIZE: usize = 16;
 /// How many cards a decklist puts in the deck: everything but the hero, the
 /// weapon and the four pieces of equipment.
 pub const DECK_CARDS: usize = 40;
-/// Capacity of a deck's circular buffer: the smallest power of two that holds
-/// a whole deck (`DECK_CARDS`).
-pub const DECK_CAPACITY: usize = 64;
+/// Capacity of a deck's circular buffer: exactly a whole deck (`DECK_CARDS`).
+pub const DECK_CAPACITY: usize = DECK_CARDS;
 const _: () = assert!(DECK_CARDS <= DECK_CAPACITY);
 /// How many links a combat chain can hold. A single combat chain is very
 /// unlikely to grow longer than that; a turn that does produce a sixth attack
