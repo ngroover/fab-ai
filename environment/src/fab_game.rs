@@ -1,7 +1,7 @@
 use crate::action::{Action, LegalActions};
 use crate::cards::{Card, CardType};
 use crate::game_state::{
-    empty_deck, empty_stack, Deck, DeckSlot, Gamestate, Player, Phase, PlayerIndex, CHAIN_LINKS, PLAYER_CARDS,
+    empty_stack, DeckSlot, Gamestate, Player, Phase, PlayerIndex, CHAIN_LINKS, DECK_CARDS, PLAYER_CARDS,
 };
 use crate::card_counts::CardCounts;
 use rand::RngExt;
@@ -45,7 +45,7 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> Player {
         .expect("no hero in decklist");
     let mut player = Player::new(pid, hero);
 
-    let mut starting_deck: Deck = empty_deck();
+    let mut starting_deck = Vec::with_capacity(DECK_CARDS);
     let mut equipment = CardCounts::EMPTY;
     let mut weapon = None;
     let mut owned = 0;
@@ -57,12 +57,14 @@ fn player_from_decklist(deck: [Card; 46], pid: PlayerIndex) -> Player {
                 weapon = Some(player.deck_id(card));
             }
             CardType::Equipment => equipment.add(player.deck_id(card)),
-            _ => starting_deck.push_back(DeckSlot::hidden(player.deck_id(card))),
+            _ => starting_deck.push(player.deck_id(card)),
         }
         owned += 1;
     }
     assert_eq!(owned, PLAYER_CARDS, "expected exactly {} non-hero cards", PLAYER_CARDS);
-    player.starting_deck = starting_deck;
+    player.starting_deck = starting_deck.try_into().unwrap_or_else(|d: Vec<_>| {
+        panic!("expected a {}-card deck, got {}", DECK_CARDS, d.len())
+    });
     player.starting_equipment = equipment;
     player.starting_weapon = weapon;
     player
@@ -114,7 +116,7 @@ pub(crate) fn shuffle_deck_for(player: &mut Player, rng: &mut SmallRng) {
     let cards = player.deck.make_contiguous();
     cards.shuffle(rng);
     for slot in cards.iter_mut() {
-        slot.known = false;
+        slot.set_known(false);
     }
 }
 
@@ -128,7 +130,10 @@ pub fn place_cards(gs: &mut Gamestate) {
 /// weapon in its zone, and every other zone emptied, along with the turn
 /// resources left over from a played-out game.
 fn place_cards_for(player: &mut Player) {
-    player.deck = player.starting_deck;
+    player.deck.clear();
+    for &id in &player.starting_deck {
+        player.deck.push_back(DeckSlot::hidden(id));
+    }
     player.equipment = player.starting_equipment;
     player.weapon = player.starting_weapon;
     player.hand = CardCounts::EMPTY;
@@ -201,7 +206,7 @@ mod tests {
         // The rest of each decklist is in the deck, hidden.
         assert_eq!(gs.p1.deck_size(), 40);
         assert_eq!(gs.p2.deck_size(), 40);
-        assert!(gs.p1.deck.iter().all(|slot| !slot.known));
+        assert!(gs.p1.deck.iter().all(|slot| !slot.is_known()));
         assert_eq!(gs.p1.deck_slot_visibility(0), Some(CardVisibleState::Hidden));
         gs.debug_check_card_totals();
     }
@@ -230,7 +235,7 @@ mod tests {
         let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(7));
         reset(&mut gs, false);
         // Scatter some cards, then reset: everything is dealt out afresh.
-        let top = gs.p1.deck.pop_front().unwrap().card;
+        let top = gs.p1.deck.pop_front().unwrap().card();
         gs.p1.graveyard.add(top);
         gs.p1.weapon = None;
         gs.p1.arsenal = Some(top);
@@ -247,7 +252,7 @@ mod tests {
         let deal = |seed| {
             let mut gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
             reset(&mut gs, false);
-            gs.p1.deck.iter().map(|s| s.card.get()).collect::<Vec<_>>()
+            gs.p1.deck.iter().map(|s| s.card().get()).collect::<Vec<_>>()
         };
         assert_eq!(deal(42), deal(42));
         assert_ne!(deal(42), deal(43));
@@ -261,6 +266,36 @@ mod tests {
         // Take a card off the deck without putting it anywhere.
         gs.p1.deck.pop_front();
         gs.debug_check_card_totals();
+    }
+
+    #[test]
+    fn a_deck_slot_packs_card_and_known_bit_into_one_byte() {
+        use crate::card_counts::{DeckCardId, MAX_DECK_IDS};
+        assert_eq!(std::mem::size_of::<DeckSlot>(), 1);
+        for i in 0..MAX_DECK_IDS {
+            let id = DeckCardId::new(i);
+            let mut slot = DeckSlot::hidden(id);
+            assert_eq!((slot.card(), slot.is_known()), (id, false));
+            slot.set_known(true);
+            assert_eq!((slot.card(), slot.is_known()), (id, true));
+            assert_eq!(slot, DeckSlot::known(id));
+            // Relabelling keeps the known bit.
+            let other = DeckCardId::new(MAX_DECK_IDS - 1 - i);
+            slot.set_card(other);
+            assert_eq!((slot.card(), slot.is_known()), (other, true));
+            slot.set_known(false);
+            assert_eq!(slot, DeckSlot::hidden(other));
+        }
+    }
+
+    #[test]
+    fn reset_deals_the_starting_deck_in_decklist_order_before_shuffling() {
+        let gs = gamestate_from_decklists(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        let playable: Vec<_> = build_rhinar_deck().into_iter()
+            .filter(|c| !matches!(c.data().typ, CardType::Hero | CardType::Weapon | CardType::Equipment))
+            .map(|c| gs.p1.deck_id(c))
+            .collect();
+        assert_eq!(gs.p1.starting_deck.to_vec(), playable);
     }
 
     #[test]

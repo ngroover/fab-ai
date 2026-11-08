@@ -1,6 +1,6 @@
 use crate::cards::Card;
 use crate::action::ActionType;
-use crate::card_counts::{CardCounts, DeckCardId};
+use crate::card_counts::{CardCounts, DeckCardId, MAX_DECK_IDS};
 use crate::deck_cards::{DeckCard, DeckKind};
 use crate::ring_buffer::RingBuffer;
 use rand::rngs::SmallRng;
@@ -56,9 +56,13 @@ pub const PLAYER_CARDS: usize = 45;
 /// reaction window can legitimately stack six or more layers (e.g. four attack
 /// reactions answered by two Dodges); 16 leaves ample headroom.
 pub const STACK_SIZE: usize = 16;
+/// How many cards a decklist puts in the deck: everything but the hero, the
+/// weapon and the four pieces of equipment.
+pub const DECK_CARDS: usize = 40;
 /// Capacity of a deck's circular buffer: the smallest power of two that holds
-/// every card a player owns.
+/// a whole deck (`DECK_CARDS`).
 pub const DECK_CAPACITY: usize = 64;
+const _: () = assert!(DECK_CARDS <= DECK_CAPACITY);
 /// How many links a combat chain can hold. A single combat chain is very
 /// unlikely to grow longer than that; a turn that does produce a sixth attack
 /// panics rather than reusing a link and mis-scoring the attack.
@@ -133,23 +137,57 @@ impl Zone {
     }
 }
 
-/// One card in a deck: which card it is, and whether both players know it is
-/// there. A card is hidden in the deck unless it went in face up — a pitched
+/// One card in a deck, packed into a single byte: which card it is (the low
+/// bits, a `DeckCardId`), and whether both players know it is there (the top
+/// bit). A card is hidden in the deck unless it went in face up — a pitched
 /// card put on the bottom, or a card revealed and kept or bottomed — and loses
 /// that the moment the deck is shuffled.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct DeckSlot {
-    pub card: DeckCardId,
-    pub known: bool,
-}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct DeckSlot(u8);
 
 impl DeckSlot {
+    const KNOWN: u8 = 0x80;
+    // Every deck card id fits below the known bit.
+    const _FITS: () = assert!(MAX_DECK_IDS <= DeckSlot::KNOWN as usize);
+
     pub const fn hidden(card: DeckCardId) -> Self {
-        DeckSlot { card, known: false }
+        DeckSlot(card.get() as u8)
     }
 
     pub const fn known(card: DeckCardId) -> Self {
-        DeckSlot { card, known: true }
+        DeckSlot(card.get() as u8 | Self::KNOWN)
+    }
+
+    /// The card in this slot.
+    #[inline]
+    pub const fn card(self) -> DeckCardId {
+        DeckCardId::new((self.0 & !Self::KNOWN) as usize)
+    }
+
+    /// Whether both players know this card is here.
+    #[inline]
+    pub const fn is_known(self) -> bool {
+        self.0 & Self::KNOWN != 0
+    }
+
+    #[inline]
+    pub fn set_known(&mut self, known: bool) {
+        if known { self.0 |= Self::KNOWN } else { self.0 &= !Self::KNOWN }
+    }
+
+    /// Turn the slot into `card`, keeping whether it is known.
+    #[inline]
+    pub fn set_card(&mut self, card: DeckCardId) {
+        self.0 = (self.0 & Self::KNOWN) | card.get() as u8;
+    }
+}
+
+impl std::fmt::Debug for DeckSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeckSlot")
+            .field("card", &self.card())
+            .field("known", &self.is_known())
+            .finish()
     }
 }
 
@@ -261,8 +299,10 @@ pub struct Player {
     pub deck_kind : DeckKind,
     /// The cards the player starts the game with, in decklist order: the
     /// deck before it is shuffled, the worn equipment, and the weapon. `reset`
-    /// deals the zones out from these.
-    pub starting_deck : Deck,
+    /// deals the zones out from these. The deck is a plain array rather than a
+    /// second `Deck` buffer: it is only read at `reset`, and a fixed list of ids
+    /// is a third the size.
+    pub starting_deck : [DeckCardId; DECK_CARDS],
     pub starting_equipment : CardCounts,
     pub starting_weapon : Option<DeckCardId>,
     /// The deck, top first. Drawn from the front; pitched cards go on the back.
@@ -605,7 +645,7 @@ impl Player {
             intellect: 0,
             hero,
             deck_kind: DeckKind::for_hero(hero),
-            starting_deck: empty_deck(),
+            starting_deck: [DeckCardId::new(0); DECK_CARDS],
             starting_equipment: CardCounts::EMPTY,
             starting_weapon: None,
             deck: empty_deck(),
@@ -787,7 +827,7 @@ impl Player {
     #[allow(dead_code)]
     pub fn deck_slot_visibility(&self, i: usize) -> Option<CardVisibleState> {
         self.deck.get(i).map(|slot| {
-            if slot.known { CardVisibleState::BothKnow } else { CardVisibleState::Hidden }
+            if slot.is_known() { CardVisibleState::BothKnow } else { CardVisibleState::Hidden }
         })
     }
 }

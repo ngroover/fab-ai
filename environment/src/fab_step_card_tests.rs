@@ -1994,7 +1994,7 @@ fn pack_call_on_an_empty_deck_does_nothing() {
     // state for the trigger to resolve in — it must no-op rather than panic.
     // Park the deck in the graveyard so no card goes missing.
     while let Some(slot) = gs.p2.deck.pop_front() {
-        gs.p2.graveyard.add(slot.card);
+        gs.p2.graveyard.add(slot.card());
     }
 
     let pc = declare_blockers(&mut gs, &[Card::PackCallY])[0];
@@ -2030,7 +2030,7 @@ fn defending_with_two_pack_calls_fires_the_effect_twice() {
     // turn and the two reveals are told apart by which card moved.
     let first_top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
     let second = gs.p2.deck.get_mut(1).expect("deck has two cards");
-    second.card = gs.p2.deck_kind.id_of(Card::ClearingBellowB).unwrap();
+    second.set_card(gs.p2.deck_kind.id_of(Card::ClearingBellowB).unwrap());
     let second_top = Card::ClearingBellowB;
     let order = deck_order(&gs, PlayerIndex::P2);
     assert_eq!(order[..2], [first_top, second_top]);

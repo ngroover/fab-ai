@@ -521,7 +521,7 @@ fn end_turn(gs: &mut Gamestate) {
         let player = gs.player(pid);
         let need = player.intellect.saturating_sub(player.hand_size()) as usize;
         Some(player.deck.iter().take(need)
-            .map(|slot| format!("{:?}", player.card(slot.card)))
+            .map(|slot| format!("{:?}", player.card(slot.card())))
             .collect::<Vec<_>>())
     } else {
         None
@@ -695,7 +695,7 @@ fn reveal_top_keep_6(gs: &mut Gamestate, pid: PlayerIndex) {
     let Some(top) = player.deck.front() else {
         return;
     };
-    let card = player.card(top.card);
+    let card = player.card(top.card());
     let keeps_top = card.data().power >= 6;
 
     if gs.logging_enabled() {
@@ -710,11 +710,11 @@ fn reveal_top_keep_6(gs: &mut Gamestate, pid: PlayerIndex) {
 
     let deck = &mut gs.player_mut(pid).deck;
     if keeps_top {
-        deck.get_mut(0).expect("the deck has a top card").known = true;
+        deck.get_mut(0).expect("the deck has a top card").set_known(true);
     } else {
         // Move the top to the bottom: the deck is reordered, never resized.
         deck.pop_front();
-        deck.push_back(DeckSlot::known(top.card));
+        deck.push_back(DeckSlot::known(top.card()));
     }
 }
 
@@ -1060,7 +1060,7 @@ fn graduate_mentor(gs: &mut Gamestate, owner: PlayerIndex, fetch: Card) {
     move_card(player, mentor, Zone::Arsenal, Zone::Banish);
 
     let fetch_id = player.deck_kind.id_of(fetch);
-    let found = fetch_id.and_then(|id| player.deck.iter().position(|slot| slot.card == id));
+    let found = fetch_id.and_then(|id| player.deck.iter().position(|slot| slot.card() == id));
 
     if gs.logging_enabled() {
         let card = gs.player(owner).card(mentor);
@@ -1081,7 +1081,7 @@ fn graduate_mentor(gs: &mut Gamestate, owner: PlayerIndex, fetch: Card) {
     };
     if let Some(pos) = found {
         let slot = player.deck.remove(pos).expect("the search found this card");
-        put_in_zone(player, slot.card, Zone::Arsenal);
+        put_in_zone(player, slot.card(), Zone::Arsenal);
         set_arsenal_face_up(player);
     }
     shuffle_deck_for(player, rng);
@@ -1688,7 +1688,7 @@ pub(crate) fn take_from_zone(player: &mut Player, id: DeckCardId, zone: Zone) {
             player.weapon = None;
         }
         Zone::Deck => {
-            let pos = player.deck.iter().position(|slot| slot.card == id)
+            let pos = player.deck.iter().position(|slot| slot.card() == id)
                 .expect("the deck does not hold that card");
             player.deck.remove(pos);
         }
@@ -1738,7 +1738,7 @@ fn draw_cards(player: &mut Player, num: usize) -> u8 {
         let Some(slot) = player.deck.pop_front() else {
             break; // deck is empty
         };
-        player.add_to(Zone::Hand, slot.card);
+        player.add_to(Zone::Hand, slot.card());
         drawn += 1;
     }
     drawn as u8
@@ -1928,7 +1928,7 @@ mod tests {
         let cb_id = gs.p1.deck_id(cb);
         bottom_pitched_card(&mut gs, PlayerIndex::P1, cb_id);
         let bottom = gs.p1.deck.len() - 1;
-        assert_eq!(gs.p1.deck.back().map(|s| s.card), Some(cb_id));
+        assert_eq!(gs.p1.deck.back().map(|s| s.card()), Some(cb_id));
         assert_eq!(gs.p1.deck_slot_visibility(bottom), Some(CardVisibleState::BothKnow));
         // A card that was never seen stays hidden.
         assert_eq!(gs.p1.deck_slot_visibility(0), Some(CardVisibleState::Hidden));
@@ -3950,7 +3950,7 @@ mod tests {
 
         for link in 0..gs.p1.chain_link.len() {
             let slot = gs.p1.deck.pop_front().expect("deck should not run dry");
-            gs.p1.chain_link[link].add(slot.card);
+            gs.p1.chain_link[link].add(slot.card());
         }
 
         run_one_attack(&mut gs, Card::MuscleMuttY, Card::ClearingBellowB, &[], false);

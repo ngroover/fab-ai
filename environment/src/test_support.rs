@@ -25,7 +25,7 @@ pub fn count_in(gs: &Gamestate, pid: PlayerIndex, card: Card, zone: Zone) -> u8 
         return 0;
     };
     match zone {
-        Zone::Deck => player.deck.iter().filter(|s| s.card == id).count() as u8,
+        Zone::Deck => player.deck.iter().filter(|s| s.card() == id).count() as u8,
         Zone::Arsenal => (player.arsenal == Some(id)) as u8,
         Zone::Weapon => (player.weapon == Some(id)) as u8,
         Zone::CombatChain => player.chain_link.iter().map(|l| l.count(id)).sum(),
@@ -141,7 +141,7 @@ pub fn hand_cards(gs: &Gamestate, pid: PlayerIndex) -> Vec<Card> {
 /// `pid`'s deck, top first.
 pub fn deck_cards(gs: &Gamestate, pid: PlayerIndex) -> Vec<Card> {
     let player = gs.player(pid);
-    player.deck.iter().map(|s| player.card(s.card)).collect()
+    player.deck.iter().map(|s| player.card(s.card())).collect()
 }
 
 /// Turn one copy of `from` in `pid`'s `zone` into `to`. For the deck, the
@@ -151,8 +151,8 @@ pub fn relabel(gs: &mut Gamestate, pid: PlayerIndex, zone: Zone, from: Card, to:
     let (from, to) = (player.deck_id(from), player.deck_id(to));
     match zone {
         Zone::Deck => {
-            let pos = player.deck.iter().position(|s| s.card == from).expect("no copy in the deck");
-            player.deck.get_mut(pos).unwrap().card = to;
+            let pos = player.deck.iter().position(|s| s.card() == from).expect("no copy in the deck");
+            player.deck.get_mut(pos).unwrap().set_card(to);
         }
         Zone::Arsenal => {
             assert_eq!(player.arsenal, Some(from));
@@ -205,7 +205,7 @@ pub fn move_hand_to_graveyard(gs: &mut Gamestate, pid: PlayerIndex) {
 pub fn put_on_top_of_deck(gs: &mut Gamestate, pid: PlayerIndex, card: Card) {
     let player = gs.player_mut(pid);
     let id = player.deck_id(card);
-    let pos = player.deck.iter().position(|s| s.card == id).expect("no copy in the deck");
+    let pos = player.deck.iter().position(|s| s.card() == id).expect("no copy in the deck");
     let slot = player.deck.remove(pos).unwrap();
     player.deck.push_front(slot);
 }
