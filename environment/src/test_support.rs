@@ -6,10 +6,42 @@
 //! `relabel`, `seat_on_chain`, ...) may turn one card into another, as a test
 //! needs a specific hand, but never create or lose one: every player keeps
 //! `PLAYER_CARDS` cards, which `step` and `legal_actions` check in debug builds.
+//!
+//! The engine keeps its rng outside the `Gamestate`, so tests play a
+//! `TestGame`: a game state and the rng it draws from, side by side. It
+//! dereferences to the `Gamestate`, so tests read and stage it as one, and the
+//! test-side `step` passes its rng to the engine's.
+
+/// A game state together with the rng `step` draws from — what a test plays.
+/// Dereferences to the `Gamestate`.
+#[derive(Clone)]
+pub struct TestGame {
+    pub state: Gamestate,
+    pub rng: GameRng,
+}
+
+impl std::ops::Deref for TestGame {
+    type Target = Gamestate;
+    fn deref(&self) -> &Gamestate {
+        &self.state
+    }
+}
+
+impl std::ops::DerefMut for TestGame {
+    fn deref_mut(&mut self) -> &mut Gamestate {
+        &mut self.state
+    }
+}
+
+/// Apply `act` to `game` with the engine's `step`, drawing from `game`'s rng.
+pub fn step(game: &mut TestGame, act: Action) {
+    crate::fab_step::step(&mut game.state, &mut game.rng, act);
+}
 
 use crate::action::{Action, ActionType, CardRef};
 use crate::card_counts::{CardCounts, DeckCardId};
 use crate::cards::{Card, CardType};
+use crate::fab_game::GameRng;
 use crate::game_state::{DeckSlot, Gamestate, PendingCard, PlayerIndex, Zone};
 
 /// `card`'s id in `pid`'s deck.
@@ -86,22 +118,22 @@ pub fn act_from(gs: &Gamestate, typ: ActionType, card: Card, zone: Zone) -> Acti
 }
 
 /// Build `act(gs, typ, card)` and step it.
-pub fn step_card(gs: &mut Gamestate, typ: ActionType, card: Card) {
+pub fn step_card(gs: &mut TestGame, typ: ActionType, card: Card) {
     let action = act(gs, typ, card);
-    crate::fab_step::step(gs, action);
+    step(gs, action);
 }
 
 /// Build `act_from(gs, typ, card, zone)` and step it.
 #[allow(dead_code)]
-pub fn step_card_from(gs: &mut Gamestate, typ: ActionType, card: Card, zone: Zone) {
+pub fn step_card_from(gs: &mut TestGame, typ: ActionType, card: Card, zone: Zone) {
     let action = act_from(gs, typ, card, zone);
-    crate::fab_step::step(gs, action);
+    step(gs, action);
 }
 
 /// Step an action that carries no card (`Pass`, `ChooseFirst`, ...).
 #[allow(dead_code)]
-pub fn step_plain(gs: &mut Gamestate, typ: ActionType) {
-    crate::fab_step::step(gs, Action::no_card(typ));
+pub fn step_plain(gs: &mut TestGame, typ: ActionType) {
+    step(gs, Action::no_card(typ));
 }
 
 /// The card an action names, read as the active player's.
@@ -317,10 +349,15 @@ pub fn uses_this_turn(gs: &Gamestate, card: Card) -> u8 {
 
 /// A fresh game between two decklists, dealt and ready for the first
 /// decision: the `Decklists`, `gamestate_from_decklists` and `reset` steps in
-/// one. Tests that need to reset again build the `Decklists` themselves.
-pub fn new_game(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: Option<u64>, logging: bool) -> Gamestate {
+/// one, with an rng seeded from `seed` (`None` for a random one) that deals
+/// the game and that `step` goes on drawing from. Tests that need to reset
+/// again build the `Decklists` themselves.
+pub fn new_game(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: Option<u64>, logging: bool) -> TestGame {
     let decks = crate::fab_game::Decklists::new(p1_deck, p2_deck);
-    let mut gs = crate::fab_game::gamestate_from_decklists(&decks, seed);
-    crate::fab_game::reset(&mut gs, &decks, logging);
-    gs
+    let mut game = TestGame {
+        state: crate::fab_game::gamestate_from_decklists(&decks),
+        rng: crate::fab_game::new_rng(seed),
+    };
+    crate::fab_game::reset(&mut game.state, &decks, &mut game.rng, logging);
+    game
 }

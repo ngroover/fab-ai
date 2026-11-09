@@ -164,20 +164,31 @@ mod tests {
         deepest
     }
 
-    /// Random play never comes close to filling the stack: across many seeds
-    /// the deepest it gets leaves headroom below `STACK_SIZE` (overflowing it
-    /// would panic in `push_to_stack`, failing the sweep outright).
+    /// Seed 13080313 is the first of 20 million random games to reach seven
+    /// layers at once — the deepest the sweep found, and so what `STACK_SIZE`
+    /// is sized to. It must finish without overflowing the stack.
+    #[test]
+    fn random_game_with_a_seven_layer_stack_finishes() {
+        use crate::game_state::STACK_SIZE;
+        let deepest = max_stack_depth(13080313);
+        assert_eq!(deepest, 7);
+        assert!(deepest <= STACK_SIZE);
+    }
+
+    /// Random play across many seeds never overflows the stack (that would
+    /// panic in `push_to_stack`, failing the sweep outright).
     #[test]
     fn random_games_stay_within_the_stack_size() {
         use crate::game_state::STACK_SIZE;
         let deepest = (0..2_000u64).map(max_stack_depth).max().unwrap();
-        assert!(deepest < STACK_SIZE, "random play reached {} stack layers (STACK_SIZE {})", deepest, STACK_SIZE);
+        assert!(deepest <= STACK_SIZE, "random play reached {} stack layers (STACK_SIZE {})", deepest, STACK_SIZE);
     }
 
     /// A much larger sweep that prints how deep the stack gets, for checking
     /// `STACK_SIZE` headroom. Slow, so ignored by default; run with
     /// `cargo test --release stack_depth_histogram -- --ignored --nocapture`
-    /// (`STACK_SWEEP_GAMES` sets the game count, default 1,000,000).
+    /// (`STACK_SWEEP_GAMES` sets the game count, default 1,000,000; 20,000,000
+    /// reaches the seven-layer game `STACK_SIZE` is sized to).
     #[test]
     #[ignore]
     fn stack_depth_histogram() {

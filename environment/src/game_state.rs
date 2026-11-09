@@ -3,7 +3,6 @@ use crate::action::ActionType;
 use crate::card_counts::{CardCounts, DeckCardId, MAX_DECK_IDS};
 use crate::deck_cards::{DeckCard, DeckKind};
 use crate::ring_buffer::RingBuffer;
-use rand::rngs::SmallRng;
 
 /// One of the two players (0 or 1), wrapped in a newtype so a player id is never
 /// silently confused with the many other small integers in the engine — card
@@ -54,10 +53,12 @@ pub const PLAYER_CARDS: usize = 45;
 /// beyond this limit panics (see `Gamestate::push_to_stack`). Both players may
 /// keep adding instants, reactions and activations without passing, so a single
 /// reaction window can legitimately stack six or more layers (e.g. four attack
-/// reactions answered by two Dodges). 10 leaves headroom over that: a sweep
-/// of 10 million random games never went deeper than 6 (see
-/// `simulator::tests::stack_depth_histogram`).
-pub const STACK_SIZE: usize = 10;
+/// reactions answered by two Dodges). Sized to the deepest stack random play
+/// reaches: a sweep of 20 million random games went no deeper than 7, first in
+/// seed 13080313 (see `simulator::tests::stack_depth_histogram` and
+/// `random_game_with_a_seven_layer_stack_finishes`). Deliberate play could in
+/// principle go deeper; raise this if it ever panics.
+pub const STACK_SIZE: usize = 7;
 /// How many cards a decklist puts in the deck: everything but the hero, the
 /// weapon and the four pieces of equipment.
 pub const DECK_CARDS: usize = 40;
@@ -436,7 +437,7 @@ pub struct Player {
     /// This player's view of the game log: what they would legitimately know,
     /// with hidden information (e.g. the identity of a card the opponent drew)
     /// redacted. `None` when logging is disabled (the default, so simulation
-    /// and cloning pay nothing); `reset(gs, decks, true)` turns it on. Entries are
+    /// and cloning pay nothing); `reset(gs, decks, rng, true)` turns it on. Entries are
     /// pushed at the moment each event happens, so a single `step` may log
     /// several (e.g. a pass that also resolves the top of the stack).
     /// Only present when built with the `logging` Cargo feature.
@@ -468,7 +469,6 @@ pub struct Gamestate {
     /// every turn (see `begin_turn`); once it reaches `MAX_TURNS` the game ends
     /// in a draw (see `check_game_end`).
     pub turn_count : u8,
-    pub rng : SmallRng,
     /// The stack: layers waiting to resolve, each a `PendingCard` naming the
     /// card, its owner, the zone it came from and the action that committed it.
     /// A circular buffer with the bottom of the stack at the front and the top —
@@ -483,7 +483,7 @@ pub struct Gamestate {
     /// The omniscient game log: every logged event with nothing redacted (the
     /// per-player views with hidden information removed live on `Player::log`).
     /// `None` when logging is disabled (the default, so simulation and cloning
-    /// pay nothing); `reset(gs, decks, true)` turns it on. Entries are pushed at the
+    /// pay nothing); `reset(gs, decks, rng, true)` turns it on. Entries are pushed at the
     /// moment each event happens, so a single `step` may log several (e.g. a
     /// pass that also resolves the top of the stack).
     /// Only present when built with the `logging` Cargo feature.

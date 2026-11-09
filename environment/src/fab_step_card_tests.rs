@@ -38,6 +38,7 @@ use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
 use crate::legal_actions::legal_actions;
 use std::collections::HashSet;
 use crate::test_support::*;
+use crate::test_support::step;
 use crate::game_state::CardVisibleState;
 
 /// Find a card sitting in p1's deck whose power satisfies `pred`.
@@ -63,7 +64,7 @@ fn bare_fangs_discarding_power6_grants_plus2_power() {
         .play_effect
         .as_ref()
         .expect("Bare Fangs should carry an on-play effect");
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
 
     // Discarding a 6-power card satisfies the condition, banking +2 power for
     // the attack; the discarded card is now in p1's graveyard.
@@ -88,7 +89,7 @@ fn bare_fangs_discarding_below_power6_grants_no_bonus() {
         .play_effect
         .as_ref()
         .expect("Bare Fangs should carry an on-play effect");
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
 
     // The discard missed the power-6 threshold, so no power is banked; the
     // card still moves to the graveyard.
@@ -114,7 +115,7 @@ fn wild_ride_discarding_power6_grants_go_again() {
         .play_effect
         .as_ref()
         .expect("Wild Ride should carry an on-play effect");
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
 
     // Discarding a 6-power card satisfies the condition, banking Go Again for
     // the attack (and no power bonus); the discarded card is now in p1's
@@ -141,7 +142,7 @@ fn wild_ride_discarding_below_power6_grants_no_go_again() {
         .play_effect
         .as_ref()
         .expect("Wild Ride should carry an on-play effect");
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
 
     // The discard missed the power-6 threshold, so no Go Again is banked; the
     // card still moves to the graveyard.
@@ -160,7 +161,7 @@ fn wild_ride_discarding_below_power6_grants_no_go_again() {
 
 /// Build a fresh game with Rhinar (p1) on his action phase, ready for his hand
 /// to be set up for a legal-actions check.
-fn setup_rhinar_action_phase() -> Gamestate {
+fn setup_rhinar_action_phase() -> TestGame {
     let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
     assert_eq!(gs.phase, Phase::Action);
@@ -172,7 +173,7 @@ fn setup_rhinar_action_phase() -> Gamestate {
 /// phase against Rhinar (p2). For tests that need Dorinthea's cards — the
 /// instants and attack reactions Rhinar's deck has none of — on the turn
 /// player's side.
-fn setup_dorinthea_action_phase() -> Gamestate {
+fn setup_dorinthea_action_phase() -> TestGame {
     let mut gs = new_game(build_dorinthea_deck(), build_rhinar_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
     assert_eq!(gs.phase, Phase::Action);
@@ -182,7 +183,7 @@ fn setup_dorinthea_action_phase() -> Gamestate {
 
 /// `setup_rhinar_action_phase` in a Rhinar mirror: both players are Rhinar,
 /// so either side can hold any Rhinar card from their own deck.
-fn setup_rhinar_mirror_action_phase() -> Gamestate {
+fn setup_rhinar_mirror_action_phase() -> TestGame {
     let mut gs = new_game(build_rhinar_deck(), build_rhinar_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
     assert_eq!(gs.phase, Phase::Action);
@@ -400,7 +401,7 @@ fn awakening_bellow_banks_plus3_for_the_next_brute_attack() {
         .play_effect
         .as_ref()
         .expect("Awakening Bellow should carry an on-play effect");
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
 }
 
@@ -410,7 +411,7 @@ fn awakening_bellow_followup_brute_attack_gets_plus3() {
 
     // Bank the +3 brute bonus from Awakening Bellow.
     let effect = Card::AwakeningBellowR.data().play_effect.as_ref().unwrap();
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
 
     // A follow-up brute attack — Bare Fangs (brute, 6 power) — is seated on the
@@ -431,7 +432,7 @@ fn awakening_bellow_followup_generic_attack_does_not_get_plus3() {
 
     // Bank the +3 brute bonus from Awakening Bellow.
     let effect = Card::AwakeningBellowR.data().play_effect.as_ref().unwrap();
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
 
     // A follow-up generic (non-brute) attack — Muscle Mutt (generic, 6 power) —
@@ -453,7 +454,7 @@ fn awakening_bellow_brute_weapon_swing_does_not_get_plus3() {
 
     // Bank the +3 brute bonus from Awakening Bellow.
     let effect = Card::AwakeningBellowR.data().play_effect.as_ref().unwrap();
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
 
     // Bone Basher is a Brute, but it is a *weapon* (not an attack action card),
@@ -495,7 +496,7 @@ fn beast_mode_gets_plus2_when_player_has_intimidated() {
         .play_effect
         .as_ref()
         .expect("Beast Mode should carry an on-play effect");
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.attack_power_bonus, 2);
 
     // Seat Beast Mode (brute, 6 power) on the chain against an undefended
@@ -518,7 +519,7 @@ fn beast_mode_no_bonus_when_player_has_not_intimidated() {
 
     // Resolving Beast Mode's on-play effect does nothing: the condition fails.
     let effect = Card::BeastModeR.data().play_effect.as_ref().unwrap();
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.attack_power_bonus, 0);
 
     // Seat Beast Mode (brute, 6 power) on the chain against an undefended
@@ -567,7 +568,7 @@ fn discard_cost_of_power6_card_triggers_intimidate() {
     assert!(gs.p2.hand_size() > 0, "opponent needs a card to be intimidated");
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
 
-    apply_discard_cost(&mut gs, PlayerIndex::P1);
+    apply_discard_cost(&mut gs.state, &mut gs.rng, PlayerIndex::P1);
 
     // The 6-power discard triggered Rhinar's constant ability: the opponent
     // banished one card from hand to their Intimidate banish zone.
@@ -583,7 +584,7 @@ fn discard_cost_of_sub_power6_card_does_not_trigger_intimidate() {
     set_hand(&mut gs, PlayerIndex::P1, &[Card::ClearingBellowB]);
     assert!(Card::ClearingBellowB.data().power < 6);
 
-    apply_discard_cost(&mut gs, PlayerIndex::P1);
+    apply_discard_cost(&mut gs.state, &mut gs.rng, PlayerIndex::P1);
 
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
 }
@@ -602,7 +603,7 @@ fn bare_fangs_play_effect_power6_discard_also_intimidates() {
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
 
     let effect = Card::BareFangsR.data().play_effect.as_ref().unwrap();
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
 
     // The play effect banked its +2, and the 6-power discard also intimidated.
     assert_eq!(gs.p1.attack_power_bonus, 2);
@@ -620,7 +621,7 @@ fn non_rhinar_hero_discard_does_not_intimidate() {
 
     let mut gs = setup_rhinar_action_phase();
     set_hand(&mut gs, PlayerIndex::P2, &[Card::FlockOfTheFeatherWalkersR]);
-    apply_discard_cost(&mut gs, PlayerIndex::P2);
+    apply_discard_cost(&mut gs.state, &mut gs.rng, PlayerIndex::P2);
 
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P1), 0);
 }
@@ -682,14 +683,14 @@ fn alpha_rampage_power6_discard_intimidates_twice() {
 /// `card` and to Clearing Bellow (pitch 3, used to pay the cost); both players
 /// then pass so the attack resolves. Returns the game and the played card's
 /// card.
-fn play_and_resolve_attack(card: Card) -> (Gamestate, Card) {
+fn play_and_resolve_attack(card: Card) -> (TestGame, Card) {
     play_and_resolve_attack_against(build_dorinthea_deck(), card)
 }
 
 /// `play_and_resolve_attack` with `defender_deck` as p2's decklist, for tests
 /// whose defender needs cards only that deck holds — a Rhinar mirror when the
 /// defender blocks or reacts with Rhinar's own cards.
-fn play_and_resolve_attack_against(defender_deck: [Card; 46], card: Card) -> (Gamestate, Card) {
+fn play_and_resolve_attack_against(defender_deck: [Card; 46], card: Card) -> (TestGame, Card) {
     let mut gs = new_game(build_rhinar_deck(), defender_deck, Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -773,7 +774,7 @@ fn wrecking_ball_discarding_power6_intimidates_twice_under_rhinar() {
         .play_effect
         .as_ref()
         .expect("Wrecking Ball should carry an on-play effect");
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
 
     // The 6-power discard intimidates twice (constant ability + the card's own
     // conditional Intimidate) and banks no power; the card is now in the
@@ -794,7 +795,7 @@ fn wrecking_ball_discarding_below_power6_does_not_intimidate() {
     put_on_top_of_deck(&mut gs, PlayerIndex::P1, pick);
 
     let effect = Card::WreckingBallR.data().play_effect.as_ref().unwrap();
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
 
     // The discard missed the power-6 threshold, so neither the constant ability
     // nor the conditional Intimidate fires; the card still moves to the
@@ -897,7 +898,7 @@ fn smash_with_big_tree_cannot_be_used_to_block() {
 /// 0-cost card is affordable outright, so it commits straight to the stack with
 /// no pitching; both players then pass so it resolves. Returns the game and the
 /// played card.
-fn play_and_resolve_zero_cost_action(card: Card) -> (Gamestate, Card) {
+fn play_and_resolve_zero_cost_action(card: Card) -> (TestGame, Card) {
     let mut gs = setup_rhinar_action_phase();
     assert_eq!(card.data().cost, 0, "helper only plays 0-cost cards");
 
@@ -953,7 +954,7 @@ fn clearing_bellow_intimidates_on_resolve_and_keeps_the_action_point() {
 
 /// Resolve Wounded Bull's on-play effect for `owner` with the two heroes on
 /// `p1_life` / `p2_life`, returning the game so the banked bonus can be checked.
-fn resolve_wounded_bull_at(owner: PlayerIndex, p1_life: u8, p2_life: u8) -> Gamestate {
+fn resolve_wounded_bull_at(owner: PlayerIndex, p1_life: u8, p2_life: u8) -> TestGame {
     let mut gs = setup_rhinar_action_phase();
     gs.p1.life = p1_life;
     gs.p2.life = p2_life;
@@ -963,7 +964,7 @@ fn resolve_wounded_bull_at(owner: PlayerIndex, p1_life: u8, p2_life: u8) -> Game
         .play_effect
         .as_ref()
         .expect("Wounded Bull should carry an on-play effect");
-    apply_on_play_effect(&mut gs, owner, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, owner, effect);
     gs
 }
 
@@ -1099,7 +1100,7 @@ fn sigil_of_solace_heals_only_its_owner() {
     let (p1_before, p2_before) = (gs.p1.life, gs.p2.life);
 
     let effect = Card::SigilofSolaceB.data().play_effect.as_ref().unwrap();
-    apply_on_play_effect(&mut gs, PlayerIndex::P2, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P2, effect);
 
     // The gain follows the resolving card's owner, leaving the opponent alone.
     assert_eq!(gs.p2.life, p2_before + 1);
@@ -1118,14 +1119,14 @@ fn sigil_of_solace_heals_only_its_owner() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Bank Come to Fight's +1 for p1 by resolving its on-play effect directly.
-fn bank_come_to_fight_bonus() -> Gamestate {
+fn bank_come_to_fight_bonus() -> TestGame {
     let mut gs = setup_rhinar_action_phase();
     let effect = Card::ComeToFightB
         .data()
         .play_effect
         .as_ref()
         .expect("Come to Fight should carry an on-play effect");
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.next_attack_action_bonus, 1);
     gs
 }
@@ -1297,7 +1298,7 @@ fn assert_vanilla_defense_reaction(card: Card, cost: u8, defense: u8) {
 /// Dorinthea (p2) is on defense, in the Defend phase with the attack on link 0
 /// of p1's chain. The starting point for every defense-reaction test below: 6
 /// power against an untouched 20 life makes the arithmetic of a block obvious.
-fn dorinthea_defending_muscle_mutt() -> Gamestate {
+fn dorinthea_defending_muscle_mutt() -> TestGame {
     let (gs, _) = play_and_resolve_attack(Card::MuscleMuttY);
     assert_eq!(gs.phase, Phase::Defend);
     assert_eq!(gs.active_player, PlayerIndex::P2);
@@ -1309,7 +1310,7 @@ fn dorinthea_defending_muscle_mutt() -> Gamestate {
 /// with Muscle Mutt and a second Rhinar (p2) defends, so the defender can block
 /// and react with Rhinar's cards — Dodge, Pack Call, Rally the Rearguard — from
 /// her own deck. Same Defend-phase starting point, same 6 power into 20 life.
-fn rhinar_defending_muscle_mutt() -> Gamestate {
+fn rhinar_defending_muscle_mutt() -> TestGame {
     let (gs, _) = play_and_resolve_attack_against(build_rhinar_deck(), Card::MuscleMuttY);
     assert_eq!(gs.phase, Phase::Defend);
     assert_eq!(gs.active_player, PlayerIndex::P2);
@@ -1322,7 +1323,7 @@ fn rhinar_defending_muscle_mutt() -> Gamestate {
 /// attack, her only attack action card) and Rhinar (p2) defends, in the Defend
 /// phase with the attack on link 0. For tests that need Rhinar's defensive
 /// cards on one side and Dorinthea's instants or attack reactions on the other.
-fn rhinar_defending_flock() -> Gamestate {
+fn rhinar_defending_flock() -> TestGame {
     let mut gs = setup_dorinthea_action_phase();
     set_hand(&mut gs, PlayerIndex::P1,
         &[Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR, Card::SharpenSteelR, Card::SharpenSteelR]);
@@ -1343,7 +1344,7 @@ fn rhinar_defending_flock() -> Gamestate {
 /// Step from the Defend phase into the defend reaction step with the defender
 /// (p2) holding priority: she declares no blockers, then the attacker passes
 /// his first crack at the reaction window.
-fn pass_to_defender_reaction(gs: &mut Gamestate) {
+fn pass_to_defender_reaction(gs: &mut TestGame) {
     step(gs, Action{ typ: ActionType::Pass, card: None}); // no blockers declared
     assert_eq!(gs.phase, Phase::Reaction);
     assert_eq!(gs.active_player, PlayerIndex::P1);
@@ -1476,7 +1477,7 @@ fn toughen_up_is_paid_for_by_pitching_in_the_reaction_window() {
 /// defend reaction step and resolve the window out: both players pass, so the
 /// reaction resolves and, with the stack empty again, the window closes and
 /// combat damage is dealt. Returns the game and the reaction.
-fn defender_reacts_with(gs: &mut Gamestate, card: Card) -> Card {
+fn defender_reacts_with(gs: &mut TestGame, card: Card) -> Card {
     assert_eq!(card.data().cost, 0, "helper only plays a free reaction");
     set_hand(gs, PlayerIndex::P2, &[card]);
     let idx = *hand_cards(&gs, PlayerIndex::P2).first().expect("the reaction should be the only card in hand");
@@ -1801,7 +1802,7 @@ fn deck_order(gs: &Gamestate, pid: PlayerIndex) -> Vec<Card> {
 /// Declare `cards` as p2's blockers, in the order given, then finish the defend
 /// step. Returns them. Any defend triggers are on the stack when this
 /// returns, still unresolved: the reaction window below is what resolves them.
-fn declare_blockers(gs: &mut Gamestate, cards: &[Card]) -> Vec<Card> {
+fn declare_blockers(gs: &mut TestGame, cards: &[Card]) -> Vec<Card> {
     set_hand(gs, PlayerIndex::P2, cards);
     for &card in cards {
         step_card(gs, ActionType::Defend, card);
@@ -1815,7 +1816,7 @@ fn declare_blockers(gs: &mut Gamestate, cards: &[Card]) -> Vec<Card> {
 
 /// Both players pass in succession, resolving exactly one layer off the stack
 /// (or closing the window and dealing combat damage when the stack is empty).
-fn pass_once_each(gs: &mut Gamestate) {
+fn pass_once_each(gs: &mut TestGame) {
     step(gs, Action{ typ: ActionType::Pass, card: None});
     step(gs, Action{ typ: ActionType::Pass, card: None});
 }
@@ -2014,8 +2015,8 @@ fn defending_with_two_pack_calls_fires_the_effect_twice() {
     // Two different sub-6-power cards on top, so each Pack Call bottoms one in
     // turn and the two reveals are told apart by which card moved.
     let first_top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::RallyTheRearguardB);
-    let second = gs.p2.deck.get_mut(1).expect("deck has two cards");
-    second.set_card(gs.p2.deck_kind.id_of(Card::ClearingBellowB).unwrap());
+    let second = gs.state.p2.deck.get_mut(1).expect("deck has two cards");
+    second.set_card(gs.state.p2.deck_kind.id_of(Card::ClearingBellowB).unwrap());
     let second_top = Card::ClearingBellowB;
     let order = deck_order(&gs, PlayerIndex::P2);
     assert_eq!(order[..2], [first_top, second_top]);
@@ -2304,14 +2305,14 @@ fn pitching_inside_the_defend_trigger_window_returns_to_it() {
 
 /// Bank Barraging Beatdown's conditional +3 for p1 by resolving its on-play
 /// effect directly.
-fn bank_barraging_beatdown_bonus() -> Gamestate {
+fn bank_barraging_beatdown_bonus() -> TestGame {
     let mut gs = setup_rhinar_action_phase();
     let effect = Card::BarragingBeatdownY
         .data()
         .play_effect
         .as_ref()
         .expect("Barraging Beatdown should carry an on-play effect");
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, effect);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 3);
     gs
 }
@@ -2499,7 +2500,7 @@ fn barraging_beatdown_stacks_with_awakening_bellows_unconditional_bonus() {
         .play_effect
         .as_ref()
         .expect("Awakening Bellow should carry an on-play effect");
-    apply_on_play_effect(&mut gs, PlayerIndex::P1, ab);
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, ab);
     assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
 
     place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::BareFangsR);
@@ -2588,14 +2589,14 @@ fn activatable_cards(gs: &Gamestate) -> HashSet<Card> {
 /// Rally the Rearguard, leaving her holding `spare` as the card her ability can
 /// discard. Priority has passed to her in the reaction window, so the
 /// activation is the next thing she may do. Returns the game and Rally.
-fn rally_blocking_muscle_mutt(spare: &[Card]) -> (Gamestate, Card) {
+fn rally_blocking_muscle_mutt(spare: &[Card]) -> (TestGame, Card) {
     rally_blocking(rhinar_defending_muscle_mutt(), spare)
 }
 
 /// Block the attack in `gs` (Defend phase, p2 defending with a Rhinar deck)
 /// with Rally the Rearguard, keeping `spare` in hand, and pass priority to the
 /// defender in the reaction window. Returns the game and Rally.
-fn rally_blocking(mut gs: Gamestate, spare: &[Card]) -> (Gamestate, Card) {
+fn rally_blocking(mut gs: TestGame, spare: &[Card]) -> (TestGame, Card) {
     let mut hand = vec![Card::RallyTheRearguardB];
     hand.extend_from_slice(spare);
     set_hand(&mut gs, PlayerIndex::P2, &hand);
@@ -2949,7 +2950,7 @@ fn power6_discard_on_your_own_turn_still_intimidates() {
     assert_eq!(gs.turn_player, PlayerIndex::P1);
     let pick = set_hand_to_one_power6_card(&mut gs, PlayerIndex::P1);
 
-    apply_discard_cost(&mut gs, PlayerIndex::P1);
+    apply_discard_cost(&mut gs.state, &mut gs.rng, PlayerIndex::P1);
 
     assert!(in_zone(&gs, PlayerIndex::P1, pick, Zone::Graveyard));
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
@@ -2966,10 +2967,10 @@ fn every_power6_discard_intimidates_there_is_no_once_per_turn_limit() {
     // The opponent needs cards to banish for both triggers to be observable.
     assert!(gs.p2.hand_size() >= 2);
 
-    apply_discard_cost(&mut gs, PlayerIndex::P1);
+    apply_discard_cost(&mut gs.state, &mut gs.rng, PlayerIndex::P1);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 1);
 
-    apply_discard_cost(&mut gs, PlayerIndex::P1);
+    apply_discard_cost(&mut gs.state, &mut gs.rng, PlayerIndex::P1);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 2,
         "the second 6-power discard intimidates too — the ability is not once per turn");
 }
@@ -2984,7 +2985,7 @@ fn power6_discard_on_the_opponents_turn_does_not_intimidate() {
     assert_eq!(gs.turn_player, PlayerIndex::P2);
 
     let pick = set_hand_to_one_power6_card(&mut gs, PlayerIndex::P1);
-    apply_discard_cost(&mut gs, PlayerIndex::P1);
+    apply_discard_cost(&mut gs.state, &mut gs.rng, PlayerIndex::P1);
 
     // The card is discarded and it is over the threshold — only the timing
     // stops it.
@@ -2998,7 +2999,7 @@ fn power6_discard_on_the_opponents_turn_does_not_intimidate() {
 /// of `rally_blocking_muscle_mutt`, with p1 on defense so the hero ability being
 /// tested is the defender's. Priority has passed to him in the reaction window.
 /// Returns the game and Rally.
-fn rhinar_blocking_with_rally(spare: &[Card]) -> (Gamestate, Card) {
+fn rhinar_blocking_with_rally(spare: &[Card]) -> (TestGame, Card) {
     let mut gs = setup_rhinar_mirror_action_phase();
     // p1 passes his turn out; p2 takes hers.
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
@@ -3087,7 +3088,7 @@ fn rally_ability_still_works_when_the_discard_would_have_intimidated() {
 /// Rhinar (p1) on his action phase with Chief Ruk'utan in his arsenal — face up
 /// or face down as asked — and `hand` (at most three cards) as his hand. Returns
 /// the game and Ruk'utan's index.
-fn rhinar_with_rukutan(face_up: bool, hand: &[Card]) -> (Gamestate, Card) {
+fn rhinar_with_rukutan(face_up: bool, hand: &[Card]) -> (TestGame, Card) {
     let mut gs = setup_rhinar_action_phase();
     let mut opening = vec![Card::ChiefRukutan];
     opening.extend_from_slice(hand);
@@ -3102,7 +3103,7 @@ fn rhinar_with_rukutan(face_up: bool, hand: &[Card]) -> (Gamestate, Card) {
 
 /// Play the first `card` in p1's hand with its cost already banked, so it goes
 /// straight onto the stack without a pitch step. Returns its index.
-fn play_from_hand_prepaid(gs: &mut Gamestate, card: Card) -> Card {
+fn play_from_hand_prepaid(gs: &mut TestGame, card: Card) -> Card {
     let idx = expect_in(gs, PlayerIndex::P1, card, Zone::Hand, "the card to play should be in hand");
     gs.p1.resources = card.data().cost;
     step_card(gs, ActionType::PlayCard, idx);
@@ -3166,7 +3167,7 @@ fn chief_rukutan_is_a_brute_mentor_with_play6_intimidate_and_alpha_rampage_searc
 /// Rhinar arsenals Chief Ruk'utan at the end of his first turn (face down),
 /// then Dorinthea passes through her turn. Returns the game as Rhinar's second
 /// turn begins, and Ruk'utan's index.
-fn rhinar_second_turn_with_face_down_rukutan() -> (Gamestate, Card) {
+fn rhinar_second_turn_with_face_down_rukutan() -> (TestGame, Card) {
     let mut gs = setup_rhinar_action_phase();
     let ruk = *hand_cards(&gs, PlayerIndex::P1).first().expect("opening hand");
     relabel(&mut gs, PlayerIndex::P1, Zone::Hand, ruk, Card::ChiefRukutan);
@@ -3192,7 +3193,7 @@ fn rhinar_second_turn_with_face_down_rukutan() -> (Gamestate, Card) {
 
 /// Pass Rhinar's turn (and Dorinthea's after it) back round to the start of
 /// Rhinar's next turn, without arsenaling anything.
-fn pass_round_to_rhinars_next_turn(gs: &mut Gamestate) {
+fn pass_round_to_rhinars_next_turn(gs: &mut TestGame) {
     assert_eq!(gs.phase, Phase::Action);
     step(gs, Action{ typ: ActionType::Pass, card: None}); // Rhinar's action phase
     step(gs, Action{ typ: ActionType::Pass, card: None}); // his arsenal (occupied)
@@ -3308,7 +3309,7 @@ fn flipping_is_logged_publicly() {
 fn a_face_down_mentor_does_not_trigger_after_being_declined() {
     let (mut gs, ruk) = rhinar_second_turn_with_face_down_rukutan();
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
-    maybe_play6_intimidate(&mut gs, PlayerIndex::P1, 6);
+    maybe_play6_intimidate(&mut gs.state, &mut gs.rng, PlayerIndex::P1, 6);
     assert_eq!(gs.p1.arsenal_lesson_counters, 0);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
 }
@@ -3371,7 +3372,7 @@ fn rukutan_ignores_a_card_with_less_than_6_power() {
 #[test]
 fn rukutan_ignores_the_opponents_6_power_plays() {
     let (mut gs, ruk) = rhinar_with_rukutan(true, &[]);
-    maybe_play6_intimidate(&mut gs, PlayerIndex::P2, 9);
+    maybe_play6_intimidate(&mut gs.state, &mut gs.rng, PlayerIndex::P2, 9);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P1), 0);
     assert_eq!(gs.p1.arsenal_lesson_counters, 0);
@@ -3416,7 +3417,7 @@ fn rukutan_graduation_shuffles_the_deck() {
     let mut expected_unshuffled = deck_order(&gs, PlayerIndex::P1);
     expected_unshuffled.retain(|&c| c != rampage);
 
-    maybe_play6_intimidate(&mut gs, PlayerIndex::P1, 6);
+    maybe_play6_intimidate(&mut gs.state, &mut gs.rng, PlayerIndex::P1, 6);
 
     let after = deck_order(&gs, PlayerIndex::P1);
     // Same cards, new order (a 30-odd card deck coming back in its old order
@@ -3438,7 +3439,7 @@ fn rukutan_graduates_even_with_no_alpha_rampage_left_to_find() {
     relabel(&mut gs, PlayerIndex::P1, Zone::Deck, rampage, Card::MuscleMuttY);
     let deck_before = gs.p1.deck_size();
 
-    maybe_play6_intimidate(&mut gs, PlayerIndex::P1, 6);
+    maybe_play6_intimidate(&mut gs.state, &mut gs.rng, PlayerIndex::P1, 6);
 
     // He is banished all the same; the arsenal is simply left empty.
     assert!(in_zone(&gs, PlayerIndex::P1, ruk, Zone::Banish));
@@ -3453,7 +3454,7 @@ fn alpha_rampage_fetched_by_rukutan_can_be_played_from_the_arsenal_that_turn() {
     // discard its additional cost demands.
     let (mut gs, ruk) = rhinar_with_rukutan(true, &[Card::ClearingBellowB, Card::PackCallY]);
     gs.p1.arsenal_lesson_counters = 1;
-    maybe_play6_intimidate(&mut gs, PlayerIndex::P1, 6);
+    maybe_play6_intimidate(&mut gs.state, &mut gs.rng, PlayerIndex::P1, 6);
     let rampage = arsenal_card(&gs, PlayerIndex::P1).expect("Alpha Rampage should be in the arsenal");
     assert_eq!(rampage, Card::AlphaRampageR);
     assert_eq!(gs.phase, Phase::Action);
@@ -3545,13 +3546,13 @@ fn bone_basher_swing_offered(gs: &Gamestate) -> bool {
 /// Swing Bone Basher on Rhinar's first turn, paying with a pitch-3 card, and
 /// carry the attack through an unblocked combat back to his action phase.
 /// Returns the game and the weapon.
-fn swing_bone_basher_unblocked() -> (Gamestate, Card) {
+fn swing_bone_basher_unblocked() -> (TestGame, Card) {
     swing_bone_basher_unblocked_keeping(&[])
 }
 
 /// As `swing_bone_basher_unblocked`, but Rhinar still holds `kept` once the
 /// swing is paid for.
-fn swing_bone_basher_unblocked_keeping(kept: &[Card]) -> (Gamestate, Card) {
+fn swing_bone_basher_unblocked_keeping(kept: &[Card]) -> (TestGame, Card) {
     let mut gs = setup_rhinar_action_phase();
     let mut hand = vec![Card::ClearingBellowB];
     hand.extend_from_slice(kept);
@@ -3698,7 +3699,7 @@ fn close_chain_offered(gs: &Gamestate) -> bool {
 /// Swing Bone Basher on Rhinar's first turn and have Dorinthea block it with
 /// one hand card, then carry play back to Rhinar's action phase. Returns the
 /// game, the weapon's index and the blocker's index.
-fn swing_bone_basher_blocked() -> (Gamestate, Card, Card) {
+fn swing_bone_basher_blocked() -> (TestGame, Card, Card) {
     let mut gs = setup_rhinar_action_phase();
     set_hand(&mut gs, PlayerIndex::P1, &[Card::ClearingBellowB]);
     let weapon = weapon_card(&gs, PlayerIndex::P1);

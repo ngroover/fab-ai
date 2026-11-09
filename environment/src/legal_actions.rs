@@ -551,9 +551,9 @@ mod tests {
     use super::*;
     use crate::cards::Card;
     use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
-    use crate::fab_step::step;
     use crate::game_state::{PlayerIndex, Zone};
     use crate::test_support::*;
+    use crate::test_support::step;
     use std::collections::HashSet;
 
     #[test]
@@ -666,7 +666,7 @@ mod tests {
     /// the attack resolves onto the combat chain — which flips the active player
     /// to Dorinthea and enters the Defend phase. This mirrors the real engine
     /// flow rather than poking `gs.phase` directly.
-    fn step_to_dorinthea_defending() -> Gamestate {
+    fn step_to_dorinthea_defending() -> TestGame {
         let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
@@ -691,7 +691,7 @@ mod tests {
     /// The seat-swapped `step_to_dorinthea_defending`: Dorinthea (p1) attacks
     /// Rhinar (p2) with Flock of the Feather Walkers (cost 1), paid with a
     /// pitch-1 Sharpen Steel, leaving two cards in her hand and Rhinar to defend.
-    fn step_to_rhinar_defending() -> Gamestate {
+    fn step_to_rhinar_defending() -> TestGame {
         let mut gs = new_game(build_dorinthea_deck(), build_rhinar_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         assert_eq!(gs.active_player, PlayerIndex::P1);

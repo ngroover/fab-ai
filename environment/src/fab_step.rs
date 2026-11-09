@@ -3,10 +3,13 @@ use crate::card_counts::{CardCounts, DeckCardId};
 use crate::game_state::{DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
 use crate::cards::{Card,CardClass,CardData,CardType,Keyword};
 use crate::card_effects::{Ability,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,MentorEffect};
-use crate::fab_game::shuffle_deck_for;
+use crate::fab_game::{shuffle_deck_for, GameRng};
 use rand::RngExt;
 
-pub fn step(gs: &mut Gamestate, act: Action) {
+/// Apply `act`, the active player's decision, to `gs`. Any random choice the
+/// action sets off (an Intimidate or random discard, a deck shuffle) is drawn
+/// from `rng`, which the caller keeps beside the game state (see `GameRng`).
+pub fn step(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
     // Once the game has been won or drawn it is frozen: no further actions are
     // processed.
     if gs.is_game_over() {
@@ -17,11 +20,11 @@ pub fn step(gs: &mut Gamestate, act: Action) {
     match gs.phase {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::MentorFlip => handle_mentor_flip_phase(gs, act),
-        Phase::Action => handle_action_phase(gs, act),
-        Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch => handle_pitch_phase(gs, act),
-        Phase::ActionInstant => handle_action_instant_phase(gs, act),
+        Phase::Action => handle_action_phase(gs, rng, act),
+        Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch => handle_pitch_phase(gs, rng, act),
+        Phase::ActionInstant => handle_action_instant_phase(gs, rng, act),
         Phase::Defend => handle_defend_phase(gs, act),
-        Phase::DefendTriggers | Phase::Reaction => handle_reaction_phase(gs, act),
+        Phase::DefendTriggers | Phase::Reaction => handle_reaction_phase(gs, rng, act),
         Phase::Arsenal => handle_arsenal_phase(gs, act),
         Phase::PitchOrder => handle_pitch_order_phase(gs, act),
         _ => {}
@@ -199,13 +202,13 @@ fn turn_mentor_face_up(gs: &mut Gamestate, pid: PlayerIndex) {
     }
 }
 
-fn handle_action_phase(gs: &mut Gamestate, act: Action) {
+fn handle_action_phase(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
     match act.typ {
         // Playing a card, or activating an ability (an armor piece or a weapon
         // swing) both commit a card that must then be paid for (see
         // `commit_card_to_pending`).
         ActionType::PlayCard | ActionType::Activate => {
-            commit_card_to_pending(gs, act);
+            commit_card_to_pending(gs, rng, act);
         }
         // Breaking the combat chain clears it ahead of the next attack, which
         // then opens a fresh chain on link 0. The action phase carries on.
@@ -238,15 +241,15 @@ fn handle_action_phase(gs: &mut Gamestate, act: Action) {
 /// — for as long as they keep the priority. Passing hands priority to the other
 /// player; once both have passed in succession, the top of the stack resolves
 /// (see `handle_action_instant_pass`).
-fn handle_action_instant_phase(gs: &mut Gamestate, act: Action) {
+fn handle_action_instant_phase(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
     match act.typ {
         // Only instants are legal here (see `legal_instant_phase`); they commit
         // through the same pending/pitch flow as an action-phase play.
         ActionType::PlayCard => {
-            commit_card_to_pending(gs, act);
+            commit_card_to_pending(gs, rng, act);
         }
         ActionType::Pass => {
-            handle_priority_pass(gs);
+            handle_priority_pass(gs, rng);
         }
         _ => {}
     }
@@ -260,7 +263,7 @@ fn handle_action_instant_phase(gs: &mut Gamestate, act: Action) {
 /// `ReactionPitch` phase when committing during the Reaction window (so play
 /// returns to it once paid), or the `ActionPitch` phase otherwise. Shared by
 /// the Action, ActionInstant, and Reaction phases.
-fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
+fn commit_card_to_pending(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
     // Cost of committing this card: an Activate (an armor ability or a weapon
     // swing) pays its ability's cost; a played card pays its own catalog cost.
     let card_ref = act.card.expect("play/activate action requires a card");
@@ -286,7 +289,7 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
     // Affordable outright: no pitching needed, commit to the stack now.
     // Otherwise leave it pending (still in its zone) and pitch for it.
     if already_paid {
-        commit_pending_to_stack(gs);
+        commit_pending_to_stack(gs, rng);
     } else {
         // Pitching during a reaction window stays within that window: each has
         // a pitch phase of its own so we return to the window we interrupted
@@ -310,7 +313,7 @@ fn commit_card_to_pending(gs: &mut Gamestate, act: Action) {
 /// pass with nothing on the stack instead closes the window and advances to the
 /// next itinerary phase banked on the return stack (the turn player resuming the
 /// Action phase).
-fn handle_priority_pass(gs: &mut Gamestate) {
+fn handle_priority_pass(gs: &mut Gamestate, rng: &mut GameRng) {
     if gs.logging_enabled() {
         gs.log_public(format!("{} passes", player_name(gs.active_player)));
     }
@@ -326,7 +329,7 @@ fn handle_priority_pass(gs: &mut Gamestate) {
         } else {
             // Resolve the top of the stack. The resolution itself decides where
             // priority and the phase go next, since that depends on the card type.
-            resolve_top_of_stack(gs);
+            resolve_top_of_stack(gs, rng);
         }
     } else {
         // First pass: hand priority to the other player, who may now respond.
@@ -566,13 +569,13 @@ fn log_end_of_turn_draw(gs: &mut Gamestate, pid: PlayerIndex, drawn: u8, names: 
 /// in succession the top of the stack resolves, and when the stack is empty the
 /// reaction step ends and play returns to the Action phase (see
 /// `handle_priority_pass`).
-fn handle_reaction_phase(gs: &mut Gamestate, act: Action) {
+fn handle_reaction_phase(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
     match act.typ {
         ActionType::PlayCard | ActionType::Activate => {
-            commit_card_to_pending(gs, act);
+            commit_card_to_pending(gs, rng, act);
         }
         ActionType::Pass => {
-            handle_priority_pass(gs);
+            handle_priority_pass(gs, rng);
         }
         _ => {}
     }
@@ -743,7 +746,7 @@ fn commit_defense_reaction(gs: &mut Gamestate, owner: PlayerIndex, id: DeckCardI
 ///   empty the window closes and we advance to the next itinerary phase;
 ///   otherwise priority returns to the turn player and we keep responding in the
 ///   live priority window (Instant or Reaction).
-fn resolve_top_of_stack(gs: &mut Gamestate) {
+fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
     let Some(pending) = gs.pop_stack() else {
         return;
     };
@@ -806,7 +809,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     // action): the resolving player's opponent banishes a random card from their
     // hand to their Intimidate banish zone.
     if data.keyword.contains(Keyword::Intimidate) {
-        apply_intimidate(gs, owner);
+        apply_intimidate(gs, rng, owner);
     }
 
     // "When you play" on-play effects fire as the card resolves, before it goes
@@ -814,7 +817,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
     // reference into the card catalog, so holding the effect across the mutable
     // `gs` calls below is fine.
     if let Some(effect) = &data.play_effect {
-        apply_on_play_effect(gs, owner, effect);
+        apply_on_play_effect(gs, rng, owner, effect);
     }
 
     // A card joins its owner's combat chain when it is attacking: a played
@@ -878,13 +881,13 @@ fn resolve_top_of_stack(gs: &mut Gamestate) {
 /// likely — or `None` when the hand is empty. Draws one index from the rng and
 /// reads that copy off the bitfield (`CardCounts::nth`), so the random hand
 /// picks made by Intimidate and the discard effects allocate nothing.
-fn random_hand_card(gs: &mut Gamestate, pid: PlayerIndex) -> Option<DeckCardId> {
+fn random_hand_card(gs: &Gamestate, rng: &mut GameRng, pid: PlayerIndex) -> Option<DeckCardId> {
     let hand = gs.player(pid).hand;
     let len = hand.len() as usize;
     if len == 0 {
         return None;
     }
-    let k = gs.rng.random_range(0..len);
+    let k = rng.random_range(0..len);
     hand.nth(k)
 }
 
@@ -893,7 +896,7 @@ fn random_hand_card(gs: &mut Gamestate, pid: PlayerIndex) -> Option<DeckCardId> 
 /// hand into their Intimidate banish zone. A no-op when that opponent's hand is
 /// empty. The banished card is hidden information to the attacker, so the log
 /// reveals its identity only to the banishing player.
-fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
+fn apply_intimidate(gs: &mut Gamestate, rng: &mut GameRng, attacker: PlayerIndex) {
     let victim = attacker.opponent();
 
     // The Intimidate trigger has resolved, so the attacker has now intimidated
@@ -903,7 +906,7 @@ fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
     let intimidator = if attacker == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
     intimidator.set_has_intimidated(true);
 
-    let Some(pick) = random_hand_card(gs, victim) else {
+    let Some(pick) = random_hand_card(gs, rng, victim) else {
         return;
     };
 
@@ -929,8 +932,8 @@ fn apply_intimidate(gs: &mut Gamestate, attacker: PlayerIndex) {
 /// Intimidate and the on-play discards, the choice is made by the engine without
 /// a dedicated choice phase; the play/pitch legal-action gates ensure a card is
 /// held back in hand so this cost can always be paid.
-fn apply_discard_cost(gs: &mut Gamestate, owner: PlayerIndex) {
-    let Some(pick) = random_hand_card(gs, owner) else {
+fn apply_discard_cost(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex) {
+    let Some(pick) = random_hand_card(gs, rng, owner) else {
         return;
     };
     let card = gs.player(owner).card(pick);
@@ -943,7 +946,7 @@ fn apply_discard_cost(gs: &mut Gamestate, owner: PlayerIndex) {
 
     move_card(gs.player_mut(owner), pick, Zone::Hand, Zone::Graveyard);
 
-    maybe_discard6_intimidate(gs, owner, discarded_power);
+    maybe_discard6_intimidate(gs, rng, owner, discarded_power);
 }
 
 /// Apply Rhinar's `OnDiscard6Intimidate` constant hero ability after a card has
@@ -966,7 +969,7 @@ fn apply_discard_cost(gs: &mut Gamestate, owner: PlayerIndex) {
 /// The discard paths that do fire it are the ones taken on your own turn: the
 /// "discard a card" additional cost (e.g. Alpha Rampage, Wrecker Romp) and the
 /// play-effect draw-then-discard (e.g. Bare Fangs, Wild Ride).
-fn maybe_discard6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, discarded_power: u8) {
+fn maybe_discard6_intimidate(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex, discarded_power: u8) {
     if owner != gs.turn_player {
         return;
     }
@@ -976,7 +979,7 @@ fn maybe_discard6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, discarded_p
     if discarded_power >= 6
         && matches!(hero_data.constant_effect, Some(ConstantEffect::OnDiscard6Intimidate))
     {
-        apply_intimidate(gs, owner);
+        apply_intimidate(gs, rng, owner);
     }
 }
 
@@ -1004,7 +1007,7 @@ fn maybe_discard6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, discarded_p
 /// - It is not limited to its owner's turn ("whenever you play"); no card that
 ///   can be played on the opponent's turn has 6 power today, so in practice it
 ///   only fires on its owner's turn.
-fn maybe_play6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, played_power: u8) {
+fn maybe_play6_intimidate(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex, played_power: u8) {
     if played_power < 6 {
         return;
     }
@@ -1023,9 +1026,9 @@ fn maybe_play6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, played_power: 
     if gs.logging_enabled() {
         gs.log_public(format!("{}'s {:?} triggers", player_name(owner), card));
     }
-    apply_intimidate(gs, owner);
+    apply_intimidate(gs, rng, owner);
     match data.mentor_effect {
-        Some(MentorEffect::AlphaRampageSearch) => mentor_alpha_rampage_search(gs, owner),
+        Some(MentorEffect::AlphaRampageSearch) => mentor_alpha_rampage_search(gs, rng, owner),
         None => {}
     }
 }
@@ -1036,11 +1039,11 @@ fn maybe_play6_intimidate(gs: &mut Gamestate, owner: PlayerIndex, played_power: 
 /// for Alpha Rampage, put it face up in arsenal and shuffle." Ruk'utan is in
 /// `owner`'s arsenal; the counters are the arsenal's
 /// (`Player::arsenal_lesson_counters`).
-fn mentor_alpha_rampage_search(gs: &mut Gamestate, owner: PlayerIndex) {
+fn mentor_alpha_rampage_search(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex) {
     let player = gs.player_mut(owner);
     player.arsenal_lesson_counters = player.arsenal_lesson_counters.saturating_add(1);
     if player.arsenal_lesson_counters >= 2 {
-        graduate_mentor(gs, owner, Card::AlphaRampageR);
+        graduate_mentor(gs, rng, owner, Card::AlphaRampageR);
     }
 }
 
@@ -1052,7 +1055,7 @@ fn mentor_alpha_rampage_search(gs: &mut Gamestate, owner: PlayerIndex) {
 ///
 /// The fetched card arrives face up and is public; like any arsenal card it can
 /// be played this very turn, paid for out of hand.
-fn graduate_mentor(gs: &mut Gamestate, owner: PlayerIndex, fetch: Card) {
+fn graduate_mentor(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex, fetch: Card) {
     // Leaving the arsenal clears its face-up state and lesson counters: they
     // belonged to the mentor while it sat there, and do not follow it.
     let player = gs.player_mut(owner);
@@ -1074,11 +1077,7 @@ fn graduate_mentor(gs: &mut Gamestate, owner: PlayerIndex, fetch: Card) {
         ));
     }
 
-    let (player, rng) = if owner == PlayerIndex::P1 {
-        (&mut gs.p1, &mut gs.rng)
-    } else {
-        (&mut gs.p2, &mut gs.rng)
-    };
+    let player = gs.player_mut(owner);
     if let Some(pos) = found {
         let slot = player.deck.remove(pos).expect("the search found this card");
         put_in_zone(player, slot.card(), Zone::Arsenal);
@@ -1092,9 +1091,9 @@ fn graduate_mentor(gs: &mut Gamestate, owner: PlayerIndex, fetch: Card) {
 /// first (it may itself move cards, as `DrawDiscardHit6` does), and the effect is
 /// applied only when the condition holds. `owner` is the player whose card is
 /// resolving. Effects the engine does not model yet are no-ops.
-fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayEffect) {
+fn apply_on_play_effect(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex, effect: &OnPlayEffect) {
     let condition_met = match effect.condition {
-        OnPlayConditionType::DrawDiscardHit6 => draw_then_discard_hit6(gs, owner),
+        OnPlayConditionType::DrawDiscardHit6 => draw_then_discard_hit6(gs, rng, owner),
         // "If you've intimidated this turn" (e.g. Beast Mode): met when the
         // owner has resolved an Intimidate trigger earlier this turn.
         OnPlayConditionType::HasIntimidated => {
@@ -1163,7 +1162,7 @@ fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayE
         // constant ability, which already fired inside the condition's own
         // discard — so Rhinar hitting a 6 with Wrecking Ball Intimidates twice.
         OnPlayEffectType::ConditionalIntimidate => {
-            apply_intimidate(gs, owner);
+            apply_intimidate(gs, rng, owner);
         }
         // The owner gains `magnitude` life (e.g. Sigil of Solace's "Gain 1
         // life."). There is no maximum life total, so this only ever adds.
@@ -1194,12 +1193,12 @@ fn apply_on_play_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &OnPlayE
 /// `apply_intimidate`). Returns whether the discarded card hit the power-6
 /// threshold; returns `false` if the hand is empty after drawing (nothing to
 /// discard, e.g. an empty deck and hand).
-fn draw_then_discard_hit6(gs: &mut Gamestate, owner: PlayerIndex) -> bool {
+fn draw_then_discard_hit6(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex) -> bool {
     // Draw a card.
     draw_cards(gs.player_mut(owner), 1);
 
     // Pick a card to discard at random.
-    let Some(pick) = random_hand_card(gs, owner) else {
+    let Some(pick) = random_hand_card(gs, rng, owner) else {
         return false;
     };
     let card = gs.player(owner).card(pick);
@@ -1214,7 +1213,7 @@ fn draw_then_discard_hit6(gs: &mut Gamestate, owner: PlayerIndex) -> bool {
 
     // Rhinar's constant ability also triggers off this discard: a power-6 discard
     // intimidates, on top of whatever the play effect itself does.
-    maybe_discard6_intimidate(gs, owner, discarded_power);
+    maybe_discard6_intimidate(gs, rng, owner, discarded_power);
 
     discarded_power >= 6
 }
@@ -1308,7 +1307,7 @@ pub(crate) fn uses_action_point(typ: ActionType, data: &CardData) -> bool {
 /// pending card's cost, that card is committed to the stack and the game returns
 /// to the window the pitch interrupted (the ActionInstant or Reaction phase; see
 /// `commit_pending_to_stack`).
-fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
+fn handle_pitch_phase(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
     if act.typ != ActionType::Pitch {
         return;
     }
@@ -1335,7 +1334,7 @@ fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
     let pending_card = gs.player(pending.owner).card(pending.card);
     let cost = action_cost(pending.typ, pending_card.data());
     if resources >= cost {
-        commit_pending_to_stack(gs);
+        commit_pending_to_stack(gs, rng);
     }
 }
 
@@ -1346,7 +1345,7 @@ fn handle_pitch_phase(gs: &mut Gamestate, act: Action) {
 /// hand or arsenal for a played card, the weapon/equipment zone for an
 /// activation — and pushed onto the stack. Assumes the player can already
 /// cover the cost.
-fn commit_pending_to_stack(gs: &mut Gamestate) {
+fn commit_pending_to_stack(gs: &mut Gamestate, rng: &mut GameRng) {
     let Some(pending) = gs.pending_card else {
         return;
     };
@@ -1380,14 +1379,14 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
     // The play/pitch legal-action gates guarantee a card was held back to satisfy
     // it. Only played cards carry this cost; activations have no additional cost.
     if matches!(data.additional_cost, Some(AdditionalCostType::DiscardCard)) {
-        apply_discard_cost(gs, owner);
+        apply_discard_cost(gs, rng, owner);
     }
 
     // "Whenever you play a card" triggers fire once the card has been played —
     // after its additional costs are paid. Only a played card counts: swinging a
     // weapon or activating an ability is not playing a card.
     if pending.typ == ActionType::PlayCard {
-        maybe_play6_intimidate(gs, owner, data.power);
+        maybe_play6_intimidate(gs, rng, owner, data.power);
     }
 
     // An activated ability pays its own costs here for the same reason: the
@@ -1400,7 +1399,7 @@ fn commit_pending_to_stack(gs: &mut Gamestate) {
                 gs.player_mut(owner).abilities_used.add(pending.card);
             }
             if ability.discards_a_card() {
-                apply_discard_cost(gs, owner);
+                apply_discard_cost(gs, rng, owner);
             }
         }
     }
@@ -1755,12 +1754,13 @@ mod card_tests;
 mod tests {
     use super::*;
     use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
-    use crate::fab_game::{gamestate_from_decklists, reset, Decklists};
+    use crate::fab_game::{gamestate_from_decklists, new_rng, reset, Decklists};
     use crate::game_state::CardVisibleState;
     use crate::cards::Card;
     use crate::deck_cards::{DorintheaCard, RhinarCard};
     use crate::legal_actions::legal_actions;
     use crate::test_support::*;
+    use crate::test_support::step;
 
     #[test]
     fn test_go_first_step() {
@@ -2060,7 +2060,7 @@ mod tests {
     /// Bellow (cost 0, so it commits straight to the stack) and we land in the
     /// Instant phase with p1 as both turn and active player. Returns the gamestate
     /// and the stack slot the committed card occupies.
-    fn instant_phase_with_one_card() -> (Gamestate, Card) {
+    fn instant_phase_with_one_card() -> (TestGame, Card) {
         let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
@@ -2185,7 +2185,7 @@ mod tests {
     /// Drive a game until Dorinthea (p2) is on defense against Rhinar's Muscle
     /// Mutt. Mirrors `test_attack_action_resolves_to_combat_chain` and leaves the
     /// gamestate in the Defend phase with p2 as the active (defending) player.
-    fn step_to_dorinthea_defending() -> Gamestate {
+    fn step_to_dorinthea_defending() -> TestGame {
         let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
@@ -2957,7 +2957,7 @@ mod tests {
     /// cards (Pack Call and Raging Onslaught, pitch 2 each, against the cost of
     /// 3), then run the turn out to the Arsenal pass. Ends with the game in the
     /// PitchOrder phase and returns the gamestate plus the two pitched slots.
-    fn step_to_pitch_order() -> (Gamestate, Card, Card) {
+    fn step_to_pitch_order() -> (TestGame, Card, Card) {
         let mut gs = fresh_game();
 
         let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
@@ -3053,7 +3053,7 @@ mod tests {
     /// she plays Toughen Up (a defense reaction, cost 2) paid for with two
     /// different pitch-1 reds (Sharpen Steel and Thrust), then both players pass the window out so combat resolves
     /// and play returns to the Action phase.
-    fn defender_pitches_two_in_reaction(gs: &mut Gamestate) -> (Card, Card) {
+    fn defender_pitches_two_in_reaction(gs: &mut TestGame) -> (Card, Card) {
         assert_eq!(gs.phase, Phase::Reaction);
         assert_eq!(gs.active_player, gs.turn_player);
 
@@ -3350,7 +3350,7 @@ mod tests {
     /// A fresh, reset game just past the first-player choice — both heroes at 20
     /// life, the turn counter at 1, in the Action phase. A convenient starting
     /// point for poking the win/draw conditions.
-    fn fresh_game() -> Gamestate {
+    fn fresh_game() -> TestGame {
         let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         gs
@@ -3548,11 +3548,11 @@ mod tests {
     #[test]
     fn test_reset_clears_turn_count() {
         let decks = Decklists::new(build_rhinar_deck(), build_dorinthea_deck());
-        let mut gs = gamestate_from_decklists(&decks, Some(42));
-        reset(&mut gs, &decks, false);
+        let mut gs = TestGame { state: gamestate_from_decklists(&decks), rng: new_rng(Some(42)) };
+        reset(&mut gs.state, &decks, &mut gs.rng, false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         gs.turn_count = 17;
-        reset(&mut gs, &decks, false);
+        reset(&mut gs.state, &decks, &mut gs.rng, false);
         assert_eq!(gs.turn_count, 0);
     }
 
@@ -3804,7 +3804,7 @@ mod tests {
     /// banks a conditional Go Again on the attack — the same bank Wild Ride fills
     /// on a 6-power discard — so the attacker keeps their action point and can
     /// attack again this turn.
-    fn run_one_attack(gs: &mut Gamestate, attack: Card, pitch: Card, blocks: &[Card], go_again: bool) {
+    fn run_one_attack(gs: &mut TestGame, attack: Card, pitch: Card, blocks: &[Card], go_again: bool) {
         let find = |gs: &Gamestate, pid: PlayerIndex, want: Card| {
             expect_in(gs, pid, want, Zone::Hand, "should be in hand")
         };

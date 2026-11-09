@@ -78,16 +78,27 @@ impl Decklists {
     }
 }
 
+/// The random number generator a game draws from: the shuffles at `reset`, the
+/// coin flip for who chooses to go first, and every random choice `step` makes
+/// (Intimidate and random discards, mid-game deck shuffles). It is kept beside
+/// the `Gamestate` rather than in it — `FabGame` owns one — so cloning a game
+/// state (e.g. for search) neither copies it nor hands the clone the real
+/// game's future shuffles.
+pub type GameRng = SmallRng;
+
+/// A `GameRng` seeded from `seed`: `Some(seed)` for a reproducible game,
+/// `None` for a random seed.
+pub fn new_rng(seed: Option<u64>) -> GameRng {
+    match seed {
+        Some(s) => SmallRng::seed_from_u64(s),
+        None => rand::make_rng(),
+    }
+}
+
 /// Build a `Gamestate` for two players with `decks`' heroes. Every zone starts
 /// empty: the game is not playable until `reset` deals it, which is also the
 /// single source of truth for life and intellect.
-/// Pass `Some(seed)` for a reproducible game, or `None` for a random seed.
-pub fn gamestate_from_decklists(decks: &Decklists, seed: Option<u64>) -> Gamestate {
-    let rng: SmallRng = match seed {
-        Some(s) => SmallRng::seed_from_u64(s),
-        None => rand::make_rng(),
-    };
-
+pub fn gamestate_from_decklists(decks: &Decklists) -> Gamestate {
     Gamestate {
         p1: Player::new(PlayerIndex::P1, decks.p1.hero),
         p2: Player::new(PlayerIndex::P2, decks.p2.hero),
@@ -96,23 +107,23 @@ pub fn gamestate_from_decklists(decks: &Decklists, seed: Option<u64>) -> Gamesta
         passes: 0,
         phase: Phase::Start,
         turn_count: 0,
-        rng,
         stack: empty_stack(),
         pending_card: None,
-        // Logging is opted into via `reset(gs, decks, true)`; off until then.
+        // Logging is opted into via `reset(gs, decks, rng, true)`; off until then.
         #[cfg(feature = "logging")]
         log: None,
     }
 }
 
 /// Reset `gs` to a fresh, playable game dealt from `decks`, which must be the
-/// decklists `gs` was built from. `logging` opts into the game logs:
+/// decklists `gs` was built from, drawing the shuffles and the first-player
+/// coin flip from `rng`. `logging` opts into the game logs:
 /// when `true`, the omniscient `Gamestate::log` and the per-player
 /// `Player::log` views are allocated (empty) and `step` appends to them; when
 /// `false` all three are `None` and logging costs nothing — the right choice
 /// for simulation or heavy gamestate cloning. Without the `logging` Cargo
 /// feature the log fields do not exist and `logging` is ignored.
-pub fn reset(gs: &mut Gamestate, decks: &Decklists, logging: bool) {
+pub fn reset(gs: &mut Gamestate, decks: &Decklists, rng: &mut GameRng, logging: bool) {
     assert!(gs.p1.hero == decks.p1.hero && gs.p2.hero == decks.p2.hero,
         "reset with decklists for other heroes than the game was built with");
     gs.phase = Phase::ChooseFirst;
@@ -132,10 +143,10 @@ pub fn reset(gs: &mut Gamestate, decks: &Decklists, logging: bool) {
     let _ = logging;
 
     place_cards(gs, decks);
-    shuffle_decks(gs);
+    shuffle_decks(gs, rng);
     set_life_and_intellect(gs);
 
-    gs.active_player = PlayerIndex::new(gs.rng.random_range(0u8..2));
+    gs.active_player = PlayerIndex::new(rng.random_range(0u8..2));
 }
 
 
@@ -146,16 +157,16 @@ pub fn set_life_and_intellect(gs: &mut Gamestate) {
     }
 }
 
-pub fn shuffle_decks(gs: &mut Gamestate) {
-    shuffle_deck_for(&mut gs.p1, &mut gs.rng);
-    shuffle_deck_for(&mut gs.p2, &mut gs.rng);
+pub fn shuffle_decks(gs: &mut Gamestate, rng: &mut GameRng) {
+    shuffle_deck_for(&mut gs.p1, rng);
+    shuffle_deck_for(&mut gs.p2, rng);
 }
 
 /// Shuffle `player`'s deck into a random order. Shuffling hides every card in
 /// it: a card both players saw go in has an unknown position now. Also used
 /// mid-game by effects that search the deck and then shuffle it (Chief
 /// Ruk'utan).
-pub(crate) fn shuffle_deck_for(player: &mut Player, rng: &mut SmallRng) {
+pub(crate) fn shuffle_deck_for(player: &mut Player, rng: &mut GameRng) {
     let cards = player.deck.make_contiguous();
     cards.shuffle(rng);
     for slot in cards.iter_mut() {
@@ -195,14 +206,16 @@ fn place_cards_for(player: &mut Player, start: &StartingCards) {
 }
 
 /// A game of FaB as the simulator drives it: the decklists it is dealt from
-/// together with the state of the game in progress. `reset` needs the
-/// decklists to deal a new game, and everything else needs only `state`, so
-/// the two are kept side by side rather than the decklists living (and being
-/// cloned) inside every `Gamestate`.
+/// together with the state of the game in progress and the rng it draws from.
+/// `reset` needs the decklists to deal a new game, and `reset` and `step` the
+/// rng; everything else needs only `state`. All three are kept side by side
+/// rather than the decklists and rng living (and being cloned) inside every
+/// `Gamestate`.
 #[derive(Clone)]
 pub struct FabGame {
     pub decks: Decklists,
     pub state: Gamestate,
+    pub rng: GameRng,
 }
 
 impl FabGame {
@@ -210,8 +223,8 @@ impl FabGame {
     /// before play). Pass `Some(seed)` for a reproducible game.
     pub fn new(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: Option<u64>) -> Self {
         let decks = Decklists::new(p1_deck, p2_deck);
-        let state = gamestate_from_decklists(&decks, seed);
-        FabGame { decks, state }
+        let state = gamestate_from_decklists(&decks);
+        FabGame { decks, state, rng: new_rng(seed) }
     }
 }
 
@@ -222,7 +235,7 @@ impl crate::simulator::Game for FabGame {
     type Action = Action;
 
     fn reset(&mut self, logging: bool) {
-        reset(&mut self.state, &self.decks, logging);
+        reset(&mut self.state, &self.decks, &mut self.rng, logging);
     }
 
     type ActionList = LegalActions;
@@ -232,7 +245,7 @@ impl crate::simulator::Game for FabGame {
     }
 
     fn step(&mut self, action: Action) {
-        crate::fab_step::step(&mut self.state, action);
+        crate::fab_step::step(&mut self.state, &mut self.rng, action);
     }
 
     fn is_over(&self) -> bool {
@@ -296,14 +309,15 @@ mod tests {
     #[test]
     fn reset_restores_a_played_out_game() {
         let decks = Decklists::new(build_rhinar_deck(), build_dorinthea_deck());
-        let mut gs = gamestate_from_decklists(&decks, Some(7));
-        reset(&mut gs, &decks, false);
+        let mut rng = new_rng(Some(7));
+        let mut gs = gamestate_from_decklists(&decks);
+        reset(&mut gs, &decks, &mut rng, false);
         // Scatter some cards, then reset: everything is dealt out afresh.
         let top = gs.p1.deck.pop_front().unwrap().card();
         gs.p1.graveyard.add(top);
         gs.p1.weapon = None;
         gs.p1.arsenal = Some(top);
-        reset(&mut gs, &decks, false);
+        reset(&mut gs, &decks, &mut rng, false);
         assert_eq!(gs.p1.deck_size(), 40);
         assert!(gs.p1.graveyard.is_empty());
         assert!(gs.p1.arsenal.is_none());
@@ -370,15 +384,16 @@ mod tests {
         // in between.
         let decks = Decklists::new(build_rhinar_deck(), build_dorinthea_deck());
         let deal = || {
-            let mut gs = gamestate_from_decklists(&decks, Some(42));
-            reset(&mut gs, &decks, false);
-            gs
+            let mut rng = new_rng(Some(42));
+            let mut gs = gamestate_from_decklists(&decks);
+            reset(&mut gs, &decks, &mut rng, false);
+            (gs, rng)
         };
-        let a = deal();
-        let mut b = deal();
-        crate::fab_step::step(&mut b, Action::no_card(crate::action::ActionType::ChooseFirst));
-        b.rng = SmallRng::seed_from_u64(42);
-        reset(&mut b, &decks, false);
+        let (a, _) = deal();
+        let (mut b, mut b_rng) = deal();
+        crate::fab_step::step(&mut b, &mut b_rng, Action::no_card(crate::action::ActionType::ChooseFirst));
+        let mut b_rng = new_rng(Some(42));
+        reset(&mut b, &decks, &mut b_rng, false);
         assert_eq!(deck_cards(&a, PlayerIndex::P1), deck_cards(&b, PlayerIndex::P1));
         assert_eq!(deck_cards(&a, PlayerIndex::P2), deck_cards(&b, PlayerIndex::P2));
     }
@@ -388,13 +403,13 @@ mod tests {
     fn reset_refuses_decklists_for_other_heroes() {
         let decks = Decklists::new(build_rhinar_deck(), build_dorinthea_deck());
         let swapped = Decklists::new(build_dorinthea_deck(), build_rhinar_deck());
-        let mut gs = gamestate_from_decklists(&decks, Some(42));
-        reset(&mut gs, &swapped, false);
+        let mut gs = gamestate_from_decklists(&decks);
+        reset(&mut gs, &swapped, &mut new_rng(Some(42)), false);
     }
 
     #[test]
     fn stack_capacity_is_the_stack_size() {
-        let gs = gamestate_from_decklists(&Decklists::new(build_rhinar_deck(), build_dorinthea_deck()), Some(42));
+        let gs = gamestate_from_decklists(&Decklists::new(build_rhinar_deck(), build_dorinthea_deck()));
         assert_eq!(gs.stack.capacity(), STACK_SIZE);
     }
 }
