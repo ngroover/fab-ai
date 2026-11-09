@@ -352,6 +352,12 @@ bitflags::bitflags! {
         const DESTROY_ARMS_ON_CHAIN_CLOSE = 1 << 5;
         const DESTROY_LEGS_ON_CHAIN_CLOSE = 1 << 6;
         /// All four of the above.
+        /// Whether the opponent knows the face-down card in this player's
+        /// arsenal: it was arsenaled from a hand made entirely of known copies
+        /// of a single card, so there was nothing else it could be. A face-up
+        /// arsenal (`ARSENAL_FACE_UP`) is public anyway. Cleared whenever the
+        /// arsenal empties (see `take_from_zone`).
+        const ARSENAL_KNOWN = 1 << 7;
         const DESTROY_ON_CHAIN_CLOSE = Self::DESTROY_HEAD_ON_CHAIN_CLOSE.bits()
             | Self::DESTROY_CHEST_ON_CHAIN_CLOSE.bits()
             | Self::DESTROY_ARMS_ON_CHAIN_CLOSE.bits()
@@ -383,10 +389,13 @@ pub struct Player {
     /// How many copies of each hand card the opponent knows are there: the
     /// hand's counterpart of `DeckSlot`'s known bit. A copy becomes known when
     /// it is revealed from hand (Flock of the Feather Walkers' cost) or drawn
-    /// from a known deck slot. Every copy of a card that leaves the hand, by
-    /// any route, takes one known copy of it off too (`remove_from`), so this
-    /// is always within `hand`: knowledge the opponent can no longer be sure
-    /// of is dropped rather than kept as a guess. Read through
+    /// from a known deck slot. A copy leaving the hand in plain view (pitched,
+    /// played, discarded, blocking) takes one known copy of that card off
+    /// (`remove_from`); one leaving face down (arsenaled, intimidated) takes a
+    /// known copy off *every* card, since the opponent cannot tell which went
+    /// (`remove_from_hand_face_down`). So this is always within `hand`:
+    /// knowledge the opponent can no longer be sure of is dropped rather than
+    /// kept as a guess. Read through
     /// `hand_known_count`; set through `mark_known_in_hand`.
     pub hand_known : CardCounts,
     /// The pitch zone. It is unordered; the order pitched cards go to the
@@ -821,6 +830,39 @@ impl Player {
         self.flags.set(PlayerFlags::ARSENAL_FACE_UP, on);
     }
 
+    /// Whether the opponent knows the face-down arsenal card
+    /// (`PlayerFlags::ARSENAL_KNOWN`).
+    pub const fn arsenal_known(&self) -> bool {
+        self.flags.contains(PlayerFlags::ARSENAL_KNOWN)
+    }
+
+    /// Set or clear `PlayerFlags::ARSENAL_KNOWN`.
+    pub fn set_arsenal_known(&mut self, on: bool) {
+        self.flags.set(PlayerFlags::ARSENAL_KNOWN, on);
+    }
+
+    /// Whether the opponent could tell which card a face-down move out of the
+    /// hand took: every card in hand is a known copy of one and the same card.
+    pub fn hand_is_one_known_card(&self) -> bool {
+        self.hand_known == self.hand && self.hand.iter().count() == 1
+    }
+
+    /// Take one copy of `id` out of the hand face down (into the arsenal, or
+    /// the Intimidate banish zone), where the opponent does not see which card
+    /// went. Any known card might have been the one, so every known card loses
+    /// a known copy — not only `id` — keeping `hand_known` to what the opponent
+    /// can still be sure of.
+    pub fn remove_from_hand_face_down(&mut self, id: DeckCardId) {
+        // `remove_from` already takes a known copy of `id` itself, if any.
+        let id_was_known = self.hand_known.contains(id);
+        self.remove_from(Zone::Hand, id);
+        for (other, _) in self.hand_known.iter() {
+            if other != id || !id_was_known {
+                self.hand_known.remove(other);
+            }
+        }
+    }
+
     /// The `DESTROY_*_ON_CHAIN_CLOSE` flag for the equipment slot `slot`, or
     /// none for the weapon slot (no weapon is destroyed this way).
     fn destroy_on_chain_close_flag(slot: &EquipmentSlot) -> PlayerFlags {
@@ -1035,7 +1077,9 @@ impl Player {
     pub fn visibility(&self, zone: Zone) -> CardVisibleState {
         match zone {
             Zone::Hand | Zone::IntimidateBanish => CardVisibleState::owner_only(self.pid),
-            Zone::Arsenal if !self.arsenal_face_up() => CardVisibleState::owner_only(self.pid),
+            Zone::Arsenal if !self.arsenal_face_up() && !self.arsenal_known() => {
+                CardVisibleState::owner_only(self.pid)
+            }
             Zone::Deck => CardVisibleState::Hidden,
             _ => CardVisibleState::BothKnow,
         }

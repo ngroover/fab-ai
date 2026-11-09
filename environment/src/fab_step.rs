@@ -422,8 +422,14 @@ fn handle_arsenal_phase(gs: &mut Gamestate, act: Action) {
                 gs.log_views(named, p1_msg, p2_msg);
             }
 
-            // Move the chosen card out of the hand into the arsenal slot.
-            move_card(gs.player_mut(pid), id, Zone::Hand, Zone::Arsenal);
+            // Move the chosen card out of the hand into the arsenal slot, face
+            // down. The opponent knows what it is only if the hand held known
+            // copies of that one card and nothing else.
+            let player = gs.player_mut(pid);
+            let deducible = player.hand_is_one_known_card();
+            player.remove_from_hand_face_down(id);
+            put_in_zone(player, id, Zone::Arsenal);
+            player.set_arsenal_known(deducible);
 
             start_pitch_order(gs);
         }
@@ -1030,7 +1036,10 @@ fn apply_intimidate(gs: &mut Gamestate, rng: &mut GameRng, attacker: PlayerIndex
         gs.log_views(full, p1_view, p2_view);
     }
 
-    move_card(gs.player_mut(victim), pick, Zone::Hand, Zone::IntimidateBanish);
+    // Banished face down: the attacker does not see which card went.
+    let player = gs.player_mut(victim);
+    player.remove_from_hand_face_down(pick);
+    put_in_zone(player, pick, Zone::IntimidateBanish);
 }
 
 /// Pay a "discard a card" additional cost (e.g. Alpha Rampage, Wrecker Romp):
@@ -1963,6 +1972,7 @@ pub(crate) fn take_from_zone(player: &mut Player, id: DeckCardId, zone: Zone) {
             assert_eq!(player.arsenal, Some(id), "the arsenal does not hold that card");
             player.arsenal = None;
             player.set_arsenal_face_up(false);
+            player.set_arsenal_known(false);
             player.arsenal_lesson_counters = 0;
         }
         Zone::Weapon => {

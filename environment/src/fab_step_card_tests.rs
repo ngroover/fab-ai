@@ -3499,8 +3499,8 @@ fn weapon_swing_does_not_teach_rukutan_a_lesson() {
 fn a_face_up_card_is_always_visible_to_both_players() {
     // Random play through whole games, checking after every action that a
     // face-up arsenal card is known to both players, that a face-down one is
-    // never shown to its owner's opponent, and that an empty arsenal carries no
-    // face-up state or lesson counters.
+    // shown to its owner's opponent only when they could deduce it, and that an
+    // empty arsenal carries no face-up or known state or lesson counters.
     use rand::{RngExt, SeedableRng};
     let mut face_up_seen = 0;
     for seed in 0..300u64 {
@@ -3523,9 +3523,17 @@ fn a_face_up_card_is_always_visible_to_both_players() {
                     face_up_seen += 1;
                     assert_eq!(visible, CardVisibleState::BothKnow,
                         "face-up {:?} should be visible to both players", card);
+                } else if player.arsenal_known() {
+                    // Face down, but the opponent could tell what went in.
+                    assert_eq!(visible, CardVisibleState::BothKnow);
                 } else {
                     // Face down: known to its owner, never shown to the opponent.
                     assert_eq!(visible, CardVisibleState::owner_only(player.pid));
+                }
+            }
+            for player in [&gs.p1, &gs.p2] {
+                if player.arsenal.is_none() {
+                    assert!(!player.arsenal_known(), "an empty arsenal is not known");
                 }
             }
         }
@@ -4950,4 +4958,119 @@ fn flock_is_offered_exactly_when_it_can_be_paid_and_never_dead_ends() {
     // Make sure the sweep really covered both outcomes.
     assert!(checked > 400 && offered_count > 0 && offered_count < checked,
         "checked {} hands, Flock offered in {}", checked, offered_count);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Knowledge through face-down moves: the arsenal, and Intimidate
+//
+// A card leaving the hand face down (arsenaled, or banished by Intimidate)
+// does not show the opponent which card went, so every known hand card loses a
+// known copy. The arsenal card itself is known (`Player::arsenal_known`) only
+// when the hand was entirely known copies of one card.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea (p1), holding `hand` with the copies in `known` marked as seen by
+/// Rhinar, passes her action phase into the Arsenal phase.
+fn dorinthea_at_arsenal(hand: &[Card], known: &[Card]) -> TestGame {
+    let mut gs = dorinthea_holding(hand, 0);
+    for &card in known {
+        let id = gs.p1.deck_id(card);
+        gs.p1.mark_known_in_hand(id);
+    }
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.phase, Phase::Arsenal);
+    gs
+}
+
+fn arsenal(gs: &mut TestGame, card: Card) {
+    step_card(gs, ActionType::Arsenal, card);
+    assert_eq!(arsenal_card(gs, PlayerIndex::P1), Some(card));
+}
+
+#[test]
+fn arsenaling_the_last_known_card_makes_the_arsenal_known() {
+    let mut gs = dorinthea_at_arsenal(&[Card::SharpenSteelR], &[Card::SharpenSteelR]);
+    arsenal(&mut gs, Card::SharpenSteelR);
+    assert!(gs.p1.arsenal_known());
+    assert!(!gs.p1.arsenal_face_up());
+    assert_eq!(gs.p1.visibility(Zone::Arsenal), crate::game_state::CardVisibleState::BothKnow);
+}
+
+#[test]
+fn arsenaling_one_of_two_known_copies_keeps_both_known() {
+    let mut gs = dorinthea_at_arsenal(
+        &[Card::SharpenSteelR, Card::SharpenSteelR], &[Card::SharpenSteelR, Card::SharpenSteelR]);
+    arsenal(&mut gs, Card::SharpenSteelR);
+    assert!(gs.p1.arsenal_known());
+    // The copy left in hand is still known; the cards drawn after are not.
+    assert_eq!(known_in_hand(&gs, PlayerIndex::P1, Card::SharpenSteelR), 1);
+    assert_eq!(gs.p1.hand_known.len(), 1);
+}
+
+#[test]
+fn an_unknown_card_in_the_arsenal_stays_hidden() {
+    let mut gs = dorinthea_at_arsenal(&[Card::SharpenSteelR], &[]);
+    arsenal(&mut gs, Card::SharpenSteelR);
+    assert!(!gs.p1.arsenal_known());
+    assert_eq!(gs.p1.visibility(Zone::Arsenal), crate::game_state::CardVisibleState::P1Knows);
+}
+
+#[test]
+fn a_choice_of_cards_hides_the_arsenal_and_the_known_card_is_forgotten() {
+    // Rhinar saw Sharpen Steel; Dorinthea arsenals the other card face down.
+    // He cannot tell which went, so Sharpen Steel is no longer certain.
+    let mut gs = dorinthea_at_arsenal(&[Card::SharpenSteelR, Card::HitAndRunB], &[Card::SharpenSteelR]);
+    arsenal(&mut gs, Card::HitAndRunB);
+    assert!(!gs.p1.arsenal_known());
+    assert_eq!(known_in_hand(&gs, PlayerIndex::P1, Card::SharpenSteelR), 0);
+    assert!(gs.p1.hand_known.is_empty());
+}
+
+#[test]
+fn a_hand_of_different_known_cards_still_hides_the_arsenal() {
+    let mut gs = dorinthea_at_arsenal(
+        &[Card::SharpenSteelR, Card::HitAndRunB], &[Card::SharpenSteelR, Card::HitAndRunB]);
+    arsenal(&mut gs, Card::SharpenSteelR);
+    assert!(!gs.p1.arsenal_known());
+    // Either could have gone, so neither is certain now.
+    assert!(gs.p1.hand_known.is_empty());
+}
+
+#[test]
+fn playing_a_known_arsenal_card_clears_the_known_flag() {
+    let mut gs = dorinthea_at_arsenal(&[Card::SharpenSteelR], &[Card::SharpenSteelR]);
+    arsenal(&mut gs, Card::SharpenSteelR);
+    assert!(gs.p1.arsenal_known());
+    while !(gs.turn_player == PlayerIndex::P1 && gs.phase == Phase::Action) {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert!(gs.p1.arsenal_known(), "still known on her next turn");
+    step_card_from(&mut gs, ActionType::PlayCard, Card::SharpenSteelR, Zone::Arsenal);
+    assert!(gs.p1.arsenal.is_none());
+    assert!(!gs.p1.arsenal_known());
+}
+
+#[test]
+fn intimidate_makes_every_known_hand_card_uncertain() {
+    // Rhinar (p2) intimidates Dorinthea: a random card is banished face down.
+    for seed in 0..8 {
+        let mut gs = dorinthea_holding(&[Card::SharpenSteelR, Card::HitAndRunB], 0);
+        let id = gs.p1.deck_id(Card::SharpenSteelR);
+        gs.p1.mark_known_in_hand(id);
+        gs.rng = <crate::fab_game::GameRng as rand::SeedableRng>::seed_from_u64(seed);
+        let TestGame { state, rng } = &mut gs;
+        apply_intimidate(state, rng, PlayerIndex::P2);
+        assert_eq!(gs.p1.hand.len(), 1);
+        assert!(gs.p1.hand_known.is_empty(), "whichever card was banished (seed {})", seed);
+    }
+}
+
+#[test]
+fn a_card_leaving_in_plain_view_keeps_the_rest_known() {
+    // Playing Hit and Run shows Rhinar exactly which card left.
+    let mut gs = dorinthea_holding(&[Card::SharpenSteelR, Card::HitAndRunB], 0);
+    let id = gs.p1.deck_id(Card::SharpenSteelR);
+    gs.p1.mark_known_in_hand(id);
+    step_card(&mut gs, ActionType::PlayCard, Card::HitAndRunB);
+    assert_eq!(known_in_hand(&gs, PlayerIndex::P1, Card::SharpenSteelR), 1);
 }

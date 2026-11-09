@@ -728,11 +728,20 @@ on-play-effect helpers).
             the copies of each hand card the opponent has seen — the hand's
             counterpart of the deck's `DeckSlot` known bit. Set by a reveal
             from hand and by drawing a known deck slot (`draw_cards`), e.g. a
-            card Pack Call or Bone Vizier kept on top. Any copy leaving the
-            hand by any route takes one known copy of that card with it
-            (`Player::remove_from`), so it always stays within the hand; the
-            debug card-total check asserts that. Cleared on reset. Read with
-            `hand_known_count`. `Player` grew 8 bytes.
+            card Pack Call or Bone Vizier kept on top. A copy leaving the
+            hand in plain view (pitched, played, discarded, blocking) takes one
+            known copy of that card with it (`Player::remove_from`). A copy
+            leaving face down — arsenaled, or banished by Intimidate — takes a
+            known copy off every card, since the opponent cannot tell which went
+            (`Player::remove_from_hand_face_down`). So it always stays within
+            the hand; the debug card-total check asserts that. Cleared on
+            reset. Read with `hand_known_count`. `Player` grew 8 bytes.
+          * Known arsenal: `PlayerFlags::ARSENAL_KNOWN` (the last spare flag
+            bit, so no growth) marks a face-down arsenal card the opponent can
+            deduce: it was arsenaled from a hand made entirely of known copies
+            of one card (`Player::hand_is_one_known_card`). Cleared whenever
+            the arsenal empties and on reset. `visibility(Zone::Arsenal)` is
+            BothKnow when the card is face up or known.
         Tests (known hand cards): flocks_reveal_makes_the_card_known_in_hand,
                a_known_card_leaving_the_hand_is_no_longer_known,
                losing_one_of_two_copies_forgets_the_known_one,
@@ -743,6 +752,14 @@ on-play-effect helpers).
                the_reveal_choice_comes_after_pitching_and_returns_to_the_instant_window,
                drawing_a_known_deck_card_keeps_it_known,
                a_reset_forgets_known_hand_cards
+               arsenaling_the_last_known_card_makes_the_arsenal_known,
+               arsenaling_one_of_two_known_copies_keeps_both_known,
+               an_unknown_card_in_the_arsenal_stays_hidden,
+               a_choice_of_cards_hides_the_arsenal_and_the_known_card_is_forgotten,
+               a_hand_of_different_known_cards_still_hides_the_arsenal,
+               playing_a_known_arsenal_card_clears_the_known_flag,
+               intimidate_makes_every_known_hand_card_uncertain,
+               a_card_leaving_in_plain_view_keeps_the_rest_known
           * Rules change moved random play: the seven-layer stack seed is now
             14501652 (20M-game sweep, still 7 layers max, STACK_SIZE kept).
         Tests: flock_is_a_5_power_attack_with_a_reveal_cost_that_creates_quicken,
