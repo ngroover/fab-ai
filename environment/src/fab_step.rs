@@ -1,8 +1,8 @@
 use crate::action::{Action,ActionType};
 use crate::card_counts::{CardCounts, DeckCardId};
 use crate::game_state::{CHAIN_LINKS,MAX_QUICKENS,DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
-use crate::cards::{Card,CardClass,CardData,CardType,Keyword};
-use crate::card_effects::{Ability,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,MentorEffect};
+use crate::cards::{Card,CardClass,CardData,CardType,Keyword,WeaponType};
+use crate::card_effects::{Ability,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,MentorEffect,PlayCondition,TargetEffect,TargetEffectType,TargetType};
 use crate::fab_game::{shuffle_deck_for, GameRng};
 use crate::deck_cards::TokenCard;
 use rand::RngExt;
@@ -970,6 +970,12 @@ fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
         // the destroyed card ends up: it left its equipment slot when the
         // activation was paid for (`commit_pending_to_stack`) and never returns.
         gs.player_mut(owner).add_to(Zone::Graveyard, top);
+        // An attack reaction's effect on the attack it targets (In the Swing's
+        // "+3 power"). The target was checked as the card was offered; it is
+        // checked again here, and the effect fizzles if it no longer holds.
+        if let Some(effect) = &data.target_effect {
+            apply_target_effect(gs, owner, effect);
+        }
         // An activated ability's own effect, e.g. Blossom of Spring's "Gain {r}".
         // The resource floats like a pitched one until spent or the turn ends.
         let gained = activated_ability(pending.typ, data).map_or(0, |a| a.resources_gained());
@@ -992,6 +998,46 @@ fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
             // (`gs.phase` is already that window).
             gs.active_player = gs.turn_player;
         }
+    }
+}
+
+/// Whether `player` may play `data` now as far as the card's own text goes: its
+/// "Play only if ..." condition holds, and an attack reaction has an attack to
+/// target. Checked when the card is offered (`legal_actions`), alongside its
+/// speed and cost; a card with neither restriction always passes.
+pub(crate) fn play_requirements_met(player: &Player, data: &CardData) -> bool {
+    let condition_met = match data.play_condition {
+        None => true,
+        Some(PlayCondition::Played2WeaponAttacks) => player.weapon_attacks_this_turn() >= 2,
+        Some(PlayCondition::PlayedWeaponAttack) => player.weapon_attacks_this_turn() >= 1,
+    };
+    condition_met
+        && data.target_effect.as_ref().is_none_or(|effect| target_attack(player, effect).is_some())
+}
+
+/// The attack `effect` would target for `player`: their current attack, when
+/// it is of the kind the effect names. Attack reactions are only played by the
+/// attacker, into the attack on the current chain link.
+fn target_attack(player: &Player, effect: &TargetEffect) -> Option<DeckCardId> {
+    let attack = player.current_attack()?;
+    let data = player.card(attack).data();
+    let valid = match effect.targetType {
+        TargetType::TargetWeapon => is_weapon(data),
+        TargetType::TargetSword => is_weapon(data) && matches!(data.weapon_type, Some(WeaponType::Sword2h)),
+    };
+    valid.then_some(attack)
+}
+
+/// Resolve an attack reaction's `effect` on the attack it targets. With no
+/// valid target left the effect does nothing.
+fn apply_target_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &TargetEffect) {
+    let Some(attack) = target_attack(gs.player(owner), effect) else { return };
+    match effect.effectType {
+        TargetEffectType::BoostPower => {
+            let player = gs.player_mut(owner);
+            player.attack_power_bonus = player.attack_power_bonus.saturating_add(effect.magnitude);
+        }
+        TargetEffectType::GiveGoAgain => attack_gains_go_again(gs, owner, attack),
     }
 }
 

@@ -3,7 +3,7 @@ use crate::action::{Action, ActionType, CardRef, LegalActions};
 use crate::card_counts::{CardCounts, DeckCardId};
 use crate::cards::{CardData, CardType};
 use crate::card_effects::AdditionalCostType;
-use crate::fab_step::{can_reveal_for_cost, current_chain_link, revealable_cards, face_down_mentor_in_arsenal, uses_action_point};
+use crate::fab_step::{can_reveal_for_cost, current_chain_link, play_requirements_met, revealable_cards, face_down_mentor_in_arsenal, uses_action_point};
 
 
 pub fn legal_actions(gs: &Gamestate) -> LegalActions {
@@ -460,12 +460,15 @@ fn push_playable_cards(actions: &mut LegalActions, player: &Player, total_pitch:
 /// paying for it: its type must be playable at all, it must be playable at the
 /// current phase's speed, and — if it is an action, which costs an action
 /// point — the player must have a point left. Instants and reactions are free,
-/// so they stay playable with none. Applies to a card in hand and to the
+/// so they stay playable with none. The card's own text must allow it too: a
+/// "Play only if ..." condition, and an attack reaction's need for an attack to
+/// target (`play_requirements_met`). Applies to a card in hand and to the
 /// arsenal card alike.
 fn is_playable_now(player: &Player, data: &CardData, is_playable: fn(CardType) -> bool) -> bool {
     can_ever_be_played(data.typ)
         && is_playable(data.typ)
         && !(uses_action_point(ActionType::PlayCard, data) && player.action_points == 0)
+        && play_requirements_met(player, data)
 }
 
 /// Whether a card of this type is ever put on the stack, in any window.
@@ -1015,7 +1018,9 @@ mod tests {
         // attacker here, so relabel them to an attack reaction (In the Swing)
         // and a non-reaction (Flock of the Feather Walkers, an AttackAction) so
         // we can see the predicate filter at work: only the attack reaction is
-        // offered as a PlayCard.
+        // offered as a PlayCard. The attack is restaged as her second Dawnblade
+        // swing, which In the Swing needs to be playable at all.
+        stage_second_weapon_swing(&mut gs, PlayerIndex::P1);
         let mut hand = hand_cards(&gs, PlayerIndex::P1);
         assert_eq!(hand.len(), 2, "expected Dorinthea to hold two cards in reaction");
         relabel(&mut gs, PlayerIndex::P1, Zone::Hand, hand[0], Card::InTheSwingR);

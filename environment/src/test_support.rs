@@ -375,3 +375,22 @@ pub fn new_game(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: Option<u64>, log
     crate::fab_game::reset(&mut game.state, &decks, &mut game.rng, logging);
     game
 }
+
+/// Stage `pid`'s current attack as their second weapon attack this turn: the
+/// attack on their current chain link goes to the graveyard, the weapon takes
+/// its place from the weapon slot, and the weapon is marked as having swung
+/// (at least) twice. For tests that need a "Play only if you have attacked 2 or more times
+/// with weapons" card (In the Swing) to be playable mid-combat.
+pub fn stage_second_weapon_swing(gs: &mut Gamestate, pid: PlayerIndex) {
+    let player = gs.player_mut(pid);
+    let link = crate::fab_step::current_chain_link(player);
+    if let Some(attack) = player.attack_on_link(link) {
+        player.chain_link[link].remove(attack);
+        player.add_to(Zone::Graveyard, attack);
+    }
+    let weapon = player.weapon.take().expect("the hero should have its weapon in the weapon zone");
+    player.chain_link[link].add(weapon);
+    while player.abilities_used.count(weapon) < 2 {
+        player.abilities_used.add(weapon);
+    }
+}

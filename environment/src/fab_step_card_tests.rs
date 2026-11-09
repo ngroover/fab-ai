@@ -39,6 +39,8 @@
 //!   - En Garde            (`Card::EnGardeR`)
 //!   - Flock of the Feather Walkers (`Card::FlockOfTheFeatherWalkersR`) and
 //!     the Quicken token (`Card::QuickenToken`)
+//!   - Dorinthea (hero)    (`Card::Dorinthea`) and Dawnblade (`Card::Dawnblade`)
+//!   - In the Swing        (`Card::InTheSwingR`)
 
 use super::*;
 use crate::cards::Card;
@@ -1416,8 +1418,11 @@ fn only_the_defender_is_offered_defense_reactions_in_the_reaction_step() {
 
     // The attacker (p1) holds priority first. Hand her a defense reaction and
     // an attack reaction: only the attack reaction is hers to play. She can
-    // afford Toughen Up's 2, so cost is not what rules it out.
+    // afford Toughen Up's 2, so cost is not what rules it out. The attack is
+    // restaged as her second Dawnblade swing so In the Swing's own
+    // requirements are met and only its speed is in question.
     assert_eq!(gs.active_player, PlayerIndex::P1);
+    stage_second_weapon_swing(&mut gs, PlayerIndex::P1);
     set_hand(&mut gs, PlayerIndex::P1, &[Card::ToughenUpB, Card::InTheSwingR]);
     gs.p1.resources = 2;
     let attacker_options = playable_cards(&gs);
@@ -5306,4 +5311,122 @@ fn the_plus_1_stacks_with_en_garde() {
     dawnblade_unblocked(&mut gs, None);
     // 2 + 1 (second attack) + 3 (En Garde).
     assert_eq!(gs.p2.life, 18 - 6);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// In the Swing (Card::InTheSwingR)
+//
+// Warrior attack reaction, cost 0, 3 block: "Play only if you have attacked 2
+// or more times with weapons this turn. Target weapon attack gains +3 power."
+// The attack it is played into counts towards the two: weapon swings are
+// counted in `Player::abilities_used` as they are committed. The +3 is banked
+// on `attack_power_bonus` as it resolves and spent at combat damage.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Whether In the Swing is offered as a play right now.
+fn in_the_swing_offered(gs: &Gamestate) -> bool {
+    playable_cards(gs).contains(&Card::InTheSwingR)
+}
+
+/// From Dorinthea's action phase, swing Dawnblade (from its slot or the chain)
+/// and let Rhinar decline to block: the game is in the reaction step with
+/// Dorinthea, the attacker, holding priority.
+fn dawnblade_into_reaction_step(gs: &mut TestGame, pitch: Option<Card>) {
+    let zone = dawnblade_zone(gs);
+    step_card_from(gs, ActionType::Activate, Card::Dawnblade, zone);
+    if let Some(card) = pitch {
+        step_card(gs, ActionType::Pitch, card);
+    }
+    pass_once_each(gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    step(gs, Action{ typ: ActionType::Pass, card: None}); // no blockers
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+}
+
+/// Dorinthea holds In the Swing, and Dawnblade has gained go again from a
+/// Quicken on its first swing; she swings it the second time and Rhinar does
+/// not block. In the reaction step with Dorinthea holding priority.
+fn second_dawnblade_swing_reaction_step() -> TestGame {
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB, Card::InTheSwingR], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, 18);
+    dawnblade_into_reaction_step(&mut gs, None);
+    assert_eq!(gs.p1.weapon_attacks_this_turn(), 2);
+    gs
+}
+
+#[test]
+fn in_the_swing_is_a_free_attack_reaction_that_pumps_a_weapon_attack_by_3() {
+    use crate::card_effects::{PlayCondition, TargetEffectType, TargetType};
+    let data = Card::InTheSwingR.data();
+    assert_eq!(data.typ, CardType::AttackReaction);
+    assert_eq!((data.cost, data.pitch, data.defense), (0, 1, 3));
+    assert_eq!(data.card_class, CardClass::Warrior);
+    assert!(matches!(data.play_condition, Some(PlayCondition::Played2WeaponAttacks)));
+    let effect = data.target_effect.as_ref().expect("In the Swing should carry a target effect");
+    assert!(matches!(effect.targetType, TargetType::TargetWeapon));
+    assert!(matches!(effect.effectType, TargetEffectType::BoostPower));
+    assert_eq!(effect.magnitude, 3);
+    assert!(data.play_effect.is_none());
+}
+
+#[test]
+fn in_the_swing_is_not_offered_on_the_first_weapon_attack() {
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB, Card::InTheSwingR], 0);
+    dawnblade_into_reaction_step(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p1.weapon_attacks_this_turn(), 1);
+    assert!(!in_the_swing_offered(&gs));
+}
+
+#[test]
+fn in_the_swing_is_offered_on_the_second_weapon_attack() {
+    let gs = second_dawnblade_swing_reaction_step();
+    assert!(in_the_swing_offered(&gs));
+}
+
+#[test]
+fn in_the_swing_gives_the_second_swing_plus_3_power() {
+    let mut gs = second_dawnblade_swing_reaction_step();
+    step_card(&mut gs, ActionType::PlayCard, Card::InTheSwingR);
+    assert!(on_stack(&gs, Card::InTheSwingR));
+    pass_once_each(&mut gs);
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::InTheSwingR, Zone::Graveyard));
+    while gs.phase != Phase::Action {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    // 2 + 1 (Dawnblade's second attack) + 3 (In the Swing).
+    assert_eq!(gs.p2.life, 18 - 6);
+    assert_eq!(gs.p1.attack_power_bonus, 0, "the bonus is spent with the attack");
+}
+
+#[test]
+fn in_the_swing_needs_a_weapon_attack_to_target() {
+    // Two weapon attacks made this turn, but the current attack is Flock of
+    // the Feather Walkers, an attack action card: nothing for In the Swing to
+    // target.
+    let mut gs = rhinar_defending_flock();
+    let dawnblade = gs.p1.deck_id(Card::Dawnblade);
+    gs.p1.abilities_used.add(dawnblade);
+    gs.p1.abilities_used.add(dawnblade);
+    assert_eq!(gs.p1.weapon_attacks_this_turn(), 2);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // no blockers
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::InTheSwingR]);
+    assert!(!in_the_swing_offered(&gs));
+    // The same attack restaged as a second Dawnblade swing can be targeted.
+    stage_second_weapon_swing(&mut gs, PlayerIndex::P1);
+    assert!(in_the_swing_offered(&gs));
+}
+
+#[test]
+fn in_the_swing_is_not_offered_to_the_defender() {
+    // Rhinar, defending against the second swing, holds In the Swing (relabelled
+    // from his hand): an attack reaction is never the defender's to play.
+    let mut gs = second_dawnblade_swing_reaction_step();
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    assert!(!in_the_swing_offered(&gs));
 }

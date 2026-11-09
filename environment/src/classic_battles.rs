@@ -1,5 +1,5 @@
 use crate::cards::{Card, CardClass, CardData, CardType, Color, EquipmentSlot, Keyword, WeaponType};
-use crate::card_effects::{AdditionalCostType, Ability, ConstantEffect, DefendEffect, MentorEffect, OnPlayConditionType, OnPlayEffect, OnPlayEffectType};
+use crate::card_effects::{AdditionalCostType, Ability, ConstantEffect, DefendEffect, MentorEffect, OnPlayConditionType, OnPlayEffect, OnPlayEffectType, PlayCondition, TargetEffect, TargetEffectType, TargetType};
 
 /// Catalog of every card in the Rhinar vs Dorinthea classic battle.
 ///
@@ -872,8 +872,12 @@ static CARD_CATALOG: [CardData; 53] = [
             defend_effect: None,
             next_attack_effect: None,
             additional_cost: None,
-            target_effect: None,
-            play_condition: None,
+            target_effect: Some(TargetEffect {
+                targetType: TargetType::TargetWeapon,
+                effectType: TargetEffectType::BoostPower,
+                magnitude: 3,
+            }),
+            play_condition: Some(PlayCondition::Played2WeaponAttacks),
             play_effect: None,
             mentor_effect: None,
         },

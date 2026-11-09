@@ -222,14 +222,26 @@ pub enum AdditionalCostType {
     DiscardCard,
 }
 
+/// What an attack reaction may target. Attack reactions only ever target the
+/// attack on the current chain link, so the target type is a requirement on
+/// that attack: with no such attack to target the card cannot be played (see
+/// `fab_step::play_requirements_met`).
 #[repr(u8)]
 pub enum TargetType {
     TargetSword,
+    /// "Target weapon attack" (In the Swing): the current attack is a weapon
+    /// swing.
     TargetWeapon,
 }
 
+/// A "Play [this] only if ..." restriction, checked before the card is offered
+/// (see `fab_step::play_requirements_met`).
 #[repr(u8)]
 pub enum PlayCondition {
+    /// "Play only if you have attacked 2 or more times with weapons this turn"
+    /// (In the Swing). The attack the card is played into counts: it was made
+    /// when the weapon's swing was committed, which is when the swing is
+    /// counted in `Player::abilities_used`.
     Played2WeaponAttacks,
     PlayedWeaponAttack,
 }
@@ -237,12 +249,15 @@ pub enum PlayCondition {
 #[repr(u8)]
 pub enum TargetEffectType {
     GiveGoAgain,
+    /// The target attack gains `magnitude` power, banked on the attacker's
+    /// `attack_power_bonus` until combat damage.
     BoostPower,
 }
 
 pub struct TargetEffect {
     pub targetType : TargetType,
     pub effectType : TargetEffectType,
+    pub magnitude : u8,
 }
 
 #[cfg(test)]

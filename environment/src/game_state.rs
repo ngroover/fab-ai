@@ -1,4 +1,4 @@
-use crate::cards::{Card, EquipmentSlot};
+use crate::cards::{Card, CardType, EquipmentSlot};
 use crate::action::ActionType;
 use crate::card_counts::{CardCounts, DeckCardId, MAX_DECK_IDS};
 use crate::deck_cards::{DeckCard, DeckKind, TokenCard};
@@ -1072,6 +1072,24 @@ impl Player {
     /// empty link.
     pub fn attack_on_link(&self, link: usize) -> Option<DeckCardId> {
         self.chain_link[link].iter().next().map(|(id, _)| id)
+    }
+
+    /// The card making this (attacking) player's current attack: the attack on
+    /// the last link their attacks have opened. `None` before any attack has
+    /// opened a link.
+    pub fn current_attack(&self) -> Option<DeckCardId> {
+        (self.chain_links_open as usize).checked_sub(1).and_then(|link| self.attack_on_link(link))
+    }
+
+    /// How many times this player has attacked with weapons this turn. Every
+    /// weapon swing is once per turn, so each one is counted in
+    /// `abilities_used` as it is committed — the swing currently on the chain
+    /// included.
+    pub fn weapon_attacks_this_turn(&self) -> u8 {
+        self.abilities_used.iter()
+            .filter(|&(id, _)| self.card(id).data().typ == CardType::Weapon)
+            .map(|(_, copies)| copies)
+            .sum()
     }
 
     /// Whether any of this player's chain links holds a card.

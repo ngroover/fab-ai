@@ -841,6 +841,39 @@ on-play-effect helpers).
                combinations against a brute-force answer, and walks every
                legal pitch and reveal of each offered play to the stack)
 
+  [x] In the Swing   (Card::InTheSwingR)
+        "Play In the Swing only if you have attacked 2 or more times with
+        weapons this turn. Target weapon attack gains +3 power." (Warrior
+        attack reaction, cost 0, pitch 1, 3 block.)
+          * The catalog's `play_condition` (`PlayCondition::Played2WeaponAttacks`)
+            and `target_effect` (`TargetType::TargetWeapon`,
+            `TargetEffectType::BoostPower`, new `magnitude` 3) are now read.
+            `fab_step::play_requirements_met` gates the card in
+            `legal_actions::is_playable_now`, next to its speed and cost.
+          * Weapon attacks this turn are counted by
+            `Player::weapon_attacks_this_turn`, from `abilities_used`: every
+            swing is once per turn, so it is counted as it is committed. The
+            attack the card is played into counts, so it is first offered in
+            the reaction step of the second swing (the Python catalog's
+            `weapon_attack_count >= 1` counts only completed attacks; same
+            meaning).
+          * Attack reactions target the attack on the current chain link
+            (`Player::current_attack`); with no weapon attack there the card is
+            not offered. As it resolves the target is checked again and the +3
+            is banked on `attack_power_bonus`, spent at combat damage.
+          * In the Swing used to be offered as a no-op in every attacker
+            reaction step. Two speed tests that used it as their sample attack
+            reaction now restage the attack as a second Dawnblade swing
+            (`test_support::stage_second_weapon_swing`).
+          * Rules change moved random play: the seven-layer stack seed is now
+            SEED_TBD.
+        Tests: in_the_swing_is_a_free_attack_reaction_that_pumps_a_weapon_attack_by_3,
+               in_the_swing_is_not_offered_on_the_first_weapon_attack,
+               in_the_swing_is_offered_on_the_second_weapon_attack,
+               in_the_swing_gives_the_second_swing_plus_3_power,
+               in_the_swing_needs_a_weapon_attack_to_target,
+               in_the_swing_is_not_offered_to_the_defender
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -878,7 +911,7 @@ on-play-effect helpers).
 ------------------------------------------------------------------------------
   [x] En Garde                       (Card::EnGardeR)  — see COMPLETE section above
   [x] Flock of the Feather Walkers   (Card::FlockOfTheFeatherWalkersR)  — see COMPLETE section above
-  [ ] In the Swing                   (Card::InTheSwingR)
+  [x] In the Swing                   (Card::InTheSwingR)  — see COMPLETE section above
   [ ] Ironsong Response              (Card::IronsongResponseR)
   [ ] Second Swing                   (Card::SecondSwingR)
   [ ] Sharpen Steel                  (Card::SharpenSteelR)
