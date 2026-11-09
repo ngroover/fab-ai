@@ -1,7 +1,6 @@
 //! Per-deck card enums: for each decklist, a compile-time enum holding every
 //! card that player owns apart from the hero — the playable deck first, then
-//! the weapon and equipment, then any tokens the deck can create (Quicken).
-//! The weapon and equipment never reach the hand,
+//! the weapon and equipment. The weapon and equipment never reach the hand,
 //! but worn equipment sits in an equipment zone and can be destroyed into the
 //! graveyard, so the unordered zones that hold them need ids for them too.
 //!
@@ -150,7 +149,6 @@ deck_cards! {
         BoneVizier,
         IronhideGauntlet,
         IronhideLegs,
-        QuickenToken,
     }
 }
 
@@ -186,13 +184,49 @@ deck_cards! {
         BlossomOfSpring,
         IronrotHelm,
         IronrotLegs,
-        QuickenToken,
     }
 }
 
 /// Which deck card enum a player's `DeckCardId`s refer to. `Player` is shared
 /// by both heroes, so this is how untyped engine code turns a `Card` into the
 /// right deck's id and back.
+/// Every token a player can create during play, whatever their deck. Tokens
+/// are in no decklist, so they get an id space of their own rather than a
+/// place in the deck enums: a token's `DeckCardId` is its field in
+/// `Player::tokens`, and means nothing in any other `CardCounts`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum TokenCard {
+    QuickenToken,
+}
+
+impl TokenCard {
+    pub const ALL: &'static [TokenCard] = &[TokenCard::QuickenToken];
+    pub const COUNT: usize = Self::ALL.len();
+
+    /// This token's field position in `Player::tokens`.
+    #[inline]
+    pub const fn id(self) -> DeckCardId {
+        DeckCardId::new(self as usize)
+    }
+
+    /// The token whose id is `id`. Panics if `id` is past the end.
+    #[inline]
+    pub const fn from_id(id: DeckCardId) -> Self {
+        Self::ALL[id.get()]
+    }
+
+    /// The game-wide `Card` this token stands for, for its catalog data.
+    #[inline]
+    pub const fn card(self) -> Card {
+        match self {
+            TokenCard::QuickenToken => Card::QuickenToken,
+        }
+    }
+}
+
+const _: () = assert!(TokenCard::COUNT <= MAX_DECK_IDS, "TokenCard has more tokens than a CardCounts can hold");
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 #[repr(u8)]
 pub enum DeckKind {
@@ -260,13 +294,8 @@ mod tests {
             .collect()
     }
 
-    /// The enum's cards, less the tokens: those are created during play, so no
-    /// decklist holds them.
     fn enum_cards<D: DeckCard>() -> BTreeSet<u8> {
-        D::ALL.iter()
-            .filter(|c| c.card().data().typ != CardType::Token)
-            .map(|c| c.card() as u8)
-            .collect()
+        D::ALL.iter().map(|c| c.card() as u8).collect()
     }
 
     #[test]
@@ -317,9 +346,8 @@ mod tests {
         // only ever add fields past them.
         fn check<D: DeckCard>() {
             for &c in D::ALL {
-                let not_deck = matches!(c.card().data().typ,
-                    CardType::Weapon | CardType::Equipment | CardType::Token);
-                assert_eq!(not_deck, c.id().get() >= 21, "{:?}", c);
+                let is_gear = matches!(c.card().data().typ, CardType::Weapon | CardType::Equipment);
+                assert_eq!(is_gear, c.id().get() >= 21, "{:?}", c);
             }
         }
         check::<RhinarCard>();

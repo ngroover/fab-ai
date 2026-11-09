@@ -691,12 +691,15 @@ on-play-effect helpers).
             lowest-pitch eligible card so it is never pitched away. The reveal
             itself (`apply_reveal_cost`) leaves the card in hand and is logged
             publicly; hand cards carry no per-card visibility.
-          * Tokens: `Card::QuickenToken` (type Token) is at the end of `Card`,
-            the catalog, and both deck enums (ids 27 / 26, past the gear), so
-            it fits a `CardCounts`. Tokens live in the new `Player::tokens`
-            (`Zone::Tokens`, unordered, public), are not counted among the
-            player's 45 cards, and simply vanish when destroyed. `MAX_QUICKENS`
-            = 2: creating one past that does nothing. `Player` grew 8 bytes.
+          * Tokens: `Card::QuickenToken` (type Token) is at the end of `Card`
+            and the catalog, for its data. Tokens are in no deck enum: they
+            have their own `TokenCard` enum (deck_cards.rs), shared by every
+            deck and always including Quicken, whose ids index the new
+            `Player::tokens` bitfield (read and changed through `token_count`,
+            `add_token`, `remove_token`; not a `Zone`, since its ids are not
+            deck ids). Tokens are public, are not counted among the player's
+            45 cards, and simply vanish when destroyed. `MAX_QUICKENS` = 2:
+            creating one past that does nothing. `Player` grew 8 bytes.
           * Creating: `OnPlayEffectType::CreateQuicken` fires as Flock resolves
             onto the chain, i.e. when it attacks (`create_quicken`).
           * Triggering: `trigger_quickens` runs in `commit_pending_to_stack`

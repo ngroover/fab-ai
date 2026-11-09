@@ -46,6 +46,7 @@ use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
 use crate::legal_actions::legal_actions;
 use std::collections::HashSet;
 use crate::test_support::*;
+use crate::deck_cards::TokenCard;
 use crate::test_support::step;
 use crate::game_state::CardVisibleState;
 
@@ -4426,7 +4427,7 @@ fn an_unused_en_garde_bonus_is_gone_next_turn() {
 //
 // Quicken: "When you play an attack action card or attack with a weapon,
 // destroy Quicken and the attack gains go again." Tokens live in the owner's
-// `Zone::Tokens`, capped at `MAX_QUICKENS`.
+// `Player::tokens`, counted by `TokenCard` id, capped at `MAX_QUICKENS`.
 //
 // The reveal is gated like Alpha Rampage's discard: a card costing 1 or less
 // must still be in hand once the pitching is done. In Dorinthea's deck only
@@ -4440,13 +4441,11 @@ fn flock_offered(gs: &Gamestate) -> bool {
 }
 
 fn quickens(gs: &Gamestate, pid: PlayerIndex) -> u8 {
-    count_in(gs, pid, Card::QuickenToken, Zone::Tokens)
+    gs.player(pid).token_count(TokenCard::QuickenToken)
 }
 
 fn give_quicken(gs: &mut Gamestate, pid: PlayerIndex) {
-    let player = gs.player_mut(pid);
-    let id = player.deck_id(Card::QuickenToken);
-    player.add_to(Zone::Tokens, id);
+    gs.player_mut(pid).add_token(TokenCard::QuickenToken);
 }
 
 /// Dorinthea (p1) holding `hand`, with `resources` floating, in her action phase.
@@ -4497,10 +4496,13 @@ fn quicken_is_a_token_that_trades_itself_for_go_again() {
     let data = Card::QuickenToken.data();
     assert_eq!(data.typ, CardType::Token);
     assert!(matches!(data.constant_effect, Some(ConstantEffect::OnAttackDestroyForGoAgain)));
-    // Both decks can hold one, past their real cards.
+    // Tokens have their own enum, shared by every deck, and are in no deck
+    // enum.
     use crate::deck_cards::{DorintheaCard, RhinarCard};
-    assert!(RhinarCard::from_card(Card::QuickenToken).is_some());
-    assert!(DorintheaCard::from_card(Card::QuickenToken).is_some());
+    assert_eq!(TokenCard::QuickenToken.card(), Card::QuickenToken);
+    assert_eq!(TokenCard::from_id(TokenCard::QuickenToken.id()), TokenCard::QuickenToken);
+    assert!(RhinarCard::from_card(Card::QuickenToken).is_none());
+    assert!(DorintheaCard::from_card(Card::QuickenToken).is_none());
 }
 
 #[test]
@@ -4574,7 +4576,6 @@ fn flock_creates_a_quicken_when_it_attacks() {
     assert_eq!(gs.phase, Phase::Defend);
     assert_eq!(quickens(&gs, PlayerIndex::P1), 1);
     assert_eq!(quickens(&gs, PlayerIndex::P2), 0);
-    assert_eq!(gs.p1.visibility(Zone::Tokens), crate::game_state::CardVisibleState::BothKnow);
 }
 
 #[test]

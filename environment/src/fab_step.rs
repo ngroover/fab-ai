@@ -4,6 +4,7 @@ use crate::game_state::{CHAIN_LINKS,MAX_QUICKENS,DeckSlot,Gamestate,Phase,Player
 use crate::cards::{Card,CardClass,CardData,CardType,Keyword};
 use crate::card_effects::{Ability,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,MentorEffect};
 use crate::fab_game::{shuffle_deck_for, GameRng};
+use crate::deck_cards::TokenCard;
 use rand::RngExt;
 
 /// Apply `act`, the active player's decision, to `gs`. Any random choice the
@@ -1083,13 +1084,10 @@ fn apply_reveal_cost(gs: &mut Gamestate, owner: PlayerIndex) {
 /// `MAX_QUICKENS`.
 fn create_quicken(gs: &mut Gamestate, owner: PlayerIndex) {
     let player = gs.player_mut(owner);
-    let Some(id) = player.deck_kind.id_of(Card::QuickenToken) else {
-        return;
-    };
-    if player.tokens.count(id) >= MAX_QUICKENS {
+    if player.token_count(TokenCard::QuickenToken) >= MAX_QUICKENS {
         return;
     }
-    player.add_to(Zone::Tokens, id);
+    player.add_token(TokenCard::QuickenToken);
     if gs.logging_enabled() {
         gs.log_public(format!("{} creates a Quicken token", player_name(owner)));
     }
@@ -1104,10 +1102,10 @@ fn trigger_quickens(gs: &mut Gamestate, owner: PlayerIndex) {
     let player = gs.player_mut(owner);
     let mut triggered = false;
     for (id, _) in player.tokens.iter() {
-        let data = player.card(id).data();
-        if matches!(data.constant_effect, Some(ConstantEffect::OnAttackDestroyForGoAgain)) {
-            while player.tokens.contains(id) {
-                player.remove_from(Zone::Tokens, id);
+        let token = TokenCard::from_id(id);
+        if matches!(token.card().data().constant_effect, Some(ConstantEffect::OnAttackDestroyForGoAgain)) {
+            while player.token_count(token) > 0 {
+                player.remove_token(token);
             }
             triggered = true;
         }

@@ -1,7 +1,7 @@
 use crate::cards::{Card, EquipmentSlot};
 use crate::action::ActionType;
 use crate::card_counts::{CardCounts, DeckCardId, MAX_DECK_IDS};
-use crate::deck_cards::{DeckCard, DeckKind};
+use crate::deck_cards::{DeckCard, DeckKind, TokenCard};
 use crate::ring_buffer::RingBuffer;
 
 /// One of the two players (0 or 1), wrapped in a newtype so a player id is never
@@ -130,10 +130,6 @@ pub enum Zone {
     Weapon,
     CombatChain,
     Stack,
-    /// The tokens a player controls (Quicken). Unordered and public. A token is
-    /// not one of the player's 45 cards: it is created in this zone and stops
-    /// existing when destroyed.
-    Tokens,
 }
 
 impl Zone {
@@ -144,7 +140,7 @@ impl Zone {
         matches!(
             self,
             Zone::Hand | Zone::Pitch | Zone::Graveyard | Zone::Banish
-                | Zone::IntimidateBanish | Zone::Equipment | Zone::Tokens
+                | Zone::IntimidateBanish | Zone::Equipment
         )
     }
 }
@@ -389,9 +385,11 @@ pub struct Player {
     /// piece sits in follows from the card itself, so one bitfield covers all
     /// four. The weapon zone is not an equipment zone; see `weapon`.
     pub equipment : CardCounts,
-    /// The tokens this player controls (Quicken), by deck card id. Not counted
-    /// among the player's cards (`cards_in_zones`): tokens are created here
-    /// and cease to exist when destroyed. At most `MAX_QUICKENS` Quickens.
+    /// The tokens this player controls (Quicken), counted by `TokenCard` id —
+    /// not by deck card id, so read and change it through `token_count`,
+    /// `add_token` and `remove_token`. Public, and not counted among the
+    /// player's cards (`cards_in_zones`): tokens are created here and cease to
+    /// exist when destroyed. At most `MAX_QUICKENS` Quickens.
     pub tokens : CardCounts,
     /// The card in the arsenal, if any.
     pub arsenal : Option<DeckCardId>,
@@ -821,6 +819,24 @@ impl Player {
         self.flags.remove(PlayerFlags::DESTROY_ON_CHAIN_CLOSE);
     }
 
+    /// How many of `token` this player holds.
+    #[inline]
+    pub const fn token_count(&self, token: TokenCard) -> u8 {
+        self.tokens.count(token.id())
+    }
+
+    /// Create one `token` for this player.
+    #[inline]
+    pub fn add_token(&mut self, token: TokenCard) {
+        self.tokens.add(token.id());
+    }
+
+    /// Destroy one of this player's `token`s. Panics if they hold none.
+    #[inline]
+    pub fn remove_token(&mut self, token: TokenCard) {
+        self.tokens.remove(token.id());
+    }
+
     /// Number of cards in hand, counting every copy.
     #[inline]
     pub const fn hand_size(&self) -> u8 {
@@ -862,7 +878,6 @@ impl Player {
             Zone::Banish => Some(self.banished),
             Zone::IntimidateBanish => Some(self.intimidate_banished),
             Zone::Equipment => Some(self.equipment),
-            Zone::Tokens => Some(self.tokens),
             Zone::Deck | Zone::Arsenal | Zone::Weapon | Zone::CombatChain | Zone::Stack => None,
         }
     }
@@ -876,7 +891,6 @@ impl Player {
             Zone::Banish => Some(&mut self.banished),
             Zone::IntimidateBanish => Some(&mut self.intimidate_banished),
             Zone::Equipment => Some(&mut self.equipment),
-            Zone::Tokens => Some(&mut self.tokens),
             Zone::Deck | Zone::Arsenal | Zone::Weapon | Zone::CombatChain | Zone::Stack => None,
         }
     }
