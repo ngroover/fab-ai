@@ -950,6 +950,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
             )
         });
         attacker.chain_link[link].add(top);
+        attacker.chain_links_open = link as u8 + 1;
         gs.phase = Phase::Defend;
     } else if commits_as_defense(pending.typ, data, owner, gs.turn_player) {
         // A defense reaction resolving in the defender's reaction window joins
@@ -1601,12 +1602,23 @@ fn commit_pending_to_stack(gs: &mut Gamestate, rng: &mut GameRng) {
     // waits on the stack. Only the activation goes on the stack, as a pending
     // entry pointing back at the card — the same shape as a defend trigger,
     // whose card likewise stays put (see `resolve_top_of_stack`).
-    let activated_while_defending = pending.typ == ActionType::Activate
-        && pending.from == Zone::CombatChain;
+    //
+    // A weapon activated from the chain is the other case: it attacked earlier
+    // this chain and is attacking again (Dorinthea's extra Dawnblade attack).
+    // It leaves its old link for the stack, and from there the next link, like
+    // any swing; its layer is recorded as coming from the weapon zone, since
+    // it is the weapon itself on the stack, as for a swing from the slot.
+    let from_chain = pending.typ == ActionType::Activate && pending.from == Zone::CombatChain;
+    let weapon_from_chain = from_chain && commits_as_attack(pending.typ, data);
+    let activated_while_defending = from_chain && !weapon_from_chain;
 
+    let mut pending = pending;
     let player = gs.player_mut(owner);
     player.resources -= cost;
-    if !activated_while_defending {
+    if weapon_from_chain {
+        take_from_chain(player, pending.card);
+        pending.from = Zone::Weapon;
+    } else if !activated_while_defending {
         // The card itself goes on the shared stack, face up.
         take_from_zone(player, pending.card, pending.from);
     }
@@ -1869,6 +1881,7 @@ fn close_combat_chain(gs: &mut Gamestate) {
         for link in 0..CHAIN_LINKS {
             let player = gs.player_mut(pid);
             let cards = std::mem::take(&mut player.chain_link[link]);
+            player.chain_links_open = 0;
             // A block bonus granted during the combat (Rally the Rearguard's +3)
             // belongs to that combat, so it goes with the link.
             player.chain_defense_bonus[link] = 0;
@@ -1954,27 +1967,29 @@ fn chain_link_total(player: &Player, link: usize, stat: impl Fn(&CardData) -> u8
         })
 }
 
-/// The link the attacking player's current attack occupies: the last occupied
-/// link on their chain. Links fill in order and are only ever cleared all at
-/// once (`close_combat_chain`), so an attacker's occupied links are always a
-/// prefix and the current attack is on the last of them. An empty chain answers
-/// link 0 — where the next attack will land — and a full one the last link,
-/// which is the attack being resolved when every link is taken.
+/// The link the attacking player's current attack occupies: the last link
+/// their attacks have opened (`Player::chain_links_open`). An empty chain
+/// answers link 0 — where the next attack will land.
 ///
-/// Only meaningful for the attacking player. A defender's links may have gaps
-/// (an attack that went unblocked leaves its link empty on their side), so their
-/// occupied links are not a prefix and must not be counted this way.
+/// Only meaningful for the attacking player; a defender opens no links.
 pub(crate) fn current_chain_link(attacker: &Player) -> usize {
-    next_free_chain_link(attacker)
-        .unwrap_or(attacker.chain_link.len())
-        .saturating_sub(1)
+    (attacker.chain_links_open as usize).saturating_sub(1)
 }
 
-/// The link a newly resolving attack should take: the first free one on the
-/// attacking player's chain. `None` means every link is already occupied, so
-/// there is nowhere to put another attack — an engine bug the caller panics on.
+/// The link a newly resolving attack should take: the next one after those
+/// already opened. `None` means every link is taken, so there is nowhere to
+/// put another attack — an engine bug the caller panics on.
 fn next_free_chain_link(attacker: &Player) -> Option<usize> {
-    attacker.chain_link.iter().position(|link| link.is_empty())
+    let next = attacker.chain_links_open as usize;
+    (next < CHAIN_LINKS).then_some(next)
+}
+
+/// Take `id` off whichever of `player`'s chain links holds it: a weapon that
+/// attacked earlier in the chain, attacking again.
+fn take_from_chain(player: &mut Player, id: DeckCardId) {
+    let link = player.chain_link.iter().position(|l| l.contains(id))
+        .expect("the card is not on the combat chain");
+    player.chain_link[link].remove(id);
 }
 
 /// Resource cost of committing a card for the given action. An `Activate` (an
@@ -4260,6 +4275,7 @@ mod tests {
             let slot = gs.p1.deck.pop_front().expect("deck should not run dry");
             gs.p1.chain_link[link].add(slot.card());
         }
+        gs.p1.chain_links_open = gs.p1.chain_link.len() as u8;
 
         run_one_attack(&mut gs, Card::MuscleMuttY, Card::ClearingBellowB, &[], false);
     }

@@ -5084,20 +5084,26 @@ fn a_card_leaving_in_plain_view_keeps_the_rest_known() {
 // Dawnblade: "Once per Turn Action — {r}: Attack. The second time you attack
 // with Dawnblade each turn, it gains +1 power until the end of turn."
 //
-// Quicken is the only way Dawnblade gains go again today. The weapon sits on
-// the combat chain after swinging, so the extra attack comes after breaking
-// the chain (`CloseChain`), which returns it to its slot.
+// Quicken is the only way Dawnblade gains go again today. After swinging,
+// Dawnblade sits on the combat chain; the extra attack is activated from
+// there, and Dawnblade moves on to the next chain link — the chain stays open.
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn dawnblade_swing_offered(gs: &Gamestate) -> bool {
     legal_actions(gs).iter().any(|a| a.typ == ActionType::Activate && card_of(gs, a) == Card::Dawnblade)
 }
 
-/// Swing Dawnblade (cost 1) from Dorinthea's action phase, pitching `pitch`
-/// if the floating resources fall short, and let it through unblocked back to
-/// her action phase.
+/// The zone Dawnblade would be swung from now: its slot, or the chain.
+fn dawnblade_zone(gs: &Gamestate) -> Zone {
+    if gs.p1.weapon.is_some() { Zone::Weapon } else { Zone::CombatChain }
+}
+
+/// Swing Dawnblade (cost 1) from Dorinthea's action phase — from its slot or,
+/// for the extra attack, from the chain — pitching `pitch` if the floating
+/// resources fall short, and let it through unblocked back to her action phase.
 fn dawnblade_unblocked(gs: &mut TestGame, pitch: Option<Card>) {
-    step_card(gs, ActionType::Activate, Card::Dawnblade);
+    let zone = dawnblade_zone(gs);
+    step_card_from(gs, ActionType::Activate, Card::Dawnblade, zone);
     if let Some(card) = pitch {
         step_card(gs, ActionType::Pitch, card);
     }
@@ -5144,35 +5150,89 @@ fn without_go_again_dawnblade_swings_once() {
     dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
     assert!(!gs.p1.extra_weapon_attack());
     assert_eq!(gs.p1.action_points, 0);
-    // Even with an action point, it has used its once per turn.
+    // Even with an action point, it has used its once per turn: not from the
+    // chain, nor from its slot once the chain is broken.
     gs.p1.action_points = 1;
+    assert!(!dawnblade_swing_offered(&gs));
     step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
     assert!(!dawnblade_swing_offered(&gs));
 }
 
 #[test]
-fn the_extra_attack_comes_once_the_chain_is_broken_and_hits_for_3() {
+fn the_extra_attack_is_swung_from_the_chain_onto_the_next_link() {
     let mut gs = dawnblade_swung_with_quicken();
-    // Dawnblade is still on the chain from its first attack.
-    assert!(!dawnblade_swing_offered(&gs));
-    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
-    assert!(dawnblade_swing_offered(&gs), "back in its slot, with the extra attack to use");
+    // Dawnblade is on link 0, and is offered from there.
+    assert_eq!(link_cards(&gs, PlayerIndex::P1, 0), vec![Card::Dawnblade]);
+    assert!(gs.p1.weapon.is_none());
+    let offered: Vec<Zone> = legal_actions(&gs).iter()
+        .filter(|a| a.typ == ActionType::Activate && card_of(&gs, a) == Card::Dawnblade)
+        .map(|a| a.card_ref().zone)
+        .collect();
+    assert_eq!(offered, vec![Zone::CombatChain]);
 
-    // The second swing is paid from the floating resources, and is +1 power.
+    // Swinging moves it to the stack, then onto link 1; the chain stays open.
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::CombatChain);
+    assert!(gs.p1.chain_link[0].is_empty(), "it left its first link");
+    assert_eq!(stack_top_card(&gs), Some(Card::Dawnblade));
+    assert!(on_stack(&gs, Card::Dawnblade));
+    gs.debug_check_card_totals();
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    assert_eq!(link_cards(&gs, PlayerIndex::P1, 1), vec![Card::Dawnblade]);
+    assert_eq!(gs.p1.chain_links_open, 2);
+    assert_eq!(current_chain_link(&gs.p1), 1);
+}
+
+#[test]
+fn the_second_swing_hits_for_3_and_the_chain_closes_with_dawnblade_back_in_its_slot() {
+    let mut gs = dawnblade_swung_with_quicken();
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 18 - 3, "+1 power on the second attack");
+    assert_eq!(uses_this_turn(&gs, Card::Dawnblade), 2);
+    assert_eq!(gs.p1.action_points, 0, "no go again this time");
+    // Passing closes the chain; Dawnblade returns to its slot from link 1.
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.p1.weapon.map(|id| gs.p1.card(id)), Some(Card::Dawnblade));
+    assert_eq!(gs.p1.chain_links_open, 0);
+    assert!(!gs.p1.chain_occupied());
+}
+
+#[test]
+fn the_second_swing_is_blocked_on_its_own_link() {
+    // Rhinar blocks the second swing; his block counts against that attack
+    // only, on link 1.
+    let mut gs = dawnblade_swung_with_quicken();
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::DodgeB, Card::ClearingBellowB]);
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::CombatChain);
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    step_card(&mut gs, ActionType::Defend, Card::ClearingBellowB);
+    assert_eq!(link_cards(&gs, PlayerIndex::P2, 1), vec![Card::ClearingBellowB]);
+    while gs.phase != Phase::Action {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    // 3 power against Clearing Bellow's block.
+    let block = Card::ClearingBellowB.data().defense;
+    assert_eq!(gs.p2.life, 18 - 3u8.saturating_sub(block));
+}
+
+#[test]
+fn breaking_the_chain_first_still_works() {
+    let mut gs = dawnblade_swung_with_quicken();
+    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
+    assert_eq!(dawnblade_zone(&gs), Zone::Weapon);
     dawnblade_unblocked(&mut gs, None);
     assert_eq!(gs.p2.life, 18 - 3);
-    assert_eq!(uses_this_turn(&gs, Card::Dawnblade), 2);
-    // No go again this time, so that was her last action point.
-    assert_eq!(gs.p1.action_points, 0);
+    assert_eq!(link_cards(&gs, PlayerIndex::P1, 0), vec![Card::Dawnblade], "a fresh chain");
 }
 
 #[test]
 fn there_is_no_third_attack() {
     let mut gs = dawnblade_swung_with_quicken();
-    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
     dawnblade_unblocked(&mut gs, None);
     gs.p1.action_points = 1;
     gs.p1.resources = 1;
+    assert!(!dawnblade_swing_offered(&gs));
     step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
     assert!(!dawnblade_swing_offered(&gs));
 }
@@ -5187,10 +5247,8 @@ fn the_extra_attack_is_granted_only_the_first_time() {
     assert!(gs.p1.extra_weapon_attack());
     // A Quicken on the second swing gives it go again but no third attack.
     give_quicken(&mut gs, PlayerIndex::P1);
-    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
     dawnblade_unblocked(&mut gs, None);
     assert_eq!(gs.p1.action_points, 1, "the second swing had go again");
-    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
     assert!(!dawnblade_swing_offered(&gs));
 }
 
@@ -5212,12 +5270,19 @@ fn rhinar_has_no_extra_attack_for_bone_basher() {
     step_card(&mut gs, ActionType::Pitch, Card::ClearingBellowB);
     assert!(gs.p1.attack_go_again_bonus());
     assert!(!gs.p1.extra_weapon_attack());
+    // Through combat with go again, Bone Basher on the chain is not offered.
+    pass_once_each(&mut gs);
+    while gs.phase != Phase::Action {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.p1.action_points, 1);
+    assert!(!legal_actions(&gs).iter().any(|a| a.typ == ActionType::Activate
+        && card_of(&gs, a) == Card::BoneBasher));
 }
 
 #[test]
 fn the_extra_attack_and_the_plus_1_end_with_the_turn() {
     let mut gs = dawnblade_swung_with_quicken();
-    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
     dawnblade_unblocked(&mut gs, None);
     while gs.turn_player == PlayerIndex::P1 {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
@@ -5238,7 +5303,6 @@ fn the_extra_attack_and_the_plus_1_end_with_the_turn() {
 fn the_plus_1_stacks_with_en_garde() {
     let mut gs = dawnblade_swung_with_quicken();
     gs.p1.next_weapon_attack_bonus = 3;
-    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
     dawnblade_unblocked(&mut gs, None);
     // 2 + 1 (second attack) + 3 (En Garde).
     assert_eq!(gs.p2.life, 18 - 6);

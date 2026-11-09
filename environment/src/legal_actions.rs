@@ -386,7 +386,15 @@ fn push_equipment_activations(actions: &mut LegalActions, player: &Player, total
     // to the combat chain (a weapon) or the graveyard (an armor ability) is
     // decided later from the card type (see `commits_as_attack`).
     let worn = player.equipment.iter().map(|(id, n)| (id, n, Zone::Equipment));
-    let weapon = player.weapon.map(|id| (id, 1, Zone::Weapon));
+    // A weapon that attacked earlier in this chain is on the chain rather than
+    // in its slot; it may attack again from there, if its once per turn allows
+    // (Dorinthea's extra Dawnblade attack). It moves on to the next link.
+    let weapon = player.weapon.map(|id| (id, 1, Zone::Weapon)).or_else(|| {
+        player.chain_link.iter()
+            .flat_map(|link| link.iter())
+            .find(|&(id, _)| player.card(id).data().typ == CardType::Weapon)
+            .map(|(id, _)| (id, 1, Zone::CombatChain))
+    });
     for (id, copies, zone) in worn.chain(weapon) {
         let data = player.card(id).data();
         let Some(ability) = &data.ability else {
@@ -403,7 +411,7 @@ fn push_equipment_activations(actions: &mut LegalActions, player: &Player, total
         // activated this turn is done, even once it is back in its slot.
         // Dorinthea's hero ability lets the weapon attack one more time
         // (`extra_weapon_attack`).
-        let extra = (zone == Zone::Weapon && player.extra_weapon_attack()) as u8;
+        let extra = (data.typ == CardType::Weapon && player.extra_weapon_attack()) as u8;
         if ability.once_per_turn() && player.abilities_used.count(id) >= copies + extra {
             continue;
         }

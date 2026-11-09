@@ -780,23 +780,36 @@ on-play-effect helpers).
             set at most once a turn, so it also marks the ability as used, and
             is cleared at the start of each turn and on reset. "You may" needs
             no prompt: the extra attack is simply offered.
-          * The weapon stays on the combat chain after swinging, so the extra
-            attack comes after breaking the chain (`CloseChain`), which puts it
-            back in its slot. (Real FaB attacks again with the chain still
-            open; the engine's weapon-on-the-chain model does not allow that.)
+          * The extra attack is made with the chain still open. After
+            swinging, the weapon sits on its link; `push_equipment_activations`
+            offers it from there (`Zone::CombatChain`) when its once per turn
+            allows. Committing takes it off its old link (`take_from_chain`)
+            onto the stack — the layer is recorded as from the weapon zone, as
+            it is the weapon itself — and it resolves onto the next link. Links
+            are now counted (`Player::chain_links_open`) rather than read off
+            which hold a card, since the weapon leaves its first link empty on
+            the attacker's side; `current_chain_link` and
+            `next_free_chain_link` use the count, which resets as the chain
+            closes. A weapon swung from the chain is told apart from an ability
+            activated while defending (Rally) by `commits_as_attack`. Breaking
+            the chain first and swinging from the slot still works.
           * Dawnblade's +1 (`ConstantEffect::SecondAttackEachTurnPlus1Power`)
             is read at combat damage: it applies when the weapon has attacked
             twice or more this turn, counted by `abilities_used`, which is
             marked as each swing is committed. Stacks with En Garde.
           * `PlayerFlags` widened from u8 to u16 for the new bit; `Player`
             stays 184 bytes.
-          * Random play: Dorinthea's wins went from 26 to 63 in 200,000 games
+          * Random play: Dorinthea's wins went from 26 to 63 in 200,000 games,
+            and to 83 once the extra attack no longer needed the chain broken
             (Rhinar ~79%, draws ~21%). Quicken (from Flock) is her only source
             of go again until the Dawnblade pump cards are done.
         Tests: dorinthea_and_dawnblade_carry_their_abilities,
                dawnblade_gaining_go_again_grants_an_extra_attack,
                without_go_again_dawnblade_swings_once,
-               the_extra_attack_comes_once_the_chain_is_broken_and_hits_for_3,
+               the_extra_attack_is_swung_from_the_chain_onto_the_next_link,
+               the_second_swing_hits_for_3_and_the_chain_closes_with_dawnblade_back_in_its_slot,
+               the_second_swing_is_blocked_on_its_own_link,
+               breaking_the_chain_first_still_works,
                there_is_no_third_attack,
                the_extra_attack_is_granted_only_the_first_time,
                go_again_on_another_attack_grants_no_extra_dawnblade_attack,

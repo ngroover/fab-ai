@@ -292,6 +292,13 @@ pub fn seat_on_chain(gs: &mut Gamestate, pid: PlayerIndex, link: usize, card: Ca
     player.hand.remove(spare);
     let id = player.deck_id(card);
     player.chain_link[link].add(id);
+    open_link(player, link);
+}
+
+/// Count `link` as opened on `player`'s chain, as an attack landing there
+/// would. Harmless on the defender's side, whose count is never read.
+fn open_link(player: &mut crate::game_state::Player, link: usize) {
+    player.chain_links_open = player.chain_links_open.max(link as u8 + 1);
 }
 
 /// Move a copy of `card` from `pid`'s `zone` onto their chain link `link`
@@ -301,6 +308,7 @@ pub fn move_to_chain(gs: &mut Gamestate, pid: PlayerIndex, zone: Zone, card: Car
     let id = player.deck_id(card);
     crate::fab_step::take_from_zone(player, id, zone);
     player.chain_link[link].add(id);
+    open_link(player, link);
 }
 
 /// Whether a copy of `card` (either player's) is on the stack as a layer that

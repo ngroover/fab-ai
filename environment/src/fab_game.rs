@@ -206,6 +206,7 @@ fn place_cards_for(player: &mut Player, start: &StartingCards) {
     player.arsenal_lesson_counters = 0;
     player.chain_link = [CardCounts::EMPTY; CHAIN_LINKS];
     player.chain_defense_bonus = [0; CHAIN_LINKS];
+    player.chain_links_open = 0;
     player.abilities_used = CardCounts::EMPTY;
     player.resources = 0;
     player.action_points = 0;

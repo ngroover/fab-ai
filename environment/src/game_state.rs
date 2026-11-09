@@ -448,6 +448,14 @@ pub struct Player {
     /// combat damage, so the bonus is kept per link rather than per copy. It
     /// lasts as long as the link, and is cleared as the chain closes.
     pub chain_defense_bonus : [u8; CHAIN_LINKS],
+    /// How many chain links this player's attacks have opened on the current
+    /// combat chain. The current attack is on link `chain_links_open - 1`, and
+    /// the next takes link `chain_links_open` (see
+    /// `fab_step::current_chain_link`). Counted rather than read off which
+    /// links hold a card, because a weapon that attacks again moves on to the
+    /// next link and leaves its earlier link empty on this side. Reset when
+    /// the chain closes.
+    pub chain_links_open : u8,
     /// How many copies of each card have used their "once per turn" ability
     /// this turn (a weapon swing, Rally the Rearguard). Another copy may still
     /// activate while fewer have been used than there are copies in the zone it
@@ -784,6 +792,7 @@ impl Player {
             weapon: None,
             chain_link: [CardCounts::EMPTY; CHAIN_LINKS],
             chain_defense_bonus: [0; CHAIN_LINKS],
+            chain_links_open: 0,
             abilities_used: CardCounts::EMPTY,
             resources: 0,
             action_points: 0,
