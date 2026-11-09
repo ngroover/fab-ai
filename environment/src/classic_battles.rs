@@ -705,7 +705,7 @@ static CARD_CATALOG: [CardData; 52] = [
             no_block: false,
             slot: Some(EquipmentSlot::Chest),
             card_class: CardClass::Generic,
-            keyword: Keyword::empty(),
+            keyword: Keyword::GoAgain,
             hero_life: 0,
             hero_intellect: 0,
             constant_effect: None,

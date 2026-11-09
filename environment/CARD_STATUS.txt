@@ -572,9 +572,10 @@ on-play-effect helpers).
             be used once per game.
           * On resolution the owner gains 1 floating resource
             (`Ability::resources_gained`), lost at end of turn like any other.
-          * Go Again belongs to the ability, not the card:
-            `Ability::go_again`, read by `resolves_with_go_again` in
-            `resolve_top_of_stack`, so the action point is not spent.
+          * Go Again is the card's `Keyword::GoAgain`, so `resolve_top_of_stack`
+            does not spend the action point. Strictly the keyword is on the
+            ability, but the card keyword is only read when it resolves (or as
+            an attack on the chain, which Blossom never is), so it is the same.
           * Rules change moved random play, so the seven-layer stack seed in
             `random_game_with_a_seven_layer_stack_finishes` was found again with
             a 20M-game sweep (now 1995699; still 7 layers max, STACK_SIZE kept).

@@ -3845,12 +3845,12 @@ fn blossom_of_spring_is_a_free_action_ability_with_go_again_gaining_1() {
     assert_eq!(data.typ, CardType::Equipment);
     assert_eq!(data.card_class, CardClass::Generic);
     assert_eq!(data.defense, 0);
+    assert!(data.keyword.contains(Keyword::GoAgain));
     let ability = data.ability.as_ref().expect("Blossom of Spring has an ability");
     assert!(matches!(ability, Ability::DestroyGain1Resource));
     assert_eq!(ability.resource_cost(), 0);
     assert_eq!(ability.card_type(), CardType::Action);
     assert_eq!(ability.resources_gained(), 1);
-    assert!(ability.go_again());
     assert!(!ability.once_per_turn());
     assert!(!ability.discards_a_card());
     assert!(!ability.only_while_defending());
