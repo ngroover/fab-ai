@@ -198,6 +198,10 @@ pub fn relabel(gs: &mut Gamestate, pid: PlayerIndex, zone: Zone, from: Card, to:
             let counts = player.counts_mut(zone).expect("unordered zone");
             counts.remove(from);
             counts.add(to);
+            // A relabelled hand card is a different card now: forget it was known.
+            if zone == Zone::Hand && player.hand_known.count(from) > player.hand.count(from) {
+                player.hand_known.remove(from);
+            }
         }
     }
 }
@@ -215,6 +219,7 @@ pub fn set_hand(gs: &mut Gamestate, pid: PlayerIndex, desired: &[Card]) {
         player.graveyard.add(id);
     }
     player.hand = CardCounts::EMPTY;
+    player.hand_known = CardCounts::EMPTY;
     for &card in desired {
         let id = player.deck_id(card);
         player.hand.add(id);
@@ -230,6 +235,7 @@ pub fn move_hand_to_graveyard(gs: &mut Gamestate, pid: PlayerIndex) {
         }
     }
     player.hand = CardCounts::EMPTY;
+    player.hand_known = CardCounts::EMPTY;
 }
 
 /// Move a copy of `card` already in `pid`'s deck to the top, so it is drawn

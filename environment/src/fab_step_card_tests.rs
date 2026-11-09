@@ -4669,3 +4669,99 @@ fn tokens_are_not_counted_among_the_players_cards() {
     // The debug card-total check still passes with a token in play.
     gs.debug_check_card_totals();
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Known hand cards (Player::hand_known)
+//
+// The hand's counterpart of the deck's known bit: how many copies of each hand
+// card the opponent has seen. Revealing (Flock's cost) and drawing a known
+// deck card add to it; any copy leaving the hand takes a known copy with it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn known_in_hand(gs: &Gamestate, pid: PlayerIndex, card: Card) -> u8 {
+    let player = gs.player(pid);
+    player.hand_known_count(player.deck_id(card))
+}
+
+#[test]
+fn flocks_reveal_makes_the_card_known_in_hand() {
+    let mut gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::ToughenUpB, Card::SharpenSteelR], 0);
+    assert_eq!(known_in_hand(&gs, PlayerIndex::P1, Card::SharpenSteelR), 0);
+    attack_with_flock(&mut gs, Some(Card::ToughenUpB));
+    assert_eq!(known_in_hand(&gs, PlayerIndex::P1, Card::SharpenSteelR), 1);
+    assert_eq!(gs.p1.hand_known.len(), 1, "only the revealed card");
+    assert!(gs.p2.hand_known.is_empty());
+}
+
+#[test]
+fn a_known_card_leaving_the_hand_is_no_longer_known() {
+    let mut gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::ToughenUpB, Card::SharpenSteelR], 0);
+    attack_with_flock(&mut gs, Some(Card::ToughenUpB));
+    no_blocks_back_to_action(&mut gs);
+    // Playing the revealed Sharpen Steel takes it, and its knowledge, out.
+    let id = gs.p1.deck_id(Card::SharpenSteelR);
+    gs.p1.action_points = 1;
+    step_card(&mut gs, ActionType::PlayCard, Card::SharpenSteelR);
+    assert_eq!(gs.p1.hand_known_count(id), 0);
+}
+
+#[test]
+fn losing_one_of_two_copies_forgets_the_known_one() {
+    // The opponent saw one Sharpen Steel; once either copy goes they cannot
+    // be sure the seen one is still there.
+    let mut gs = dorinthea_holding(&[Card::SharpenSteelR, Card::SharpenSteelR], 0);
+    let id = gs.p1.deck_id(Card::SharpenSteelR);
+    gs.p1.mark_known_in_hand(id);
+    gs.p1.remove_from(Zone::Hand, id);
+    assert_eq!(gs.p1.hand.count(id), 1);
+    assert_eq!(gs.p1.hand_known_count(id), 0);
+}
+
+#[test]
+fn marking_known_never_exceeds_the_copies_in_hand() {
+    let mut gs = dorinthea_holding(&[Card::SharpenSteelR], 0);
+    let id = gs.p1.deck_id(Card::SharpenSteelR);
+    gs.p1.mark_known_in_hand(id);
+    gs.p1.mark_known_in_hand(id);
+    assert_eq!(gs.p1.hand_known_count(id), 1);
+    gs.debug_check_card_totals();
+}
+
+#[test]
+fn the_reveal_prefers_a_card_the_opponent_already_knows() {
+    // Sharpen Steel has the lower id, but Hit and Run is already known, so
+    // revealing it gives nothing new away.
+    let mut gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR, Card::HitAndRunB], 1);
+    let (sharpen, hit_and_run) = (gs.p1.deck_id(Card::SharpenSteelR), gs.p1.deck_id(Card::HitAndRunB));
+    assert!(sharpen < hit_and_run);
+    gs.p1.mark_known_in_hand(hit_and_run);
+    attack_with_flock(&mut gs, None);
+    assert_eq!(gs.p1.hand_known_count(hit_and_run), 1);
+    assert_eq!(gs.p1.hand_known_count(sharpen), 0);
+}
+
+#[test]
+fn drawing_a_known_deck_card_keeps_it_known() {
+    let mut gs = dorinthea_holding(&[], 0);
+    let top = gs.p1.deck.front().unwrap().card();
+    gs.p1.deck.get_mut(0).unwrap().set_known(true);
+    let second = gs.p1.deck.get(1).unwrap().card();
+    assert!(!gs.p1.deck.get(1).unwrap().is_known());
+    draw_cards(&mut gs.p1, 2);
+    assert_eq!(gs.p1.hand_known_count(top), 1);
+    if second != top {
+        assert_eq!(gs.p1.hand_known_count(second), 0, "a hidden card stays hidden");
+    }
+    assert_eq!(gs.p1.hand_known.len(), 1);
+}
+
+#[test]
+fn a_reset_forgets_known_hand_cards() {
+    let mut gs = dorinthea_holding(&[Card::SharpenSteelR], 0);
+    let id = gs.p1.deck_id(Card::SharpenSteelR);
+    gs.p1.mark_known_in_hand(id);
+    let decks = crate::fab_game::Decklists::new(build_dorinthea_deck(), build_rhinar_deck());
+    let TestGame { state, rng } = &mut gs;
+    crate::fab_game::reset(state, &decks, rng, false);
+    assert!(gs.p1.hand_known.is_empty());
+}

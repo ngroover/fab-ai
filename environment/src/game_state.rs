@@ -79,7 +79,8 @@ pub const MAX_QUICKENS: u8 = 2;
 /// Who can see a card. Cards carry no visibility of their own: it follows from
 /// the zone they are in (see `Player::visibility`), except in the deck, where
 /// each slot remembers whether both players have seen that card (a pitched
-/// card put on the bottom, or a revealed one).
+/// card put on the bottom, or a revealed one), and in the hand, where
+/// `Player::hand_known` counts the copies the opponent has seen.
 // Read by tests and, later, by observation encoding; the engine itself never
 // needs to ask who can see a card.
 #[allow(dead_code)]
@@ -371,6 +372,15 @@ pub struct Player {
     /// The hand: how many copies of each card are in it. The hand is
     /// unordered, so the counts are all there is to know about it.
     pub hand : CardCounts,
+    /// How many copies of each hand card the opponent knows are there: the
+    /// hand's counterpart of `DeckSlot`'s known bit. A copy becomes known when
+    /// it is revealed from hand (Flock of the Feather Walkers' cost) or drawn
+    /// from a known deck slot. Every copy of a card that leaves the hand, by
+    /// any route, takes one known copy of it off too (`remove_from`), so this
+    /// is always within `hand`: knowledge the opponent can no longer be sure
+    /// of is dropped rather than kept as a guess. Read through
+    /// `hand_known_count`; set through `mark_known_in_hand`.
+    pub hand_known : CardCounts,
     /// The pitch zone. It is unordered; the order pitched cards go to the
     /// bottom of the deck is chosen as they leave it (the `PitchOrder` phase).
     pub pitch : CardCounts,
@@ -615,6 +625,13 @@ impl Gamestate {
             let on_stack = self.stack.iter()
                 .filter(|p| p.owner == player.pid && p.holds_card())
                 .count();
+            for (id, known) in player.hand_known.iter() {
+                assert!(
+                    known <= player.hand.count(id),
+                    "P{} knows of more copies of deck card {} in hand than it holds",
+                    player.pid.get() + 1, id.get(),
+                );
+            }
             let total = player.cards_in_zones() + on_stack;
             assert_eq!(
                 total, PLAYER_CARDS,
@@ -728,6 +745,7 @@ impl Player {
             deck_kind: DeckKind::for_hero(hero),
             deck: empty_deck(),
             hand: CardCounts::EMPTY,
+            hand_known: CardCounts::EMPTY,
             pitch: CardCounts::EMPTY,
             graveyard: CardCounts::EMPTY,
             banished: CardCounts::EMPTY,
@@ -911,6 +929,27 @@ impl Player {
         self.counts_mut(zone)
             .unwrap_or_else(|| panic!("{:?} is not an unordered zone", zone))
             .remove(id);
+        // A copy leaving the hand takes a known copy of the same card with it,
+        // keeping `hand_known` within the hand.
+        if zone == Zone::Hand && self.hand_known.contains(id) {
+            self.hand_known.remove(id);
+        }
+    }
+
+    /// Mark one more copy of `id` in hand as known to the opponent. A no-op
+    /// once every copy in hand is already known.
+    pub fn mark_known_in_hand(&mut self, id: DeckCardId) {
+        if self.hand_known.count(id) < self.hand.count(id) {
+            self.hand_known.add(id);
+        }
+    }
+
+    /// How many copies of `id` in hand the opponent knows about.
+    // Read by tests and, later, by observation encoding.
+    #[allow(dead_code)]
+    #[inline]
+    pub const fn hand_known_count(&self, id: DeckCardId) -> u8 {
+        self.hand_known.count(id)
     }
 
     /// How many copies of `card` are in hand, for code that knows which deck
@@ -975,8 +1014,10 @@ impl Player {
 
     /// Who can see the cards this player has in `zone`. The hand, the
     /// Intimidate banish zone and a face-down arsenal card are known to their
-    /// owner alone; a deck card is hidden unless its slot is known (see
-    /// `DeckSlot`, and `deck_slot_visibility`); everything else is public.
+    /// owner alone — except hand copies the opponent has seen, which
+    /// `hand_known_count` reports; a deck card is hidden unless its slot is
+    /// known (see `DeckSlot`, and `deck_slot_visibility`); everything else is
+    /// public.
     #[allow(dead_code)]
     pub fn visibility(&self, zone: Zone) -> CardVisibleState {
         match zone {

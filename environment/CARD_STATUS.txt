@@ -689,8 +689,10 @@ on-play-effect helpers).
             that holds a card back (any card to discard, cost <= 1 to reveal),
             and `can_pay_for_card` / `pitch_leaves_card_for_cost` reserve the
             lowest-pitch eligible card so it is never pitched away. The reveal
-            itself (`apply_reveal_cost`) leaves the card in hand and is logged
-            publicly; hand cards carry no per-card visibility.
+            itself (`apply_reveal_cost`) is automatic: it leaves the card in
+            hand, marks it known to the opponent (`Player::hand_known`, see
+            below), and prefers a card that is already known, else the lowest
+            id.
           * Tokens: `Card::QuickenToken` (type Token) is at the end of `Card`
             and the catalog, for its data. Tokens are in no deck enum: they
             have their own `TokenCard` enum (deck_cards.rs), shared by every
@@ -709,6 +711,22 @@ on-play-effect helpers).
             again through `attack_go_again_bonus`. Flock spends an existing
             Quicken when played, then makes a new one when it attacks.
           * Tokens persist across turns; only the owner's attacks set them off.
+          * Known hand cards: `Player::hand_known` (a `CardCounts`) counts
+            the copies of each hand card the opponent has seen — the hand's
+            counterpart of the deck's `DeckSlot` known bit. Set by a reveal
+            from hand and by drawing a known deck slot (`draw_cards`), e.g. a
+            card Pack Call or Bone Vizier kept on top. Any copy leaving the
+            hand by any route takes one known copy of that card with it
+            (`Player::remove_from`), so it always stays within the hand; the
+            debug card-total check asserts that. Cleared on reset. Read with
+            `hand_known_count`. `Player` grew 8 bytes.
+        Tests (known hand cards): flocks_reveal_makes_the_card_known_in_hand,
+               a_known_card_leaving_the_hand_is_no_longer_known,
+               losing_one_of_two_copies_forgets_the_known_one,
+               marking_known_never_exceeds_the_copies_in_hand,
+               the_reveal_prefers_a_card_the_opponent_already_knows,
+               drawing_a_known_deck_card_keeps_it_known,
+               a_reset_forgets_known_hand_cards
           * Rules change moved random play: the seven-layer stack seed is now
             14501652 (20M-game sweep, still 7 layers max, STACK_SIZE kept).
         Tests: flock_is_a_5_power_attack_with_a_reveal_cost_that_creates_quicken,

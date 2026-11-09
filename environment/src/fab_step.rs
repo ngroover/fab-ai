@@ -1063,17 +1063,18 @@ pub(crate) fn can_reveal_for_cost(data: &CardData) -> bool {
 }
 
 /// Pay a "reveal a card with cost 1 or less" additional cost from `owner`'s
-/// hand. The card stays in hand; revealing it only shows it to the opponent,
-/// which the engine records in the public log (hand cards carry no per-card
-/// visibility). Which eligible card is shown makes no difference to the game,
-/// so the lowest id is used. The legal-action gates guarantee one is there.
+/// hand. The card stays in hand, now known to the opponent
+/// (`Player::hand_known`). The pick is automatic: the eligible card with the
+/// lowest id, preferring one already known so no new information is given
+/// away when it can be helped. The legal-action gates guarantee one is there.
 fn apply_reveal_cost(gs: &mut Gamestate, owner: PlayerIndex) {
     let player = gs.player(owner);
-    let pick = player.hand.iter()
-        .map(|(id, _)| id)
-        .find(|&id| can_reveal_for_cost(player.card(id).data()));
+    let eligible = |id: DeckCardId| can_reveal_for_cost(player.card(id).data());
+    let pick = player.hand_known.iter().map(|(id, _)| id).find(|&id| eligible(id))
+        .or_else(|| player.hand.iter().map(|(id, _)| id).find(|&id| eligible(id)));
     debug_assert!(pick.is_some(), "no card with cost 1 or less left to reveal");
     if let Some(id) = pick {
+        gs.player_mut(owner).mark_known_in_hand(id);
         if gs.logging_enabled() {
             gs.log_public(format!("{} reveals {:?}", player_name(owner), gs.player(owner).card(id)));
         }
@@ -1980,6 +1981,11 @@ fn draw_cards(player: &mut Player, num: usize) -> u8 {
             break; // deck is empty
         };
         player.add_to(Zone::Hand, slot.card());
+        // A card both players had seen on the deck (revealed and kept on top,
+        // say) is still known once drawn.
+        if slot.is_known() {
+            player.mark_known_in_hand(slot.card());
+        }
         drawn += 1;
     }
     drawn as u8

@@ -192,6 +192,7 @@ fn place_cards_for(player: &mut Player, start: &StartingCards) {
     player.tokens = CardCounts::EMPTY;
     player.weapon = start.weapon;
     player.hand = CardCounts::EMPTY;
+    player.hand_known = CardCounts::EMPTY;
     player.pitch = CardCounts::EMPTY;
     player.graveyard = CardCounts::EMPTY;
     player.banished = CardCounts::EMPTY;

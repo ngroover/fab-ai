@@ -528,16 +528,11 @@ fn can_pay_for_card(
     pitch_pool >= needed
 }
 
-/// The pitch value of the lowest-pitch card in `counts` — the rest of the hand
-/// once the played card is set aside. This is the card a "discard a card"
-/// additional cost would set aside to discard (the cheapest to lose), and
-/// removing it from the pitch pool is equivalent to sorting the hand by pitch
-/// and dropping the lowest card. `None` when there is no other card to discard.
-fn min_pitch(player: &Player, counts: CardCounts) -> Option<u8> {
-    min_pitch_where(player, counts, |_| true)
-}
-
-/// `min_pitch` over only the cards in `counts` that pass `eligible`.
+/// The pitch value of the lowest-pitch card in `counts` that passes
+/// `eligible` — the card an additional cost that holds a hand card back (a
+/// discard, or a reveal) sets aside, the cheapest to give up. Removing it from
+/// the pitch pool is equivalent to sorting the eligible cards by pitch and
+/// dropping the lowest. `None` when no card in `counts` is eligible.
 fn min_pitch_where(player: &Player, counts: CardCounts, eligible: fn(&CardData) -> bool) -> Option<u8> {
     counts.iter()
         .map(|(id, _)| player.card(id).data())
