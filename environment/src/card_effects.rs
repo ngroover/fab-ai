@@ -150,6 +150,22 @@ pub struct OnPlayEffect {
 pub enum DefendEffect {
     Reveal6BottomOtherwise,
     PitchToBlock,
+    /// Ironhide Gauntlet / Ironhide Legs: "When you defend with this, you may
+    /// pay {r}. If you do, it gains +2 block and 'When the combat chain closes,
+    /// destroy this.'" The payment is a choice made as the trigger resolves
+    /// (`Phase::DefendPayment`); see `fab_step::apply_defend_effect`.
+    PayForPlus2BlockThenDestroy,
+}
+
+impl DefendEffect {
+    /// Resources the trigger's optional payment costs; 0 for a trigger that
+    /// asks for no payment.
+    pub fn resource_cost(&self) -> u8 {
+        match self {
+            DefendEffect::PayForPlus2BlockThenDestroy => 1,
+            DefendEffect::Reveal6BottomOtherwise | DefendEffect::PitchToBlock => 0,
+        }
+    }
 }
 
 bitflags! {

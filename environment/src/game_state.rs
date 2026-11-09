@@ -1,4 +1,4 @@
-use crate::cards::Card;
+use crate::cards::{Card, EquipmentSlot};
 use crate::action::ActionType;
 use crate::card_counts::{CardCounts, DeckCardId, MAX_DECK_IDS};
 use crate::deck_cards::{DeckCard, DeckKind};
@@ -55,7 +55,7 @@ pub const PLAYER_CARDS: usize = 45;
 /// reaction window can legitimately stack six or more layers (e.g. four attack
 /// reactions answered by two Dodges). Sized to the deepest stack random play
 /// reaches: a sweep of 20 million random games went no deeper than 7, first in
-/// seed 851660 (see `simulator::tests::stack_depth_histogram` and
+/// seed 448752 (see `simulator::tests::stack_depth_histogram` and
 /// `random_game_with_a_seven_layer_stack_finishes`). Deliberate play could in
 /// principle go deeper; raise this if it ever panics.
 pub const STACK_SIZE: usize = 7;
@@ -255,6 +255,15 @@ pub enum Phase {
     /// defend step rather than spelled out as `DefendTriggersPitch`: it is the
     /// pitch phase reached from the defend step, and nothing else there pitches.
     DefendPitch,
+    /// A defend trigger with an optional payment (Ironhide Gauntlet / Legs:
+    /// "you may pay {r}") is resolving, and its controller — the defender,
+    /// made active — chooses: `Activate` the card on the chain to pay, or
+    /// `Pass` to decline. The trigger's card is held in `pending_card` with
+    /// type `DefendTrigger`. Paying more than the banked resources cover moves
+    /// to `DefendPitch`, which applies the effect once paid. Either way play
+    /// then returns to the `DefendTriggers` window. Entered only when the
+    /// defender could pay; a trigger they cannot afford is declined outright.
+    DefendPayment,
     Reaction,
     ReactionPitch,
     /// The end of the turn player's action phase: they have passed, the combat
@@ -318,6 +327,20 @@ bitflags::bitflags! {
         /// than on every card; it is cleared whenever the arsenal empties (see
         /// `take_from_zone`).
         const ARSENAL_FACE_UP = 1 << 2;
+        /// "When the combat chain closes, destroy this", granted to the piece
+        /// of equipment in the named slot while it defends (Ironhide Gauntlet
+        /// and Legs, once their payment is made). Each equipment slot holds at
+        /// most one piece, so one bit per slot names the card. Read and
+        /// cleared as the chain closes (`fab_step::close_combat_chain`).
+        const DESTROY_HEAD_ON_CHAIN_CLOSE = 1 << 3;
+        const DESTROY_CHEST_ON_CHAIN_CLOSE = 1 << 4;
+        const DESTROY_ARMS_ON_CHAIN_CLOSE = 1 << 5;
+        const DESTROY_LEGS_ON_CHAIN_CLOSE = 1 << 6;
+        /// All four of the above.
+        const DESTROY_ON_CHAIN_CLOSE = Self::DESTROY_HEAD_ON_CHAIN_CLOSE.bits()
+            | Self::DESTROY_CHEST_ON_CHAIN_CLOSE.bits()
+            | Self::DESTROY_ARMS_ON_CHAIN_CLOSE.bits()
+            | Self::DESTROY_LEGS_ON_CHAIN_CLOSE.bits();
     }
 }
 
@@ -745,6 +768,35 @@ impl Player {
     #[inline]
     pub fn set_arsenal_face_up(&mut self, on: bool) {
         self.flags.set(PlayerFlags::ARSENAL_FACE_UP, on);
+    }
+
+    /// The `DESTROY_*_ON_CHAIN_CLOSE` flag for the equipment slot `slot`, or
+    /// none for the weapon slot (no weapon is destroyed this way).
+    fn destroy_on_chain_close_flag(slot: &EquipmentSlot) -> PlayerFlags {
+        match slot {
+            EquipmentSlot::Head => PlayerFlags::DESTROY_HEAD_ON_CHAIN_CLOSE,
+            EquipmentSlot::Chest => PlayerFlags::DESTROY_CHEST_ON_CHAIN_CLOSE,
+            EquipmentSlot::Arms => PlayerFlags::DESTROY_ARMS_ON_CHAIN_CLOSE,
+            EquipmentSlot::Legs => PlayerFlags::DESTROY_LEGS_ON_CHAIN_CLOSE,
+            EquipmentSlot::Weapon => PlayerFlags::empty(),
+        }
+    }
+
+    /// Whether the equipment in `slot` is to be destroyed when the combat
+    /// chain closes.
+    pub fn destroy_on_chain_close(&self, slot: &EquipmentSlot) -> bool {
+        let flag = Self::destroy_on_chain_close_flag(slot);
+        !flag.is_empty() && self.flags.contains(flag)
+    }
+
+    /// Mark the equipment in `slot` to be destroyed when the combat chain closes.
+    pub fn set_destroy_on_chain_close(&mut self, slot: &EquipmentSlot) {
+        self.flags.insert(Self::destroy_on_chain_close_flag(slot));
+    }
+
+    /// Forget every "destroy when the chain closes" mark.
+    pub fn clear_destroy_on_chain_close(&mut self) {
+        self.flags.remove(PlayerFlags::DESTROY_ON_CHAIN_CLOSE);
     }
 
     /// Number of cards in hand, counting every copy.

@@ -26,6 +26,7 @@ pub fn legal_actions(gs: &Gamestate) -> LegalActions {
         Phase::ActionInstant => legal_instant_phase(gs),
         Phase::Defend => legal_defend_phase(gs),
         Phase::DefendTriggers => legal_defend_triggers_phase(gs),
+        Phase::DefendPayment => legal_defend_payment_phase(gs),
         Phase::Reaction => legal_reaction_phase(gs),
         Phase::Arsenal => legal_arsenal_phase(gs),
         Phase::PitchOrder => legal_pitch_order_phase(gs),
@@ -78,6 +79,18 @@ fn legal_defend_phase(gs: &Gamestate) -> LegalActions {
         card: None,
     });
 
+    actions
+}
+
+/// A resolving defend trigger's optional payment (Ironhide's "you may pay
+/// {r}"): pay for it by activating the card on the chain, or pass to decline.
+/// The phase is only entered when the payment can be made.
+fn legal_defend_payment_phase(gs: &Gamestate) -> LegalActions {
+    let mut actions = LegalActions::new();
+    if let Some(p) = gs.pending_card {
+        actions.push(Action::new(ActionType::Activate, CardRef::new(p.card, Zone::CombatChain)));
+    }
+    actions.push(Action::no_card(ActionType::Pass));
     actions
 }
 

@@ -606,8 +606,6 @@ on-play-effect helpers).
             Ruk'utan's triggers, using the same `reveal_top_keep_6` as Pack
             Call. The reveal is public; it is the owner's deck, whoever's turn
             it is.
-          * Ironhide Gauntlet / Legs (0 defense) can now defend, but their "pay
-            1 for +2 block" defend effect is still TODO.
           * Rules change moved random play: the seven-layer stack seed is now
             851660 (20M-game sweep, still 7 layers max, STACK_SIZE kept).
         Tests: bone_vizier_is_a_1_block_brute_helm_with_blade_break_and_a_destroy_trigger,
@@ -621,6 +619,41 @@ on-play-effect helpers).
                blade_break_destroys_only_the_piece_that_has_it,
                a_destroyed_bone_vizier_cannot_defend_again
                (plus legal_actions_in_defend_phase, which now checks equipment)
+
+  [x] Ironhide Gauntlet (Card::IronhideGauntlet)
+  [x] Ironhide Legs     (Card::IronhideLegs)
+        Generic 0-defense arms / legs. "When you defend with this, you may pay
+        {r}. If you do, it gains +2 block and 'When the combat chain closes,
+        destroy this.'"
+          * `DefendEffect::PayForPlus2BlockThenDestroy` (cost 1, from
+            `DefendEffect::resource_cost`): defending pushes the trigger like
+            Pack Call's, into the `DefendTriggers` window.
+          * As it resolves, `apply_defend_effect` asks the defender — new
+            `Phase::DefendPayment`, with the trigger's card held in
+            `pending_card` as a `DefendTrigger`. `Activate` on the card (on
+            the combat chain) pays; `Pass` declines. A defender who cannot pay
+            from banked resources plus hand pitch is not asked.
+          * Paying more than is banked moves to `DefendPitch`;
+            `handle_pitch_phase` sees the `DefendTrigger` pending and applies
+            the effect rather than pushing anything onto the stack. Either way
+            play returns to the `DefendTriggers` window (`finish_defend_trigger`).
+          * The effect (`pay_for_defend_trigger`): +2 on the link's
+            `chain_defense_bonus`, and the piece is marked to be destroyed
+            when the chain closes. The mark is a `PlayerFlags` bit per
+            equipment slot (each slot holds one piece), so `Player` does not
+            grow. `close_combat_chain` destroys a marked piece like a Blade
+            Break one (`destroy_equipment`), then clears every mark.
+          * Rules change moved random play: the seven-layer stack seed was
+            re-found with a 20M-game sweep (now 448752; still 7 layers max).
+        Tests: ironhide_pieces_are_0_block_generic_equipment_with_a_paid_defend_trigger,
+               defending_with_ironhide_asks_the_defender_whether_to_pay,
+               paying_from_banked_resources_gives_plus_2_block_and_destroys_it_at_chain_close,
+               paying_with_nothing_banked_pitches_for_it,
+               declining_leaves_it_a_0_block_piece_that_returns_to_its_slot,
+               a_defender_who_cannot_pay_is_not_asked,
+               both_pieces_can_be_paid_for_and_both_are_destroyed,
+               only_the_piece_paid_for_is_destroyed,
+               the_destroy_mark_does_not_outlive_the_chain
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
@@ -650,8 +683,8 @@ on-play-effect helpers).
   [x] Bone Basher (weapon)   (Card::BoneBasher)  — see COMPLETE section above
   [x] Blossom of Spring      (Card::BlossomOfSpring)  — see COMPLETE section above
   [x] Bone Vizier            (Card::BoneVizier)  — see COMPLETE section above
-  [ ] Ironhide Gauntlet      (Card::IronhideGauntlet)
-  [ ] Ironhide Legs          (Card::IronhideLegs)
+  [x] Ironhide Gauntlet      (Card::IronhideGauntlet)  — see COMPLETE section above
+  [x] Ironhide Legs          (Card::IronhideLegs)  — see COMPLETE section above
 
 
 ------------------------------------------------------------------------------

@@ -25,6 +25,7 @@ pub fn step(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
         Phase::ActionInstant => handle_action_instant_phase(gs, rng, act),
         Phase::Defend => handle_defend_phase(gs, act),
         Phase::DefendTriggers | Phase::Reaction => handle_reaction_phase(gs, rng, act),
+        Phase::DefendPayment => handle_defend_payment_phase(gs, act),
         Phase::Arsenal => handle_arsenal_phase(gs, act),
         Phase::PitchOrder => handle_pitch_order_phase(gs, act),
         _ => {}
@@ -649,15 +650,110 @@ fn push_defend_triggers(gs: &mut Gamestate) -> bool {
 /// Fire the "when you defend with this" trigger of `id`, a blocker declared by
 /// `pid`, as that trigger resolves off the stack. Cards without a
 /// `defend_effect` never get a trigger pushed in the first place.
-fn apply_defend_effect(gs: &mut Gamestate, pid: PlayerIndex, id: DeckCardId) {
-    match gs.player(pid).card(id).data().defend_effect {
-        Some(DefendEffect::Reveal6BottomOtherwise) => reveal_top_keep_6(gs, pid),
+///
+/// Returns `true` when the trigger is waiting on a choice from its controller
+/// (an optional payment, `Phase::DefendPayment`), in which case the caller
+/// must leave the window as it is: `finish_defend_trigger` runs once the
+/// choice is made.
+fn apply_defend_effect(gs: &mut Gamestate, pid: PlayerIndex, id: DeckCardId) -> bool {
+    match &gs.player(pid).card(id).data().defend_effect {
+        Some(DefendEffect::Reveal6BottomOtherwise) => {
+            reveal_top_keep_6(gs, pid);
+            false
+        }
+        Some(effect @ DefendEffect::PayForPlus2BlockThenDestroy) => {
+            // "You may pay {r}": only a choice if it can be paid, from banked
+            // resources plus whatever the hand can pitch. Otherwise it is
+            // declined without asking.
+            let player = gs.player(pid);
+            let can_pay = player.resources.saturating_add(player.hand_pitch_total())
+                >= effect.resource_cost();
+            if !can_pay {
+                if gs.logging_enabled() {
+                    gs.log_public(format!("{} cannot pay for {:?}", player_name(pid), player.card(id)));
+                }
+                return false;
+            }
+            gs.pending_card = Some(PendingCard {
+                owner: pid,
+                card: id,
+                from: Zone::CombatChain,
+                typ: ActionType::DefendTrigger,
+            });
+            gs.phase = Phase::DefendPayment;
+            gs.active_player = pid;
+            true
+        }
         // `PitchToBlock` is unused and no card in the catalog carries it. It was
         // put here for Rally the Rearguard, whose "+3 block" turned out to be an
         // activated ability rather than a defend trigger — it is implemented as
         // `Ability::DiscardCardPlusBlock` (see `apply_defending_ability`), and
         // the card's `defend_effect` is `None`.
-        Some(DefendEffect::PitchToBlock) | None => {}
+        Some(DefendEffect::PitchToBlock) | None => false,
+    }
+}
+
+/// Handle the defender's choice in `Phase::DefendPayment`: `Activate` the
+/// trigger's card to pay for it, or `Pass` to decline. Paying out of banked
+/// resources applies the effect at once; otherwise the defender pitches for it
+/// in `DefendPitch` first (see `handle_pitch_phase`).
+fn handle_defend_payment_phase(gs: &mut Gamestate, act: Action) {
+    let pending = gs.pending_card.expect("a defend payment is pending");
+    match act.typ {
+        ActionType::Activate => {
+            let data = gs.player(pending.owner).card(pending.card).data();
+            if gs.player(pending.owner).resources >= action_cost(pending.typ, data) {
+                pay_for_defend_trigger(gs);
+            } else {
+                gs.phase = Phase::DefendPitch;
+            }
+        }
+        ActionType::Pass => {
+            if gs.logging_enabled() {
+                gs.log_public(format!("{} declines to pay for {:?}",
+                    player_name(pending.owner), gs.player(pending.owner).card(pending.card)));
+            }
+            gs.pending_card = None;
+            gs.phase = Phase::DefendTriggers;
+            finish_defend_trigger(gs);
+        }
+        _ => {}
+    }
+}
+
+/// Pay for the pending defend trigger out of banked resources (which cover
+/// it) and apply what the payment buys. Ironhide's: +2 block on the defended
+/// link, and the piece is marked to be destroyed when the chain closes. Play
+/// returns to the `DefendTriggers` window.
+fn pay_for_defend_trigger(gs: &mut Gamestate) {
+    let pending = gs.pending_card.take().expect("a defend payment is pending");
+    let owner = pending.owner;
+    let card = gs.player(owner).card(pending.card);
+    let data = card.data();
+    let cost = action_cost(pending.typ, data);
+    if gs.logging_enabled() {
+        gs.log_public(format!("{} pays {} for {:?}: +2 block, destroyed when the chain closes",
+            player_name(owner), cost, card));
+    }
+    let link = current_chain_link(gs.player(gs.turn_player));
+    let player = gs.player_mut(owner);
+    player.resources -= cost;
+    player.chain_defense_bonus[link] = player.chain_defense_bonus[link].saturating_add(2);
+    if let Some(slot) = &data.slot {
+        player.set_destroy_on_chain_close(slot);
+    }
+    gs.phase = Phase::DefendTriggers;
+    finish_defend_trigger(gs);
+}
+
+/// A defend trigger has finished resolving in the `DefendTriggers` window:
+/// close the window if the stack is now empty, or hand priority back to the
+/// turn player for the next layer.
+fn finish_defend_trigger(gs: &mut Gamestate) {
+    if gs.stack_is_empty() {
+        close_priority_window(gs);
+    } else {
+        gs.active_player = gs.turn_player;
     }
 }
 
@@ -785,13 +881,9 @@ fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
         if gs.logging_enabled() {
             gs.log_public(format!("{}'s {:?} defend trigger resolves", player_name(owner), card));
         }
-        apply_defend_effect(gs, owner, top);
-        if gs.stack_is_empty() {
-            close_priority_window(gs);
-        } else {
-            // More triggers (or responses) still to resolve: priority returns to
-            // the turn player for a fresh round in the same window.
-            gs.active_player = gs.turn_player;
+        // A trigger awaiting its controller's choice finishes once it is made.
+        if !apply_defend_effect(gs, owner, top) {
+            finish_defend_trigger(gs);
         }
         return;
     }
@@ -1351,7 +1443,13 @@ fn handle_pitch_phase(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
     let pending_card = gs.player(pending.owner).card(pending.card);
     let cost = action_cost(pending.typ, pending_card.data());
     if resources >= cost {
-        commit_pending_to_stack(gs, rng);
+        if pending.typ == ActionType::DefendTrigger {
+            // Paying a resolving trigger's optional cost: nothing goes on the
+            // stack, the effect just applies.
+            pay_for_defend_trigger(gs);
+        } else {
+            commit_pending_to_stack(gs, rng);
+        }
     }
 }
 
@@ -1598,8 +1696,11 @@ fn close_combat_chain(gs: &mut Gamestate) {
                         put_in_zone(gs.player_mut(pid), id, Zone::Weapon);
                     } else if data.typ == CardType::Equipment {
                         // Equipment that defended goes back to its slot, unless
-                        // Blade Break destroys it as the chain closes.
-                        if data.keyword.contains(Keyword::BladeBreak) {
+                        // Blade Break, or an effect that marked it ("when the
+                        // combat chain closes, destroy this"), destroys it.
+                        let marked = data.slot.as_ref()
+                            .is_some_and(|slot| gs.player(pid).destroy_on_chain_close(slot));
+                        if data.keyword.contains(Keyword::BladeBreak) || marked {
                             destroy_equipment(gs, pid, id);
                         } else {
                             put_in_zone(gs.player_mut(pid), id, Zone::Equipment);
@@ -1611,6 +1712,8 @@ fn close_combat_chain(gs: &mut Gamestate) {
                 }
             }
         }
+        // Every mark has now been acted on.
+        gs.player_mut(pid).clear_destroy_on_chain_close();
     }
 }
 
@@ -1703,6 +1806,11 @@ fn action_cost(typ: ActionType, data: &CardData) -> u8 {
             .as_ref()
             .expect("Activate action requires a card with an ability")
             .resource_cost(),
+        // Paying for a resolving defend trigger (Ironhide's "you may pay {r}").
+        ActionType::DefendTrigger => data
+            .defend_effect
+            .as_ref()
+            .map_or(0, |effect| effect.resource_cost()),
         _ => data.cost,
     }
 }

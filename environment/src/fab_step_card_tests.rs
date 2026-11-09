@@ -34,6 +34,8 @@
 //!   - Blossom of Spring   (`Card::BlossomOfSpring`)
 //!   - Bone Vizier         (`Card::BoneVizier`), with equipment blocking and
 //!     Blade Break
+//!   - Ironhide Gauntlet   (`Card::IronhideGauntlet`)
+//!   - Ironhide Legs       (`Card::IronhideLegs`)
 
 use super::*;
 use crate::cards::Card;
@@ -4085,4 +4087,198 @@ fn a_destroyed_bone_vizier_cannot_defend_again() {
     assert!(!in_zone(&gs, PlayerIndex::P2, Card::BoneVizier, Zone::Equipment));
     // Nothing anywhere offers it again: it is only in the graveyard.
     assert_eq!(count_in(&gs, PlayerIndex::P2, Card::BoneVizier, Zone::Graveyard), 1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ironhide Gauntlet (Card::IronhideGauntlet) and Ironhide Legs
+// (Card::IronhideLegs)
+//
+// Generic 0-defense arms and legs: "When you defend with this, you may pay
+// {r}. If you do, it gains +2 block and 'When the combat chain closes, destroy
+// this.'"
+//
+// Defending puts the trigger on the stack (the `DefendTriggers` window). As it
+// resolves the defender chooses in `Phase::DefendPayment`: `Activate` the card
+// on the chain to pay, or `Pass` to decline. Paying beyond the banked
+// resources goes through `DefendPitch`. A defender who cannot pay is not asked.
+//
+// Dorinthea (p1) attacks with Flock (5 power); Rhinar (p2) defends.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Rhinar (p2) holds `hand` with `resources` banked and defends Flock with the
+/// worn `blocks`. Blockers are declared and the top defend trigger resolves,
+/// so the game is either asking for the payment or has moved past it.
+fn ironhide_trigger_resolving(blocks: &[Card], hand: &[Card], resources: u8) -> TestGame {
+    let mut gs = rhinar_defending_flock();
+    set_hand(&mut gs, PlayerIndex::P2, hand);
+    gs.p2.resources = resources;
+    for &card in blocks {
+        step_card_from(&mut gs, ActionType::Defend, card, Zone::Equipment);
+    }
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done declaring
+    assert_eq!(gs.phase, Phase::DefendTriggers);
+    assert_eq!(stacked_defend_triggers(&gs).len(), blocks.len());
+    pass_once_each(&mut gs);
+    gs
+}
+
+fn pay_for(gs: &mut TestGame, card: Card) {
+    assert_eq!(gs.phase, Phase::DefendPayment);
+    step_card_from(gs, ActionType::Activate, card, Zone::CombatChain);
+}
+
+fn decline(gs: &mut TestGame) {
+    assert_eq!(gs.phase, Phase::DefendPayment);
+    step(gs, Action{ typ: ActionType::Pass, card: None});
+}
+
+/// Run the rest of combat out with nobody acting, back to Dorinthea's action
+/// phase.
+fn finish_combat(gs: &mut TestGame) {
+    assert_eq!(gs.phase, Phase::Reaction, "the payment is done with");
+    while gs.phase != Phase::Action {
+        step(gs, Action{ typ: ActionType::Pass, card: None});
+    }
+}
+
+#[test]
+fn ironhide_pieces_are_0_block_generic_equipment_with_a_paid_defend_trigger() {
+    use crate::cards::EquipmentSlot;
+    assert!(matches!(Card::IronhideGauntlet.data().slot, Some(EquipmentSlot::Arms)));
+    assert!(matches!(Card::IronhideLegs.data().slot, Some(EquipmentSlot::Legs)));
+    for card in [Card::IronhideGauntlet, Card::IronhideLegs] {
+        let data = card.data();
+        assert_eq!(data.typ, CardType::Equipment);
+        assert_eq!(data.card_class, CardClass::Generic);
+        assert_eq!(data.defense, 0);
+        assert!(data.keyword.is_empty(), "{:?} has no Blade Break of its own", card);
+        let effect = data.defend_effect.as_ref().expect("a defend trigger");
+        assert!(matches!(effect, DefendEffect::PayForPlus2BlockThenDestroy));
+        assert_eq!(effect.resource_cost(), 1);
+    }
+}
+
+#[test]
+fn defending_with_ironhide_asks_the_defender_whether_to_pay() {
+    let gs = ironhide_trigger_resolving(&[Card::IronhideGauntlet], &[Card::ClearingBellowB], 0);
+    assert_eq!(gs.phase, Phase::DefendPayment);
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    let actions = legal_actions(&gs);
+    assert_eq!(actions.len(), 2);
+    assert!(actions.iter().any(|a| a.typ == ActionType::Pass));
+    assert!(actions.iter().any(|a| a.typ == ActionType::Activate
+        && a.card_ref().zone == Zone::CombatChain
+        && card_of(&gs, a) == Card::IronhideGauntlet));
+}
+
+#[test]
+fn paying_from_banked_resources_gives_plus_2_block_and_destroys_it_at_chain_close() {
+    let mut gs = ironhide_trigger_resolving(&[Card::IronhideGauntlet], &[], 1);
+    pay_for(&mut gs, Card::IronhideGauntlet);
+    assert_eq!(gs.p2.resources, 0);
+    assert_eq!(gs.p2.chain_defense_bonus[0], 2);
+    assert!(gs.pending_card.is_none());
+
+    finish_combat(&mut gs);
+    assert_eq!(gs.p2.life, 20 - (5 - 2));
+    // Still defending until the chain closes, then destroyed.
+    assert!(link_cards(&gs, PlayerIndex::P2, 0).contains(&Card::IronhideGauntlet));
+    close_chain_by_passing(&mut gs);
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::IronhideGauntlet, Zone::Graveyard));
+    assert!(!in_zone(&gs, PlayerIndex::P2, Card::IronhideGauntlet, Zone::Equipment));
+}
+
+#[test]
+fn paying_with_nothing_banked_pitches_for_it() {
+    let mut gs = ironhide_trigger_resolving(&[Card::IronhideLegs], &[Card::ClearingBellowB], 0);
+    pay_for(&mut gs, Card::IronhideLegs);
+    assert_eq!(gs.phase, Phase::DefendPitch);
+    let pitches: Vec<Card> = legal_actions(&gs).iter()
+        .filter(|a| a.typ == ActionType::Pitch)
+        .map(|a| card_of(&gs, a))
+        .collect();
+    assert_eq!(pitches, vec![Card::ClearingBellowB]);
+
+    step_card(&mut gs, ActionType::Pitch, Card::ClearingBellowB);
+    // Pitch 3 less the cost of 1 leaves 2 floating.
+    assert_eq!(gs.p2.resources, 2);
+    assert_eq!(gs.p2.chain_defense_bonus[0], 2);
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::ClearingBellowB, Zone::Pitch));
+    finish_combat(&mut gs);
+    assert_eq!(gs.p2.life, 17);
+}
+
+#[test]
+fn declining_leaves_it_a_0_block_piece_that_returns_to_its_slot() {
+    let mut gs = ironhide_trigger_resolving(&[Card::IronhideGauntlet], &[Card::ClearingBellowB], 1);
+    decline(&mut gs);
+    assert_eq!(gs.p2.resources, 1);
+    assert_eq!(gs.p2.chain_defense_bonus[0], 0);
+    assert!(gs.pending_card.is_none());
+    finish_combat(&mut gs);
+    assert_eq!(gs.p2.life, 15);
+    close_chain_by_passing(&mut gs);
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::IronhideGauntlet, Zone::Equipment));
+}
+
+#[test]
+fn a_defender_who_cannot_pay_is_not_asked() {
+    let mut gs = ironhide_trigger_resolving(&[Card::IronhideGauntlet], &[], 0);
+    assert_eq!(gs.phase, Phase::Reaction, "straight past the payment");
+    assert_eq!(gs.p2.chain_defense_bonus[0], 0);
+    finish_combat(&mut gs);
+    close_chain_by_passing(&mut gs);
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::IronhideGauntlet, Zone::Equipment));
+}
+
+#[test]
+fn both_pieces_can_be_paid_for_and_both_are_destroyed() {
+    let mut gs = ironhide_trigger_resolving(
+        &[Card::IronhideGauntlet, Card::IronhideLegs], &[Card::ClearingBellowB], 0);
+    // The first trigger to resolve: pitch for it, leaving 2 floating.
+    let first = gs.pending_card.map(|p| gs.p2.card(p.card)).unwrap();
+    pay_for(&mut gs, first);
+    step_card(&mut gs, ActionType::Pitch, Card::ClearingBellowB);
+    // Back in the trigger window with the second trigger still to resolve.
+    assert_eq!(gs.phase, Phase::DefendTriggers);
+    assert_eq!(stacked_defend_triggers(&gs).len(), 1);
+    pass_once_each(&mut gs);
+    let second = if first == Card::IronhideGauntlet { Card::IronhideLegs } else { Card::IronhideGauntlet };
+    pay_for(&mut gs, second);
+    assert_eq!(gs.p2.resources, 1, "the second paid from what the pitch left over");
+    assert_eq!(gs.p2.chain_defense_bonus[0], 4);
+
+    finish_combat(&mut gs);
+    assert_eq!(gs.p2.life, 20 - (5 - 4));
+    close_chain_by_passing(&mut gs);
+    for card in [Card::IronhideGauntlet, Card::IronhideLegs] {
+        assert!(in_zone(&gs, PlayerIndex::P2, card, Zone::Graveyard), "{:?} destroyed", card);
+    }
+}
+
+#[test]
+fn only_the_piece_paid_for_is_destroyed() {
+    let mut gs = ironhide_trigger_resolving(
+        &[Card::IronhideGauntlet, Card::IronhideLegs], &[], 1);
+    let first = gs.pending_card.map(|p| gs.p2.card(p.card)).unwrap();
+    pay_for(&mut gs, first);
+    pass_once_each(&mut gs);
+    // Nothing left to pay with, so the second is not even offered.
+    assert_eq!(gs.phase, Phase::Reaction);
+    finish_combat(&mut gs);
+    close_chain_by_passing(&mut gs);
+    let other = if first == Card::IronhideGauntlet { Card::IronhideLegs } else { Card::IronhideGauntlet };
+    assert!(in_zone(&gs, PlayerIndex::P2, first, Zone::Graveyard));
+    assert!(in_zone(&gs, PlayerIndex::P2, other, Zone::Equipment));
+}
+
+#[test]
+fn the_destroy_mark_does_not_outlive_the_chain() {
+    let mut gs = ironhide_trigger_resolving(&[Card::IronhideGauntlet], &[], 1);
+    pay_for(&mut gs, Card::IronhideGauntlet);
+    finish_combat(&mut gs);
+    use crate::cards::EquipmentSlot;
+    assert!(gs.p2.destroy_on_chain_close(&EquipmentSlot::Arms));
+    close_chain_by_passing(&mut gs);
+    assert!(!gs.p2.destroy_on_chain_close(&EquipmentSlot::Arms));
 }
