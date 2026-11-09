@@ -37,6 +37,8 @@
 //!   - Ironhide Gauntlet   (`Card::IronhideGauntlet`)
 //!   - Ironhide Legs       (`Card::IronhideLegs`)
 //!   - En Garde            (`Card::EnGardeR`)
+//!   - Flock of the Feather Walkers (`Card::FlockOfTheFeatherWalkersR`) and
+//!     the Quicken token (`Card::QuickenToken`)
 
 use super::*;
 use crate::cards::Card;
@@ -4412,4 +4414,257 @@ fn an_unused_en_garde_bonus_is_gone_next_turn() {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     }
     assert_eq!(gs.p1.next_weapon_attack_bonus, 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Flock of the Feather Walkers (Card::FlockOfTheFeatherWalkersR) and Quicken
+// (Card::QuickenToken)
+//
+// Generic attack, cost 1, 5 power: "As an additional cost to play Flock of the
+// Feather Walkers, reveal a card in your hand with cost 1 or less. When you
+// attack with Flock of the Feather Walkers, create a Quicken token."
+//
+// Quicken: "When you play an attack action card or attack with a weapon,
+// destroy Quicken and the attack gains go again." Tokens live in the owner's
+// `Zone::Tokens`, capped at `MAX_QUICKENS`.
+//
+// The reveal is gated like Alpha Rampage's discard: a card costing 1 or less
+// must still be in hand once the pitching is done. In Dorinthea's deck only
+// Driving Blade and Toughen Up (cost 2) cannot be revealed.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn flock_offered(gs: &Gamestate) -> bool {
+    legal_actions(gs).iter().any(|a| {
+        a.typ == ActionType::PlayCard && card_of(gs, a) == Card::FlockOfTheFeatherWalkersR
+    })
+}
+
+fn quickens(gs: &Gamestate, pid: PlayerIndex) -> u8 {
+    count_in(gs, pid, Card::QuickenToken, Zone::Tokens)
+}
+
+fn give_quicken(gs: &mut Gamestate, pid: PlayerIndex) {
+    let player = gs.player_mut(pid);
+    let id = player.deck_id(Card::QuickenToken);
+    player.add_to(Zone::Tokens, id);
+}
+
+/// Dorinthea (p1) holding `hand`, with `resources` floating, in her action phase.
+fn dorinthea_holding(hand: &[Card], resources: u8) -> TestGame {
+    let mut gs = setup_dorinthea_action_phase();
+    set_hand(&mut gs, PlayerIndex::P1, hand);
+    gs.p1.resources = resources;
+    gs
+}
+
+/// Play Flock, pitching `pitch` if given, and let it resolve onto the chain:
+/// the game is in Rhinar's Defend phase.
+fn attack_with_flock(gs: &mut TestGame, pitch: Option<Card>) {
+    step_card(gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    if let Some(card) = pitch {
+        assert_eq!(gs.phase, Phase::ActionPitch);
+        step_card(gs, ActionType::Pitch, card);
+    }
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    pass_once_each(gs);
+    assert_eq!(gs.phase, Phase::Defend);
+}
+
+/// Rhinar declares no blockers and everyone passes until Dorinthea is back in
+/// her action phase, or her turn has moved on.
+fn no_blocks_back_to_action(gs: &mut TestGame) {
+    while gs.phase != Phase::Action {
+        step(gs, Action{ typ: ActionType::Pass, card: None});
+    }
+}
+
+#[test]
+fn flock_is_a_5_power_attack_with_a_reveal_cost_that_creates_quicken() {
+    use crate::card_effects::{OnPlayConditionType, OnPlayEffectType};
+    let data = Card::FlockOfTheFeatherWalkersR.data();
+    assert_eq!(data.typ, CardType::AttackAction);
+    assert_eq!(data.card_class, CardClass::Generic);
+    assert_eq!((data.cost, data.pitch, data.power, data.defense), (1, 1, 5, 2));
+    assert!(data.keyword.is_empty(), "Flock has no go again of its own");
+    assert!(matches!(data.additional_cost, Some(AdditionalCostType::RevealCost1OrLess)));
+    let effect = data.play_effect.as_ref().expect("Flock creates a Quicken");
+    assert!(matches!(effect.condition, OnPlayConditionType::Always));
+    assert!(matches!(effect.effectType, OnPlayEffectType::CreateQuicken));
+}
+
+#[test]
+fn quicken_is_a_token_that_trades_itself_for_go_again() {
+    let data = Card::QuickenToken.data();
+    assert_eq!(data.typ, CardType::Token);
+    assert!(matches!(data.constant_effect, Some(ConstantEffect::OnAttackDestroyForGoAgain)));
+    // Both decks can hold one, past their real cards.
+    use crate::deck_cards::{DorintheaCard, RhinarCard};
+    assert!(RhinarCard::from_card(Card::QuickenToken).is_some());
+    assert!(DorintheaCard::from_card(Card::QuickenToken).is_some());
+}
+
+#[test]
+fn flock_needs_a_card_costing_1_or_less_to_reveal() {
+    // Toughen Up and Driving Blade cost 2: they can pay but not be revealed.
+    let gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::ToughenUpB, Card::DrivingBladeY], 0);
+    assert!(!flock_offered(&gs));
+    // Add a cost-0 card and it can be.
+    let gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::ToughenUpB, Card::SharpenSteelR], 0);
+    assert!(flock_offered(&gs));
+}
+
+#[test]
+fn the_revealed_card_cannot_also_be_the_one_pitched() {
+    // Visit the Blacksmith is the only other card: it would have to pay and be
+    // revealed.
+    let gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::VisitTheBlacksmithB], 0);
+    assert!(!flock_offered(&gs));
+    // Floating resources pay instead, leaving it free to reveal.
+    let gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::VisitTheBlacksmithB], 1);
+    assert!(flock_offered(&gs));
+    // With nothing else in hand there is nothing to reveal at all.
+    let gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR], 1);
+    assert!(!flock_offered(&gs));
+}
+
+#[test]
+fn a_second_flock_can_be_the_revealed_card() {
+    let gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::FlockOfTheFeatherWalkersR], 1);
+    assert!(flock_offered(&gs));
+}
+
+#[test]
+fn flock_from_the_arsenal_can_reveal_from_the_whole_hand() {
+    let mut gs = dorinthea_holding(&[Card::SharpenSteelR, Card::FlockOfTheFeatherWalkersR], 1);
+    put_in_arsenal(&mut gs, PlayerIndex::P1, Card::FlockOfTheFeatherWalkersR);
+    assert_eq!(hand_cards(&gs, PlayerIndex::P1), vec![Card::SharpenSteelR]);
+    assert!(legal_actions(&gs).iter().any(|a| a.typ == ActionType::PlayCard
+        && a.card_ref().zone == Zone::Arsenal));
+}
+
+#[test]
+fn pitching_keeps_the_only_revealable_card_back() {
+    // Sharpen Steel (pitch 1) would cover the cost, but then only Toughen Up
+    // is left, which cannot be revealed. Toughen Up must pay instead.
+    let mut gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::ToughenUpB, Card::SharpenSteelR], 0);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    assert_eq!(gs.phase, Phase::ActionPitch);
+    let pitches: Vec<Card> = legal_actions(&gs).iter()
+        .filter(|a| a.typ == ActionType::Pitch)
+        .map(|a| card_of(&gs, a))
+        .collect();
+    assert_eq!(pitches, vec![Card::ToughenUpB]);
+}
+
+#[test]
+fn revealing_leaves_the_card_in_hand() {
+    let mut gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::ToughenUpB, Card::SharpenSteelR], 0);
+    attack_with_flock(&mut gs, Some(Card::ToughenUpB));
+    assert_eq!(hand_cards(&gs, PlayerIndex::P1), vec![Card::SharpenSteelR]);
+    assert!(!in_zone(&gs, PlayerIndex::P1, Card::SharpenSteelR, Zone::Graveyard));
+}
+
+#[test]
+fn flock_creates_a_quicken_when_it_attacks() {
+    let mut gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::ToughenUpB, Card::SharpenSteelR], 0);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    step_card(&mut gs, ActionType::Pitch, Card::ToughenUpB);
+    assert_eq!(quickens(&gs, PlayerIndex::P1), 0, "not yet: Flock is only on the stack");
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    assert_eq!(quickens(&gs, PlayerIndex::P1), 1);
+    assert_eq!(quickens(&gs, PlayerIndex::P2), 0);
+    assert_eq!(gs.p1.visibility(Zone::Tokens), crate::game_state::CardVisibleState::BothKnow);
+}
+
+#[test]
+fn flock_without_quicken_has_no_go_again_and_its_quicken_waits_for_next_turn() {
+    let mut gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::ToughenUpB, Card::SharpenSteelR], 0);
+    attack_with_flock(&mut gs, Some(Card::ToughenUpB));
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 15);
+    assert_eq!(gs.p1.action_points, 0);
+    // The token outlives the turn.
+    while gs.turn_player == PlayerIndex::P1 {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    while !(gs.turn_player == PlayerIndex::P1 && gs.phase == Phase::Action) {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(quickens(&gs, PlayerIndex::P1), 1);
+}
+
+#[test]
+fn a_quicken_gives_flock_go_again_and_flock_makes_a_fresh_one() {
+    let mut gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::ToughenUpB, Card::SharpenSteelR], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    step_card(&mut gs, ActionType::Pitch, Card::ToughenUpB);
+    // Playing the attack spent the Quicken already.
+    assert_eq!(quickens(&gs, PlayerIndex::P1), 0);
+    assert!(gs.p1.attack_go_again_bonus());
+    pass_once_each(&mut gs);
+    // Attacking made a new one.
+    assert_eq!(quickens(&gs, PlayerIndex::P1), 1);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 15);
+    assert_eq!(gs.p1.action_points, 1, "go again from the Quicken");
+}
+
+#[test]
+fn a_quicken_gives_a_weapon_attack_go_again() {
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    step_card(&mut gs, ActionType::Activate, Card::Dawnblade);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    assert_eq!(quickens(&gs, PlayerIndex::P1), 0);
+    pass_once_each(&mut gs);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 18);
+    assert_eq!(gs.p1.action_points, 1);
+}
+
+#[test]
+fn a_non_attack_action_leaves_the_quicken_alone() {
+    let mut gs = dorinthea_holding(&[Card::SharpenSteelR], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    step_card(&mut gs, ActionType::PlayCard, Card::SharpenSteelR);
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(quickens(&gs, PlayerIndex::P1), 1);
+    assert!(!gs.p1.attack_go_again_bonus());
+}
+
+#[test]
+fn the_opponents_attack_leaves_your_quicken_alone() {
+    let mut gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::ToughenUpB, Card::SharpenSteelR], 0);
+    give_quicken(&mut gs, PlayerIndex::P2);
+    attack_with_flock(&mut gs, Some(Card::ToughenUpB));
+    assert_eq!(quickens(&gs, PlayerIndex::P2), 1);
+    assert!(!gs.p2.attack_go_again_bonus());
+}
+
+#[test]
+fn quickens_are_capped_at_two_and_all_go_at_once() {
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB], 0);
+    for _ in 0..3 {
+        create_quicken(&mut gs, PlayerIndex::P1);
+    }
+    assert_eq!(quickens(&gs, PlayerIndex::P1), crate::game_state::MAX_QUICKENS);
+    assert_eq!(quickens(&gs, PlayerIndex::P1), 2);
+    // A single attack sets both off.
+    step_card(&mut gs, ActionType::Activate, Card::Dawnblade);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    assert_eq!(quickens(&gs, PlayerIndex::P1), 0);
+    assert!(gs.p1.attack_go_again_bonus());
+}
+
+#[test]
+fn tokens_are_not_counted_among_the_players_cards() {
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB], 0);
+    let before = gs.p1.cards_in_zones();
+    give_quicken(&mut gs, PlayerIndex::P1);
+    assert_eq!(gs.p1.cards_in_zones(), before);
+    // The debug card-total check still passes with a token in play.
+    gs.debug_check_card_totals();
 }

@@ -144,5 +144,8 @@ pub enum Card {
     GallantryGold,
     IronrotHelm,
     IronrotLegs,
+    /// The Quicken token Flock of the Feather Walkers creates. Not part of any
+    /// decklist: it only ever exists in a player's token zone.
+    QuickenToken,
 }
 

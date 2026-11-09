@@ -3,7 +3,7 @@ use crate::action::{Action, ActionType, CardRef, LegalActions};
 use crate::card_counts::{CardCounts, DeckCardId};
 use crate::cards::{CardData, CardType};
 use crate::card_effects::AdditionalCostType;
-use crate::fab_step::{current_chain_link, face_down_mentor_in_arsenal, uses_action_point};
+use crate::fab_step::{can_reveal_for_cost, current_chain_link, face_down_mentor_in_arsenal, uses_action_point};
 
 
 pub fn legal_actions(gs: &Gamestate) -> LegalActions {
@@ -149,9 +149,14 @@ fn legal_pitch_phase(gs: &Gamestate) -> LegalActions {
     // card is only legal if the rest of the hand can still both finish covering
     // the cost and keep a spare card to discard — so pitching the card that
     // ought to be discarded (e.g. the lone low-pitch card) is disallowed.
-    let discard_cost_cost: Option<u8> = pending.and_then(|p| {
+    // The same holds for a "reveal a card with cost 1 or less" cost, where the
+    // card kept back must be one costing 1 or less.
+    let held_back_cost: Option<(u8, fn(&CardData) -> bool)> = pending.and_then(|p| {
         let data = player.card(p.card).data();
-        matches!(data.additional_cost, Some(AdditionalCostType::DiscardCard)).then_some(data.cost)
+        if p.typ != ActionType::PlayCard {
+            return None;
+        }
+        data.additional_cost.as_ref().map(|c| (data.cost, cost_card_filter(c)))
     });
 
     // Every other card in hand is a pitch option, as long as it actually pitches
@@ -159,26 +164,28 @@ fn legal_pitch_phase(gs: &Gamestate) -> LegalActions {
     // pitched.
     available.iter()
         .filter(|&(id, _)| player.card(id).data().pitch > 0)
-        .filter(|&(id, _)| match discard_cost_cost {
-            Some(cost) => pitch_leaves_card_to_discard(player, available, cost, player.resources, id),
+        .filter(|&(id, _)| match held_back_cost {
+            Some((cost, eligible)) => pitch_leaves_card_for_cost(player, available, cost, player.resources, id, eligible),
             None => true,
         })
         .map(|(id, _)| Action::new(ActionType::Pitch, CardRef::new(id, Zone::Hand)))
         .collect()
 }
 
-/// While paying for a card that carries a "discard a card" additional cost,
-/// decide whether pitching a copy of `cand` can still leave a card in hand to
-/// discard once the cost is covered. `available` is the hand without the
-/// pending card. Pitching the candidate banks its pitch; the rest of the hand
-/// must then be able to cover whatever cost remains while keeping its
-/// lowest-pitch card back to discard.
-fn pitch_leaves_card_to_discard(
+/// While paying for a card that carries an additional cost which holds a hand
+/// card back — "discard a card", or "reveal a card with cost 1 or less" —
+/// decide whether pitching a copy of `cand` can still leave such a card in hand
+/// once the cost is covered. `eligible` says which cards can pay that cost.
+/// `available` is the hand without the pending card. Pitching the candidate
+/// banks its pitch; the rest of the hand must then be able to cover whatever
+/// cost remains while keeping its lowest-pitch eligible card back.
+fn pitch_leaves_card_for_cost(
     player: &Player,
     available: CardCounts,
     cost: u8,
     resources: u8,
     cand: DeckCardId,
+    eligible: fn(&CardData) -> bool,
 ) -> bool {
     // Cost still owed after banking what this candidate pitches.
     let cand_pitch = player.card(cand).data().pitch;
@@ -187,17 +194,17 @@ fn pitch_leaves_card_to_discard(
     // The rest of the hand left after pitching the candidate.
     let rest = available.without(cand);
 
-    // No card left means nothing to discard, so this pitch is a dead end.
-    if rest.is_empty() {
+    // No eligible card left means the additional cost can't be paid, so this
+    // pitch is a dead end.
+    let Some(reserved) = min_pitch_where(player, rest, eligible) else {
         return false;
-    }
-    // Cost already fully covered: the remaining cards include the discard.
+    };
+    // Cost already fully covered: the remaining cards include the one held back.
     if remaining_cost == 0 {
         return true;
     }
-    // Reserve the lowest-pitch remaining card for the discard; the rest must
-    // still cover what's owed.
-    let reserved = min_pitch(player, rest).unwrap_or(0);
+    // Reserve the lowest-pitch eligible card; the rest must still cover what's
+    // owed.
     player.pitch_total(rest).saturating_sub(reserved) >= remaining_cost
 }
 
@@ -501,12 +508,17 @@ fn can_pay_for_card(
     // cost can't be paid and the card isn't playable. For an arsenal card every
     // hand card is available to discard, since none of them is the card being
     // played.
-    if matches!(data.additional_cost, Some(AdditionalCostType::DiscardCard)) {
+    //
+    // A "reveal a card with cost 1 or less" cost (Flock of the Feather Walkers)
+    // works the same way, except only a card costing 1 or less can be set
+    // aside. The revealed card stays in hand, but it must still be there once
+    // the pitching is done, so it cannot be pitched either.
+    if let Some(eligible) = data.additional_cost.as_ref().map(cost_card_filter) {
         let others = match played_from {
             PlayedFrom::Hand => player.hand.without(id),
             PlayedFrom::Arsenal => player.hand,
         };
-        match min_pitch(player, others) {
+        match min_pitch_where(player, others, eligible) {
             Some(reserved) => pitch_pool = pitch_pool.saturating_sub(reserved),
             None => return false,
         }
@@ -522,7 +534,25 @@ fn can_pay_for_card(
 /// removing it from the pitch pool is equivalent to sorting the hand by pitch
 /// and dropping the lowest card. `None` when there is no other card to discard.
 fn min_pitch(player: &Player, counts: CardCounts) -> Option<u8> {
-    counts.iter().map(|(id, _)| player.card(id).data().pitch).min()
+    min_pitch_where(player, counts, |_| true)
+}
+
+/// `min_pitch` over only the cards in `counts` that pass `eligible`.
+fn min_pitch_where(player: &Player, counts: CardCounts, eligible: fn(&CardData) -> bool) -> Option<u8> {
+    counts.iter()
+        .map(|(id, _)| player.card(id).data())
+        .filter(|data| eligible(data))
+        .map(|data| data.pitch)
+        .min()
+}
+
+/// Which hand cards can pay an additional cost that holds a card back: any
+/// card for a discard, a card costing 1 or less for a reveal.
+fn cost_card_filter(cost: &AdditionalCostType) -> fn(&CardData) -> bool {
+    match cost {
+        AdditionalCostType::DiscardCard => |_| true,
+        AdditionalCostType::RevealCost1OrLess => can_reveal_for_cost,
+    }
 }
 
 /// Whether a card in the defender's hand may be committed as a blocker in the

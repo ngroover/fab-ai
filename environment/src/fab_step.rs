@@ -1,6 +1,6 @@
 use crate::action::{Action,ActionType};
 use crate::card_counts::{CardCounts, DeckCardId};
-use crate::game_state::{CHAIN_LINKS,DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
+use crate::game_state::{CHAIN_LINKS,MAX_QUICKENS,DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
 use crate::cards::{Card,CardClass,CardData,CardType,Keyword};
 use crate::card_effects::{Ability,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,MentorEffect};
 use crate::fab_game::{shuffle_deck_for, GameRng};
@@ -1055,6 +1055,71 @@ fn apply_discard_cost(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex)
     maybe_discard6_intimidate(gs, rng, owner, discarded_power);
 }
 
+/// Whether `data` can be revealed for a "reveal a card in your hand with cost
+/// 1 or less" additional cost (Flock of the Feather Walkers).
+pub(crate) fn can_reveal_for_cost(data: &CardData) -> bool {
+    data.cost <= 1
+}
+
+/// Pay a "reveal a card with cost 1 or less" additional cost from `owner`'s
+/// hand. The card stays in hand; revealing it only shows it to the opponent,
+/// which the engine records in the public log (hand cards carry no per-card
+/// visibility). Which eligible card is shown makes no difference to the game,
+/// so the lowest id is used. The legal-action gates guarantee one is there.
+fn apply_reveal_cost(gs: &mut Gamestate, owner: PlayerIndex) {
+    let player = gs.player(owner);
+    let pick = player.hand.iter()
+        .map(|(id, _)| id)
+        .find(|&id| can_reveal_for_cost(player.card(id).data()));
+    debug_assert!(pick.is_some(), "no card with cost 1 or less left to reveal");
+    if let Some(id) = pick {
+        if gs.logging_enabled() {
+            gs.log_public(format!("{} reveals {:?}", player_name(owner), gs.player(owner).card(id)));
+        }
+    }
+}
+
+/// Create a Quicken token for `owner`, unless they already hold
+/// `MAX_QUICKENS`.
+fn create_quicken(gs: &mut Gamestate, owner: PlayerIndex) {
+    let player = gs.player_mut(owner);
+    let Some(id) = player.deck_kind.id_of(Card::QuickenToken) else {
+        return;
+    };
+    if player.tokens.count(id) >= MAX_QUICKENS {
+        return;
+    }
+    player.add_to(Zone::Tokens, id);
+    if gs.logging_enabled() {
+        gs.log_public(format!("{} creates a Quicken token", player_name(owner)));
+    }
+}
+
+/// `owner` has just played an attack action card or attacked with a weapon:
+/// each Quicken they hold triggers, is destroyed, and gives the attack go
+/// again. Every Quicken triggers on the same attack, so all are spent at once.
+/// The go again is banked like Wild Ride's (`attack_go_again_bonus`) and read
+/// when combat damage resolves.
+fn trigger_quickens(gs: &mut Gamestate, owner: PlayerIndex) {
+    let player = gs.player_mut(owner);
+    let mut triggered = false;
+    for (id, _) in player.tokens.iter() {
+        let data = player.card(id).data();
+        if matches!(data.constant_effect, Some(ConstantEffect::OnAttackDestroyForGoAgain)) {
+            while player.tokens.contains(id) {
+                player.remove_from(Zone::Tokens, id);
+            }
+            triggered = true;
+        }
+    }
+    if triggered {
+        player.set_attack_go_again_bonus(true);
+        if gs.logging_enabled() {
+            gs.log_public(format!("{}'s Quicken is destroyed and the attack gains go again", player_name(owner)));
+        }
+    }
+}
+
 /// Apply Rhinar's `OnDiscard6Intimidate` constant hero ability after a card has
 /// just been discarded from `owner`'s hand: when the discarded card had 6 or more
 /// power and the owner's hero carries the constant effect, trigger an Intimidate
@@ -1291,11 +1356,11 @@ fn apply_on_play_effect(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerInde
                 ));
             }
         }
-        // Quicken tokens (Flock of the Feather Walkers) need a token zone the
-        // engine does not have yet, so this is still a no-op. Listed explicitly
-        // rather than caught by a wildcard so a new effect type fails to compile
-        // here until it is handled.
-        OnPlayEffectType::CreateQuicken => {}
+        // "When you attack with this, create a Quicken token" (Flock of the
+        // Feather Walkers). On-play effects fire as the card resolves onto the
+        // chain, which is when it attacks — after any Quicken already held was
+        // spent on playing it (see `trigger_quickens`).
+        OnPlayEffectType::CreateQuicken => create_quicken(gs, owner),
     }
 }
 
@@ -1505,6 +1570,18 @@ fn commit_pending_to_stack(gs: &mut Gamestate, rng: &mut GameRng) {
     // it. Only played cards carry this cost; activations have no additional cost.
     if matches!(data.additional_cost, Some(AdditionalCostType::DiscardCard)) {
         apply_discard_cost(gs, rng, owner);
+    }
+    // A "reveal a card with cost 1 or less" cost (Flock of the Feather
+    // Walkers) is paid the same way, out of what is left in hand after
+    // pitching; the legal-action gates kept such a card back.
+    if matches!(data.additional_cost, Some(AdditionalCostType::RevealCost1OrLess)) {
+        apply_reveal_cost(gs, owner);
+    }
+
+    // Playing an attack action card or attacking with a weapon sets off every
+    // Quicken its owner holds.
+    if commits_as_attack(pending.typ, data) {
+        trigger_quickens(gs, owner);
     }
 
     // "Whenever you play a card" triggers fire once the card has been played —

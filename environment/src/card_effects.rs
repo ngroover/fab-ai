@@ -18,6 +18,10 @@ pub enum ConstantEffect {
     /// bottom." Carried by Bone Vizier; fired by `fab_step::destroy_equipment`.
     /// The reveal is the same one Pack Call's defend trigger makes.
     OnDestroyedReveal6BottomOtherwise,
+    /// Quicken: "When you play an attack action card or attack with a weapon,
+    /// destroy Quicken and the attack gains go again." Fired by
+    /// `fab_step::trigger_quickens` from the owner's token zone.
+    OnAttackDestroyForGoAgain,
 }
 
 /// What a mentor does with its lessons, on top of its constant effect. A

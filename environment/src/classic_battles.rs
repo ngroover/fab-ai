@@ -11,7 +11,7 @@ use crate::card_effects::{AdditionalCostType, Ability, ConstantEffect, DefendEff
 /// the compiler can fold lookups of a known card away entirely. Keeping it
 /// const-evaluable means keyword sets are combined with `Keyword::union`, since
 /// the `|` operator isn't usable in a `static` initializer.
-static CARD_CATALOG: [CardData; 52] = [
+static CARD_CATALOG: [CardData; 53] = [
         // ── HEROES ──────────────────────────────────────────────────────
         // Rhinar
         CardData {
@@ -842,10 +842,14 @@ static CARD_CATALOG: [CardData; 52] = [
             ability: None,
             defend_effect: None,
             next_attack_effect: None,
-            additional_cost: None,
+            additional_cost: Some(AdditionalCostType::RevealCost1OrLess),
             target_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::Always,
+                effectType: OnPlayEffectType::CreateQuicken,
+                magnitude: 1,
+            }),
             mentor_effect: None,
         },
         // In the Swing
@@ -1408,10 +1412,35 @@ static CARD_CATALOG: [CardData; 52] = [
             play_effect: None,
             mentor_effect: None,
         },
+        // Quicken (token)
+        CardData {
+            typ: CardType::Token,
+            weapon_type: None,
+            cost: 0,
+            pitch: 0,
+            power: 0,
+            defense: 0,
+            color: None,
+            no_block: true,
+            slot: None,
+            card_class: CardClass::Generic,
+            keyword: Keyword::empty(),
+            hero_life: 0,
+            hero_intellect: 0,
+            constant_effect: Some(ConstantEffect::OnAttackDestroyForGoAgain),
+            ability: None,
+            defend_effect: None,
+            next_attack_effect: None,
+            additional_cost: None,
+            target_effect: None,
+            play_condition: None,
+            play_effect: None,
+            mentor_effect: None,
+        },
 ];
 
 /// Returns a reference to the shared card catalog.
-pub fn get_card_catalog() -> &'static [CardData; 52] {
+pub fn get_card_catalog() -> &'static [CardData; 53] {
     &CARD_CATALOG
 }
 

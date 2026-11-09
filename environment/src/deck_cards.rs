@@ -1,6 +1,7 @@
 //! Per-deck card enums: for each decklist, a compile-time enum holding every
 //! card that player owns apart from the hero — the playable deck first, then
-//! the weapon and equipment. The weapon and equipment never reach the hand,
+//! the weapon and equipment, then any tokens the deck can create (Quicken).
+//! The weapon and equipment never reach the hand,
 //! but worn equipment sits in an equipment zone and can be destroyed into the
 //! graveyard, so the unordered zones that hold them need ids for them too.
 //!
@@ -149,6 +150,7 @@ deck_cards! {
         BoneVizier,
         IronhideGauntlet,
         IronhideLegs,
+        QuickenToken,
     }
 }
 
@@ -184,6 +186,7 @@ deck_cards! {
         BlossomOfSpring,
         IronrotHelm,
         IronrotLegs,
+        QuickenToken,
     }
 }
 
@@ -257,8 +260,13 @@ mod tests {
             .collect()
     }
 
+    /// The enum's cards, less the tokens: those are created during play, so no
+    /// decklist holds them.
     fn enum_cards<D: DeckCard>() -> BTreeSet<u8> {
-        D::ALL.iter().map(|c| c.card() as u8).collect()
+        D::ALL.iter()
+            .filter(|c| c.card().data().typ != CardType::Token)
+            .map(|c| c.card() as u8)
+            .collect()
     }
 
     #[test]
@@ -309,8 +317,9 @@ mod tests {
         // only ever add fields past them.
         fn check<D: DeckCard>() {
             for &c in D::ALL {
-                let is_gear = matches!(c.card().data().typ, CardType::Weapon | CardType::Equipment);
-                assert_eq!(is_gear, c.id().get() >= 21, "{:?}", c);
+                let not_deck = matches!(c.card().data().typ,
+                    CardType::Weapon | CardType::Equipment | CardType::Token);
+                assert_eq!(not_deck, c.id().get() >= 21, "{:?}", c);
             }
         }
         check::<RhinarCard>();

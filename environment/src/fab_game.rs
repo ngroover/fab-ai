@@ -189,6 +189,7 @@ fn place_cards_for(player: &mut Player, start: &StartingCards) {
         player.deck.push_back(DeckSlot::hidden(id));
     }
     player.equipment = start.equipment;
+    player.tokens = CardCounts::EMPTY;
     player.weapon = start.weapon;
     player.hand = CardCounts::EMPTY;
     player.pitch = CardCounts::EMPTY;

@@ -675,6 +675,56 @@ on-play-effect helpers).
                two_en_gardes_stack,
                an_unused_en_garde_bonus_is_gone_next_turn
 
+  [x] Flock of the Feather Walkers (Card::FlockOfTheFeatherWalkersR)
+  [x] Quicken token                (Card::QuickenToken)
+        Flock: generic attack, cost 1, 5 power. "As an additional cost to play
+        Flock of the Feather Walkers, reveal a card in your hand with cost 1 or
+        less. When you attack with Flock of the Feather Walkers, create a
+        Quicken token."
+        Quicken: "When you play an attack action card or attack with a weapon,
+        destroy Quicken and the attack gains go again."
+          * Reveal cost (`AdditionalCostType::RevealCost1OrLess`): gated like
+            Alpha Rampage's discard. The discard gate was generalised —
+            `cost_card_filter` says which hand cards can pay an additional cost
+            that holds a card back (any card to discard, cost <= 1 to reveal),
+            and `can_pay_for_card` / `pitch_leaves_card_for_cost` reserve the
+            lowest-pitch eligible card so it is never pitched away. The reveal
+            itself (`apply_reveal_cost`) leaves the card in hand and is logged
+            publicly; hand cards carry no per-card visibility.
+          * Tokens: `Card::QuickenToken` (type Token) is at the end of `Card`,
+            the catalog, and both deck enums (ids 27 / 26, past the gear), so
+            it fits a `CardCounts`. Tokens live in the new `Player::tokens`
+            (`Zone::Tokens`, unordered, public), are not counted among the
+            player's 45 cards, and simply vanish when destroyed. `MAX_QUICKENS`
+            = 2: creating one past that does nothing. `Player` grew 8 bytes.
+          * Creating: `OnPlayEffectType::CreateQuicken` fires as Flock resolves
+            onto the chain, i.e. when it attacks (`create_quicken`).
+          * Triggering: `trigger_quickens` runs in `commit_pending_to_stack`
+            for anything that `commits_as_attack` (an attack action card being
+            played, or a weapon swing — the swing is treated as attacking when
+            activated). Every Quicken goes at once and the attack gains go
+            again through `attack_go_again_bonus`. Flock spends an existing
+            Quicken when played, then makes a new one when it attacks.
+          * Tokens persist across turns; only the owner's attacks set them off.
+          * Rules change moved random play: the seven-layer stack seed is now
+            14501652 (20M-game sweep, still 7 layers max, STACK_SIZE kept).
+        Tests: flock_is_a_5_power_attack_with_a_reveal_cost_that_creates_quicken,
+               quicken_is_a_token_that_trades_itself_for_go_again,
+               flock_needs_a_card_costing_1_or_less_to_reveal,
+               the_revealed_card_cannot_also_be_the_one_pitched,
+               a_second_flock_can_be_the_revealed_card,
+               flock_from_the_arsenal_can_reveal_from_the_whole_hand,
+               pitching_keeps_the_only_revealable_card_back,
+               revealing_leaves_the_card_in_hand,
+               flock_creates_a_quicken_when_it_attacks,
+               flock_without_quicken_has_no_go_again_and_its_quicken_waits_for_next_turn,
+               a_quicken_gives_flock_go_again_and_flock_makes_a_fresh_one,
+               a_quicken_gives_a_weapon_attack_go_again,
+               a_non_attack_action_leaves_the_quicken_alone,
+               the_opponents_attack_leaves_your_quicken_alone,
+               quickens_are_capped_at_two_and_all_go_at_once,
+               tokens_are_not_counted_among_the_players_cards
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -711,7 +761,7 @@ on-play-effect helpers).
  TODO — DORINTHEA (Warrior) attack/action cards
 ------------------------------------------------------------------------------
   [x] En Garde                       (Card::EnGardeR)  — see COMPLETE section above
-  [ ] Flock of the Feather Walkers   (Card::FlockOfTheFeatherWalkersR)
+  [x] Flock of the Feather Walkers   (Card::FlockOfTheFeatherWalkersR)  — see COMPLETE section above
   [ ] In the Swing                   (Card::InTheSwingR)
   [ ] Ironsong Response              (Card::IronsongResponseR)
   [ ] Second Swing                   (Card::SecondSwingR)

@@ -55,7 +55,7 @@ pub const PLAYER_CARDS: usize = 45;
 /// reaction window can legitimately stack six or more layers (e.g. four attack
 /// reactions answered by two Dodges). Sized to the deepest stack random play
 /// reaches: a sweep of 20 million random games went no deeper than 7, first in
-/// seed 448752 (see `simulator::tests::stack_depth_histogram` and
+/// seed 14501652 (see `simulator::tests::stack_depth_histogram` and
 /// `random_game_with_a_seven_layer_stack_finishes`). Deliberate play could in
 /// principle go deeper; raise this if it ever panics.
 pub const STACK_SIZE: usize = 7;
@@ -69,6 +69,12 @@ const _: () = assert!(DECK_CARDS <= DECK_CAPACITY);
 /// unlikely to grow longer than that; a turn that does produce a sixth attack
 /// panics rather than reusing a link and mis-scoring the attack.
 pub const CHAIN_LINKS: usize = 5;
+
+/// The most Quicken tokens a player can hold at once. Creating one past this
+/// does nothing. Every Quicken triggers on the same attack and all are
+/// destroyed together, so a second one adds nothing anyway; the cap just
+/// keeps the token zone small.
+pub const MAX_QUICKENS: u8 = 2;
 
 /// Who can see a card. Cards carry no visibility of their own: it follows from
 /// the zone they are in (see `Player::visibility`), except in the deck, where
@@ -124,6 +130,10 @@ pub enum Zone {
     Weapon,
     CombatChain,
     Stack,
+    /// The tokens a player controls (Quicken). Unordered and public. A token is
+    /// not one of the player's 45 cards: it is created in this zone and stops
+    /// existing when destroyed.
+    Tokens,
 }
 
 impl Zone {
@@ -134,7 +144,7 @@ impl Zone {
         matches!(
             self,
             Zone::Hand | Zone::Pitch | Zone::Graveyard | Zone::Banish
-                | Zone::IntimidateBanish | Zone::Equipment
+                | Zone::IntimidateBanish | Zone::Equipment | Zone::Tokens
         )
     }
 }
@@ -379,6 +389,10 @@ pub struct Player {
     /// piece sits in follows from the card itself, so one bitfield covers all
     /// four. The weapon zone is not an equipment zone; see `weapon`.
     pub equipment : CardCounts,
+    /// The tokens this player controls (Quicken), by deck card id. Not counted
+    /// among the player's cards (`cards_in_zones`): tokens are created here
+    /// and cease to exist when destroyed. At most `MAX_QUICKENS` Quickens.
+    pub tokens : CardCounts,
     /// The card in the arsenal, if any.
     pub arsenal : Option<DeckCardId>,
     /// The weapon in the weapon zone. Empty while the weapon is on the stack or
@@ -721,6 +735,7 @@ impl Player {
             banished: CardCounts::EMPTY,
             intimidate_banished: CardCounts::EMPTY,
             equipment: CardCounts::EMPTY,
+            tokens: CardCounts::EMPTY,
             arsenal: None,
             weapon: None,
             chain_link: [CardCounts::EMPTY; CHAIN_LINKS],
@@ -847,6 +862,7 @@ impl Player {
             Zone::Banish => Some(self.banished),
             Zone::IntimidateBanish => Some(self.intimidate_banished),
             Zone::Equipment => Some(self.equipment),
+            Zone::Tokens => Some(self.tokens),
             Zone::Deck | Zone::Arsenal | Zone::Weapon | Zone::CombatChain | Zone::Stack => None,
         }
     }
@@ -860,6 +876,7 @@ impl Player {
             Zone::Banish => Some(&mut self.banished),
             Zone::IntimidateBanish => Some(&mut self.intimidate_banished),
             Zone::Equipment => Some(&mut self.equipment),
+            Zone::Tokens => Some(&mut self.tokens),
             Zone::Deck | Zone::Arsenal | Zone::Weapon | Zone::CombatChain | Zone::Stack => None,
         }
     }
