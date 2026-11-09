@@ -448,6 +448,12 @@ pub struct Player {
     /// the blocker count let it pay out — and cleared at the start of each turn
     /// so it never leaks.
     pub next_brute_attack_conditional_bonus : u8,
+    /// Extra power banked for the *next weapon attack* this player makes this
+    /// turn (En Garde's "+3 power"). Applied only when a weapon swing resolves
+    /// combat damage — an attack action card in between neither takes nor
+    /// spends it — then consumed, and cleared at the start of each turn so it
+    /// never leaks.
+    pub next_weapon_attack_bonus : u8,
     /// Per-player yes/no state packed into one byte: see `PlayerFlags` for
     /// what each flag means, and the `Player` accessors of the same names.
     pub flags : PlayerFlags,
@@ -726,6 +732,7 @@ impl Player {
             next_brute_attack_action_bonus: 0,
             next_attack_action_bonus: 0,
             next_brute_attack_conditional_bonus: 0,
+            next_weapon_attack_bonus: 0,
             flags: PlayerFlags::empty(),
             arsenal_lesson_counters: 0,
             // Logging is opted into via `reset(gs, decks, true)`; off until then.

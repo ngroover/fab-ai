@@ -36,6 +36,7 @@
 //!     Blade Break
 //!   - Ironhide Gauntlet   (`Card::IronhideGauntlet`)
 //!   - Ironhide Legs       (`Card::IronhideLegs`)
+//!   - En Garde            (`Card::EnGardeR`)
 
 use super::*;
 use crate::cards::Card;
@@ -4281,4 +4282,134 @@ fn the_destroy_mark_does_not_outlive_the_chain() {
     assert!(gs.p2.destroy_on_chain_close(&EquipmentSlot::Arms));
     close_chain_by_passing(&mut gs);
     assert!(!gs.p2.destroy_on_chain_close(&EquipmentSlot::Arms));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// En Garde (Card::EnGardeR)
+//
+// Warrior action, cost 1, 3 block: "Your next weapon attack this turn gains +3
+// power. Go again." The bonus is banked on `Player::next_weapon_attack_bonus`
+// as the card resolves and folded into the next weapon swing's power at combat
+// damage, which spends it. An attack action card in between leaves it banked.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea (p1) plays En Garde, pitching Visit the Blacksmith (pitch 3), and
+/// it resolves. She is back in her action phase with 2 floating resources and
+/// the rest of `rest` in hand.
+fn play_en_garde(rest: &[Card]) -> TestGame {
+    let mut gs = setup_dorinthea_action_phase();
+    let mut hand = vec![Card::EnGardeR, Card::VisitTheBlacksmithB];
+    hand.extend_from_slice(rest);
+    set_hand(&mut gs, PlayerIndex::P1, &hand);
+    gs.p1.resources = 0;
+    step_card(&mut gs, ActionType::PlayCard, Card::EnGardeR);
+    assert_eq!(gs.phase, Phase::ActionPitch);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    gs
+}
+
+/// Swing Dawnblade (cost 1, from the floating resources) and let it go
+/// unblocked, back to Dorinthea's action phase.
+fn swing_dawnblade_unblocked(gs: &mut TestGame) {
+    let weapon = weapon_card(gs, PlayerIndex::P1);
+    assert_eq!(weapon, Card::Dawnblade);
+    step_card(gs, ActionType::Activate, weapon);
+    assert_eq!(gs.phase, Phase::ActionInstant, "paid from floating resources");
+    pass_once_each(gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    while gs.phase != Phase::Action {
+        step(gs, Action{ typ: ActionType::Pass, card: None});
+    }
+}
+
+#[test]
+fn en_garde_is_a_go_again_warrior_action_banking_plus_3_for_the_next_weapon_attack() {
+    use crate::card_effects::{OnPlayConditionType, OnPlayEffectType};
+    let data = Card::EnGardeR.data();
+    assert_eq!(data.typ, CardType::Action);
+    assert_eq!(data.card_class, CardClass::Warrior);
+    assert_eq!(data.cost, 1);
+    assert_eq!(data.pitch, 1);
+    assert_eq!(data.defense, 3);
+    assert!(data.keyword.contains(Keyword::GoAgain));
+    let effect = data.play_effect.as_ref().expect("En Garde should carry an on-play effect");
+    assert!(matches!(effect.condition, OnPlayConditionType::Always));
+    assert!(matches!(effect.effectType, OnPlayEffectType::NextWeaponPower));
+    assert_eq!(effect.magnitude, 3);
+}
+
+#[test]
+fn en_garde_banks_the_bonus_and_keeps_the_action_point() {
+    let gs = play_en_garde(&[]);
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 3);
+    assert_eq!(gs.p2.next_weapon_attack_bonus, 0);
+    // The other banked bonuses are untouched.
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+    assert_eq!(gs.p1.next_attack_action_bonus, 0);
+    assert_eq!(gs.p1.action_points, 1, "Go again");
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::EnGardeR, Zone::Graveyard));
+    assert_eq!(gs.p1.resources, 2);
+}
+
+#[test]
+fn en_garde_pumps_the_next_dawnblade_swing_by_3() {
+    let mut gs = play_en_garde(&[]);
+    swing_dawnblade_unblocked(&mut gs);
+    // Dawnblade's 2 + 3.
+    assert_eq!(gs.p2.life, 20 - 5);
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 0, "spent by the swing");
+}
+
+#[test]
+fn en_garde_bonus_is_not_taken_by_an_attack_action_card() {
+    let mut gs = play_en_garde(&[Card::SharpenSteelR]);
+    // Flock of the Feather Walkers (5 power) is not a weapon attack.
+    place_attacker_on_chain(&mut gs, PlayerIndex::P1, Card::FlockOfTheFeatherWalkersR);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+    assert_eq!(gs.p2.life, life_before - 5);
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 3, "still banked for a weapon attack");
+}
+
+#[test]
+fn en_garde_bonus_applies_once() {
+    let mut gs = play_en_garde(&[]);
+    // A swing takes it...
+    place_weapon_on_chain(&mut gs, PlayerIndex::P1);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+    assert_eq!(gs.p2.life, life_before - 5);
+    // ...and the next weapon attack gets nothing extra.
+    close_combat_chain(&mut gs);
+    place_weapon_on_chain(&mut gs, PlayerIndex::P1);
+    let life_before = gs.p2.life;
+    resolve_combat_damage(&mut gs);
+    assert_eq!(gs.p2.life, life_before - 2);
+}
+
+#[test]
+fn two_en_gardes_stack() {
+    let mut gs = play_en_garde(&[Card::EnGardeR]);
+    // The second copy is paid out of the 2 floating resources.
+    step_card(&mut gs, ActionType::PlayCard, Card::EnGardeR);
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    pass_once_each(&mut gs);
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 6);
+    assert_eq!(gs.p1.action_points, 1);
+}
+
+#[test]
+fn an_unused_en_garde_bonus_is_gone_next_turn() {
+    let mut gs = play_en_garde(&[]);
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 3);
+    while gs.turn_player == PlayerIndex::P1 {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    while !(gs.turn_player == PlayerIndex::P1 && gs.phase == Phase::Action) {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 0);
 }

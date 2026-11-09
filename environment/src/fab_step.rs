@@ -125,6 +125,9 @@ fn begin_turn(gs: &mut Gamestate) {
     // cannot leak into this turn's attacks.
     gs.p1.next_brute_attack_conditional_bonus = 0;
     gs.p2.next_brute_attack_conditional_bonus = 0;
+    // Likewise clear any unconsumed "next weapon attack" bonus (En Garde).
+    gs.p1.next_weapon_attack_bonus = 0;
+    gs.p2.next_weapon_attack_bonus = 0;
     // Clear the per-turn "has intimidated" flag so a prior turn's Intimidate
     // can never satisfy this turn's "if you've intimidated" conditions.
     gs.p1.set_has_intimidated(false);
@@ -1254,6 +1257,13 @@ fn apply_on_play_effect(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerInde
         // cards (e.g. Barraging Beatdown). Banked here; the blocker count is a
         // property of how the defender answers the attack, so it can only be
         // read when combat damage resolves — see `resolve_combat_damage`.
+        // The next weapon attack the owner makes this turn gains `magnitude`
+        // power (e.g. En Garde). Banked like the bonuses above and applied
+        // only when a weapon swing resolves combat damage.
+        OnPlayEffectType::NextWeaponPower => {
+            let player = gs.player_mut(owner);
+            player.next_weapon_attack_bonus = player.next_weapon_attack_bonus.saturating_add(effect.magnitude);
+        }
         OnPlayEffectType::NextBruteConditionalPower => {
             let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
             player.next_brute_attack_conditional_bonus =
@@ -1574,6 +1584,11 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         .map(|data| data.typ == CardType::AttackAction)
         .unwrap_or(false);
     let attack_action_bonus = if attack_is_attack_action { attacker.next_attack_action_bonus } else { 0 };
+    // Whether the attack is a weapon swing, which gates the banked "next
+    // weapon attack" bonus (En Garde's +3). An attack action card leaves it
+    // banked for a later swing this turn.
+    let attack_is_weapon = attack_data.map(is_weapon).unwrap_or(false);
+    let weapon_bonus = if attack_is_weapon { attacker.next_weapon_attack_bonus } else { 0 };
     // Whether the attacking card is a Brute *attack* of any kind, which gates
     // the banked conditional bonus (e.g. Barraging Beatdown's +3). Unlike
     // `attack_is_brute` above this covers a brute weapon swing as well as a
@@ -1605,7 +1620,8 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         .saturating_add(attacker.attack_power_bonus)
         .saturating_add(brute_bonus)
         .saturating_add(attack_action_bonus)
-        .saturating_add(brute_conditional_bonus);
+        .saturating_add(brute_conditional_bonus)
+        .saturating_add(weapon_bonus);
     // The block is the blockers' printed defense plus whatever was granted to
     // them during the combat (Rally the Rearguard's +3 block).
     let blocked = chain_link_total(defender, link, |d| d.defense)
@@ -1660,6 +1676,10 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // so a weapon swing leaves it banked for a later attack action this turn.
     if attack_is_attack_action {
         attacker.next_attack_action_bonus = 0;
+    }
+    // And the weapon bonus: spent by a weapon swing only.
+    if attack_is_weapon {
+        attacker.next_weapon_attack_bonus = 0;
     }
     // The conditional brute bonus is spent by any brute attack, whether or not
     // the blocker count let it pay out: the attack it was banked for has now

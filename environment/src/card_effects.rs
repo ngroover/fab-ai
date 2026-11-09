@@ -138,6 +138,12 @@ pub enum OnPlayEffectType {
     /// non-equipment cards, and "Brute attack" is read to cover a brute weapon
     /// swing as well as a brute attack action card, so Bone Basher takes it.
     NextBruteConditionalPower,
+    /// Banks `magnitude` power for the next *weapon* attack the owner makes
+    /// this turn (En Garde's "Your next weapon attack this turn gains +3
+    /// power"). The weapon counterpart of `NextAttackPower`: only a weapon
+    /// swing takes and spends it, so an attack action card in between leaves
+    /// it banked.
+    NextWeaponPower,
 }
 
 pub struct OnPlayEffect {

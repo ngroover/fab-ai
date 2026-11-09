@@ -816,7 +816,11 @@ static CARD_CATALOG: [CardData; 52] = [
             additional_cost: None,
             target_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::Always,
+                effectType: OnPlayEffectType::NextWeaponPower,
+                magnitude: 3,
+            }),
             mentor_effect: None,
         },
         // Flock of the Feather Walkers
