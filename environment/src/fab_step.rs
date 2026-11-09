@@ -27,6 +27,7 @@ pub fn step(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
         Phase::Defend => handle_defend_phase(gs, act),
         Phase::DefendTriggers | Phase::Reaction => handle_reaction_phase(gs, rng, act),
         Phase::DefendPayment => handle_defend_payment_phase(gs, act),
+        Phase::RevealChoice => handle_reveal_choice_phase(gs, rng, act),
         Phase::Arsenal => handle_arsenal_phase(gs, act),
         Phase::PitchOrder => handle_pitch_order_phase(gs, act),
         _ => {}
@@ -1062,23 +1063,34 @@ pub(crate) fn can_reveal_for_cost(data: &CardData) -> bool {
     data.cost <= 1
 }
 
-/// Pay a "reveal a card with cost 1 or less" additional cost from `owner`'s
-/// hand. The card stays in hand, now known to the opponent
-/// (`Player::hand_known`). The pick is automatic: the eligible card with the
-/// lowest id, preferring one already known so no new information is given
-/// away when it can be helped. The legal-action gates guarantee one is there.
-fn apply_reveal_cost(gs: &mut Gamestate, owner: PlayerIndex) {
-    let player = gs.player(owner);
-    let eligible = |id: DeckCardId| can_reveal_for_cost(player.card(id).data());
-    let pick = player.hand_known.iter().map(|(id, _)| id).find(|&id| eligible(id))
-        .or_else(|| player.hand.iter().map(|(id, _)| id).find(|&id| eligible(id)));
-    debug_assert!(pick.is_some(), "no card with cost 1 or less left to reveal");
-    if let Some(id) = pick {
-        gs.player_mut(owner).mark_known_in_hand(id);
-        if gs.logging_enabled() {
-            gs.log_public(format!("{} reveals {:?}", player_name(owner), gs.player(owner).card(id)));
-        }
+/// The distinct cards in `owner`'s hand that could pay a "reveal a card with
+/// cost 1 or less" additional cost, lowest id first. Copies count once: which
+/// copy is shown makes no difference.
+pub(crate) fn revealable_cards(player: &Player) -> impl Iterator<Item = DeckCardId> + '_ {
+    player.hand.iter()
+        .map(|(id, _)| id)
+        .filter(|&id| can_reveal_for_cost(player.card(id).data()))
+}
+
+/// Reveal `id` from `owner`'s hand to pay a reveal cost. The card stays in
+/// hand, now known to the opponent (`Player::hand_known`).
+fn reveal_from_hand(gs: &mut Gamestate, owner: PlayerIndex, id: DeckCardId) {
+    gs.player_mut(owner).mark_known_in_hand(id);
+    if gs.logging_enabled() {
+        gs.log_public(format!("{} reveals {:?}", player_name(owner), gs.player(owner).card(id)));
     }
+}
+
+/// Handle the choice in `Phase::RevealChoice`: reveal the chosen hand card,
+/// then finish the play that paused for it, from the phase it was committed in.
+fn handle_reveal_choice_phase(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
+    if act.typ != ActionType::Reveal {
+        return;
+    }
+    let pending = gs.pending_card.expect("a reveal choice belongs to a pending play");
+    reveal_from_hand(gs, pending.owner, act.card_ref().id);
+    gs.phase = gs.choice_return_phase;
+    finish_commit(gs, rng, pending);
 }
 
 /// Create a Quicken token for `owner`, unless they already hold
@@ -1571,11 +1583,39 @@ fn commit_pending_to_stack(gs: &mut Gamestate, rng: &mut GameRng) {
         apply_discard_cost(gs, rng, owner);
     }
     // A "reveal a card with cost 1 or less" cost (Flock of the Feather
-    // Walkers) is paid the same way, out of what is left in hand after
-    // pitching; the legal-action gates kept such a card back.
+    // Walkers) is paid out of what is left in hand after pitching; the
+    // legal-action gates kept such a card back. With one card to choose from
+    // it is revealed at once; with more, the owner chooses (`RevealChoice`)
+    // and the play finishes once they have (`handle_reveal_choice_phase`).
     if matches!(data.additional_cost, Some(AdditionalCostType::RevealCost1OrLess)) {
-        apply_reveal_cost(gs, owner);
+        let (first, more) = {
+            let mut options = revealable_cards(gs.player(owner));
+            (options.next(), options.next().is_some())
+        };
+        debug_assert!(first.is_some(), "no card with cost 1 or less left to reveal");
+        if more {
+            gs.choice_return_phase = gs.phase;
+            gs.phase = Phase::RevealChoice;
+            gs.active_player = owner;
+            return;
+        }
+        if let Some(id) = first {
+            reveal_from_hand(gs, owner, id);
+        }
     }
+
+    finish_commit(gs, rng, pending);
+}
+
+/// The second half of committing a card to the stack, once it is there and its
+/// costs are paid: the triggers that fire on playing or attacking, the
+/// bookkeeping for an activated ability, and the move into the next window.
+/// Runs straight after `commit_pending_to_stack`, or after a choice the
+/// payment paused for (`RevealChoice`), with `gs.phase` back on the phase the
+/// card was committed from.
+fn finish_commit(gs: &mut Gamestate, rng: &mut GameRng, pending: PendingCard) {
+    let owner = pending.owner;
+    let data = gs.player(owner).card(pending.card).data();
 
     // Playing an attack action card or attacking with a weapon sets off every
     // Quicken its owner holds.

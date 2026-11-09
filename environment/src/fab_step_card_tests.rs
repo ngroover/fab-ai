@@ -4728,16 +4728,67 @@ fn marking_known_never_exceeds_the_copies_in_hand() {
 }
 
 #[test]
-fn the_reveal_prefers_a_card_the_opponent_already_knows() {
-    // Sharpen Steel has the lower id, but Hit and Run is already known, so
-    // revealing it gives nothing new away.
+fn with_two_cards_to_reveal_the_player_chooses() {
     let mut gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR, Card::HitAndRunB], 1);
-    let (sharpen, hit_and_run) = (gs.p1.deck_id(Card::SharpenSteelR), gs.p1.deck_id(Card::HitAndRunB));
-    assert!(sharpen < hit_and_run);
-    gs.p1.mark_known_in_hand(hit_and_run);
-    attack_with_flock(&mut gs, None);
-    assert_eq!(gs.p1.hand_known_count(hit_and_run), 1);
-    assert_eq!(gs.p1.hand_known_count(sharpen), 0);
+    gs.p1.action_points = 1;
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    // Paid from floating resources and on the stack, but waiting on the choice.
+    assert_eq!(gs.phase, Phase::RevealChoice);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    assert_eq!(stack_top_card(&gs), Some(Card::FlockOfTheFeatherWalkersR));
+    assert!(gs.pending_card.is_some());
+    let offered: HashSet<Card> = legal_actions(&gs).iter()
+        .map(|a| { assert_eq!(a.typ, ActionType::Reveal); card_of(&gs, a) })
+        .collect();
+    assert_eq!(offered, HashSet::from([Card::SharpenSteelR, Card::HitAndRunB]));
+
+    // Choosing Hit and Run, though Sharpen Steel has the lower id.
+    step_card(&mut gs, ActionType::Reveal, Card::HitAndRunB);
+    assert_eq!(known_in_hand(&gs, PlayerIndex::P1, Card::HitAndRunB), 1);
+    assert_eq!(known_in_hand(&gs, PlayerIndex::P1, Card::SharpenSteelR), 0);
+    // The play finishes as it would have without the pause.
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    assert!(gs.pending_card.is_none());
+    assert_eq!(gs.passes, 0);
+    assert_eq!(hand_cards(&gs, PlayerIndex::P1).len(), 2, "revealing leaves both in hand");
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    assert_eq!(quickens(&gs, PlayerIndex::P1), 1);
+}
+
+#[test]
+fn copies_of_one_card_are_a_single_option_and_need_no_choice() {
+    let mut gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR, Card::SharpenSteelR], 1);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    assert_eq!(gs.phase, Phase::ActionInstant, "only one card to show: revealed without asking");
+    assert_eq!(known_in_hand(&gs, PlayerIndex::P1, Card::SharpenSteelR), 1);
+}
+
+#[test]
+fn cards_costing_2_are_not_offered_to_reveal() {
+    let mut gs = dorinthea_holding(
+        &[Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR, Card::HitAndRunB, Card::ToughenUpB], 1);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    assert_eq!(gs.phase, Phase::RevealChoice);
+    let offered: HashSet<Card> = legal_actions(&gs).iter().map(|a| card_of(&gs, a)).collect();
+    assert_eq!(offered, HashSet::from([Card::SharpenSteelR, Card::HitAndRunB]));
+}
+
+#[test]
+fn the_reveal_choice_comes_after_pitching_and_returns_to_the_instant_window() {
+    let mut gs = dorinthea_holding(
+        &[Card::FlockOfTheFeatherWalkersR, Card::ToughenUpB, Card::SharpenSteelR, Card::HitAndRunB], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    assert_eq!(gs.phase, Phase::ActionPitch);
+    step_card(&mut gs, ActionType::Pitch, Card::ToughenUpB);
+    assert_eq!(gs.phase, Phase::RevealChoice);
+    // The Quicken waits for the play to finish.
+    assert_eq!(quickens(&gs, PlayerIndex::P1), 1);
+    step_card(&mut gs, ActionType::Reveal, Card::SharpenSteelR);
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    assert_eq!(quickens(&gs, PlayerIndex::P1), 0);
+    assert!(gs.p1.attack_go_again_bonus());
 }
 
 #[test]

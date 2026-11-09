@@ -3,7 +3,7 @@ use crate::action::{Action, ActionType, CardRef, LegalActions};
 use crate::card_counts::{CardCounts, DeckCardId};
 use crate::cards::{CardData, CardType};
 use crate::card_effects::AdditionalCostType;
-use crate::fab_step::{can_reveal_for_cost, current_chain_link, face_down_mentor_in_arsenal, uses_action_point};
+use crate::fab_step::{can_reveal_for_cost, current_chain_link, revealable_cards, face_down_mentor_in_arsenal, uses_action_point};
 
 
 pub fn legal_actions(gs: &Gamestate) -> LegalActions {
@@ -27,6 +27,7 @@ pub fn legal_actions(gs: &Gamestate) -> LegalActions {
         Phase::Defend => legal_defend_phase(gs),
         Phase::DefendTriggers => legal_defend_triggers_phase(gs),
         Phase::DefendPayment => legal_defend_payment_phase(gs),
+        Phase::RevealChoice => legal_reveal_choice_phase(gs),
         Phase::Reaction => legal_reaction_phase(gs),
         Phase::Arsenal => legal_arsenal_phase(gs),
         Phase::PitchOrder => legal_pitch_order_phase(gs),
@@ -92,6 +93,14 @@ fn legal_defend_payment_phase(gs: &Gamestate) -> LegalActions {
     }
     actions.push(Action::no_card(ActionType::Pass));
     actions
+}
+
+/// Choosing the card to reveal for a reveal cost: one `Reveal` per distinct
+/// eligible hand card. There is no pass — the cost must be paid.
+fn legal_reveal_choice_phase(gs: &Gamestate) -> LegalActions {
+    revealable_cards(gs.player(gs.active_player))
+        .map(|id| Action::new(ActionType::Reveal, CardRef::new(id, Zone::Hand)))
+        .collect()
 }
 
 fn legal_arsenal_phase(gs: &Gamestate) -> LegalActions {
@@ -760,6 +769,11 @@ mod tests {
         hand[1] = Card::SharpenSteelR;
         step_card(&mut gs, ActionType::PlayCard, hand[0]);
         step_card(&mut gs, ActionType::Pitch, hand[1]);
+        // Flock's reveal cost: with more than one card to show, pick the first.
+        if gs.phase == Phase::RevealChoice {
+            let reveal = legal_actions(&gs)[0];
+            step(&mut gs, reveal);
+        }
 
         // Both players pass; the attack resolves to the chain and Rhinar must
         // now defend.

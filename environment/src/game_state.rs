@@ -55,7 +55,7 @@ pub const PLAYER_CARDS: usize = 45;
 /// reaction window can legitimately stack six or more layers (e.g. four attack
 /// reactions answered by two Dodges). Sized to the deepest stack random play
 /// reaches: a sweep of 20 million random games went no deeper than 7, first in
-/// seed 14501652 (see `simulator::tests::stack_depth_histogram` and
+/// seed 643619 (see `simulator::tests::stack_depth_histogram` and
 /// `random_game_with_a_seven_layer_stack_finishes`). Deliberate play could in
 /// principle go deeper; raise this if it ever panics.
 pub const STACK_SIZE: usize = 7;
@@ -271,6 +271,14 @@ pub enum Phase {
     /// then returns to the `DefendTriggers` window. Entered only when the
     /// defender could pay; a trigger they cannot afford is declined outright.
     DefendPayment,
+    /// A card has been paid for and put on the stack, but its "reveal a card
+    /// with cost 1 or less" additional cost (Flock of the Feather Walkers) has
+    /// more than one card it could show: its owner, made active, picks one
+    /// (`Reveal`). The card is still named by `pending_card`, and the play
+    /// then finishes from `choice_return_phase` (see
+    /// `fab_step::finish_commit`). With only one card to show, it is revealed
+    /// without asking and this phase is skipped.
+    RevealChoice,
     Reaction,
     ReactionPitch,
     /// The end of the turn player's action phase: they have passed, the combat
@@ -531,6 +539,11 @@ pub struct Gamestate {
     /// stays in the zone it is played from until it is paid for. `None` outside
     /// the pay-for-a-card flow.
     pub pending_card : Option<PendingCard>,
+    /// The phase a play was committed from (`Action`, `ActionPitch`, ...) when
+    /// it paused for a choice mid-payment (`RevealChoice`). Restored once the
+    /// choice is made, so the play finishes and moves on exactly as it would
+    /// have without pausing. Meaningless outside such a choice.
+    pub choice_return_phase : Phase,
     /// The omniscient game log: every logged event with nothing redacted (the
     /// per-player views with hidden information removed live on `Player::log`).
     /// `None` when logging is disabled (the default, so simulation and cloning

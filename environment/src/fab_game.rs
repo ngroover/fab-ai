@@ -109,6 +109,7 @@ pub fn gamestate_from_decklists(decks: &Decklists) -> Gamestate {
         turn_count: 0,
         stack: empty_stack(),
         pending_card: None,
+        choice_return_phase: Phase::Start,
         // Logging is opted into via `reset(gs, decks, rng, true)`; off until then.
         #[cfg(feature = "logging")]
         log: None,

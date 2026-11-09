@@ -94,7 +94,7 @@ pub fn source_zone(gs: &Gamestate, typ: ActionType, card: Card) -> Zone {
             // otherwise. `act_from` names the zone outright when both hold one.
             if in_zone(gs, pid, card, Zone::Arsenal) { Zone::Arsenal } else { Zone::Hand }
         }
-        ActionType::Pitch | ActionType::Defend | ActionType::Arsenal => Zone::Hand,
+        ActionType::Pitch | ActionType::Defend | ActionType::Arsenal | ActionType::Reveal => Zone::Hand,
         ActionType::BottomPitch => Zone::Pitch,
         ActionType::FlipFaceUp => Zone::Arsenal,
         ActionType::Activate => match card.data().typ {

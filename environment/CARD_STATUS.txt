@@ -689,10 +689,23 @@ on-play-effect helpers).
             that holds a card back (any card to discard, cost <= 1 to reveal),
             and `can_pay_for_card` / `pitch_leaves_card_for_cost` reserve the
             lowest-pitch eligible card so it is never pitched away. The reveal
-            itself (`apply_reveal_cost`) is automatic: it leaves the card in
-            hand, marks it known to the opponent (`Player::hand_known`, see
-            below), and prefers a card that is already known, else the lowest
-            id.
+            itself leaves the card in hand and marks it known to the opponent
+            (`Player::hand_known`, see below).
+          * Choosing the card: `commit_pending_to_stack` is split. The first
+            half pays, puts the card on the stack and pays a random discard;
+            `finish_commit` does the rest (Quicken, play triggers, activation
+            bookkeeping, the move into the next window). If more than one
+            distinct card could be revealed (`revealable_cards`; copies count
+            once), the first half saves the phase it was committed from in
+            `Gamestate::choice_return_phase` and enters the new
+            `Phase::RevealChoice`, with the owner active and the card still
+            named by `pending_card`. Legal actions are one `ActionType::Reveal`
+            per option, with no pass. The choice reveals that card, restores
+            the saved phase and runs `finish_commit`, so the play ends exactly
+            as it would have without pausing. With a single option it is
+            revealed without asking.
+            The new decision moved random play: the seven-layer stack seed is
+            now 643619 (20M-game sweep, still 7 layers max).
           * Tokens: `Card::QuickenToken` (type Token) is at the end of `Card`
             and the catalog, for its data. Tokens are in no deck enum: they
             have their own `TokenCard` enum (deck_cards.rs), shared by every
@@ -724,7 +737,10 @@ on-play-effect helpers).
                a_known_card_leaving_the_hand_is_no_longer_known,
                losing_one_of_two_copies_forgets_the_known_one,
                marking_known_never_exceeds_the_copies_in_hand,
-               the_reveal_prefers_a_card_the_opponent_already_knows,
+               with_two_cards_to_reveal_the_player_chooses,
+               copies_of_one_card_are_a_single_option_and_need_no_choice,
+               cards_costing_2_are_not_offered_to_reveal,
+               the_reveal_choice_comes_after_pitching_and_returns_to_the_instant_window,
                drawing_a_known_deck_card_keeps_it_known,
                a_reset_forgets_known_hand_cards
           * Rules change moved random play: the seven-layer stack seed is now

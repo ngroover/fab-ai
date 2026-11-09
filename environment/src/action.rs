@@ -30,6 +30,10 @@ pub enum ActionType {
     /// everything else to its owner's graveyard — and the Action phase carries
     /// on. Carries no card.
     CloseChain,
+    /// Reveal a card from hand to pay a "reveal a card" additional cost (Flock
+    /// of the Feather Walkers' "reveal a card in your hand with cost 1 or
+    /// less"), in the `RevealChoice` phase. `card` is the hand card shown.
+    Reveal,
     Pass
 }
 
