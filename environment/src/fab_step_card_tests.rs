@@ -563,7 +563,7 @@ fn rhinar_constant_ability_is_on_discard6_intimidate() {
         Some(ConstantEffect::OnDiscard6Intimidate)
     ));
     // The opposing hero (Dorinthea) carries no such constant effect.
-    assert!(Card::Dorinthea.data().constant_effect.is_none());
+    assert!(!matches!(Card::Dorinthea.data().constant_effect, Some(ConstantEffect::OnDiscard6Intimidate)));
 }
 
 #[test]
@@ -624,7 +624,7 @@ fn non_rhinar_hero_discard_does_not_intimidate() {
     // The constant ability keys off the discarding hero, not the discard itself.
     // Dorinthea's deck holds no 6-power card, so the closest she can come is
     // discarding her biggest attack, Flock of the Feather Walkers (5).
-    assert!(Card::Dorinthea.data().constant_effect.is_none());
+    assert!(!matches!(Card::Dorinthea.data().constant_effect, Some(ConstantEffect::OnDiscard6Intimidate)));
     assert!(build_dorinthea_deck().iter().all(|c| c.data().power < 6),
         "Dorinthea's deck has no 6-power card to discard");
 
@@ -5073,4 +5073,173 @@ fn a_card_leaving_in_plain_view_keeps_the_rest_known() {
     gs.p1.mark_known_in_hand(id);
     step_card(&mut gs, ActionType::PlayCard, Card::HitAndRunB);
     assert_eq!(known_in_hand(&gs, PlayerIndex::P1, Card::SharpenSteelR), 1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dorinthea, Quicksilver Prodigy (Card::Dorinthea) and Dawnblade, Resplendent
+// (Card::Dawnblade)
+//
+// Dorinthea: "The first time Dawnblade, Resplendent gains go again each turn,
+// you may attack an additional time with it this turn."
+// Dawnblade: "Once per Turn Action — {r}: Attack. The second time you attack
+// with Dawnblade each turn, it gains +1 power until the end of turn."
+//
+// Quicken is the only way Dawnblade gains go again today. The weapon sits on
+// the combat chain after swinging, so the extra attack comes after breaking
+// the chain (`CloseChain`), which returns it to its slot.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn dawnblade_swing_offered(gs: &Gamestate) -> bool {
+    legal_actions(gs).iter().any(|a| a.typ == ActionType::Activate && card_of(gs, a) == Card::Dawnblade)
+}
+
+/// Swing Dawnblade (cost 1) from Dorinthea's action phase, pitching `pitch`
+/// if the floating resources fall short, and let it through unblocked back to
+/// her action phase.
+fn dawnblade_unblocked(gs: &mut TestGame, pitch: Option<Card>) {
+    step_card(gs, ActionType::Activate, Card::Dawnblade);
+    if let Some(card) = pitch {
+        step_card(gs, ActionType::Pitch, card);
+    }
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    pass_once_each(gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    while gs.phase != Phase::Action && gs.turn_player == PlayerIndex::P1 {
+        step(gs, Action{ typ: ActionType::Pass, card: None});
+    }
+}
+
+/// Dorinthea, holding a Quicken and Visit the Blacksmith (pitch 3), swings
+/// Dawnblade once: the Quicken gives it go again, so her hero ability grants
+/// an extra attack. Back in her action phase with 2 floating resources.
+fn dawnblade_swung_with_quicken() -> TestGame {
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    gs
+}
+
+#[test]
+fn dorinthea_and_dawnblade_carry_their_abilities() {
+    assert!(matches!(Card::Dorinthea.data().constant_effect,
+        Some(ConstantEffect::OnDawnbladeGoAgainExtraSwing)));
+    let dawnblade = Card::Dawnblade.data();
+    assert!(matches!(dawnblade.constant_effect, Some(ConstantEffect::SecondAttackEachTurnPlus1Power)));
+    assert_eq!((dawnblade.power, dawnblade.ability.as_ref().unwrap().resource_cost()), (2, 1));
+    assert!(dawnblade.ability.as_ref().unwrap().once_per_turn());
+}
+
+#[test]
+fn dawnblade_gaining_go_again_grants_an_extra_attack() {
+    let gs = dawnblade_swung_with_quicken();
+    assert!(gs.p1.extra_weapon_attack());
+    assert_eq!(gs.p2.life, 18, "the first swing is 2 power");
+    assert_eq!(gs.p1.action_points, 1, "go again");
+    assert_eq!(gs.p1.resources, 2);
+}
+
+#[test]
+fn without_go_again_dawnblade_swings_once() {
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB], 0);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert!(!gs.p1.extra_weapon_attack());
+    assert_eq!(gs.p1.action_points, 0);
+    // Even with an action point, it has used its once per turn.
+    gs.p1.action_points = 1;
+    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
+    assert!(!dawnblade_swing_offered(&gs));
+}
+
+#[test]
+fn the_extra_attack_comes_once_the_chain_is_broken_and_hits_for_3() {
+    let mut gs = dawnblade_swung_with_quicken();
+    // Dawnblade is still on the chain from its first attack.
+    assert!(!dawnblade_swing_offered(&gs));
+    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
+    assert!(dawnblade_swing_offered(&gs), "back in its slot, with the extra attack to use");
+
+    // The second swing is paid from the floating resources, and is +1 power.
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 18 - 3);
+    assert_eq!(uses_this_turn(&gs, Card::Dawnblade), 2);
+    // No go again this time, so that was her last action point.
+    assert_eq!(gs.p1.action_points, 0);
+}
+
+#[test]
+fn there_is_no_third_attack() {
+    let mut gs = dawnblade_swung_with_quicken();
+    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
+    dawnblade_unblocked(&mut gs, None);
+    gs.p1.action_points = 1;
+    gs.p1.resources = 1;
+    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
+    assert!(!dawnblade_swing_offered(&gs));
+}
+
+#[test]
+fn the_extra_attack_is_granted_only_the_first_time() {
+    // Two Quickens: the first swing takes both, and the grant happens once.
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert!(gs.p1.extra_weapon_attack());
+    // A Quicken on the second swing gives it go again but no third attack.
+    give_quicken(&mut gs, PlayerIndex::P1);
+    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p1.action_points, 1, "the second swing had go again");
+    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
+    assert!(!dawnblade_swing_offered(&gs));
+}
+
+#[test]
+fn go_again_on_another_attack_grants_no_extra_dawnblade_attack() {
+    let mut gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::ToughenUpB, Card::SharpenSteelR], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    attack_with_flock(&mut gs, Some(Card::ToughenUpB));
+    assert!(gs.p1.attack_go_again_bonus(), "Flock gained go again");
+    assert!(!gs.p1.extra_weapon_attack());
+}
+
+#[test]
+fn rhinar_has_no_extra_attack_for_bone_basher() {
+    let mut gs = setup_rhinar_action_phase();
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::ClearingBellowB]);
+    gs.p1.add_token(TokenCard::QuickenToken);
+    step_card(&mut gs, ActionType::Activate, Card::BoneBasher);
+    step_card(&mut gs, ActionType::Pitch, Card::ClearingBellowB);
+    assert!(gs.p1.attack_go_again_bonus());
+    assert!(!gs.p1.extra_weapon_attack());
+}
+
+#[test]
+fn the_extra_attack_and_the_plus_1_end_with_the_turn() {
+    let mut gs = dawnblade_swung_with_quicken();
+    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
+    dawnblade_unblocked(&mut gs, None);
+    while gs.turn_player == PlayerIndex::P1 {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    while !(gs.turn_player == PlayerIndex::P1 && gs.phase == Phase::Action) {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert!(!gs.p1.extra_weapon_attack());
+    assert_eq!(uses_this_turn(&gs, Card::Dawnblade), 0);
+    // The first swing of the new turn is back to 2 power.
+    let life_before = gs.p2.life;
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::VisitTheBlacksmithB]);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, life_before - 2);
+}
+
+#[test]
+fn the_plus_1_stacks_with_en_garde() {
+    let mut gs = dawnblade_swung_with_quicken();
+    gs.p1.next_weapon_attack_bonus = 3;
+    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
+    dawnblade_unblocked(&mut gs, None);
+    // 2 + 1 (second attack) + 3 (En Garde).
+    assert_eq!(gs.p2.life, 18 - 6);
 }

@@ -5,7 +5,16 @@ use crate::cards::CardType;
 #[repr(u8)]
 pub enum ConstantEffect {
     OnDiscard6Intimidate,
+    /// Dorinthea, Quicksilver Prodigy: "The first time Dawnblade, Resplendent
+    /// gains go again each turn, you may attack an additional time with it
+    /// this turn." Fired by `fab_step::attack_gains_go_again`; the extra attack
+    /// is `PlayerFlags::EXTRA_WEAPON_ATTACK`.
     OnDawnbladeGoAgainExtraSwing,
+    /// Dawnblade, Resplendent: "The second time you attack with Dawnblade each
+    /// turn, it gains +1 power until the end of turn." Read when combat damage
+    /// resolves (`fab_step::resolve_combat_damage`), from how many times the
+    /// weapon has attacked this turn (`Player::abilities_used`).
+    SecondAttackEachTurnPlus1Power,
     /// "Whenever you play a card with 6 or more power, intimidate." The play
     /// counterpart of `OnDiscard6Intimidate`. Carried by Chief Ruk'utan, whose
     /// constant effect only applies while he is face up in his owner's arsenal

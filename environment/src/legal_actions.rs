@@ -401,7 +401,10 @@ fn push_equipment_activations(actions: &mut LegalActions, player: &Player, total
 
         // "Once per turn" (a weapon swing): a card that has already been
         // activated this turn is done, even once it is back in its slot.
-        if ability.once_per_turn() && player.abilities_used.count(id) >= copies {
+        // Dorinthea's hero ability lets the weapon attack one more time
+        // (`extra_weapon_attack`).
+        let extra = (zone == Zone::Weapon && player.extra_weapon_attack()) as u8;
+        if ability.once_per_turn() && player.abilities_used.count(id) >= copies + extra {
             continue;
         }
 

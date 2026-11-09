@@ -138,6 +138,9 @@ fn begin_turn(gs: &mut Gamestate) {
     // boundary as the bonuses above.
     gs.p1.abilities_used = CardCounts::EMPTY;
     gs.p2.abilities_used = CardCounts::EMPTY;
+    // Dorinthea's extra Dawnblade attack lasts for the turn it was granted in.
+    gs.p1.set_extra_weapon_attack(false);
+    gs.p2.set_extra_weapon_attack(false);
     // "At the start of your turn, you may turn [a face-down mentor] face up":
     // when the turn player has one in their arsenal, the turn opens on that
     // decision instead of going straight to the Action phase (see
@@ -1120,7 +1123,7 @@ fn create_quicken(gs: &mut Gamestate, owner: PlayerIndex) {
 /// again. Every Quicken triggers on the same attack, so all are spent at once.
 /// The go again is banked like Wild Ride's (`attack_go_again_bonus`) and read
 /// when combat damage resolves.
-fn trigger_quickens(gs: &mut Gamestate, owner: PlayerIndex) {
+fn trigger_quickens(gs: &mut Gamestate, owner: PlayerIndex, attack: DeckCardId) {
     let player = gs.player_mut(owner);
     let mut triggered = false;
     for (id, _) in player.tokens.iter() {
@@ -1133,9 +1136,35 @@ fn trigger_quickens(gs: &mut Gamestate, owner: PlayerIndex) {
         }
     }
     if triggered {
-        player.set_attack_go_again_bonus(true);
         if gs.logging_enabled() {
             gs.log_public(format!("{}'s Quicken is destroyed and the attack gains go again", player_name(owner)));
+        }
+        attack_gains_go_again(gs, owner, attack);
+    }
+}
+
+/// `owner`'s attack with `attack` gains go again. Banked on the player like
+/// Wild Ride's (`attack_go_again_bonus`) and read when combat damage resolves.
+/// Every effect that gives an attack go again should come through here, so
+/// that "when this gains go again" abilities see it.
+///
+/// Dorinthea's hero ability is the one such today: the first time Dawnblade
+/// gains go again each turn, she may attack an additional time with it this
+/// turn (`PlayerFlags::EXTRA_WEAPON_ATTACK`, which lets the swing past its once
+/// per turn). "You may" needs no prompt: the extra attack is only an option,
+/// taken by swinging again.
+fn attack_gains_go_again(gs: &mut Gamestate, owner: PlayerIndex, attack: DeckCardId) {
+    let player = gs.player_mut(owner);
+    player.set_attack_go_again_bonus(true);
+    let hero_extra_swing = matches!(
+        player.hero.data().constant_effect,
+        Some(ConstantEffect::OnDawnbladeGoAgainExtraSwing)
+    );
+    if hero_extra_swing && player.card(attack) == Card::Dawnblade && !player.extra_weapon_attack() {
+        player.set_extra_weapon_attack(true);
+        if gs.logging_enabled() {
+            gs.log_public(format!("{}'s Dawnblade gained go again: it may attack an additional time this turn",
+                player_name(owner)));
         }
     }
 }
@@ -1629,7 +1658,7 @@ fn finish_commit(gs: &mut Gamestate, rng: &mut GameRng, pending: PendingCard) {
     // Playing an attack action card or attacking with a weapon sets off every
     // Quicken its owner holds.
     if commits_as_attack(pending.typ, data) {
-        trigger_quickens(gs, owner);
+        trigger_quickens(gs, owner, pending.card);
     }
 
     // "Whenever you play a card" triggers fire once the card has been played —
@@ -1714,6 +1743,15 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // banked for a later swing this turn.
     let attack_is_weapon = attack_data.map(is_weapon).unwrap_or(false);
     let weapon_bonus = if attack_is_weapon { attacker.next_weapon_attack_bonus } else { 0 };
+    // Dawnblade: "The second time you attack with Dawnblade each turn, it gains
+    // +1 power until the end of turn" — so its second attack and any after it
+    // this turn. Each swing is counted in `abilities_used` as it is committed.
+    let second_attack_bonus = match attacker.attack_on_link(link) {
+        Some(id) if attack_data.is_some_and(|d| matches!(d.constant_effect,
+            Some(ConstantEffect::SecondAttackEachTurnPlus1Power)))
+            && attacker.abilities_used.count(id) >= 2 => 1,
+        _ => 0,
+    };
     // Whether the attacking card is a Brute *attack* of any kind, which gates
     // the banked conditional bonus (e.g. Barraging Beatdown's +3). Unlike
     // `attack_is_brute` above this covers a brute weapon swing as well as a
@@ -1746,7 +1784,8 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         .saturating_add(brute_bonus)
         .saturating_add(attack_action_bonus)
         .saturating_add(brute_conditional_bonus)
-        .saturating_add(weapon_bonus);
+        .saturating_add(weapon_bonus)
+        .saturating_add(second_attack_bonus);
     // The block is the blockers' printed defense plus whatever was granted to
     // them during the combat (Rally the Rearguard's +3 block).
     let blocked = chain_link_total(defender, link, |d| d.defense)

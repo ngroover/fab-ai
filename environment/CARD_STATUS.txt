@@ -543,8 +543,8 @@ on-play-effect helpers).
             Action phase carries on; the next attack opens a fresh chain on
             link 0. Passing still closes the chain and ends the phase. (Equipment
             that defended also returns to its slot, unless destroyed: see Bone
-            Vizier.) Dorinthea's extra Dawnblade swing will need an exception to
-            the once-per-turn flag when her hero ability is implemented.
+            Vizier.) Dorinthea's extra Dawnblade swing is that exception: see
+            Dorinthea below.
         Tests: bone_basher_is_a_4_power_brute_club_swung_for_2,
                bone_basher_swing_is_offered_only_when_2_resources_can_be_paid,
                bone_basher_swing_needs_an_action_point,
@@ -760,6 +760,49 @@ on-play-effect helpers).
                playing_a_known_arsenal_card_clears_the_known_flag,
                intimidate_makes_every_known_hand_card_uncertain,
                a_card_leaving_in_plain_view_keeps_the_rest_known
+
+  [x] Dorinthea, Quicksilver Prodigy (hero) (Card::Dorinthea)
+  [x] Dawnblade, Resplendent (weapon)       (Card::Dawnblade)
+        Dorinthea: "The first time Dawnblade, Resplendent gains go again each
+        turn, you may attack an additional time with it this turn."
+        Dawnblade: "Once per Turn Action — {r}: Attack. The second time you
+        attack with Dawnblade each turn, it gains +1 power until the end of
+        turn." (2 power.)
+          * Every grant of go again to an attack now goes through
+            `attack_gains_go_again`, which banks `attack_go_again_bonus` and,
+            for Dorinthea's (`ConstantEffect::OnDawnbladeGoAgainExtraSwing`)
+            Dawnblade, sets `PlayerFlags::EXTRA_WEAPON_ATTACK` the first time
+            in the turn. Quicken is the only grant that reaches a weapon today;
+            future go-again effects should call it too. Wild Ride's
+            ConditionalGoAgain only ever applies to attack action cards.
+          * The flag lets the weapon past its once per turn one more time
+            (`push_equipment_activations`: uses allowed = copies + 1). It is
+            set at most once a turn, so it also marks the ability as used, and
+            is cleared at the start of each turn and on reset. "You may" needs
+            no prompt: the extra attack is simply offered.
+          * The weapon stays on the combat chain after swinging, so the extra
+            attack comes after breaking the chain (`CloseChain`), which puts it
+            back in its slot. (Real FaB attacks again with the chain still
+            open; the engine's weapon-on-the-chain model does not allow that.)
+          * Dawnblade's +1 (`ConstantEffect::SecondAttackEachTurnPlus1Power`)
+            is read at combat damage: it applies when the weapon has attacked
+            twice or more this turn, counted by `abilities_used`, which is
+            marked as each swing is committed. Stacks with En Garde.
+          * `PlayerFlags` widened from u8 to u16 for the new bit; `Player`
+            stays 184 bytes.
+          * Random play: Dorinthea's wins went from 26 to 63 in 200,000 games
+            (Rhinar ~79%, draws ~21%). Quicken (from Flock) is her only source
+            of go again until the Dawnblade pump cards are done.
+        Tests: dorinthea_and_dawnblade_carry_their_abilities,
+               dawnblade_gaining_go_again_grants_an_extra_attack,
+               without_go_again_dawnblade_swings_once,
+               the_extra_attack_comes_once_the_chain_is_broken_and_hits_for_3,
+               there_is_no_third_attack,
+               the_extra_attack_is_granted_only_the_first_time,
+               go_again_on_another_attack_grants_no_extra_dawnblade_attack,
+               rhinar_has_no_extra_attack_for_bone_basher,
+               the_extra_attack_and_the_plus_1_end_with_the_turn,
+               the_plus_1_stacks_with_en_garde
           * Rules change moved random play: the seven-layer stack seed is now
             14501652 (20M-game sweep, still 7 layers max, STACK_SIZE kept).
         Tests: flock_is_a_5_power_attack_with_a_reveal_cost_that_creates_quicken,
@@ -844,9 +887,9 @@ on-play-effect helpers).
 ------------------------------------------------------------------------------
  TODO — DORINTHEA hero / weapon / equipment
 ------------------------------------------------------------------------------
-  [ ] Dorinthea (hero)       (Card::Dorinthea)
+  [x] Dorinthea (hero)       (Card::Dorinthea)  — see COMPLETE section above
   [ ] Hala Goldenhelm        (Card::HalaGoldenhelm)
-  [ ] Dawnblade (weapon)     (Card::Dawnblade)
+  [x] Dawnblade (weapon)     (Card::Dawnblade)  — see COMPLETE section above
   [ ] Gallantry Gold         (Card::GallantryGold)
   [ ] Ironrot Helm           (Card::IronrotHelm)
   [ ] Ironrot Legs           (Card::IronrotLegs)

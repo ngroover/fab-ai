@@ -315,11 +315,11 @@ impl Phase {
 pub const MAX_TURNS: u8 = 40;
 
 bitflags::bitflags! {
-    /// A player's boolean state, packed into one byte so `Player` stays small.
+    /// A player's boolean state, packed into two bytes so `Player` stays small.
     /// Read and written through the `Player` accessors (`attack_go_again_bonus()`,
     /// `set_attack_go_again_bonus(..)`, and so on).
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct PlayerFlags : u8 {
+    pub struct PlayerFlags : u16 {
         /// Whether this player's current attack has been granted Go Again by an
         /// on-play effect (e.g. Wild Ride's "if a card with 6 or more power is
         /// discarded, this gains go again"). Like `Player::attack_power_bonus` this is banked
@@ -351,6 +351,12 @@ bitflags::bitflags! {
         const DESTROY_CHEST_ON_CHAIN_CLOSE = 1 << 4;
         const DESTROY_ARMS_ON_CHAIN_CLOSE = 1 << 5;
         const DESTROY_LEGS_ON_CHAIN_CLOSE = 1 << 6;
+        /// The weapon may attack one more time this turn than its "once per
+        /// turn" allows: Dorinthea's hero ability fired, the first time
+        /// Dawnblade gained go again this turn. Set once per turn at most, so it
+        /// also records that the ability has been used. Cleared at the start of
+        /// each turn.
+        const EXTRA_WEAPON_ATTACK = 1 << 8;
         /// All four of the above.
         /// Whether the opponent knows the face-down card in this player's
         /// arsenal: it was arsenaled from a hand made entirely of known copies
@@ -828,6 +834,17 @@ impl Player {
     #[inline]
     pub fn set_arsenal_face_up(&mut self, on: bool) {
         self.flags.set(PlayerFlags::ARSENAL_FACE_UP, on);
+    }
+
+    /// Whether the weapon may attack once more this turn
+    /// (`PlayerFlags::EXTRA_WEAPON_ATTACK`).
+    pub const fn extra_weapon_attack(&self) -> bool {
+        self.flags.contains(PlayerFlags::EXTRA_WEAPON_ATTACK)
+    }
+
+    /// Set or clear `PlayerFlags::EXTRA_WEAPON_ATTACK`.
+    pub fn set_extra_weapon_attack(&mut self, on: bool) {
+        self.flags.set(PlayerFlags::EXTRA_WEAPON_ATTACK, on);
     }
 
     /// Whether the opponent knows the face-down arsenal card
