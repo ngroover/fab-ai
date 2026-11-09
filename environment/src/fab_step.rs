@@ -1,6 +1,6 @@
 use crate::action::{Action,ActionType};
 use crate::card_counts::{CardCounts, DeckCardId};
-use crate::game_state::{DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
+use crate::game_state::{CHAIN_LINKS,DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
 use crate::cards::{Card,CardClass,CardData,CardType,Keyword};
 use crate::card_effects::{Ability,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,MentorEffect};
 use crate::fab_game::{shuffle_deck_for, GameRng};
@@ -370,7 +370,7 @@ fn close_priority_window(gs: &mut Gamestate) {
 /// Reaction window, pushed onto the return stack when the attack was committed.
 fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
     match act.typ {
-        ActionType::Defend => commit_blocker(gs, act.card_ref().id),
+        ActionType::Defend => commit_blocker(gs, act.card_ref().id, act.card_ref().zone),
         ActionType::Pass => {
             if gs.logging_enabled() {
                 gs.log_public(format!("{} passes", player_name(gs.active_player)));
@@ -587,7 +587,7 @@ fn handle_reaction_phase(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
 /// the one link can hold any number of blocking cards. The defender is the
 /// active player; the attacker's card sits on the *attacker's* chain, a
 /// separate array.
-fn commit_blocker(gs: &mut Gamestate, id: DeckCardId) {
+fn commit_blocker(gs: &mut Gamestate, id: DeckCardId, from: Zone) {
     let pid = gs.active_player;
     // Declaring a blocker reveals it, so the announcement is public.
     if gs.logging_enabled() {
@@ -598,8 +598,9 @@ fn commit_blocker(gs: &mut Gamestate, id: DeckCardId) {
     // blockers alone and they play no part in a later attack this turn. Only the
     // turn player attacks, so the attacker is always the turn player.
     let link = current_chain_link(gs.player(gs.turn_player));
+    // A blocker comes from the hand or, for a piece of equipment, its slot.
     let player = gs.player_mut(pid);
-    player.remove_from(Zone::Hand, id);
+    take_from_zone(player, id, from);
     player.chain_link[link].add(id);
 }
 
@@ -1486,11 +1487,8 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
                 && matches!(data.typ, CardType::AttackAction | CardType::Weapon)
         })
         .unwrap_or(false);
-    // The number of non-equipment cards defending this link. Equipment is
-    // excluded by card type — the engine does not model blocking with equipment
-    // yet, so nothing puts an equipment card here today, but the text names the
-    // exclusion and the rule is stated where it belongs rather than left to
-    // emerge from that gap.
+    // The number of non-equipment cards defending this link. Equipment that
+    // defends (Bone Vizier, Ironrot Helm, ...) is excluded by card type.
     let non_equipment_blockers = chain_link_count(defender, link, |d| {
         d.typ != CardType::Equipment
     });
@@ -1585,24 +1583,49 @@ fn close_combat_chain(gs: &mut Gamestate) {
     if (gs.p1.chain_occupied() || gs.p2.chain_occupied()) && gs.logging_enabled() {
         gs.log_public("combat chain closes".to_string());
     }
-    for player in [&mut gs.p1, &mut gs.p2] {
-        for link in 0..player.chain_link.len() {
+    for pid in [PlayerIndex::P1, PlayerIndex::P2] {
+        for link in 0..CHAIN_LINKS {
+            let player = gs.player_mut(pid);
             let cards = std::mem::take(&mut player.chain_link[link]);
             // A block bonus granted during the combat (Rally the Rearguard's +3)
             // belongs to that combat, so it goes with the link.
             player.chain_defense_bonus[link] = 0;
             for (id, copies) in cards.iter() {
                 for _ in 0..copies {
-                    if is_weapon(player.card(id).data()) {
+                    let data = gs.player(pid).card(id).data();
+                    if is_weapon(data) {
                         // A weapon on the chain returns to the slot it swung from.
-                        put_in_zone(player, id, Zone::Weapon);
+                        put_in_zone(gs.player_mut(pid), id, Zone::Weapon);
+                    } else if data.typ == CardType::Equipment {
+                        // Equipment that defended goes back to its slot, unless
+                        // Blade Break destroys it as the chain closes.
+                        if data.keyword.contains(Keyword::BladeBreak) {
+                            destroy_equipment(gs, pid, id);
+                        } else {
+                            put_in_zone(gs.player_mut(pid), id, Zone::Equipment);
+                        }
                     } else {
                         // The graveyard is a public zone.
-                        player.add_to(Zone::Graveyard, id);
+                        gs.player_mut(pid).add_to(Zone::Graveyard, id);
                     }
                 }
             }
         }
+    }
+}
+
+/// Destroy `pid`'s equipment `id`, which has already left its slot (it was
+/// defending on the chain): it goes to the graveyard, and its "when this is
+/// destroyed" trigger, if any, fires. Like Rhinar's and Ruk'utan's triggers it
+/// resolves inline rather than as a stack layer of its own.
+fn destroy_equipment(gs: &mut Gamestate, pid: PlayerIndex, id: DeckCardId) {
+    let card = gs.player(pid).card(id);
+    if gs.logging_enabled() {
+        gs.log_public(format!("{}'s {:?} is destroyed", player_name(pid), card));
+    }
+    gs.player_mut(pid).add_to(Zone::Graveyard, id);
+    if matches!(card.data().constant_effect, Some(ConstantEffect::OnDestroyedReveal6BottomOtherwise)) {
+        reveal_top_keep_6(gs, pid);
     }
 }
 

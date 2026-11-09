@@ -13,6 +13,11 @@ pub enum ConstantEffect {
     /// Rampage search ride the same trigger as his `MentorEffect`.
     OnPlay6Intimidate,
     OnSwordHitMentor,
+    /// "When this is destroyed, reveal the top card of your deck. If it has 6
+    /// or more power, put it on top of your deck. Otherwise, put it on the
+    /// bottom." Carried by Bone Vizier; fired by `fab_step::destroy_equipment`.
+    /// The reveal is the same one Pack Call's defend trigger makes.
+    OnDestroyedReveal6BottomOtherwise,
 }
 
 /// What a mentor does with its lessons, on top of its constant effect. A

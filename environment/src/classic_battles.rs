@@ -733,7 +733,7 @@ static CARD_CATALOG: [CardData; 52] = [
             keyword: Keyword::BladeBreak,
             hero_life: 0,
             hero_intellect: 0,
-            constant_effect: None,
+            constant_effect: Some(ConstantEffect::OnDestroyedReveal6BottomOtherwise),
             ability: None,
             defend_effect: None,
             next_attack_effect: None,

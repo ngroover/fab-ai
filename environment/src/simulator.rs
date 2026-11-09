@@ -164,7 +164,7 @@ mod tests {
         deepest
     }
 
-    /// Seed 1995699 is the first of 20 million random games to reach seven
+    /// Seed 851660 is the first of 20 million random games to reach seven
     /// layers at once — the deepest the sweep found, and so what `STACK_SIZE`
     /// is sized to. It must finish without overflowing the stack. (The seed
     /// moves whenever a rules change alters random play; re-run
@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn random_game_with_a_seven_layer_stack_finishes() {
         use crate::game_state::STACK_SIZE;
-        let deepest = max_stack_depth(1995699);
+        let deepest = max_stack_depth(851660);
         assert_eq!(deepest, 7);
         assert!(deepest <= STACK_SIZE);
     }

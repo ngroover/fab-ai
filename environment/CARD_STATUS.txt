@@ -337,10 +337,9 @@ on-play-effect helpers).
             The new `chain_link_count` counts the non-equipment cards on the
             defender's link — `chain_link_total`'s companion, counting rather
             than summing — and the +3 applies only while that count is under 2.
-          * "Non-equipment" is read off the card type. The engine does not model
-            blocking with equipment yet, so nothing puts an equipment card on
-            the link today; the exclusion is stated where the rule lives rather
-            than left to emerge from that gap, for the same reason
+          * "Non-equipment" is read off the card type, so equipment that
+            defends (now possible: see Bone Vizier) does not count, for the
+            same reason
             `can_be_declared_as_blocker` tests the card type rather than leaning
             on `no_block`. A defense reaction, by contrast, is not equipment and
             does count: it joins the chain link as it resolves, so a declared
@@ -542,9 +541,9 @@ on-play-effect helpers).
             `close_combat_chain` sends the weapon back to its slot and every
             other card (attacks, blockers) to its owner's graveyard, and the
             Action phase carries on; the next attack opens a fresh chain on
-            link 0. Passing still closes the chain and ends the phase. (Blocking
-            with equipment isn't implemented yet, so nothing else returns to a
-            slot.) Dorinthea's extra Dawnblade swing will need an exception to
+            link 0. Passing still closes the chain and ends the phase. (Equipment
+            that defended also returns to its slot, unless destroyed: see Bone
+            Vizier.) Dorinthea's extra Dawnblade swing will need an exception to
             the once-per-turn flag when her hero ability is implemented.
         Tests: bone_basher_is_a_4_power_brute_club_swung_for_2,
                bone_basher_swing_is_offered_only_when_2_resources_can_be_paid,
@@ -587,6 +586,42 @@ on-play-effect helpers).
                blossom_of_spring_resource_pays_for_a_card_the_hand_could_not,
                blossom_of_spring_stays_destroyed_on_rhinars_next_turn
 
+  [x] Bone Vizier (Card::BoneVizier)
+        Brute head equipment, 1 defense. "When Bone Vizier is destroyed, reveal
+        the top card of your deck. If it has 6 or more power, put it on top of
+        your deck. Otherwise, put it on the bottom. Blade Break."
+          * Blocking with equipment (new): `legal_defend_phase` offers every
+            worn piece as a Defend from `Zone::Equipment`, and `commit_blocker`
+            moves it from its slot onto the defended link, where its printed
+            defense counts like any blocker's. Battleworn pieces (Gallantry
+            Gold) are held back by `can_equipment_defend` until the -1 defense
+            counter is modelled; otherwise they would block at full strength
+            every turn.
+          * `close_combat_chain` sends defending equipment back to its slot,
+            unless it has Blade Break, which destroys it (`destroy_equipment`):
+            to the graveyard, never to return. This also covers Ironrot Helm
+            and Ironrot Legs, which are plain Blade Break pieces.
+          * The destroy trigger is `ConstantEffect::OnDestroyedReveal6BottomOtherwise`,
+            fired by `destroy_equipment` and resolved inline, like Rhinar's and
+            Ruk'utan's triggers, using the same `reveal_top_keep_6` as Pack
+            Call. The reveal is public; it is the owner's deck, whoever's turn
+            it is.
+          * Ironhide Gauntlet / Legs (0 defense) can now defend, but their "pay
+            1 for +2 block" defend effect is still TODO.
+          * Rules change moved random play: the seven-layer stack seed is now
+            851660 (20M-game sweep, still 7 layers max, STACK_SIZE kept).
+        Tests: bone_vizier_is_a_1_block_brute_helm_with_blade_break_and_a_destroy_trigger,
+               rhinar_may_defend_with_any_of_his_worn_equipment,
+               battleworn_equipment_is_not_offered_as_a_blocker_yet,
+               bone_vizier_blocks_for_1,
+               bone_vizier_is_destroyed_when_the_chain_closes_and_keeps_a_6_power_card_on_top,
+               bone_vizier_destruction_bottoms_a_card_with_less_than_6_power,
+               bone_vizier_that_did_not_defend_is_not_destroyed,
+               equipment_without_blade_break_returns_to_its_slot_when_the_chain_closes,
+               blade_break_destroys_only_the_piece_that_has_it,
+               a_destroyed_bone_vizier_cannot_defend_again
+               (plus legal_actions_in_defend_phase, which now checks equipment)
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -614,7 +649,7 @@ on-play-effect helpers).
   [x] Chief Rukutan          (Card::ChiefRukutan)  — see COMPLETE section above
   [x] Bone Basher (weapon)   (Card::BoneBasher)  — see COMPLETE section above
   [x] Blossom of Spring      (Card::BlossomOfSpring)  — see COMPLETE section above
-  [ ] Bone Vizier            (Card::BoneVizier)
+  [x] Bone Vizier            (Card::BoneVizier)  — see COMPLETE section above
   [ ] Ironhide Gauntlet      (Card::IronhideGauntlet)
   [ ] Ironhide Legs          (Card::IronhideLegs)
 

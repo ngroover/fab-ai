@@ -62,6 +62,15 @@ fn legal_defend_phase(gs: &Gamestate) -> LegalActions {
         .map(|(id, _)| Action::new(ActionType::Defend, CardRef::new(id, Zone::Hand)))
         .collect();
 
+    // Each piece of equipment still worn may defend too, one at a time. It
+    // leaves its slot for the chain link and comes back when the chain closes,
+    // unless a keyword destroys it (see `fab_step::close_combat_chain`).
+    for (id, _) in player.equipment.iter() {
+        if can_equipment_defend(player.card(id).data()) {
+            actions.push(Action::new(ActionType::Defend, CardRef::new(id, Zone::Equipment)));
+        }
+    }
+
     // Blocking is optional (and the only choice once the hand is empty):
     // passing finishes declaring blockers and advances to the reaction window.
     actions.push(Action {
@@ -517,6 +526,15 @@ fn can_be_declared_as_blocker(data: &CardData) -> bool {
     !data.no_block && data.typ != CardType::DefenseReaction
 }
 
+/// Whether a worn piece of equipment may be declared as a blocker. Any
+/// equipment may defend, except — for now — a Battleworn piece (Gallantry
+/// Gold): Battleworn's -1 defense counter is not modelled yet, so letting it
+/// defend would hand out its full defense every turn, forever.
+fn can_equipment_defend(data: &CardData) -> bool {
+    use crate::cards::Keyword;
+    !data.keyword.contains(Keyword::Battleworn)
+}
+
 fn is_action_phase_playable(typ: CardType) -> bool {
     matches!(
         typ,
@@ -726,18 +744,26 @@ mod tests {
         let defends: Vec<&Action> = actions.iter()
                 .filter(|a| a.typ == ActionType::Defend)
                 .collect();
-        for a in &defends {
-            assert_eq!(a.card_ref().zone, Zone::Hand);
-        }
-        let blockable: HashSet<Card> = defends.iter()
+        let from = |zone: Zone| -> HashSet<Card> {
+            defends.iter()
+                .filter(|a| a.card_ref().zone == zone)
                 .map(|a| card_of(&gs, a))
-                .collect();
-        assert_eq!(blockable, HashSet::from([
+                .collect()
+        };
+        assert_eq!(from(Zone::Hand), HashSet::from([
             Card::DrivingBladeY,
             Card::SharpenSteelR,
             Card::SecondSwingR,
             Card::InTheSwingR,
         ]));
+        // Her worn equipment may defend too — all but Gallantry Gold, whose
+        // Battleworn counter is not modelled yet.
+        assert_eq!(from(Zone::Equipment), HashSet::from([
+            Card::BlossomOfSpring,
+            Card::IronrotHelm,
+            Card::IronrotLegs,
+        ]));
+        assert!(defends.iter().all(|a| matches!(a.card_ref().zone, Zone::Hand | Zone::Equipment)));
 
         // Blocking is optional: passing is offered too, exactly once.
         let passes = actions.iter().filter(|a| a.typ == ActionType::Pass).count();
@@ -762,7 +788,7 @@ mod tests {
 
         assert!(actions.iter().all(|a| named(&gs, a) != Some(db)));
         let blockable: HashSet<Card> = actions.iter()
-                .filter(|a| a.typ == ActionType::Defend)
+                .filter(|a| a.typ == ActionType::Defend && a.card_ref().zone == Zone::Hand)
                 .map(|a| card_of(&gs, a))
                 .collect();
         assert_eq!(blockable, HashSet::from([

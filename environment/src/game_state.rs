@@ -55,7 +55,7 @@ pub const PLAYER_CARDS: usize = 45;
 /// reaction window can legitimately stack six or more layers (e.g. four attack
 /// reactions answered by two Dodges). Sized to the deepest stack random play
 /// reaches: a sweep of 20 million random games went no deeper than 7, first in
-/// seed 1995699 (see `simulator::tests::stack_depth_histogram` and
+/// seed 851660 (see `simulator::tests::stack_depth_histogram` and
 /// `random_game_with_a_seven_layer_stack_finishes`). Deliberate play could in
 /// principle go deeper; raise this if it ever panics.
 pub const STACK_SIZE: usize = 7;

@@ -32,6 +32,8 @@
 //!   - Bone Basher         (`Card::BoneBasher`)
 //!   - Breaking the combat chain (`ActionType::CloseChain`)
 //!   - Blossom of Spring   (`Card::BlossomOfSpring`)
+//!   - Bone Vizier         (`Card::BoneVizier`), with equipment blocking and
+//!     Blade Break
 
 use super::*;
 use crate::cards::Card;
@@ -3921,4 +3923,166 @@ fn blossom_of_spring_stays_destroyed_on_rhinars_next_turn() {
     assert_eq!(gs.p1.resources, 0, "the unspent resource was lost at end of turn");
     assert!(in_zone(&gs, PlayerIndex::P1, Card::BlossomOfSpring, Zone::Graveyard));
     assert!(!blossom_offered(&gs));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bone Vizier (Card::BoneVizier), and blocking with equipment
+//
+// Brute head equipment, 1 defense: "When Bone Vizier is destroyed, reveal the
+// top card of your deck. If it has 6 or more power, put it on top of your
+// deck. Otherwise, put it on the bottom. Blade Break."
+//
+// Any worn equipment may be declared as a blocker (bar Battleworn pieces, whose
+// counter is not modelled yet): it leaves its slot for the chain link and goes
+// back when the chain closes. Blade Break instead destroys it as the chain
+// closes, which is what fires Bone Vizier's reveal.
+//
+// Dorinthea (p1) attacks with Flock of the Feather Walkers (5 power) and Rhinar
+// (p2) defends, so "your deck" is p2's and p1's must stay untouched.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Rhinar (p2) declares `equipment` (worn pieces) and nothing from hand as
+/// blockers against Flock, and combat damage resolves. Play is back in
+/// Dorinthea's action phase with the chain still open.
+fn rhinar_blocks_flock_with_equipment(equipment: &[Card]) -> TestGame {
+    let mut gs = rhinar_defending_flock();
+    for &card in equipment {
+        assert!(in_zone(&gs, PlayerIndex::P2, card, Zone::Equipment));
+        step_card_from(&mut gs, ActionType::Defend, card, Zone::Equipment);
+        assert!(!in_zone(&gs, PlayerIndex::P2, card, Zone::Equipment), "it leaves its slot to defend");
+        assert!(link_cards(&gs, PlayerIndex::P2, 0).contains(&card));
+    }
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done declaring
+    while gs.phase != Phase::Action {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.turn_player, PlayerIndex::P1);
+    gs
+}
+
+/// Dorinthea passes her action phase, closing the combat chain.
+fn close_chain_by_passing(gs: &mut TestGame) {
+    step(gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.phase, Phase::Arsenal);
+    assert!(!gs.p1.chain_occupied() && !gs.p2.chain_occupied());
+}
+
+fn equipment_blockers(gs: &Gamestate) -> HashSet<Card> {
+    legal_actions(gs).iter()
+        .filter(|a| a.typ == ActionType::Defend && a.card_ref().zone == Zone::Equipment)
+        .map(|a| card_of(gs, a))
+        .collect()
+}
+
+#[test]
+fn bone_vizier_is_a_1_block_brute_helm_with_blade_break_and_a_destroy_trigger() {
+    let data = Card::BoneVizier.data();
+    assert_eq!(data.typ, CardType::Equipment);
+    assert!(matches!(data.slot, Some(crate::cards::EquipmentSlot::Head)));
+    assert_eq!(data.card_class, CardClass::Brute);
+    assert_eq!(data.defense, 1);
+    assert!(data.keyword.contains(Keyword::BladeBreak));
+    assert!(matches!(data.constant_effect, Some(ConstantEffect::OnDestroyedReveal6BottomOtherwise)));
+    assert!(data.ability.is_none());
+    assert!(data.defend_effect.is_none(), "the reveal is on destruction, not on defending");
+}
+
+#[test]
+fn rhinar_may_defend_with_any_of_his_worn_equipment() {
+    let gs = rhinar_defending_flock();
+    assert_eq!(equipment_blockers(&gs), HashSet::from([
+        Card::BoneVizier,
+        Card::BlossomOfSpring,
+        Card::IronhideGauntlet,
+        Card::IronhideLegs,
+    ]));
+}
+
+#[test]
+fn battleworn_equipment_is_not_offered_as_a_blocker_yet() {
+    let gs = dorinthea_defending_muscle_mutt();
+    let offered = equipment_blockers(&gs);
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::GallantryGold, Zone::Equipment));
+    assert!(!offered.contains(&Card::GallantryGold));
+    assert!(offered.contains(&Card::IronrotHelm));
+}
+
+#[test]
+fn bone_vizier_blocks_for_1() {
+    let gs = rhinar_blocks_flock_with_equipment(&[Card::BoneVizier]);
+    assert_eq!(gs.p2.life, 20 - (5 - 1));
+    // Still defending until the chain closes.
+    assert_eq!(link_cards(&gs, PlayerIndex::P2, 0), vec![Card::BoneVizier]);
+}
+
+#[test]
+fn bone_vizier_is_destroyed_when_the_chain_closes_and_keeps_a_6_power_card_on_top() {
+    let mut gs = rhinar_blocks_flock_with_equipment(&[Card::BoneVizier]);
+    let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::WoundedBullY);
+    assert!(Card::WoundedBullY.data().power >= 6);
+    let before = deck_order(&gs, PlayerIndex::P2);
+    let attacker_before = deck_order(&gs, PlayerIndex::P1);
+
+    close_chain_by_passing(&mut gs);
+
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::BoneVizier, Zone::Graveyard));
+    assert!(!in_zone(&gs, PlayerIndex::P2, Card::BoneVizier, Zone::Equipment));
+    assert_eq!(deck_order(&gs, PlayerIndex::P2), before, "a 6-power card stays put");
+    assert_eq!(deck_order(&gs, PlayerIndex::P2)[0], top);
+    assert!(gs.p2.deck.front().unwrap().is_known(), "the revealed card is public");
+    assert_eq!(deck_order(&gs, PlayerIndex::P1), attacker_before);
+}
+
+#[test]
+fn bone_vizier_destruction_bottoms_a_card_with_less_than_6_power() {
+    let mut gs = rhinar_blocks_flock_with_equipment(&[Card::BoneVizier]);
+    let top = set_top_of_deck(&mut gs, PlayerIndex::P2, Card::ClearingBellowB);
+    assert!(Card::ClearingBellowB.data().power < 6);
+    let before = deck_order(&gs, PlayerIndex::P2);
+
+    close_chain_by_passing(&mut gs);
+
+    let mut expected = before[1..].to_vec();
+    expected.push(top);
+    assert_eq!(deck_order(&gs, PlayerIndex::P2), expected);
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::BoneVizier, Zone::Graveyard));
+}
+
+#[test]
+fn bone_vizier_that_did_not_defend_is_not_destroyed() {
+    let mut gs = rhinar_blocks_flock_with_equipment(&[]);
+    let before = deck_order(&gs, PlayerIndex::P2);
+    close_chain_by_passing(&mut gs);
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::BoneVizier, Zone::Equipment));
+    assert!(!in_zone(&gs, PlayerIndex::P2, Card::BoneVizier, Zone::Graveyard));
+    assert_eq!(deck_order(&gs, PlayerIndex::P2), before, "no reveal without a destruction");
+}
+
+#[test]
+fn equipment_without_blade_break_returns_to_its_slot_when_the_chain_closes() {
+    let mut gs = rhinar_blocks_flock_with_equipment(&[Card::IronhideLegs, Card::BlossomOfSpring]);
+    // Both 0-defense pieces: the whole 5 lands.
+    assert_eq!(gs.p2.life, 15);
+    close_chain_by_passing(&mut gs);
+    for card in [Card::IronhideLegs, Card::BlossomOfSpring] {
+        assert!(in_zone(&gs, PlayerIndex::P2, card, Zone::Equipment), "{:?} back in its slot", card);
+        assert!(!in_zone(&gs, PlayerIndex::P2, card, Zone::Graveyard));
+    }
+}
+
+#[test]
+fn blade_break_destroys_only_the_piece_that_has_it() {
+    let mut gs = rhinar_blocks_flock_with_equipment(&[Card::BoneVizier, Card::IronhideGauntlet]);
+    close_chain_by_passing(&mut gs);
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::BoneVizier, Zone::Graveyard));
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::IronhideGauntlet, Zone::Equipment));
+}
+
+#[test]
+fn a_destroyed_bone_vizier_cannot_defend_again() {
+    let mut gs = rhinar_blocks_flock_with_equipment(&[Card::BoneVizier]);
+    close_chain_by_passing(&mut gs);
+    assert!(!in_zone(&gs, PlayerIndex::P2, Card::BoneVizier, Zone::Equipment));
+    // Nothing anywhere offers it again: it is only in the graveyard.
+    assert_eq!(count_in(&gs, PlayerIndex::P2, Card::BoneVizier, Zone::Graveyard), 1);
 }
