@@ -4816,3 +4816,138 @@ fn a_reset_forgets_known_hand_cards() {
     crate::fab_game::reset(state, &decks, rng, false);
     assert!(gs.p1.hand_known.is_empty());
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Flock of the Feather Walkers: offered only when payable
+//
+// Flock (cost 1) may only be offered when its costs can all be met together:
+// the resource cost from floating resources plus cards pitched from hand, and
+// the reveal from a card costing 1 or less that was *not* pitched. Flock never
+// pays for itself (a hand copy can't be pitched for itself; an arsenal copy
+// isn't in hand).
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn a_card_to_reveal_but_nothing_else_to_pitch_is_not_enough() {
+    // Sharpen Steel could be revealed, or pitched for the cost, but not both.
+    let gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR], 0);
+    assert!(!flock_offered(&gs));
+    // A second card to pitch fixes it.
+    let gs = dorinthea_holding(&[Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR, Card::HitAndRunB], 0);
+    assert!(flock_offered(&gs));
+}
+
+#[test]
+fn flock_in_the_arsenal_still_needs_both_a_pitch_and_a_reveal() {
+    let mut gs = dorinthea_holding(&[Card::SharpenSteelR, Card::FlockOfTheFeatherWalkersR], 0);
+    put_in_arsenal(&mut gs, PlayerIndex::P1, Card::FlockOfTheFeatherWalkersR);
+    assert!(!legal_actions(&gs).iter().any(|a| a.typ == ActionType::PlayCard
+        && card_of(&gs, a) == Card::FlockOfTheFeatherWalkersR));
+    // With a floating resource, Sharpen Steel is free to be revealed.
+    gs.p1.resources = 1;
+    assert!(legal_actions(&gs).iter().any(|a| a.typ == ActionType::PlayCard
+        && card_of(&gs, a) == Card::FlockOfTheFeatherWalkersR));
+}
+
+/// Brute force: can `others` (the hand, less the Flock being played) pay a
+/// cost of `cost` on top of `resources`, while keeping back a card costing 1
+/// or less to reveal? Tries every subset of `others` as the pitched cards.
+fn flock_payable_by_brute_force(others: &[Card], resources: u8, cost: u8) -> bool {
+    (0u32..1 << others.len()).any(|pitched| {
+        let pitch: u8 = others.iter().enumerate()
+            .filter(|(i, _)| pitched & (1 << i) != 0)
+            .map(|(_, c)| c.data().pitch)
+            .sum();
+        let revealable_left = others.iter().enumerate()
+            .any(|(i, c)| pitched & (1 << i) == 0 && c.data().cost <= 1);
+        resources + pitch >= cost && revealable_left
+    })
+}
+
+/// Follow every legal pitch and reveal from here until the play is on the
+/// stack and finished; panic if any line runs out of legal actions first.
+fn every_payment_line_completes(gs: &TestGame, path: &mut Vec<Action>) {
+    if !matches!(gs.phase, Phase::ActionPitch | Phase::RevealChoice) {
+        assert_eq!(gs.phase, Phase::ActionInstant, "after {:?}", path);
+        assert_eq!(stack_top_card(gs), Some(Card::FlockOfTheFeatherWalkersR));
+        assert!(gs.pending_card.is_none());
+        // The reveal was paid: some card costing 1 or less is known in hand.
+        assert!(gs.p1.hand_known.iter().any(|(id, _)| gs.p1.card(id).data().cost <= 1),
+            "no card was revealed after {:?}", path);
+        return;
+    }
+    let actions = legal_actions(gs);
+    assert!(!actions.is_empty(), "stuck paying for Flock after {:?}", path);
+    for a in actions.iter() {
+        let mut next = gs.clone();
+        step(&mut next, *a);
+        path.push(*a);
+        every_payment_line_completes(&next, path);
+        path.pop();
+    }
+}
+
+#[test]
+fn flock_is_offered_exactly_when_it_can_be_paid_and_never_dead_ends() {
+    // One card per (cost <= 1?, pitch) class, plus a second Flock.
+    let pool = [
+        Card::SharpenSteelR,   // cost 0, pitch 1
+        Card::OnAKnifeEdgeY,   // cost 0, pitch 2
+        Card::HitAndRunB,      // cost 0, pitch 3
+        Card::EnGardeR,        // cost 1, pitch 1
+        Card::FlockOfTheFeatherWalkersR, // cost 1, pitch 1
+        Card::DrivingBladeY,   // cost 2, pitch 2 — cannot be revealed
+        Card::ToughenUpB,      // cost 2, pitch 3 — cannot be revealed
+    ];
+    let cost = Card::FlockOfTheFeatherWalkersR.data().cost;
+    let mut checked = 0;
+    let mut offered_count = 0;
+    // Every multiset of up to 3 other cards from the pool.
+    let mut hands: Vec<Vec<Card>> = vec![vec![]];
+    for size in 1..=3 {
+        fn extend(pool: &[Card], start: usize, left: usize, cur: &mut Vec<Card>, out: &mut Vec<Vec<Card>>) {
+            if left == 0 { out.push(cur.clone()); return; }
+            for i in start..pool.len() {
+                cur.push(pool[i]);
+                extend(pool, i, left - 1, cur, out);
+                cur.pop();
+            }
+        }
+        extend(&pool, 0, size, &mut vec![], &mut hands);
+    }
+    // A Blitz deck holds at most two copies of a card, and a zone counts at
+    // most three, so skip hands with more Flocks than that.
+    hands.retain(|h| h.iter().filter(|&&c| c == Card::FlockOfTheFeatherWalkersR).count() <= 1);
+    for others in &hands {
+        for resources in [0u8, 1] {
+            for from_arsenal in [false, true] {
+                let mut hand = vec![Card::FlockOfTheFeatherWalkersR];
+                hand.extend_from_slice(others);
+                let mut gs = dorinthea_holding(&hand, resources);
+                let zone = if from_arsenal {
+                    put_in_arsenal(&mut gs, PlayerIndex::P1, Card::FlockOfTheFeatherWalkersR);
+                    Zone::Arsenal
+                } else {
+                    Zone::Hand
+                };
+                let flock = legal_actions(&gs).iter().copied().find(|a| {
+                    a.typ == ActionType::PlayCard && a.card_ref().zone == zone
+                        && card_of(&gs, a) == Card::FlockOfTheFeatherWalkersR
+                });
+                let expected = flock_payable_by_brute_force(others, resources, cost);
+                assert_eq!(flock.is_some(), expected,
+                    "hand {:?} + Flock (from {:?}), {} floating", others, zone, resources);
+                if let Some(play) = flock {
+                    offered_count += 1;
+                    let mut next = gs.clone();
+                    step(&mut next, play);
+                    every_payment_line_completes(&next, &mut vec![play]);
+                }
+                checked += 1;
+            }
+        }
+    }
+    // Make sure the sweep really covered both outcomes.
+    assert!(checked > 400 && offered_count > 0 && offered_count < checked,
+        "checked {} hands, Flock offered in {}", checked, offered_count);
+}

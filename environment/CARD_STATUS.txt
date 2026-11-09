@@ -761,6 +761,12 @@ on-play-effect helpers).
                the_opponents_attack_leaves_your_quicken_alone,
                quickens_are_capped_at_two_and_all_go_at_once,
                tokens_are_not_counted_among_the_players_cards
+               a_card_to_reveal_but_nothing_else_to_pitch_is_not_enough,
+               flock_in_the_arsenal_still_needs_both_a_pitch_and_a_reveal,
+               flock_is_offered_exactly_when_it_can_be_paid_and_never_dead_ends
+               (the last checks 448 hand / floating / hand-or-arsenal
+               combinations against a brute-force answer, and walks every
+               legal pitch and reveal of each offered play to the stack)
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
