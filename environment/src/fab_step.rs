@@ -857,13 +857,23 @@ fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
             gs.active_player = gs.turn_player;
         }
     } else {
-        // A resolved card goes to the graveyard, face up.
+        // A resolved card goes to the graveyard, face up. For an armor ability
+        // whose cost is destroying its card (Blossom of Spring), this is where
+        // the destroyed card ends up: it left its equipment slot when the
+        // activation was paid for (`commit_pending_to_stack`) and never returns.
         gs.player_mut(owner).add_to(Zone::Graveyard, top);
+        // An activated ability's own effect, e.g. Blossom of Spring's "Gain {r}".
+        // The resource floats like a pitched one until spent or the turn ends.
+        let gained = activated_ability(pending.typ, data).map_or(0, |a| a.resources_gained());
+        if gained > 0 {
+            let player = gs.player_mut(owner);
+            player.resources = player.resources.saturating_add(gained);
+        }
         // A resolving non-attack action — an action card, or an activated
         // action-speed ability — spends the owner's action point unless it has
         // Go Again. Attacks are handled when combat damage resolves; instants and
         // reactions are free.
-        if uses_action_point(pending.typ, data) && !data.keyword.contains(Keyword::GoAgain) {
+        if uses_action_point(pending.typ, data) && !resolves_with_go_again(pending.typ, data) {
             spend_action_point(gs, owner);
         }
         if gs.stack_is_empty() {
@@ -1281,6 +1291,22 @@ fn commits_as_defense(
     typ == ActionType::PlayCard
         && data.typ == CardType::DefenseReaction
         && owner != turn_player
+}
+
+/// The ability being activated, when `typ` is an `Activate`; `None` for a card
+/// that is played (its catalog `ability`, if any, is not in use).
+fn activated_ability(typ: ActionType, data: &CardData) -> Option<&Ability> {
+    if typ == ActionType::Activate { data.ability.as_ref() } else { None }
+}
+
+/// Whether a resolving non-attack action has Go Again. A played card has it if
+/// the card carries the keyword; an activated ability has it if the ability
+/// says so (Blossom of Spring), whatever keywords its card carries.
+fn resolves_with_go_again(typ: ActionType, data: &CardData) -> bool {
+    match activated_ability(typ, data) {
+        Some(ability) => ability.go_again(),
+        None => data.keyword.contains(Keyword::GoAgain),
+    }
 }
 
 /// Whether committing `typ` on `data` spends an action point — i.e. it is an

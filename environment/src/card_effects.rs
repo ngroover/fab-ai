@@ -76,6 +76,24 @@ impl Ability {
         matches!(self, Ability::DiscardCardPlusBlock | Ability::Attack2 | Ability::Attack1)
     }
 
+    /// Whether this ability has Go Again: resolving it hands back the action
+    /// point it would otherwise spend. Blossom of Spring's "Destroy Blossom of
+    /// Spring: Gain {r}. Go again" is the only one implemented so far. The go
+    /// again belongs to the ability, not to the card, so it is read from here
+    /// rather than from the card's keywords.
+    pub fn go_again(&self) -> bool {
+        matches!(self, Ability::DestroyGain1Resource)
+    }
+
+    /// Resource points gained when this ability resolves. Blossom of Spring
+    /// gains {r}; no other ability gains any.
+    pub fn resources_gained(&self) -> u8 {
+        match self {
+            Ability::DestroyGain1Resource => 1,
+            _ => 0,
+        }
+    }
+
     /// The card type at which this ability is activated. Action-speed abilities
     /// cost an action point on your turn; instant-speed abilities can be used at
     /// any time you have priority (e.g. during the defend step).

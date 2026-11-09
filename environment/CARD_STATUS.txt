@@ -559,6 +559,33 @@ on-play-effect helpers).
                the_next_attack_after_breaking_the_chain_opens_a_fresh_chain,
                passing_still_closes_the_chain_and_ends_the_action_phase
 
+  [x] Blossom of Spring (Card::BlossomOfSpring)
+        Generic chest equipment, 0 defense. "Action — Destroy Blossom of
+        Spring: Gain {r}. Go again."
+          * Offered by `push_equipment_activations` as an Activate from the
+            equipment zone: action speed, so it needs an action point, but it
+            costs no resources, so even an empty hand can use it. Being free, it
+            goes straight onto the stack with no pitch phase.
+          * Destroying the card is the cost: it leaves its slot when the
+            activation is paid for (`commit_pending_to_stack`) and goes to the
+            graveyard when the ability resolves. Nothing returns it, so it can
+            be used once per game.
+          * On resolution the owner gains 1 floating resource
+            (`Ability::resources_gained`), lost at end of turn like any other.
+          * Go Again belongs to the ability, not the card:
+            `Ability::go_again`, read by `resolves_with_go_again` in
+            `resolve_top_of_stack`, so the action point is not spent.
+          * Rules change moved random play, so the seven-layer stack seed in
+            `random_game_with_a_seven_layer_stack_finishes` was found again with
+            a 20M-game sweep (now 1995699; still 7 layers max, STACK_SIZE kept).
+        Tests: blossom_of_spring_is_a_free_action_ability_with_go_again_gaining_1,
+               blossom_of_spring_is_offered_with_an_action_point_and_an_empty_hand,
+               blossom_of_spring_needs_an_action_point,
+               blossom_of_spring_gains_a_resource_keeps_the_action_point_and_is_destroyed,
+               blossom_of_spring_cannot_be_activated_again_once_destroyed,
+               blossom_of_spring_resource_pays_for_a_card_the_hand_could_not,
+               blossom_of_spring_stays_destroyed_on_rhinars_next_turn
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -585,7 +612,7 @@ on-play-effect helpers).
   [x] Rhinar (hero)          (Card::Rhinar)  — see COMPLETE section above
   [x] Chief Rukutan          (Card::ChiefRukutan)  — see COMPLETE section above
   [x] Bone Basher (weapon)   (Card::BoneBasher)  — see COMPLETE section above
-  [ ] Blossom of Spring      (Card::BlossomOfSpring)
+  [x] Blossom of Spring      (Card::BlossomOfSpring)  — see COMPLETE section above
   [ ] Bone Vizier            (Card::BoneVizier)
   [ ] Ironhide Gauntlet      (Card::IronhideGauntlet)
   [ ] Ironhide Legs          (Card::IronhideLegs)

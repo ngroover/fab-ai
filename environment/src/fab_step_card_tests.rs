@@ -31,6 +31,7 @@
 //!   - Chief Ruk'utan      (`Card::ChiefRukutan`)
 //!   - Bone Basher         (`Card::BoneBasher`)
 //!   - Breaking the combat chain (`ActionType::CloseChain`)
+//!   - Blossom of Spring   (`Card::BlossomOfSpring`)
 
 use super::*;
 use crate::cards::Card;
@@ -3797,4 +3798,127 @@ fn passing_still_closes_the_chain_and_ends_the_action_phase() {
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     assert_eq!(gs.phase, Phase::Arsenal);
     assert!(in_zone(&gs, PlayerIndex::P1, weapon, Zone::Weapon));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Blossom of Spring (Card::BlossomOfSpring)
+//
+// Generic chest equipment, 0 defense: "Action — Destroy Blossom of Spring:
+// Gain {r}. Go again." The activation costs no resources but is action speed,
+// so it needs an action point; destroying the card is its cost, so it leaves
+// the equipment slot as it is activated and ends in the graveyard. Resolving
+// gains a floating resource, and Go Again hands the action point back.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn blossom_offered(gs: &Gamestate) -> bool {
+    legal_actions(gs).iter().any(|a| {
+        a.typ == ActionType::Activate && card_of(gs, a) == Card::BlossomOfSpring
+    })
+}
+
+/// Activate Blossom of Spring on Rhinar's first turn holding `hand`, and let
+/// both players pass so the ability resolves. Rhinar starts with no floating
+/// resources.
+fn activate_and_resolve_blossom(hand: &[Card]) -> TestGame {
+    let mut gs = setup_rhinar_action_phase();
+    set_hand(&mut gs, PlayerIndex::P1, hand);
+    gs.p1.resources = 0;
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::BlossomOfSpring, Zone::Equipment));
+
+    step_card(&mut gs, ActionType::Activate, Card::BlossomOfSpring);
+    // Free to activate: straight onto the stack, no pitch phase.
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    assert_eq!(stack_top_card(&gs), Some(Card::BlossomOfSpring));
+    // Destroying it is the cost, so it is already out of its slot.
+    assert!(!in_zone(&gs, PlayerIndex::P1, Card::BlossomOfSpring, Zone::Equipment));
+
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    gs
+}
+
+#[test]
+fn blossom_of_spring_is_a_free_action_ability_with_go_again_gaining_1() {
+    let data = Card::BlossomOfSpring.data();
+    assert_eq!(data.typ, CardType::Equipment);
+    assert_eq!(data.card_class, CardClass::Generic);
+    assert_eq!(data.defense, 0);
+    let ability = data.ability.as_ref().expect("Blossom of Spring has an ability");
+    assert!(matches!(ability, Ability::DestroyGain1Resource));
+    assert_eq!(ability.resource_cost(), 0);
+    assert_eq!(ability.card_type(), CardType::Action);
+    assert_eq!(ability.resources_gained(), 1);
+    assert!(ability.go_again());
+    assert!(!ability.once_per_turn());
+    assert!(!ability.discards_a_card());
+    assert!(!ability.only_while_defending());
+}
+
+#[test]
+fn blossom_of_spring_is_offered_with_an_action_point_and_an_empty_hand() {
+    let mut gs = setup_rhinar_action_phase();
+    set_hand(&mut gs, PlayerIndex::P1, &[]);
+    gs.p1.resources = 0;
+    assert!(blossom_offered(&gs), "it costs nothing, so an empty hand can activate it");
+}
+
+#[test]
+fn blossom_of_spring_needs_an_action_point() {
+    let mut gs = setup_rhinar_action_phase();
+    gs.p1.action_points = 0;
+    assert!(!blossom_offered(&gs));
+}
+
+#[test]
+fn blossom_of_spring_gains_a_resource_keeps_the_action_point_and_is_destroyed() {
+    let gs = activate_and_resolve_blossom(&[]);
+    assert_eq!(gs.p1.resources, 1, "Gain {{r}}");
+    assert_eq!(gs.p1.action_points, 1, "Go again: the action point comes back");
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::BlossomOfSpring, Zone::Graveyard));
+    assert!(!in_zone(&gs, PlayerIndex::P1, Card::BlossomOfSpring, Zone::Equipment));
+    // Nothing went to the combat chain: an armor ability is not an attack.
+    assert!(gs.p1.chain_link.iter().all(|l| l.is_empty()));
+    assert!(gs.stack_is_empty());
+}
+
+#[test]
+fn blossom_of_spring_cannot_be_activated_again_once_destroyed() {
+    let gs = activate_and_resolve_blossom(&[]);
+    assert!(!blossom_offered(&gs));
+}
+
+#[test]
+fn blossom_of_spring_resource_pays_for_a_card_the_hand_could_not() {
+    // Awakening Bellow costs 1, and a lone card cannot pitch for itself.
+    let mut gs = setup_rhinar_action_phase();
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::AwakeningBellowR]);
+    gs.p1.resources = 0;
+    let bellow_offered = |gs: &Gamestate| legal_actions(gs).iter().any(|a| {
+        a.typ == ActionType::PlayCard && card_of(gs, a) == Card::AwakeningBellowR
+    });
+    assert!(!bellow_offered(&gs));
+
+    let mut gs = activate_and_resolve_blossom(&[Card::AwakeningBellowR]);
+    assert!(bellow_offered(&gs), "the gained resource and kept action point allow the play");
+
+    // Playing it spends the floating resource with no pitch phase.
+    step_card(&mut gs, ActionType::PlayCard, Card::AwakeningBellowR);
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    assert_eq!(gs.p1.resources, 0);
+}
+
+#[test]
+fn blossom_of_spring_stays_destroyed_on_rhinars_next_turn() {
+    let mut gs = activate_and_resolve_blossom(&[]);
+    while gs.turn_player == PlayerIndex::P1 {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    while !(gs.turn_player == PlayerIndex::P1 && gs.phase == Phase::Action) {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.p1.resources, 0, "the unspent resource was lost at end of turn");
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::BlossomOfSpring, Zone::Graveyard));
+    assert!(!blossom_offered(&gs));
 }
