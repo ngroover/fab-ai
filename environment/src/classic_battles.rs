@@ -1173,9 +1173,19 @@ static CARD_CATALOG: [CardData; 53] = [
             defend_effect: None,
             next_attack_effect: None,
             additional_cost: None,
-            attack_effect: None,
+            attack_effect: Some(AttackEffect {
+                attack: AttackKind::Sword,
+                targeted: true,
+                condition: OnPlayConditionType::Always,
+                effect: AttackEffectType::GainGoAgain,
+                magnitude: 0,
+            }),
             play_condition: None,
-            play_effect: None,
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::Always,
+                effectType: OnPlayEffectType::NextSwordPower,
+                magnitude: 2,
+            }),
             mentor_effect: None,
         },
         // Slice and Dice

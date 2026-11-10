@@ -540,6 +540,13 @@ pub struct Player {
     /// reach combat damage spends it. Cleared at the start of each turn so it
     /// never leaks.
     pub next_attack_bonus : u8,
+    /// Extra power banked for the *next sword attack* this player makes this
+    /// turn (Run Through's "+2 power"). Unlike `next_weapon_attack_bonus` it is
+    /// handed over as that attack is made, onto `attack_power_bonus`, rather
+    /// than read at combat damage: Run Through banks it during the reaction
+    /// step of a sword attack, and that attack must not take it. Cleared at the
+    /// start of each turn so it never leaks.
+    pub next_sword_attack_bonus : u8,
     /// +1 power counters on this player's weapon (Glistening Steelblade puts
     /// them on Dawnblade). Each adds 1 to the weapon's power whenever it
     /// attacks. Counters stay on the card for the rest of the game — the
@@ -845,6 +852,7 @@ impl Player {
             next_brute_attack_conditional_bonus: 0,
             next_weapon_attack_bonus: 0,
             next_attack_bonus: 0,
+            next_sword_attack_bonus: 0,
             weapon_power_counters: 0,
             dawnblade_hit_counter_effects: 0,
             flags: PlayerFlags::empty(),

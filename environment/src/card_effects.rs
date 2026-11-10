@@ -176,6 +176,13 @@ pub enum OnPlayEffectType {
     /// swing takes and spends it, so an attack action card in between leaves
     /// it banked.
     NextWeaponPower,
+    /// Banks `magnitude` power for the next *sword* attack the owner makes
+    /// this turn (Run Through's "Your next sword attack this turn gains +2
+    /// power"). Banked on `Player::next_sword_attack_bonus` and handed to that
+    /// attack as it is made (`fab_step::finish_commit`), so when Run Through
+    /// is played into a sword attack, that attack — already made — does not
+    /// take it; the next swing does.
+    NextSwordPower,
 }
 
 pub struct OnPlayEffect {

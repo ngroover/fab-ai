@@ -132,6 +132,8 @@ fn begin_turn(gs: &mut Gamestate) {
     gs.p2.next_weapon_attack_bonus = 0;
     gs.p1.next_attack_bonus = 0;
     gs.p2.next_attack_bonus = 0;
+    gs.p1.next_sword_attack_bonus = 0;
+    gs.p2.next_sword_attack_bonus = 0;
     // Clear the per-turn "has intimidated" flag so a prior turn's Intimidate
     // can never satisfy this turn's "if you've intimidated" conditions.
     gs.p1.set_has_intimidated(false);
@@ -1523,6 +1525,12 @@ fn apply_on_play_effect_type(gs: &mut Gamestate, rng: &mut GameRng, owner: Playe
             let player = gs.player_mut(owner);
             player.next_weapon_attack_bonus = player.next_weapon_attack_bonus.saturating_add(effect.magnitude);
         }
+        // Run Through: banked for the next sword attack, handed to it as it is
+        // made (`finish_commit`).
+        OnPlayEffectType::NextSwordPower => {
+            let player = gs.player_mut(owner);
+            player.next_sword_attack_bonus = player.next_sword_attack_bonus.saturating_add(effect.magnitude);
+        }
         OnPlayEffectType::NextBruteConditionalPower => {
             let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
             player.next_brute_attack_conditional_bonus =
@@ -1831,6 +1839,15 @@ fn finish_commit(gs: &mut Gamestate, rng: &mut GameRng, pending: PendingCard) {
         if is_sword(data) && gs.player(owner).next_sword_go_again() {
             gs.player_mut(owner).set_next_sword_go_again(false);
             attack_gains_go_again(gs, owner, pending.card);
+        }
+        // Run Through's "your next sword attack this turn gains +2 power" is
+        // spent as that attack is made, onto the attack's own bonus. Handing
+        // it over here rather than at combat damage keeps it off the sword
+        // attack Run Through was played into, which was made before it.
+        if is_sword(data) && gs.player(owner).next_sword_attack_bonus > 0 {
+            let player = gs.player_mut(owner);
+            player.attack_power_bonus = player.attack_power_bonus.saturating_add(player.next_sword_attack_bonus);
+            player.next_sword_attack_bonus = 0;
         }
     }
 

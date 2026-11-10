@@ -1094,6 +1094,26 @@ on-play-effect helpers).
                a_club_swing_does_not_take_a_banked_sword_go_again,
                on_a_knife_edge_does_not_outlive_the_turn
 
+  [x] Run Through   (Card::RunThroughY)
+        "Target sword attack gains go again. Your next sword attack this turn
+        gains +2 power." (Warrior attack reaction, cost 1, pitch 2, 3 block.)
+          * The go again is an `AttackEffect` (sword, targeted,
+            `GainGoAgain`): only offered into a sword attack (Dawnblade), and
+            applied through `attack_gains_go_again` as the card resolves, so
+            on Dawnblade it sets off Dorinthea's extra attack.
+          * The +2 is a new on-play `OnPlayEffectType::NextSwordPower`, banked
+            on `Player::next_sword_attack_bonus`. Unlike En Garde's
+            `next_weapon_attack_bonus` (read at combat damage), it is handed
+            onto `attack_power_bonus` as the next sword attack is made
+            (`fab_step::finish_commit`): Run Through is played during a sword
+            attack, which must not take its own +2. An attack action card
+            leaves it banked. Cleared each turn.
+        Tests: run_through_is_a_targeted_sword_go_again_banking_2_for_the_next_sword_attack,
+               run_through_gives_dawnblade_go_again_and_an_extra_attack_with_plus_2,
+               run_through_is_not_offered_against_an_attack_action_card,
+               run_throughs_bonus_is_left_banked_by_an_attack_action_card,
+               run_through_on_the_extra_swing_grants_no_third_attack_and_its_bonus_ends_with_the_turn
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1141,7 +1161,7 @@ on-play-effect helpers).
   [x] Glistening Steelblade          (Card::GlisteningSteelbladeY)  — see COMPLETE section above
   [x] On a Knife Edge                (Card::OnAKnifeEdgeY)  — see COMPLETE section above
   [ ] Out for Blood                  (Card::OutForBloodY)
-  [ ] Run Through                    (Card::RunThroughY)
+  [x] Run Through                    (Card::RunThroughY)  — see COMPLETE section above
   [ ] Slice and Dice                 (Card::SliceAndDiceY)
   [ ] Blade Flash                    (Card::BladeFlashB)
   [ ] Hit and Run                    (Card::HitAndRunB)

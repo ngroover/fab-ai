@@ -49,6 +49,7 @@
 //!   - Driving Blade       (`Card::DrivingBladeY`)
 //!   - Glistening Steelblade (`Card::GlisteningSteelbladeY`)
 //!   - On a Knife Edge     (`Card::OnAKnifeEdgeY`)
+//!   - Run Through         (`Card::RunThroughY`)
 
 use super::*;
 use crate::cards::Card;
@@ -6527,4 +6528,137 @@ fn on_a_knife_edge_does_not_outlive_the_turn() {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     }
     assert!(!gs.p1.next_sword_go_again());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Run Through (Card::RunThroughY)
+//
+// Warrior attack reaction, cost 1, 3 block: "Target sword attack gains go
+// again. Your next sword attack this turn gains +2 power." The go again is an
+// `AttackEffect` (sword, targeted, `GainGoAgain`), so it is only offered into a
+// sword attack and, on Dawnblade, sets off Dorinthea's extra attack. The +2 is
+// an on-play `NextSwordPower`, banked on `next_sword_attack_bonus` and handed
+// to the next sword attack as it is made — never to the attack Run Through
+// was played into.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea swings Dawnblade paying with Visit the Blacksmith (2 floating),
+/// Rhinar does not block, and she plays Run Through from the float and lets it
+/// resolve. Still in the reaction step, 1 resource floating.
+fn dawnblade_run_through(gs: &mut TestGame) {
+    dawnblade_into_reaction_step(gs, Some(Card::VisitTheBlacksmithB));
+    assert!(playable_cards(gs).contains(&Card::RunThroughY));
+    step_card(gs, ActionType::PlayCard, Card::RunThroughY);
+    assert!(on_stack(gs, Card::RunThroughY));
+    assert_eq!(gs.p1.resources, 1);
+    pass_once_each(gs);
+    assert!(in_zone(gs, PlayerIndex::P1, Card::RunThroughY, Zone::Graveyard));
+}
+
+#[test]
+fn run_through_is_a_targeted_sword_go_again_banking_2_for_the_next_sword_attack() {
+    use crate::card_effects::{AttackEffectType, AttackKind, OnPlayConditionType, OnPlayEffectType};
+    let data = Card::RunThroughY.data();
+    assert_eq!(data.typ, CardType::AttackReaction);
+    assert_eq!((data.cost, data.pitch, data.defense), (1, 2, 3));
+    assert_eq!(data.card_class, CardClass::Warrior);
+    let effect = data.attack_effect.as_ref().expect("Run Through should carry an attack effect");
+    assert!(matches!(effect.attack, AttackKind::Sword));
+    assert!(effect.targeted, "\"target sword attack\"");
+    assert!(matches!(effect.condition, OnPlayConditionType::Always));
+    assert!(matches!(effect.effect, AttackEffectType::GainGoAgain));
+    let power = data.play_effect.as_ref().expect("Run Through should carry an on-play effect");
+    assert!(matches!(power.condition, OnPlayConditionType::Always));
+    assert!(matches!(power.effectType, OnPlayEffectType::NextSwordPower));
+    assert_eq!(power.magnitude, 2);
+    assert!(data.next_attack_effect.is_none() && data.play_condition.is_none());
+}
+
+#[test]
+fn run_through_gives_dawnblade_go_again_and_an_extra_attack_with_plus_2() {
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB, Card::RunThroughY], 0);
+    dawnblade_run_through(&mut gs);
+    assert!(gs.p1.attack_go_again_bonus());
+    assert!(gs.p1.extra_weapon_attack());
+    assert_eq!(gs.p1.next_sword_attack_bonus, 2);
+    close_reaction_step(&mut gs);
+    // The +2 is for the *next* sword attack, not this one.
+    assert_eq!(gs.p2.life, 20 - 2);
+    assert_eq!(gs.p1.next_sword_attack_bonus, 2, "still banked");
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.p1.action_points, 1, "go again");
+
+    // The extra swing, from the float: 2 + 1 (second attack) + 2 (Run Through).
+    dawnblade_into_reaction_step(&mut gs, None);
+    assert_eq!(gs.p1.next_sword_attack_bonus, 0, "spent as the attack was made");
+    assert_eq!(gs.p1.attack_power_bonus, 2);
+    close_reaction_step(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 2 - 5);
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+    assert_eq!(gs.p1.action_points, 0);
+}
+
+#[test]
+fn run_through_is_not_offered_against_an_attack_action_card() {
+    let mut gs = rhinar_defending_flock();
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // no blockers
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::RunThroughY, Card::VisitTheBlacksmithB]);
+    assert!(!playable_cards(&gs).contains(&Card::RunThroughY), "no sword attack to target");
+}
+
+#[test]
+fn run_throughs_bonus_is_left_banked_by_an_attack_action_card() {
+    // After Run Through, Flock of the Feather Walkers (its 1 paid from the
+    // float, revealing Sharpen Steel) hits for its own 5: only a sword attack
+    // takes the +2.
+    let mut gs = dorinthea_holding(&[
+        Card::VisitTheBlacksmithB, Card::RunThroughY,
+        Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR,
+    ], 0);
+    dawnblade_run_through(&mut gs);
+    close_reaction_step(&mut gs);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    if gs.phase == Phase::RevealChoice {
+        step_card(&mut gs, ActionType::Reveal, Card::SharpenSteelR);
+    }
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 2 - 5);
+    assert_eq!(gs.p1.next_sword_attack_bonus, 2);
+}
+
+#[test]
+fn run_through_on_the_extra_swing_grants_no_third_attack_and_its_bonus_ends_with_the_turn() {
+    // Run Through on the first swing, then again on the extra one: the second
+    // copy gives go again but Dorinthea's ability has fired already, so there
+    // is no third swing; its +2 waits for a sword attack that never comes.
+    let mut gs = dorinthea_holding(&[
+        Card::VisitTheBlacksmithB, Card::RunThroughY, Card::RunThroughY, Card::SharpenSteelR,
+    ], 0);
+    dawnblade_run_through(&mut gs);
+    close_reaction_step(&mut gs);
+    dawnblade_into_reaction_step(&mut gs, None);
+    step_card(&mut gs, ActionType::PlayCard, Card::RunThroughY);
+    assert_eq!(gs.phase, Phase::ReactionPitch, "nothing floating");
+    step_card(&mut gs, ActionType::Pitch, Card::SharpenSteelR);
+    pass_once_each(&mut gs);
+    close_reaction_step(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 2 - 5);
+    assert_eq!(gs.p1.action_points, 1, "go again");
+    assert_eq!(gs.p1.next_sword_attack_bonus, 2);
+    assert!(!dawnblade_swing_offered(&gs), "no third attack");
+    // Pass the turn away; with two cards pitched, the turn ends on ordering
+    // them to the bottom of the deck, which a pass does not answer.
+    while gs.turn_player == PlayerIndex::P1 {
+        let act = if gs.phase == Phase::PitchOrder {
+            legal_actions(&gs)[0]
+        } else {
+            Action{ typ: ActionType::Pass, card: None}
+        };
+        step(&mut gs, act);
+    }
+    assert_eq!(gs.p1.next_sword_attack_bonus, 0);
 }
