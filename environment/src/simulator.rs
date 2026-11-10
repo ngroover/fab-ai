@@ -164,7 +164,7 @@ mod tests {
         deepest
     }
 
-    /// Seed 247504 is the first of 20 million random games to reach six
+    /// Seed 35221 is the first of 20 million random games to reach six
     /// layers at once — the deepest the sweep found. It must finish without
     /// overflowing the stack. (The seed moves whenever a rules change alters
     /// random play; re-run `stack_depth_histogram` with 20,000,000 games to find
@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn deepest_random_game_finishes_within_the_stack_size() {
         use crate::game_state::STACK_SIZE;
-        let deepest = max_stack_depth(247504);
+        let deepest = max_stack_depth(35221);
         assert_eq!(deepest, 6);
         assert!(deepest <= STACK_SIZE);
     }

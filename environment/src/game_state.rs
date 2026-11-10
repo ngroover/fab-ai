@@ -56,7 +56,8 @@ pub const PLAYER_CARDS: usize = 45;
 /// reactions answered by two Dodges). Sized to the deepest stack random play
 /// reached: a sweep of 20 million random games went no deeper than 7 (seed
 /// 643619) before In the Swing was gated on two weapon attacks, and no deeper
-/// than 6 since (seed 247504; see `simulator::tests::stack_depth_histogram` and
+/// than 6 since (first at seed 35221 as of On a Knife Edge; see
+/// `simulator::tests::stack_depth_histogram` and
 /// `deepest_random_game_finishes_within_the_stack_size`). Kept at 7 for
 /// headroom: deliberate play could in principle go deeper; raise this if it
 /// ever panics.

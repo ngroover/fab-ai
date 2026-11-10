@@ -1082,6 +1082,11 @@ on-play-effect helpers).
             turn and on reset.
           * `fab_step::is_sword` is now shared by this and `AttackKind::Sword`.
           * Changes go again, so random play moved; see the stack-seed sweep.
+          * Stack-seed sweep after the batch from Second Swing through On a
+            Knife Edge (and the reaction-step fix): 20M random games still peak
+            at 6 layers, first at seed 35221, which
+            `deepest_random_game_finishes_within_the_stack_size` now uses.
+            STACK_SIZE stays 7.
         Tests: on_a_knife_edge_banks_go_again_for_the_next_sword_attack,
                on_a_knife_edge_gives_dawnblade_go_again_and_an_extra_attack,
                on_a_knife_edges_go_again_does_not_need_the_swing_to_hit,
