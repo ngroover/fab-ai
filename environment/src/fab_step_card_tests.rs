@@ -83,8 +83,8 @@ fn bare_fangs_discarding_power6_grants_plus2_power() {
 
     let effect = Card::BareFangsR
         .data()
-        .play_effect
-        .as_ref()
+        .play_effects
+        .first()
         .expect("Bare Fangs should carry an on-play effect");
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
 
@@ -108,8 +108,8 @@ fn bare_fangs_discarding_below_power6_grants_no_bonus() {
 
     let effect = Card::BareFangsR
         .data()
-        .play_effect
-        .as_ref()
+        .play_effects
+        .first()
         .expect("Bare Fangs should carry an on-play effect");
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
 
@@ -134,8 +134,8 @@ fn wild_ride_discarding_power6_grants_go_again() {
 
     let effect = Card::WildRideR
         .data()
-        .play_effect
-        .as_ref()
+        .play_effects
+        .first()
         .expect("Wild Ride should carry an on-play effect");
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
 
@@ -161,8 +161,8 @@ fn wild_ride_discarding_below_power6_grants_no_go_again() {
 
     let effect = Card::WildRideR
         .data()
-        .play_effect
-        .as_ref()
+        .play_effects
+        .first()
         .expect("Wild Ride should carry an on-play effect");
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
 
@@ -420,8 +420,8 @@ fn awakening_bellow_banks_plus3_for_the_next_brute_attack() {
     // Resolving Awakening Bellow's on-play effect banks +3 for the next brute.
     let effect = Card::AwakeningBellowR
         .data()
-        .play_effect
-        .as_ref()
+        .play_effects
+        .first()
         .expect("Awakening Bellow should carry an on-play effect");
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
@@ -432,7 +432,7 @@ fn awakening_bellow_followup_brute_attack_gets_plus3() {
     let mut gs = setup_rhinar_action_phase();
 
     // Bank the +3 brute bonus from Awakening Bellow.
-    let effect = Card::AwakeningBellowR.data().play_effect.as_ref().unwrap();
+    let effect = Card::AwakeningBellowR.data().play_effects.first().unwrap();
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
 
@@ -453,7 +453,7 @@ fn awakening_bellow_followup_generic_attack_does_not_get_plus3() {
     let mut gs = setup_rhinar_action_phase();
 
     // Bank the +3 brute bonus from Awakening Bellow.
-    let effect = Card::AwakeningBellowR.data().play_effect.as_ref().unwrap();
+    let effect = Card::AwakeningBellowR.data().play_effects.first().unwrap();
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
 
@@ -475,7 +475,7 @@ fn awakening_bellow_brute_weapon_swing_does_not_get_plus3() {
     let mut gs = setup_rhinar_action_phase();
 
     // Bank the +3 brute bonus from Awakening Bellow.
-    let effect = Card::AwakeningBellowR.data().play_effect.as_ref().unwrap();
+    let effect = Card::AwakeningBellowR.data().play_effects.first().unwrap();
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
 
@@ -515,8 +515,8 @@ fn beast_mode_gets_plus2_when_player_has_intimidated() {
     // Resolving Beast Mode's on-play effect banks +2 onto the resolving attack.
     let effect = Card::BeastModeR
         .data()
-        .play_effect
-        .as_ref()
+        .play_effects
+        .first()
         .expect("Beast Mode should carry an on-play effect");
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.attack_power_bonus, 2);
@@ -540,7 +540,7 @@ fn beast_mode_no_bonus_when_player_has_not_intimidated() {
     assert!(!gs.p1.has_intimidated());
 
     // Resolving Beast Mode's on-play effect does nothing: the condition fails.
-    let effect = Card::BeastModeR.data().play_effect.as_ref().unwrap();
+    let effect = Card::BeastModeR.data().play_effects.first().unwrap();
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.attack_power_bonus, 0);
 
@@ -624,7 +624,7 @@ fn bare_fangs_play_effect_power6_discard_also_intimidates() {
     put_on_top_of_deck(&mut gs, PlayerIndex::P1, pick);
     assert_eq!(intimidate_banish_count(&gs, PlayerIndex::P2), 0);
 
-    let effect = Card::BareFangsR.data().play_effect.as_ref().unwrap();
+    let effect = Card::BareFangsR.data().play_effects.first().unwrap();
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
 
     // The play effect banked its +2, and the 6-power discard also intimidated.
@@ -793,8 +793,8 @@ fn wrecking_ball_discarding_power6_intimidates_twice_under_rhinar() {
 
     let effect = Card::WreckingBallR
         .data()
-        .play_effect
-        .as_ref()
+        .play_effects
+        .first()
         .expect("Wrecking Ball should carry an on-play effect");
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
 
@@ -816,7 +816,7 @@ fn wrecking_ball_discarding_below_power6_does_not_intimidate() {
     let pick = find_p1_deck_card(&gs, |power| power < 6);
     put_on_top_of_deck(&mut gs, PlayerIndex::P1, pick);
 
-    let effect = Card::WreckingBallR.data().play_effect.as_ref().unwrap();
+    let effect = Card::WreckingBallR.data().play_effects.first().unwrap();
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
 
     // The discard missed the power-6 threshold, so neither the constant ability
@@ -848,7 +848,7 @@ fn assert_vanilla_attack(card: Card, cost: u8, power: u8, defense: u8, class: Ca
     assert_eq!(data.defense, defense);
     assert_eq!(data.card_class, class);
     assert!(data.keyword.is_empty(), "{:?} should carry no keywords", card);
-    assert!(data.play_effect.is_none(), "{:?} should have no on-play effect", card);
+    assert!(data.play_effects.is_empty(), "{:?} should have no on-play effect", card);
     assert!(data.additional_cost.is_none(), "{:?} should have no additional cost", card);
     assert!(data.ability.is_none(), "{:?} should have no activated ability", card);
     assert!(data.defend_effect.is_none(), "{:?} should have no defend effect", card);
@@ -944,7 +944,7 @@ fn clearing_bellow_has_go_again_and_intimidate() {
     assert!(data.keyword.contains(Keyword::GoAgain));
     assert!(data.keyword.contains(Keyword::Intimidate));
     // Both halves of the text are keywords: there is no on-play effect.
-    assert!(data.play_effect.is_none());
+    assert!(data.play_effects.is_empty());
 }
 
 #[test]
@@ -983,8 +983,8 @@ fn resolve_wounded_bull_at(owner: PlayerIndex, p1_life: u8, p2_life: u8) -> Test
 
     let effect = Card::WoundedBullY
         .data()
-        .play_effect
-        .as_ref()
+        .play_effects
+        .first()
         .expect("Wounded Bull should carry an on-play effect");
     apply_on_play_effect(&mut gs.state, &mut gs.rng, owner, effect);
     gs
@@ -997,7 +997,7 @@ fn wounded_bull_effect_is_conditional_power_on_less_life() {
     assert_eq!(data.typ, CardType::AttackAction);
     assert_eq!(data.power, 6);
     assert_eq!(data.card_class, CardClass::Generic);
-    let effect = data.play_effect.as_ref().expect("Wounded Bull should carry an on-play effect");
+    let effect = data.play_effects.first().expect("Wounded Bull should carry an on-play effect");
     assert!(matches!(effect.condition, OnPlayConditionType::HasLessLife));
     assert!(matches!(effect.effectType, OnPlayEffectType::ConditionalPower));
     assert_eq!(effect.magnitude, 1);
@@ -1081,7 +1081,7 @@ fn sigil_of_solace_effect_is_gain_1_life() {
     assert_eq!(data.defense, 0);
     assert!(data.no_block);
 
-    let effect = data.play_effect.as_ref().expect("Sigil of Solace should carry an on-play effect");
+    let effect = data.play_effects.first().expect("Sigil of Solace should carry an on-play effect");
     // Unconditional: the life is gained whenever it resolves.
     assert!(matches!(effect.condition, OnPlayConditionType::Always));
     assert!(matches!(effect.effectType, OnPlayEffectType::GainLife));
@@ -1121,7 +1121,7 @@ fn sigil_of_solace_heals_only_its_owner() {
     let mut gs = setup_rhinar_action_phase();
     let (p1_before, p2_before) = (gs.p1.life, gs.p2.life);
 
-    let effect = Card::SigilofSolaceB.data().play_effect.as_ref().unwrap();
+    let effect = Card::SigilofSolaceB.data().play_effects.first().unwrap();
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P2, effect);
 
     // The gain follows the resolving card's owner, leaving the opponent alone.
@@ -1145,8 +1145,8 @@ fn bank_come_to_fight_bonus() -> TestGame {
     let mut gs = setup_rhinar_action_phase();
     let effect = Card::ComeToFightB
         .data()
-        .play_effect
-        .as_ref()
+        .play_effects
+        .first()
         .expect("Come to Fight should carry an on-play effect");
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.next_attack_action_bonus, 1);
@@ -1165,7 +1165,7 @@ fn come_to_fight_effect_is_next_attack_action_power() {
     // "Go again" is the keyword half of the text.
     assert!(data.keyword.contains(Keyword::GoAgain));
 
-    let effect = data.play_effect.as_ref().expect("Come to Fight should carry an on-play effect");
+    let effect = data.play_effects.first().expect("Come to Fight should carry an on-play effect");
     assert!(matches!(effect.condition, OnPlayConditionType::Always));
     assert!(matches!(effect.effectType, OnPlayEffectType::NextAttackActionPower));
     assert_eq!(effect.magnitude, 1);
@@ -1308,7 +1308,7 @@ fn assert_vanilla_defense_reaction(card: Card, cost: u8, defense: u8) {
     assert_eq!(data.defense, defense);
     assert_eq!(data.power, 0);
     assert!(data.keyword.is_empty(), "{:?} should carry no keywords", card);
-    assert!(data.play_effect.is_none(), "{:?} should have no on-play effect", card);
+    assert!(data.play_effects.is_empty(), "{:?} should have no on-play effect", card);
     assert!(data.additional_cost.is_none(), "{:?} should have no additional cost", card);
     assert!(data.ability.is_none(), "{:?} should have no activated ability", card);
     assert!(data.defend_effect.is_none(), "{:?} should have no defend effect", card);
@@ -1724,7 +1724,7 @@ fn titanium_bauble_is_a_vanilla_3_pitch_3_block_resource() {
     // Nothing about it is an effect — it has no text at all.
     assert!(!data.no_block, "a resource with defense still blocks");
     assert!(data.keyword.is_empty(), "Titanium Bauble should carry no keywords");
-    assert!(data.play_effect.is_none(), "Titanium Bauble should have no on-play effect");
+    assert!(data.play_effects.is_empty(), "Titanium Bauble should have no on-play effect");
     assert!(data.additional_cost.is_none(), "Titanium Bauble should have no additional cost");
     assert!(data.ability.is_none(), "Titanium Bauble should have no activated ability");
     assert!(data.defend_effect.is_none(), "Titanium Bauble should have no defend effect");
@@ -1895,7 +1895,7 @@ fn pack_call_is_a_6_power_brute_attack_with_a_defend_trigger() {
     assert!(data.keyword.is_empty(), "Pack Call should carry no keywords");
     // Its whole text is the defend trigger — nothing happens when it is played.
     assert!(matches!(data.defend_effect, Some(DefendEffect::Reveal6BottomOtherwise)));
-    assert!(data.play_effect.is_none(), "Pack Call should have no on-play effect");
+    assert!(data.play_effects.is_empty(), "Pack Call should have no on-play effect");
     assert!(data.additional_cost.is_none(), "Pack Call should have no additional cost");
     assert!(data.ability.is_none(), "Pack Call should have no activated ability");
 }
@@ -2365,8 +2365,8 @@ fn bank_barraging_beatdown_bonus() -> TestGame {
     let mut gs = setup_rhinar_action_phase();
     let effect = Card::BarragingBeatdownY
         .data()
-        .play_effect
-        .as_ref()
+        .play_effects
+        .first()
         .expect("Barraging Beatdown should carry an on-play effect");
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
     assert_eq!(gs.p1.next_brute_attack_conditional_bonus, 3);
@@ -2400,7 +2400,7 @@ fn barraging_beatdown_is_a_0_cost_brute_action_with_go_again_and_intimidate() {
     // The middle clause is the on-play effect, and it is unconditional at play
     // time — the "less than 2 non-equipment cards" test belongs to the attack it
     // hands the ability to, not to playing this card.
-    let effect = data.play_effect.as_ref().expect("Barraging Beatdown should carry an on-play effect");
+    let effect = data.play_effects.first().expect("Barraging Beatdown should carry an on-play effect");
     assert!(matches!(effect.condition, OnPlayConditionType::Always));
     assert!(matches!(effect.effectType, OnPlayEffectType::NextBruteConditionalPower));
     assert_eq!(effect.magnitude, 3);
@@ -2553,8 +2553,8 @@ fn barraging_beatdown_stacks_with_awakening_bellows_unconditional_bonus() {
     // The two brute pumps are separate pots, so a brute attack collects both.
     let ab = Card::AwakeningBellowR
         .data()
-        .play_effect
-        .as_ref()
+        .play_effects
+        .first()
         .expect("Awakening Bellow should carry an on-play effect");
     apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, ab);
     assert_eq!(gs.p1.next_brute_attack_action_bonus, 3);
@@ -2683,7 +2683,7 @@ fn rally_the_rearguard_is_a_4_power_attack_action_with_a_defending_ability() {
     assert_eq!(data.defense, 2);
     // The whole text is the ability: no keywords, no on-play or defend effect.
     assert!(data.keyword.is_empty());
-    assert!(data.play_effect.is_none());
+    assert!(data.play_effects.is_empty());
     assert!(data.defend_effect.is_none());
 
     let ability = data.ability.as_ref().expect("Rally should carry an activated ability");
@@ -3656,7 +3656,7 @@ fn bone_basher_is_a_4_power_brute_club_swung_for_2() {
     assert_eq!(data.card_class, CardClass::Brute);
     assert_eq!(data.power, 4);
     assert!(data.keyword.is_empty(), "Bone Basher should carry no keywords (no Go Again)");
-    assert!(data.play_effect.is_none());
+    assert!(data.play_effects.is_empty());
     assert!(data.next_attack_effect.is_none());
     assert!(data.constant_effect.is_none());
 
@@ -4396,7 +4396,7 @@ fn en_garde_is_a_go_again_warrior_action_banking_plus_3_for_the_next_weapon_atta
     assert_eq!(data.pitch, 1);
     assert_eq!(data.defense, 3);
     assert!(data.keyword.contains(Keyword::GoAgain));
-    let effect = data.play_effect.as_ref().expect("En Garde should carry an on-play effect");
+    let effect = data.play_effects.first().expect("En Garde should carry an on-play effect");
     assert!(matches!(effect.condition, OnPlayConditionType::Always));
     assert!(matches!(effect.effectType, OnPlayEffectType::NextWeaponPower));
     assert_eq!(effect.magnitude, 3);
@@ -4543,7 +4543,7 @@ fn flock_is_a_5_power_attack_with_a_reveal_cost_that_creates_quicken() {
     assert_eq!((data.cost, data.pitch, data.power, data.defense), (1, 1, 5, 2));
     assert!(data.keyword.is_empty(), "Flock has no go again of its own");
     assert!(matches!(data.additional_cost, Some(AdditionalCostType::RevealCost1OrLess)));
-    let effect = data.play_effect.as_ref().expect("Flock creates a Quicken");
+    let effect = data.play_effects.first().expect("Flock creates a Quicken");
     assert!(matches!(effect.condition, OnPlayConditionType::Always));
     assert!(matches!(effect.effectType, OnPlayEffectType::CreateQuicken));
 }
@@ -5415,7 +5415,7 @@ fn in_the_swing_is_a_free_attack_reaction_that_pumps_a_weapon_attack_by_3() {
     assert!(matches!(effect.condition, OnPlayConditionType::Always));
     assert!(matches!(effect.effect, AttackEffectType::GainPower));
     assert_eq!(effect.magnitude, 3);
-    assert!(data.play_effect.is_none());
+    assert!(data.play_effects.is_empty());
 }
 
 #[test]
@@ -5533,7 +5533,7 @@ fn ironsong_response_is_a_free_reprise_attack_reaction_pumping_a_weapon_attack_b
     assert!(matches!(effect.condition, OnPlayConditionType::Reprise));
     assert!(matches!(effect.effect, AttackEffectType::GainPower));
     assert_eq!(effect.magnitude, 3);
-    assert!(data.play_condition.is_none() && data.play_effect.is_none());
+    assert!(data.play_condition.is_none() && data.play_effects.is_empty());
 }
 
 #[test]
@@ -5735,7 +5735,7 @@ fn second_swing_is_a_go_again_action_that_banks_4_for_the_next_attack() {
     assert_eq!((data.cost, data.pitch, data.defense), (1, 1, 3));
     assert_eq!(data.card_class, CardClass::Warrior);
     assert!(data.keyword.contains(Keyword::GoAgain));
-    let effect = data.play_effect.as_ref().expect("Second Swing should carry an on-play effect");
+    let effect = data.play_effects.first().expect("Second Swing should carry an on-play effect");
     assert!(matches!(effect.condition, OnPlayConditionType::HasAttackedWithWeapon));
     assert!(matches!(effect.effectType, OnPlayEffectType::NextAttackPower));
     assert_eq!(effect.magnitude, 4);
@@ -5848,7 +5848,7 @@ fn sharpen_steel_is_a_free_go_again_action_banking_3_for_the_next_weapon_attack(
     assert_eq!((data.cost, data.pitch, data.defense), (0, 1, 3));
     assert_eq!(data.card_class, CardClass::Warrior);
     assert!(data.keyword.contains(Keyword::GoAgain));
-    let effect = data.play_effect.as_ref().expect("Sharpen Steel should carry an on-play effect");
+    let effect = data.play_effects.first().expect("Sharpen Steel should carry an on-play effect");
     assert!(matches!(effect.condition, OnPlayConditionType::Always));
     assert!(matches!(effect.effectType, OnPlayEffectType::NextWeaponPower));
     assert_eq!(effect.magnitude, 3);
@@ -5942,7 +5942,7 @@ fn thrust_is_a_1_cost_attack_reaction_giving_a_targeted_sword_attack_plus_3() {
     assert!(matches!(effect.condition, OnPlayConditionType::Always));
     assert!(matches!(effect.effect, AttackEffectType::GainPower));
     assert_eq!(effect.magnitude, 3);
-    assert!(data.play_effect.is_none() && data.play_condition.is_none());
+    assert!(data.play_effects.is_empty() && data.play_condition.is_none());
 }
 
 #[test]
@@ -6045,7 +6045,7 @@ fn warriors_valor_banks_3_and_on_hit_go_again_for_the_next_weapon_attack() {
     assert_eq!((data.cost, data.pitch, data.defense), (1, 1, 3));
     assert_eq!(data.card_class, CardClass::Warrior);
     assert!(data.keyword.contains(Keyword::GoAgain));
-    let power = data.play_effect.as_ref().expect("Warrior's Valor should carry an on-play effect");
+    let power = data.play_effects.first().expect("Warrior's Valor should carry an on-play effect");
     assert!(matches!(power.condition, OnPlayConditionType::Always));
     assert!(matches!(power.effectType, OnPlayEffectType::NextWeaponPower));
     assert_eq!(power.magnitude, 3);
@@ -6159,7 +6159,7 @@ fn driving_blade_banks_2_and_go_again_for_the_next_weapon_attack() {
     assert_eq!((data.cost, data.pitch, data.defense), (2, 2, 3));
     assert_eq!(data.card_class, CardClass::Warrior);
     assert!(data.keyword.contains(Keyword::GoAgain));
-    let power = data.play_effect.as_ref().expect("Driving Blade should carry an on-play effect");
+    let power = data.play_effects.first().expect("Driving Blade should carry an on-play effect");
     assert!(matches!(power.condition, OnPlayConditionType::Always));
     assert!(matches!(power.effectType, OnPlayEffectType::NextWeaponPower));
     assert_eq!(power.magnitude, 2);
@@ -6314,7 +6314,7 @@ fn glistening_steelblade_is_a_dorinthea_specialization_with_go_again_and_a_hit_t
     let next = data.next_attack_effect.as_ref().expect("it should carry a next-attack effect");
     assert_eq!(next.attackType, NextAttackType::IsDawnblade);
     assert!(matches!(next.effectType, NextAttackEffectType::GoAgain));
-    let hit = data.play_effect.as_ref().expect("it should carry an on-play effect");
+    let hit = data.play_effects.first().expect("it should carry an on-play effect");
     assert!(matches!(hit.condition, OnPlayConditionType::Always));
     assert!(matches!(hit.effectType, OnPlayEffectType::DawnbladeHitCounterThisTurn));
     assert_eq!(hit.magnitude, 1);
@@ -6447,7 +6447,7 @@ fn on_a_knife_edge_banks_go_again_for_the_next_sword_attack() {
     let next = data.next_attack_effect.as_ref().expect("it should carry a next-attack effect");
     assert_eq!(next.attackType, NextAttackType::IsSword);
     assert!(matches!(next.effectType, NextAttackEffectType::GoAgain));
-    assert!(data.play_effect.is_none() && data.attack_effect.is_none());
+    assert!(data.play_effects.is_empty() && data.attack_effect.is_none());
 
     let mut gs = dorinthea_holding(&[Card::OnAKnifeEdgeY], 0);
     play_on_a_knife_edge(&mut gs);
@@ -6568,7 +6568,7 @@ fn run_through_is_a_targeted_sword_go_again_banking_2_for_the_next_sword_attack(
     assert!(effect.targeted, "\"target sword attack\"");
     assert!(matches!(effect.condition, OnPlayConditionType::Always));
     assert!(matches!(effect.effect, AttackEffectType::GainGoAgain));
-    let power = data.play_effect.as_ref().expect("Run Through should carry an on-play effect");
+    let power = data.play_effects.first().expect("Run Through should carry an on-play effect");
     assert!(matches!(power.condition, OnPlayConditionType::Always));
     assert!(matches!(power.effectType, OnPlayEffectType::NextSwordPower));
     assert_eq!(power.magnitude, 2);
@@ -6729,7 +6729,7 @@ fn out_for_blood_pumps_a_targeted_weapon_attack_by_2_with_a_reprise_plus_1_for_t
     assert!(matches!(effect.condition, OnPlayConditionType::Always));
     assert!(matches!(effect.effect, AttackEffectType::GainPower));
     assert_eq!(effect.magnitude, 2);
-    let next = data.play_effect.as_ref().expect("Out for Blood should carry an on-play effect");
+    let next = data.play_effects.first().expect("Out for Blood should carry an on-play effect");
     assert!(matches!(next.condition, OnPlayConditionType::Reprise));
     assert!(matches!(next.effectType, OnPlayEffectType::NextAttackPower));
     assert_eq!(next.magnitude, 1);
@@ -6804,10 +6804,10 @@ fn out_for_blood_reprise_bonus_does_not_outlive_the_turn() {
 // Warrior action, cost 0, 3 block: "The first time you attack with a weapon
 // this turn, if it's a sword or dagger it gains +1 power. The second time you
 // attack with a weapon this turn if it's a sword or dagger it gains +2 power.
-// Go again." An on-play `FirstAndSecondWeaponAttackPower` adds one to
-// `Player::slice_and_dice_effects` for the turn; as each weapon attack is made
-// it is counted, and the first takes +1 and the second +2 per effect, onto
-// `attack_power_bonus`.
+// Go again." Two on-play effects, `FirstWeaponAttackPower` (+1) and
+// `SecondWeaponAttackPower` (+2), bank on `Player::weapon_attack_power` for the
+// turn; as each weapon attack is made it is counted, and the Nth takes the
+// power banked for it onto `attack_power_bonus`.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Dorinthea plays Slice and Dice (free) and it resolves.
@@ -6828,15 +6828,20 @@ fn slice_and_dice_is_a_free_go_again_action_pumping_the_first_two_weapon_attacks
     assert_eq!((data.cost, data.pitch, data.defense), (0, 2, 3));
     assert_eq!(data.card_class, CardClass::Warrior);
     assert!(data.keyword.contains(Keyword::GoAgain));
-    let effect = data.play_effect.as_ref().expect("Slice and Dice should carry an on-play effect");
-    assert!(matches!(effect.condition, OnPlayConditionType::Always));
-    assert!(matches!(effect.effectType, OnPlayEffectType::FirstAndSecondWeaponAttackPower));
-    assert_eq!(effect.magnitude, 1);
+    let [first, second] = data.play_effects else {
+        panic!("Slice and Dice should carry two on-play effects");
+    };
+    assert!(matches!(first.condition, OnPlayConditionType::Always));
+    assert!(matches!(first.effectType, OnPlayEffectType::FirstWeaponAttackPower));
+    assert_eq!(first.magnitude, 1);
+    assert!(matches!(second.condition, OnPlayConditionType::Always));
+    assert!(matches!(second.effectType, OnPlayEffectType::SecondWeaponAttackPower));
+    assert_eq!(second.magnitude, 2);
     assert!(data.attack_effect.is_none() && data.next_attack_effect.is_none());
 
     let mut gs = dorinthea_holding(&[Card::SliceAndDiceY], 0);
     play_slice_and_dice(&mut gs);
-    assert_eq!(gs.p1.slice_and_dice_effects, 1);
+    assert_eq!(gs.p1.weapon_attack_power, [1, 2]);
 }
 
 #[test]
@@ -6885,7 +6890,7 @@ fn two_slice_and_dices_stack() {
     give_quicken(&mut gs, PlayerIndex::P1);
     play_slice_and_dice(&mut gs);
     play_slice_and_dice(&mut gs);
-    assert_eq!(gs.p1.slice_and_dice_effects, 2);
+    assert_eq!(gs.p1.weapon_attack_power, [2, 4]);
     // 2 + 2, then 2 + 1 + 4.
     dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
     assert_eq!(gs.p2.life, 20 - 4);
@@ -6898,7 +6903,7 @@ fn slice_and_dice_does_not_pump_a_club_swing() {
     // Rhinar's deck holds no Slice and Dice, so the effect is staged: Bone
     // Basher is a club, neither a sword nor a dagger.
     let mut gs = setup_rhinar_action_phase();
-    gs.p1.slice_and_dice_effects = 1;
+    gs.p1.weapon_attack_power = [1, 2];
     gs.p1.resources = 2;
     step_card_from(&mut gs, ActionType::Activate, Card::BoneBasher, Zone::Weapon);
     assert_eq!(gs.p1.weapon_attacks_this_turn(), 1);
@@ -6917,5 +6922,5 @@ fn slice_and_dice_does_not_outlive_the_turn() {
         };
         step(&mut gs, act);
     }
-    assert_eq!(gs.p1.slice_and_dice_effects, 0);
+    assert_eq!(gs.p1.weapon_attack_power, [0, 0]);
 }

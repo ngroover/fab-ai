@@ -181,18 +181,31 @@ pub enum OnPlayEffectType {
     /// power"). Kept apart from `NextWeaponPower` so a non-sword weapon (Bone
     /// Basher, a club) leaves it banked. See `next_attack_kind`.
     NextSwordPower,
-    /// Slice and Dice: "The first time you attack with a weapon this turn, if
-    /// it's a sword or dagger it gains +1 power. The second time you attack
-    /// with a weapon this turn, if it's a sword or dagger it gains +2 power."
-    /// Adds `magnitude` (one per copy) to `Player::slice_and_dice_effects` for
-    /// the turn. As each weapon attack is made it is counted
-    /// (`Player::weapon_attacks_this_turn`); the first takes +1 and the second
-    /// +2 per effect, if it is a sword or dagger (`fab_step::finish_commit`).
-    /// Attacks already made when the card resolves are missed.
-    FirstAndSecondWeaponAttackPower,
+    /// "The first time you attack with a weapon this turn, if it's a sword or
+    /// dagger it gains +`magnitude` power" (Slice and Dice's +1). Banked for
+    /// the turn on `Player::weapon_attack_power[0]`; the first weapon attack
+    /// made this turn takes it as it is made, if it is a sword or dagger
+    /// (`fab_step::finish_commit`). Already missed if that attack was made
+    /// before the card resolved. See `weapon_attack_ordinal`.
+    FirstWeaponAttackPower,
+    /// "The second time you attack with a weapon this turn, if it's a sword or
+    /// dagger it gains +`magnitude` power" (Slice and Dice's +2), on
+    /// `Player::weapon_attack_power[1]`. As `FirstWeaponAttackPower`.
+    SecondWeaponAttackPower,
 }
 
 impl OnPlayEffectType {
+    /// For an effect that banks power for the owner's Nth weapon attack this
+    /// turn, N - 1 (an index into `Player::weapon_attack_power`); `None` for
+    /// any other effect.
+    pub fn weapon_attack_ordinal(&self) -> Option<usize> {
+        match self {
+            OnPlayEffectType::FirstWeaponAttackPower => Some(0),
+            OnPlayEffectType::SecondWeaponAttackPower => Some(1),
+            _ => None,
+        }
+    }
+
     /// For an effect that banks power for the owner's next attack of one kind
     /// this turn, that kind; `None` for any other effect. Both kinds share one
     /// path: banked on `Player::next_attack_power_bonus_mut`, and handed onto

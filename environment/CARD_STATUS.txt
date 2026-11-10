@@ -1154,12 +1154,18 @@ on-play-effect helpers).
         dagger it gains +1 power. The second time you attack with a weapon
         this turn if it's a sword or dagger it gains +2 power. Go again."
         (Warrior action, cost 0, pitch 2, 3 block.)
-          * A new on-play `OnPlayEffectType::FirstAndSecondWeaponAttackPower`
-            adds one per copy to `Player::slice_and_dice_effects` for the turn,
-            like Glistening Steelblade's per-turn count.
+          * Two on-play effects, one per sentence:
+            `{ Always, FirstWeaponAttackPower, 1 }` and
+            `{ Always, SecondWeaponAttackPower, 2 }`. Each banks its magnitude
+            for the turn on `Player::weapon_attack_power` (index 0 for the
+            first weapon attack, 1 for the second).
+          * `CardData::play_effect: Option<OnPlayEffect>` became
+            `play_effects: &'static [OnPlayEffect]` to hold both: every catalog
+            entry is `&[]` or `&[effect]`, and a resolving card applies each in
+            turn under its own condition. No other card's behaviour changed.
           * Read as each weapon attack is made (`fab_step::finish_commit`),
-            after the swing is counted in `abilities_used`: the first weapon
-            attack this turn takes +1 and the second +2 per effect onto
+            after the swing is counted in `abilities_used`: the Nth weapon
+            attack this turn takes `weapon_attack_power[N - 1]` onto
             `attack_power_bonus`, if it is a sword or dagger
             (`fab_step::is_sword_or_dagger`; the catalog has no dagger type
             yet, so a sword). A third attack takes nothing.

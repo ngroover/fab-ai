@@ -39,7 +39,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Dorinthea, Quicksilver Prodigy
@@ -64,7 +64,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // ── RHINAR — RED ────────────────────────────────────────────────
@@ -91,7 +91,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: Some(AdditionalCostType::DiscardCard),
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Awakening Bellow
@@ -118,11 +118,11 @@ static CARD_CATALOG: [CardData; 53] = [
             play_condition: None,
             // "The next attack action card you play this turn with the brute type
             // gains +3{p}." Unconditional on play; banks +3 for the next brute.
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::Always,
                 effectType: OnPlayEffectType::NextBrutePower,
                 magnitude: 3,
-            }),
+            }],
             mentor_effect: None,
         },
         // Bare Fangs
@@ -147,11 +147,11 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::DrawDiscardHit6,
                 effectType: OnPlayEffectType::ConditionalPower,
                 magnitude: 2,
-            }),
+            }],
             mentor_effect: None,
         },
         // Beast Mode
@@ -177,11 +177,11 @@ static CARD_CATALOG: [CardData; 53] = [
             attack_effect: None,
             play_condition: None,
             // "If you've intimidated this turn, this gets +2 power."
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::HasIntimidated,
                 effectType: OnPlayEffectType::ConditionalPower,
                 magnitude: 2,
-            }),
+            }],
             mentor_effect: None,
         },
         // Pack Hunt
@@ -206,7 +206,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Wild Ride
@@ -234,11 +234,11 @@ static CARD_CATALOG: [CardData; 53] = [
             // Like Bare Fangs, draw then discard a card; if the discard had 6 or
             // more power the condition is met — but Wild Ride grants Go Again
             // rather than +power. Magnitude is unused for the Go Again effect.
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::DrawDiscardHit6,
                 effectType: OnPlayEffectType::ConditionalGoAgain,
                 magnitude: 0,
-            }),
+            }],
             mentor_effect: None,
         },
         // Wrecking Ball
@@ -267,11 +267,11 @@ static CARD_CATALOG: [CardData; 53] = [
             // the discarded card has 6 or more power, Intimidate." Same draw-then-
             // discard condition as Bare Fangs / Wild Ride, but the payoff is an
             // Intimidate instead of a power/Go Again buff.
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::DrawDiscardHit6,
                 effectType: OnPlayEffectType::ConditionalIntimidate,
                 magnitude: 0,
-            }),
+            }],
             mentor_effect: None,
         },
         // ── RHINAR — YELLOW ─────────────────────────────────────────────
@@ -303,11 +303,11 @@ static CARD_CATALOG: [CardData; 53] = [
             // engine applies generically as the card resolves; the on-play
             // effect is the middle clause, banked for the next brute attack and
             // paid out at combat damage if the blocker count allows.
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::Always,
                 effectType: OnPlayEffectType::NextBruteConditionalPower,
                 magnitude: 3,
-            }),
+            }],
             mentor_effect: None,
         },
         // Muscle Mutt
@@ -332,7 +332,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Pack Call
@@ -362,7 +362,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Raging Onslaught
@@ -387,7 +387,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Smash Instinct
@@ -412,7 +412,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Smash with Big Tree
@@ -437,7 +437,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Wounded Bull
@@ -466,11 +466,11 @@ static CARD_CATALOG: [CardData; 53] = [
             // opposing hero, it gains +1 power." The condition is checked as the
             // card resolves; the bonus is banked on the player and folded into
             // the chain's power when combat damage resolves.
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::HasLessLife,
                 effectType: OnPlayEffectType::ConditionalPower,
                 magnitude: 1,
-            }),
+            }],
             mentor_effect: None,
         },
         // ── RHINAR — BLUE ───────────────────────────────────────────────
@@ -496,7 +496,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Come to Fight
@@ -524,11 +524,11 @@ static CARD_CATALOG: [CardData; 53] = [
             // "Your next attack action card you play this turn gains +1 power.
             // Go again." Go again is the keyword above; the +1 is banked here
             // for the next attack action card of any class.
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::Always,
                 effectType: OnPlayEffectType::NextAttackActionPower,
                 magnitude: 1,
-            }),
+            }],
             mentor_effect: None,
         },
         // Dodge
@@ -553,7 +553,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Rally the Rearguard
@@ -578,7 +578,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Titanium Bauble
@@ -603,7 +603,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Wrecker Romp
@@ -629,7 +629,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: Some(AdditionalCostType::DiscardCard),
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // ── RHINAR — MENTOR ─────────────────────────────────────────────
@@ -664,7 +664,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: Some(MentorEffect::AlphaRampageSearch),
         },
         // ── RHINAR — EQUIPMENT ──────────────────────────────────────────
@@ -690,7 +690,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Blossom of Spring
@@ -715,7 +715,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Bone Vizier
@@ -740,7 +740,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Ironhide Gauntlet
@@ -765,7 +765,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Ironhide Legs
@@ -790,7 +790,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // ── DORINTHEA — RED ─────────────────────────────────────────────
@@ -816,11 +816,11 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::Always,
                 effectType: OnPlayEffectType::NextWeaponPower,
                 magnitude: 3,
-            }),
+            }],
             mentor_effect: None,
         },
         // Flock of the Feather Walkers
@@ -845,11 +845,11 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: Some(AdditionalCostType::RevealCost1OrLess),
             attack_effect: None,
             play_condition: None,
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::Always,
                 effectType: OnPlayEffectType::CreateQuicken,
                 magnitude: 1,
-            }),
+            }],
             mentor_effect: None,
         },
         // In the Swing
@@ -880,7 +880,7 @@ static CARD_CATALOG: [CardData; 53] = [
                 magnitude: 3,
             }),
             play_condition: Some(PlayCondition::Played2WeaponAttacks),
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Ironsong Response
@@ -911,7 +911,7 @@ static CARD_CATALOG: [CardData; 53] = [
                 magnitude: 3,
             }),
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Second Swing
@@ -936,11 +936,11 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::HasAttackedWithWeapon,
                 effectType: OnPlayEffectType::NextAttackPower,
                 magnitude: 4,
-            }),
+            }],
             mentor_effect: None,
         },
         // Sharpen Steel
@@ -965,11 +965,11 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::Always,
                 effectType: OnPlayEffectType::NextWeaponPower,
                 magnitude: 3,
-            }),
+            }],
             mentor_effect: None,
         },
         // Thrust
@@ -1000,7 +1000,7 @@ static CARD_CATALOG: [CardData; 53] = [
                 magnitude: 3,
             }),
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Warrior's Valor
@@ -1028,11 +1028,11 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::Always,
                 effectType: OnPlayEffectType::NextWeaponPower,
                 magnitude: 3,
-            }),
+            }],
             mentor_effect: None,
         },
         // ── DORINTHEA — YELLOW ──────────────────────────────────────────
@@ -1061,11 +1061,11 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::Always,
                 effectType: OnPlayEffectType::NextWeaponPower,
                 magnitude: 2,
-            }),
+            }],
             mentor_effect: None,
         },
         // Glistening Steelblade
@@ -1093,11 +1093,11 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::Always,
                 effectType: OnPlayEffectType::DawnbladeHitCounterThisTurn,
                 magnitude: 1,
-            }),
+            }],
             mentor_effect: None,
         },
         // On a Knife Edge
@@ -1125,7 +1125,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Out for Blood
@@ -1156,11 +1156,11 @@ static CARD_CATALOG: [CardData; 53] = [
                 magnitude: 2,
             }),
             play_condition: None,
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::Reprise,
                 effectType: OnPlayEffectType::NextAttackPower,
                 magnitude: 1,
-            }),
+            }],
             mentor_effect: None,
         },
         // Run Through
@@ -1191,11 +1191,11 @@ static CARD_CATALOG: [CardData; 53] = [
                 magnitude: 0,
             }),
             play_condition: None,
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::Always,
                 effectType: OnPlayEffectType::NextSwordPower,
                 magnitude: 2,
-            }),
+            }],
             mentor_effect: None,
         },
         // Slice and Dice
@@ -1220,11 +1220,18 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: Some(OnPlayEffect {
-                condition: OnPlayConditionType::Always,
-                effectType: OnPlayEffectType::FirstAndSecondWeaponAttackPower,
-                magnitude: 1,
-            }),
+            play_effects: &[
+                OnPlayEffect {
+                    condition: OnPlayConditionType::Always,
+                    effectType: OnPlayEffectType::FirstWeaponAttackPower,
+                    magnitude: 1,
+                },
+                OnPlayEffect {
+                    condition: OnPlayConditionType::Always,
+                    effectType: OnPlayEffectType::SecondWeaponAttackPower,
+                    magnitude: 2,
+                },
+            ],
             mentor_effect: None,
         },
         // ── DORINTHEA — BLUE ────────────────────────────────────────────
@@ -1250,7 +1257,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Hit and Run
@@ -1275,7 +1282,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Sigil of Solace
@@ -1302,11 +1309,11 @@ static CARD_CATALOG: [CardData; 53] = [
             play_condition: None,
             // "Gain 1 life." Unconditional on play; an instant, so it can be
             // played in any priority window the owner holds.
-            play_effect: Some(OnPlayEffect {
+            play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::Always,
                 effectType: OnPlayEffectType::GainLife,
                 magnitude: 1,
-            }),
+            }],
             mentor_effect: None,
         },
         // Toughen Up
@@ -1331,7 +1338,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Visit the Blacksmith
@@ -1356,7 +1363,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // ── DORINTHEA — MENTOR ──────────────────────────────────────────
@@ -1382,7 +1389,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // ── DORINTHEA — EQUIPMENT ───────────────────────────────────────
@@ -1408,7 +1415,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Gallantry Gold
@@ -1433,7 +1440,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Ironrot Helm
@@ -1458,7 +1465,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Ironrot Legs
@@ -1483,7 +1490,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
         // Quicken (token)
@@ -1508,7 +1515,7 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         },
 ];
@@ -1553,8 +1560,8 @@ mod tests {
     fn bare_fangs_has_draw_discard_hit6_conditional_power() {
         let effect = Card::BareFangsR
             .data()
-            .play_effect
-            .as_ref()
+            .play_effects
+            .first()
             .expect("Bare Fangs should carry an on-play effect");
         assert!(matches!(effect.condition, OnPlayConditionType::DrawDiscardHit6));
         assert!(matches!(effect.effectType, OnPlayEffectType::ConditionalPower));

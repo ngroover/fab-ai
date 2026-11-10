@@ -1,4 +1,8 @@
 use crate::card_effects::AttackKind;
+
+/// How many weapon attacks a turn can bank power for by their order
+/// (`Player::weapon_attack_power`): the first and the second (Slice and Dice).
+pub const WEAPON_ATTACK_ORDINALS: usize = 2;
 use crate::cards::{Card, CardType, EquipmentSlot};
 use crate::action::ActionType;
 use crate::card_counts::{CardCounts, DeckCardId, MAX_DECK_IDS};
@@ -556,12 +560,12 @@ pub struct Player {
     /// Steelblade resolved). Each Dawnblade hit puts this many counters on it.
     /// Cleared at the start of each turn.
     pub dawnblade_hit_counter_effects : u8,
-    /// How many Slice and Dice effects this player has this turn: "the first
-    /// time you attack with a weapon this turn, if it's a sword or dagger it
-    /// gains +1 power; the second time, +2". Each copy adds one; read as each
-    /// weapon attack is made (`fab_step::finish_commit`), and cleared at the
-    /// start of each turn.
-    pub slice_and_dice_effects : u8,
+    /// Power banked for this player's first and second weapon attack this
+    /// turn, if it is a sword or dagger (Slice and Dice's +1 and +2; each copy
+    /// adds its own). Index 0 is the first weapon attack, 1 the second. Read
+    /// as each weapon attack is made (`fab_step::finish_commit`), and cleared
+    /// at the start of each turn.
+    pub weapon_attack_power : [u8; WEAPON_ATTACK_ORDINALS],
     /// Per-player yes/no state packed into one byte: see `PlayerFlags` for
     /// what each flag means, and the `Player` accessors of the same names.
     pub flags : PlayerFlags,
@@ -860,7 +864,7 @@ impl Player {
             next_sword_attack_bonus: 0,
             weapon_power_counters: 0,
             dawnblade_hit_counter_effects: 0,
-            slice_and_dice_effects: 0,
+            weapon_attack_power: [0; WEAPON_ATTACK_ORDINALS],
             flags: PlayerFlags::empty(),
             arsenal_lesson_counters: 0,
             // Logging is opted into via `reset(gs, decks, true)`; off until then.

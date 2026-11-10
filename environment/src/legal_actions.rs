@@ -890,7 +890,7 @@ mod tests {
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effects: &[],
             mentor_effect: None,
         }
     }

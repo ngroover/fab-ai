@@ -209,7 +209,7 @@ fn place_cards_for(player: &mut Player, start: &StartingCards) {
     player.set_next_sword_go_again(false);
     player.weapon_power_counters = 0;
     player.dawnblade_hit_counter_effects = 0;
-    player.slice_and_dice_effects = 0;
+    player.weapon_attack_power = [0; crate::game_state::WEAPON_ATTACK_ORDINALS];
     player.clear_destroy_on_chain_close();
     player.arsenal_lesson_counters = 0;
     player.chain_link = [CardCounts::EMPTY; CHAIN_LINKS];

@@ -1,6 +1,6 @@
 use crate::action::{Action,ActionType};
 use crate::card_counts::{CardCounts, DeckCardId};
-use crate::game_state::{CHAIN_LINKS,MAX_QUICKENS,DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
+use crate::game_state::{CHAIN_LINKS,MAX_QUICKENS,WEAPON_ATTACK_ORDINALS,DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
 use crate::cards::{Card,CardClass,CardData,CardType,Keyword,WeaponType};
 use crate::card_effects::{Ability,NextAttackEffect,NextAttackEffectType,NextAttackType,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,MentorEffect,PlayCondition,AttackEffect,AttackEffectType,AttackKind};
 use crate::fab_game::{shuffle_deck_for, GameRng};
@@ -159,8 +159,8 @@ fn begin_turn(gs: &mut Gamestate) {
     gs.p1.dawnblade_hit_counter_effects = 0;
     gs.p2.dawnblade_hit_counter_effects = 0;
     // So does Slice and Dice.
-    gs.p1.slice_and_dice_effects = 0;
-    gs.p2.slice_and_dice_effects = 0;
+    gs.p1.weapon_attack_power = [0; WEAPON_ATTACK_ORDINALS];
+    gs.p2.weapon_attack_power = [0; WEAPON_ATTACK_ORDINALS];
     // "At the start of your turn, you may turn [a face-down mentor] face up":
     // when the turn player has one in their arsenal, the turn opens on that
     // decision instead of going straight to the Action phase (see
@@ -945,8 +945,8 @@ fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
     // "When you play" on-play effects fire as the card resolves, before it goes
     // on to the combat chain (an attack) or the graveyard. `data` is a 'static
     // reference into the card catalog, so holding the effect across the mutable
-    // `gs` calls below is fine.
-    if let Some(effect) = &data.play_effect {
+    // `gs` calls below is fine. Each effect is checked and applied in turn.
+    for effect in data.play_effects {
         apply_on_play_effect(gs, rng, owner, effect);
     }
     // A grant to the owner's next attack of some kind (Warrior's Valor's "When
@@ -1517,11 +1517,12 @@ fn apply_on_play_effect_type(gs: &mut Gamestate, rng: &mut GameRng, owner: Playe
         // (Second Swing): see the shared arm below.
         // Glistening Steelblade: one more "whenever Dawnblade hits a hero this
         // turn, put a +1 counter on it" for the owner. Read at combat damage.
-        // Slice and Dice: one more "first/second weapon attack this turn"
-        // pump for the owner, read as each weapon attack is made.
-        OnPlayEffectType::FirstAndSecondWeaponAttackPower => {
-            let player = gs.player_mut(owner);
-            player.slice_and_dice_effects = player.slice_and_dice_effects.saturating_add(effect.magnitude);
+        // Slice and Dice: power for the first / second weapon attack this
+        // turn, read as each weapon attack is made.
+        OnPlayEffectType::FirstWeaponAttackPower | OnPlayEffectType::SecondWeaponAttackPower => {
+            let ordinal = effect.effectType.weapon_attack_ordinal().expect("a weapon-attack-ordinal power effect");
+            let bonus = &mut gs.player_mut(owner).weapon_attack_power[ordinal];
+            *bonus = bonus.saturating_add(effect.magnitude);
         }
         OnPlayEffectType::DawnbladeHitCounterThisTurn => {
             let player = gs.player_mut(owner);
@@ -1881,18 +1882,13 @@ fn finish_commit(gs: &mut Gamestate, rng: &mut GameRng, pending: PendingCard) {
         }
     }
 
-    // Slice and Dice: the first weapon attack this turn gains +1 and the
-    // second +2 per effect, if it is a sword or dagger. Read after the swing
-    // was counted above, so the count includes this attack.
-    if commits_as_attack(pending.typ, data) && is_weapon(data) {
+    // Slice and Dice: the Nth weapon attack this turn takes the power banked
+    // for it (`Player::weapon_attack_power`), if it is a sword or dagger. Read
+    // after the swing was counted above, so the count includes this attack.
+    if commits_as_attack(pending.typ, data) && is_sword_or_dagger(data) {
         let player = gs.player_mut(owner);
-        let per_effect = match player.weapon_attacks_this_turn() {
-            1 => 1,
-            2 => 2,
-            _ => 0,
-        };
-        if is_sword_or_dagger(data) && per_effect > 0 {
-            let bonus = per_effect * player.slice_and_dice_effects;
+        let ordinal = usize::from(player.weapon_attacks_this_turn()).wrapping_sub(1);
+        if let Some(&bonus) = player.weapon_attack_power.get(ordinal) {
             player.attack_power_bonus = player.attack_power_bonus.saturating_add(bonus);
         }
     }

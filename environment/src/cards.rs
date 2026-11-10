@@ -83,7 +83,10 @@ pub struct CardData {
     pub additional_cost : Option<AdditionalCostType>,
     pub attack_effect : Option<AttackEffect>,
     pub play_condition : Option<PlayCondition>,
-    pub play_effect : Option<OnPlayEffect>,
+    /// The card's "when you play" effects, applied in order as it resolves,
+    /// each under its own condition (`fab_step::apply_on_play_effect`). Empty
+    /// for a card with none; most cards have one, Slice and Dice two.
+    pub play_effects : &'static [OnPlayEffect],
     /// What a mentor's lessons build towards (see `MentorEffect`). `None` for
     /// every card that is not a mentor, and for a mentor not implemented yet.
     pub mentor_effect : Option<MentorEffect>,
