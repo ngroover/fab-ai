@@ -1208,6 +1208,21 @@ on-play-effect helpers).
                blade_flash_is_not_offered_without_the_resources_to_pay_for_it,
                blade_flash_on_the_extra_swing_gives_go_again_but_no_third_attack
 
+  [x] Ironrot Helm   (Card::IronrotHelm)
+  [x] Ironrot Legs   (Card::IronrotLegs)
+        Generic head / legs equipment, 1 block, Blade Break.
+          * Catalog entries only: Blade Break was already handled for Bone
+            Vizier. Equipment that defends leaves its slot for the chain link;
+            `close_combat_chain` sends a Blade Break piece to the graveyard
+            (`destroy_equipment`) instead of back to its slot. A piece that did
+            not defend stays worn.
+        Tests: ironrot_pieces_are_1_block_generic_equipment_with_blade_break,
+               dorinthea_may_defend_with_either_ironrot_piece,
+               each_ironrot_piece_blocks_for_1,
+               ironrot_pieces_that_defended_go_to_the_graveyard_when_the_chain_closes,
+               only_the_ironrot_piece_that_defended_is_destroyed,
+               ironrot_pieces_that_did_not_defend_stay_in_their_slots
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1271,8 +1286,8 @@ on-play-effect helpers).
   [ ] Hala Goldenhelm        (Card::HalaGoldenhelm)
   [x] Dawnblade (weapon)     (Card::Dawnblade)  — see COMPLETE section above
   [ ] Gallantry Gold         (Card::GallantryGold)
-  [ ] Ironrot Helm           (Card::IronrotHelm)
-  [ ] Ironrot Legs           (Card::IronrotLegs)
+  [x] Ironrot Helm           (Card::IronrotHelm)  — see COMPLETE section above
+  [x] Ironrot Legs           (Card::IronrotLegs)  — see COMPLETE section above
 
 
 ==============================================================================

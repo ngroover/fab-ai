@@ -4154,6 +4154,106 @@ fn a_destroyed_bone_vizier_cannot_defend_again() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Ironrot Helm (Card::IronrotHelm) and Ironrot Legs (Card::IronrotLegs)
+//
+// Generic head and legs equipment, 1 defense, Blade Break: each blocks for 1
+// and is destroyed (to the graveyard) when the combat chain closes, if it
+// defended.
+//
+// Rhinar (p1) attacks with Muscle Mutt (6 power) and Dorinthea (p2) defends.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea (p2) declares `equipment` (worn pieces) and nothing from hand as
+/// blockers against Muscle Mutt, and combat damage resolves. Play is back in
+/// Rhinar's action phase with the chain still open.
+fn dorinthea_blocks_muscle_mutt_with_equipment(equipment: &[Card]) -> TestGame {
+    let mut gs = dorinthea_defending_muscle_mutt();
+    for &card in equipment {
+        assert!(in_zone(&gs, PlayerIndex::P2, card, Zone::Equipment));
+        step_card_from(&mut gs, ActionType::Defend, card, Zone::Equipment);
+        assert!(!in_zone(&gs, PlayerIndex::P2, card, Zone::Equipment), "it leaves its slot to defend");
+        assert!(link_cards(&gs, PlayerIndex::P2, 0).contains(&card));
+    }
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done declaring
+    while gs.phase != Phase::Action {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.turn_player, PlayerIndex::P1);
+    gs
+}
+
+#[test]
+fn ironrot_pieces_are_1_block_generic_equipment_with_blade_break() {
+    assert!(matches!(Card::IronrotHelm.data().slot, Some(crate::cards::EquipmentSlot::Head)));
+    assert!(matches!(Card::IronrotLegs.data().slot, Some(crate::cards::EquipmentSlot::Legs)));
+    for card in [Card::IronrotHelm, Card::IronrotLegs] {
+        let data = card.data();
+        assert_eq!(data.typ, CardType::Equipment, "{:?}", card);
+        assert_eq!(data.card_class, CardClass::Generic, "{:?}", card);
+        assert_eq!(data.defense, 1, "{:?}", card);
+        assert!(data.keyword.contains(Keyword::BladeBreak), "{:?}", card);
+        assert!(data.constant_effect.is_none(), "{:?}", card);
+        assert!(data.ability.is_none(), "{:?}", card);
+        assert!(data.defend_effect.is_none(), "{:?}", card);
+    }
+}
+
+#[test]
+fn dorinthea_may_defend_with_either_ironrot_piece() {
+    let gs = dorinthea_defending_muscle_mutt();
+    let offered = equipment_blockers(&gs);
+    assert!(offered.contains(&Card::IronrotHelm));
+    assert!(offered.contains(&Card::IronrotLegs));
+}
+
+#[test]
+fn each_ironrot_piece_blocks_for_1() {
+    let gs = dorinthea_blocks_muscle_mutt_with_equipment(&[Card::IronrotHelm]);
+    assert_eq!(gs.p2.life, 20 - (6 - 1));
+    let gs = dorinthea_blocks_muscle_mutt_with_equipment(&[Card::IronrotLegs]);
+    assert_eq!(gs.p2.life, 20 - (6 - 1));
+    let gs = dorinthea_blocks_muscle_mutt_with_equipment(&[Card::IronrotHelm, Card::IronrotLegs]);
+    assert_eq!(gs.p2.life, 20 - (6 - 2));
+    // Still defending until the chain closes.
+    let mut on_link = link_cards(&gs, PlayerIndex::P2, 0);
+    on_link.sort_by_key(|c| format!("{:?}", c));
+    assert_eq!(on_link, vec![Card::IronrotHelm, Card::IronrotLegs]);
+}
+
+#[test]
+fn ironrot_pieces_that_defended_go_to_the_graveyard_when_the_chain_closes() {
+    let mut gs = dorinthea_blocks_muscle_mutt_with_equipment(&[Card::IronrotHelm, Card::IronrotLegs]);
+    close_chain_by_passing(&mut gs);
+    for card in [Card::IronrotHelm, Card::IronrotLegs] {
+        assert!(!in_zone(&gs, PlayerIndex::P2, card, Zone::Equipment), "{:?} left its slot", card);
+        assert_eq!(count_in(&gs, PlayerIndex::P2, card, Zone::Graveyard), 1, "{:?} destroyed", card);
+    }
+    // Nothing else of Dorinthea's went to the graveyard (no blockers from hand).
+    assert!(!in_zone(&gs, PlayerIndex::P2, Card::GallantryGold, Zone::Graveyard));
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::GallantryGold, Zone::Equipment));
+}
+
+#[test]
+fn only_the_ironrot_piece_that_defended_is_destroyed() {
+    let mut gs = dorinthea_blocks_muscle_mutt_with_equipment(&[Card::IronrotLegs]);
+    close_chain_by_passing(&mut gs);
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::IronrotLegs, Zone::Graveyard));
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::IronrotHelm, Zone::Equipment));
+    assert!(!in_zone(&gs, PlayerIndex::P2, Card::IronrotHelm, Zone::Graveyard));
+}
+
+#[test]
+fn ironrot_pieces_that_did_not_defend_stay_in_their_slots() {
+    let mut gs = dorinthea_blocks_muscle_mutt_with_equipment(&[]);
+    assert_eq!(gs.p2.life, 20 - 6);
+    close_chain_by_passing(&mut gs);
+    for card in [Card::IronrotHelm, Card::IronrotLegs] {
+        assert!(in_zone(&gs, PlayerIndex::P2, card, Zone::Equipment), "{:?} still worn", card);
+        assert!(!in_zone(&gs, PlayerIndex::P2, card, Zone::Graveyard));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Ironhide Gauntlet (Card::IronhideGauntlet) and Ironhide Legs
 // (Card::IronhideLegs)
 //
