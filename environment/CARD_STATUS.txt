@@ -1029,8 +1029,9 @@ on-play-effect helpers).
             weapon attack is made (`commit_pending_to_stack`, beside the
             Quicken trigger), through `attack_gains_go_again`. So it holds
             whether or not the swing hits (unlike Warrior's Valor), and on
-            Dawnblade it sets off Dorinthea's extra attack. With a Quicken too,
-            the extra attack is still granted once. An attack action card in
+            Dawnblade it sets off Dorinthea's extra attack. A Quicken held at
+            the same time is still destroyed by the swing (its trigger is not
+            optional), and the extra attack is still granted once. An attack action card in
             between leaves both halves banked. Cleared each turn and on reset.
           * Changes damage and go again, so random play moved; see the
             stack-seed sweep.

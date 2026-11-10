@@ -6236,14 +6236,22 @@ fn driving_blade_is_left_banked_by_an_attack_action_card() {
 
 #[test]
 fn driving_blade_with_a_quicken_still_grants_one_extra_attack() {
-    // Both grant Dawnblade go again as it attacks; Dorinthea's ability fires
-    // only the first time, so there is one extra swing and no third.
+    // Both grant Dawnblade go again as it attacks: the Quicken's trigger is not
+    // optional, so it is destroyed even though Driving Blade already gives go
+    // again. Dorinthea's ability fires only the first time, so there is one
+    // extra swing and no third.
     let mut gs = dorinthea_holding(&[
         Card::DrivingBladeY, Card::VisitTheBlacksmithB, Card::SharpenSteelR,
     ], 0);
     give_quicken(&mut gs, PlayerIndex::P1);
     play_driving_blade(&mut gs);
-    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(quickens(&gs, PlayerIndex::P1), 1, "Driving Blade is not an attack: the Quicken waits");
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::Weapon);
+    assert_eq!(quickens(&gs, PlayerIndex::P1), 0, "the swing destroys the Quicken");
+    assert!(!gs.p1.next_weapon_go_again(), "and spends Driving Blade's go again");
+    pass_once_each(&mut gs);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20 - (2 + 2));
     assert_eq!(gs.p1.action_points, 1);
     dawnblade_unblocked(&mut gs, Some(Card::SharpenSteelR));
     assert_eq!(gs.p2.life, 20 - 4 - 3);
