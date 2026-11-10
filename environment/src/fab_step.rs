@@ -2,7 +2,7 @@ use crate::action::{Action,ActionType};
 use crate::card_counts::{CardCounts, DeckCardId};
 use crate::game_state::{CHAIN_LINKS,MAX_QUICKENS,WEAPON_ATTACK_ORDINALS,DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
 use crate::cards::{Card,CardClass,CardData,CardType,Keyword,WeaponType};
-use crate::card_effects::{Ability,NextAttackEffect,NextAttackEffectType,NextAttackType,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,MentorEffect,PlayCondition,AttackEffect,AttackEffectType,AttackKind};
+use crate::card_effects::{Ability,NextAttackEffect,NextAttackEffectType,NextAttackType,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,PlayCondition,AttackEffect,AttackEffectType,AttackKind};
 use crate::fab_game::{shuffle_deck_for, GameRng};
 use crate::deck_cards::TokenCard;
 use rand::RngExt;
@@ -354,7 +354,15 @@ fn handle_priority_pass(gs: &mut Gamestate, rng: &mut GameRng) {
             // Nothing left to resolve (the reaction window opened on an empty
             // stack, or every layer has already resolved): the window closes and
             // play advances to the next itinerary phase.
+            let combat_damage = gs.phase == Phase::Reaction;
             close_priority_window(gs);
+            // Closing the reaction step resolved combat damage. A mentor that
+            // took a lesson from that hit (Hala Goldenhelm's) graduates now, if
+            // it was the second: the search shuffles the deck, so it is done
+            // here, where the rng is, rather than in `resolve_combat_damage`.
+            if combat_damage && !gs.is_game_over() {
+                maybe_graduate_mentor(gs, rng, gs.turn_player);
+            }
         } else {
             // Resolve the top of the stack. The resolution itself decides where
             // priority and the phase go next, since that depends on the card type.
@@ -1310,8 +1318,9 @@ fn maybe_discard6_intimidate(gs: &mut Gamestate, rng: &mut GameRng, owner: Playe
 /// `owner`'s arsenal and only while that card is face up (see
 /// `handle_mentor_flip_phase`). The card that triggers it is always played from
 /// hand, since the mentor is occupying the arsenal. Once the intimidate is done,
-/// a mentor's lesson follows on the same trigger: its `MentorEffect`, if it has
-/// one (Ruk'utan's `mentor_alpha_rampage_search`).
+/// a mentor's lesson follows on the same trigger: a lesson counter
+/// (`add_mentor_lesson`), then graduation if that was its second
+/// (`maybe_graduate_mentor`).
 ///
 /// - **Power** is the printed power, the same reading Rhinar's discard trigger
 ///   uses: the engine banks power bonuses on the player and applies them at
@@ -1344,23 +1353,34 @@ fn maybe_play6_intimidate(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIn
         gs.log_public(format!("{}'s {:?} triggers", player_name(owner), card));
     }
     apply_intimidate(gs, rng, owner);
-    match data.mentor_effect {
-        Some(MentorEffect::AlphaRampageSearch) => mentor_alpha_rampage_search(gs, rng, owner),
-        None => {}
-    }
+    add_mentor_lesson(gs.player_mut(owner));
+    maybe_graduate_mentor(gs, rng, owner);
 }
 
-/// Chief Ruk'utan's lesson (`MentorEffect::AlphaRampageSearch`), run each time
-/// his constant effect triggers: "put a lesson counter on Chief Ruk'utan. Then
-/// if there are 2 or more lesson counters on him, banish him, search your deck
-/// for Alpha Rampage, put it face up in arsenal and shuffle." Ruk'utan is in
-/// `owner`'s arsenal; the counters are the arsenal's
-/// (`Player::arsenal_lesson_counters`).
-fn mentor_alpha_rampage_search(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex) {
-    let player = gs.player_mut(owner);
+/// Put a lesson counter on the mentor in `player`'s arsenal, as its constant
+/// effect triggers (Ruk'utan's "intimidate and put a lesson counter on him",
+/// Hala's "it gains go again and put a lesson counter on Hala"). The counters
+/// are the arsenal's (`Player::arsenal_lesson_counters`).
+fn add_mentor_lesson(player: &mut Player) {
     player.arsenal_lesson_counters = player.arsenal_lesson_counters.saturating_add(1);
-    if player.arsenal_lesson_counters >= 2 {
-        graduate_mentor(gs, rng, owner, Card::AlphaRampageR);
+}
+
+/// A mentor's "Then if there are 2 or more lesson counters on [it], banish
+/// [it], search your deck for [card], put it face up in arsenal and shuffle":
+/// if the face-up mentor in `owner`'s arsenal has 2 or more lesson counters,
+/// it graduates (`graduate_mentor`), fetching its `MentorEffect`'s card.
+/// Otherwise nothing happens.
+fn maybe_graduate_mentor(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex) {
+    let player = gs.player(owner);
+    let Some(mentor) = player.arsenal else {
+        return;
+    };
+    if !player.arsenal_face_up() || player.arsenal_lesson_counters < 2 {
+        return;
+    }
+    if let Some(effect) = &player.card(mentor).data().mentor_effect {
+        let fetch = effect.graduation_card();
+        graduate_mentor(gs, rng, owner, fetch);
     }
 }
 
@@ -2018,6 +2038,26 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         let attack = gs.player(attacker_id).attack_on_link(link)
             .expect("a weapon attack is on the link");
         attack_gains_go_again(gs, attacker_id, attack);
+    }
+    // Hala Goldenhelm, face up in the attacker's arsenal: "whenever a sword
+    // attack you control hits, it gains go again and put a lesson counter on
+    // Hala". The go again goes through `attack_gains_go_again`, so on Dawnblade
+    // it can set off Dorinthea's extra attack. Graduating on the second lesson
+    // shuffles the deck, so it waits until damage is done (see `step`'s close
+    // of the reaction step).
+    let attacker = gs.player(attacker_id);
+    let sword_hit_mentor = attacker.arsenal_face_up()
+        && attacker.arsenal.is_some_and(|m| matches!(attacker.card(m).data().constant_effect,
+            Some(ConstantEffect::OnSwordHitMentor)));
+    if sword_hit_mentor && damage > 0 && attack_data.is_some_and(is_sword) {
+        let attack = attacker.attack_on_link(link).expect("a sword attack is on the link");
+        if gs.logging_enabled() {
+            let mentor = attacker.card(attacker.arsenal.expect("the mentor is in the arsenal"));
+            gs.log_public(format!("{}'s {:?} triggers: the sword attack gains go again",
+                player_name(attacker_id), mentor));
+        }
+        attack_gains_go_again(gs, attacker_id, attack);
+        add_mentor_lesson(gs.player_mut(attacker_id));
     }
     // Glistening Steelblade: "Whenever Dawnblade hits a hero this turn, put a +1
     // counter on it" — one counter per such effect, after this hit's damage, so

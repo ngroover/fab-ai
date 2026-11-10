@@ -468,17 +468,17 @@ on-play-effect helpers).
             opponent's log gets no entry, since only a mentor is ever offered
             the flip and a public decline would reveal one. Flipping is logged
             publicly, as it reveals the card anyway. It keys off `CardType::Mentor`, since every
-            mentor carries the clause (Hala Goldenhelm gets the decision too,
-            and does nothing face up until her own ability is implemented).
+            mentor carries the clause (Hala Goldenhelm gets the decision too).
           * The card is split into two effects. His constant effect is the
             general `ConstantEffect::OnPlay6Intimidate` ("whenever you play a
             card with 6 or more power, intimidate"), the play counterpart of
             Rhinar's `OnDiscard6Intimidate`; it replaces the unused
             `OnDiscard6Mentor` placeholder. His lesson counter and search are
             the new `CardData::mentor_effect`,
-            `MentorEffect::AlphaRampageSearch`, run by
-            `mentor_alpha_rampage_search` on the same trigger, after the
-            intimidate. Every other catalog entry has `mentor_effect: None`.
+            `MentorEffect::AlphaRampageSearch`, run on the same trigger, after
+            the intimidate: `add_mentor_lesson`, then `maybe_graduate_mentor`
+            (shared with Hala; the card each mentor fetches is
+            `MentorEffect::graduation_card`). Every other catalog entry has `mentor_effect: None`.
           * The trigger is checked by `maybe_play6_intimidate` in
             `commit_pending_to_stack` after any additional cost is paid. Only a
             `PlayCard` counts: a weapon swing or other activation is not playing
@@ -492,7 +492,7 @@ on-play-effect helpers).
             whenever the arsenal empties, so they never follow the card out —
             banishing Ruk'utan clears them, and the fetched Alpha Rampage starts
             at 0.
-          * Graduation (`mentor_alpha_rampage_search` reaching 2 counters) is
+          * Graduation (`maybe_graduate_mentor` at 2 counters) is
             `graduate_mentor`: the mentor goes to the banish zone
             (now a real linked list on `Player::banish_idx` — it was a single
             index nothing used), the deck is searched for Alpha Rampage, which
@@ -1267,6 +1267,46 @@ on-play-effect helpers).
                hit_and_run_power_goes_to_an_attack_action_card_but_its_go_again_waits_for_a_weapon,
                hit_and_run_does_not_outlive_the_turn
 
+  [x] Hala Goldenhelm (Card::HalaGoldenhelm)
+        Dorinthea's mentor, 3 block. "While Hala is face down in arsenal, at
+        the start of your turn you may turn her face up. While Hala is face up
+        in arsenal, whenever a sword attack you control hits, it gains go again
+        and put a lesson counter on Hala. Then if there are 2 or more lesson
+        counters on Hala, banish her, search your deck for Glistening
+        Steelblade, put it face up in arsenal, and shuffle."
+          * The flip, face-up state, lesson counters and graduation are Chief
+            Ruk'utan's machinery (see his entry).
+          * Her constant effect is `ConstantEffect::OnSwordHitMentor` (until
+            now an unused placeholder), read only while she is face up in her
+            owner's arsenal. `resolve_combat_damage` checks it on the hit: if
+            the attack is a sword (`is_sword`: Dawnblade) and dealt damage,
+            the attack gains go again through `attack_gains_go_again`, so on
+            Dawnblade it also sets off Dorinthea's extra attack, and Hala gets
+            a lesson counter (`add_mentor_lesson`). The go again lands before
+            the attack's action point is spent, so the turn continues.
+          * Her `MentorEffect::GlisteningSteelbladeSearch` graduates through
+            the shared `maybe_graduate_mentor` / `graduate_mentor`.
+            Graduating shuffles the deck, which needs the rng, so it runs in
+            `step` right after the reaction step closes and combat damage
+            resolves (the only path to `resolve_combat_damage`), rather than
+            inside it. Nothing can act in between. It is skipped if the hit
+            ended the game.
+          * Ruk'utan's lesson moved onto the same shared helpers
+            (`mentor_alpha_rampage_search` is gone), with no change in
+            behaviour.
+          * Changes random play. 1M-game stack sweep: still peaks at 6
+            layers, first at seed 35221; STACK_SIZE stays 7.
+        Tests: hala_goldenhelm_is_a_warrior_mentor_with_a_sword_hit_lesson_and_steelblade_search,
+               face_up_hala_gives_a_dawnblade_hit_go_again_and_takes_a_lesson,
+               face_down_hala_does_not_trigger,
+               hala_does_not_trigger_on_a_sword_attack_that_is_fully_blocked,
+               hala_does_not_trigger_on_an_attack_action_card_hit,
+               hala_graduates_on_the_second_hit_fetching_glistening_steelblade_face_up,
+               hala_graduation_shuffles_the_deck,
+               hala_graduates_even_with_no_glistening_steelblade_left_to_find,
+               glistening_steelblade_fetched_by_hala_can_be_played_from_the_arsenal_that_turn,
+               hala_is_never_offered_as_a_play_from_the_arsenal
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1327,7 +1367,7 @@ on-play-effect helpers).
  TODO — DORINTHEA hero / weapon / equipment
 ------------------------------------------------------------------------------
   [x] Dorinthea (hero)       (Card::Dorinthea)  — see COMPLETE section above
-  [ ] Hala Goldenhelm        (Card::HalaGoldenhelm)
+  [x] Hala Goldenhelm        (Card::HalaGoldenhelm)  — see COMPLETE section above
   [x] Dawnblade (weapon)     (Card::Dawnblade)  — see COMPLETE section above
   [ ] Gallantry Gold         (Card::GallantryGold)
   [x] Ironrot Helm           (Card::IronrotHelm)  — see COMPLETE section above

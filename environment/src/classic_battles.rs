@@ -1407,7 +1407,13 @@ static CARD_CATALOG: [CardData; 53] = [
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
-            constant_effect: None,
+            // "While Hala is face up in arsenal, whenever a sword attack you
+            // control hits, it gains go again and put a lesson counter on
+            // Hala. Then if there are 2 or more lesson counters on Hala, banish
+            // her, search your deck for Glistening Steelblade, put it face up
+            // in arsenal, and shuffle." (Turning her face up at the start of
+            // the turn is the flip every mentor gets.)
+            constant_effect: Some(ConstantEffect::OnSwordHitMentor),
             ability: None,
             defend_effect: None,
             next_attack_effect: None,
@@ -1415,7 +1421,7 @@ static CARD_CATALOG: [CardData; 53] = [
             attack_effect: None,
             play_condition: None,
             play_effects: &[],
-            mentor_effect: None,
+            mentor_effect: Some(MentorEffect::GlisteningSteelbladeSearch),
         },
         // ── DORINTHEA — EQUIPMENT ───────────────────────────────────────
         // Dawnblade, Resplendent

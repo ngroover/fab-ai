@@ -3594,6 +3594,204 @@ fn a_face_up_card_is_always_visible_to_both_players() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Hala Goldenhelm (Card::HalaGoldenhelm)
+//
+// Dorinthea's mentor, 3 block: "While Hala is face down in arsenal, at the
+// start of your turn you may turn her face up. While Hala is face up in
+// arsenal, whenever a sword attack you control hits, it gains go again and put
+// a lesson counter on Hala. Then if there are 2 or more lesson counters on
+// Hala, banish her, search your deck for Glistening Steelblade, put it face up
+// in arsenal, and shuffle."
+//
+// The flip is the one every mentor gets (see Chief Ruk'utan above). Her
+// constant effect is `ConstantEffect::OnSwordHitMentor`, checked as combat
+// damage resolves; the go again goes through `attack_gains_go_again`, so on
+// Dawnblade it can set off Dorinthea's extra attack. The lesson counter is
+// added on the hit, and graduation (`MentorEffect::GlisteningSteelbladeSearch`)
+// follows as the reaction step closes.
+//
+// Dorinthea (p1) swings Dawnblade (a two-handed sword, 2 power) at Rhinar (p2).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea (p1) on her action phase with Hala Goldenhelm in her arsenal —
+/// face up or face down as asked — holding Visit the Blacksmith (pitch 3, to
+/// pay for a swing) plus `rest`.
+fn dorinthea_with_hala(face_up: bool, rest: &[Card]) -> TestGame {
+    let mut gs = setup_dorinthea_action_phase();
+    let mut hand = vec![Card::HalaGoldenhelm, Card::VisitTheBlacksmithB];
+    hand.extend_from_slice(rest);
+    set_hand(&mut gs, PlayerIndex::P1, &hand);
+    put_in_arsenal(&mut gs, PlayerIndex::P1, Card::HalaGoldenhelm);
+    if face_up {
+        turn_mentor_face_up(&mut gs, PlayerIndex::P1);
+        assert!(gs.p1.arsenal_face_up());
+    }
+    gs
+}
+
+#[test]
+fn hala_goldenhelm_is_a_warrior_mentor_with_a_sword_hit_lesson_and_steelblade_search() {
+    let data = Card::HalaGoldenhelm.data();
+    assert_eq!(data.typ, CardType::Mentor);
+    assert_eq!(data.card_class, CardClass::Warrior);
+    assert_eq!(data.defense, 3);
+    assert!(matches!(data.constant_effect, Some(ConstantEffect::OnSwordHitMentor)));
+    let mentor = data.mentor_effect.as_ref().expect("Hala should carry a mentor effect");
+    assert!(matches!(mentor, crate::card_effects::MentorEffect::GlisteningSteelbladeSearch));
+    assert_eq!(mentor.graduation_card(), Card::GlisteningSteelbladeY);
+}
+
+#[test]
+fn face_up_hala_gives_a_dawnblade_hit_go_again_and_takes_a_lesson() {
+    let mut gs = dorinthea_with_hala(true, &[]);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, 18);
+    assert_eq!(gs.p1.action_points, 1, "the hit gained go again");
+    assert!(gs.p1.extra_weapon_attack(), "Dawnblade gaining go again unlocks Dorinthea's extra attack");
+    assert_eq!(gs.p1.arsenal_lesson_counters, 1);
+    assert_eq!(arsenal_card(&gs, PlayerIndex::P1), Some(Card::HalaGoldenhelm), "one lesson: she stays");
+    assert!(gs.p1.arsenal_face_up());
+}
+
+#[test]
+fn face_down_hala_does_not_trigger() {
+    let mut gs = dorinthea_with_hala(false, &[]);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, 18);
+    assert_eq!(gs.p1.action_points, 0, "no go again");
+    assert!(!gs.p1.extra_weapon_attack());
+    assert_eq!(gs.p1.arsenal_lesson_counters, 0);
+}
+
+#[test]
+fn hala_does_not_trigger_on_a_sword_attack_that_is_fully_blocked() {
+    // Clearing Bellow (3 block) stops Dawnblade's 2: no hit.
+    let mut gs = dorinthea_with_hala(true, &[]);
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::ClearingBellowB]);
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::Weapon);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    step_card(&mut gs, ActionType::Defend, Card::ClearingBellowB);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20);
+    assert_eq!(gs.p1.action_points, 0, "no hit, no go again");
+    assert_eq!(gs.p1.arsenal_lesson_counters, 0);
+}
+
+#[test]
+fn hala_does_not_trigger_on_an_attack_action_card_hit() {
+    // Flock of the Feather Walkers (5, paid by pitching Visit, revealing Sharpen
+    // Steel) is not a sword attack.
+    let mut gs = dorinthea_with_hala(true, &[Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR]);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    if gs.phase == Phase::RevealChoice {
+        step_card(&mut gs, ActionType::Reveal, Card::SharpenSteelR);
+    }
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 15);
+    assert_eq!(gs.p1.action_points, 0, "Flock has no go again, and Hala gives none");
+    assert_eq!(gs.p1.arsenal_lesson_counters, 0);
+}
+
+#[test]
+fn hala_graduates_on_the_second_hit_fetching_glistening_steelblade_face_up() {
+    // Two Dawnblade hits in one turn: the first gains go again from Hala (and
+    // unlocks Dorinthea's extra attack); the second, paid from the float,
+    // teaches the second lesson.
+    let mut gs = dorinthea_with_hala(true, &[]);
+    let steelblade = p1_deck_copy_of(&gs, Card::GlisteningSteelbladeY)
+        .expect("Glistening Steelblade should be in the deck");
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p1.arsenal_lesson_counters, 1);
+    let deck_before = gs.p1.deck_size();
+
+    dawnblade_unblocked(&mut gs, None);
+    // 2, then 2 + 1 (Dawnblade's second attack this turn).
+    assert_eq!(gs.p2.life, 20 - 2 - 3);
+    assert_eq!(gs.p1.action_points, 1, "the second hit gained go again as well");
+
+    // Hala is banished; Glistening Steelblade sits face up in the arsenal.
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::HalaGoldenhelm, Zone::Banish));
+    assert_eq!(arsenal_card(&gs, PlayerIndex::P1), Some(steelblade));
+    assert!(gs.p1.arsenal_face_up());
+    assert_eq!(gs.p1.visibility(Zone::Arsenal), CardVisibleState::BothKnow);
+    assert_eq!(gs.p1.arsenal_lesson_counters, 0, "the counters stayed with Hala");
+    // The deck lost exactly that card.
+    assert_eq!(gs.p1.deck_size(), deck_before - 1);
+    assert!(!deck_order(&gs, PlayerIndex::P1).contains(&steelblade));
+}
+
+#[test]
+fn hala_graduation_shuffles_the_deck() {
+    let mut gs = dorinthea_with_hala(true, &[]);
+    gs.p1.arsenal_lesson_counters = 1;
+    let steelblade = p1_deck_copy_of(&gs, Card::GlisteningSteelbladeY)
+        .expect("Glistening Steelblade should be in the deck");
+    let mut expected_unshuffled = deck_order(&gs, PlayerIndex::P1);
+    expected_unshuffled.retain(|&c| c != steelblade);
+
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::HalaGoldenhelm, Zone::Banish));
+
+    let after = deck_order(&gs, PlayerIndex::P1);
+    let mut a = after.clone();
+    let mut b = expected_unshuffled.clone();
+    a.sort_by_key(|c| *c as u8);
+    b.sort_by_key(|c| *c as u8);
+    assert_eq!(a, b, "same cards");
+    assert_ne!(after, expected_unshuffled, "new order");
+}
+
+#[test]
+fn hala_graduates_even_with_no_glistening_steelblade_left_to_find() {
+    let mut gs = dorinthea_with_hala(true, &[]);
+    gs.p1.arsenal_lesson_counters = 1;
+    let steelblade = p1_deck_copy_of(&gs, Card::GlisteningSteelbladeY)
+        .expect("Glistening Steelblade should be in the deck");
+    relabel(&mut gs, PlayerIndex::P1, Zone::Deck, steelblade, Card::SharpenSteelR);
+    let deck_before = gs.p1.deck_size();
+
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::HalaGoldenhelm, Zone::Banish));
+    assert_eq!(gs.p1.arsenal, None);
+    assert_eq!(gs.p1.deck_size(), deck_before);
+    assert_eq!(gs.p1.action_points, 1, "the hit still gained go again");
+}
+
+#[test]
+fn glistening_steelblade_fetched_by_hala_can_be_played_from_the_arsenal_that_turn() {
+    // Graduating on the first swing's hit leaves 2 resources floating (Visit's
+    // 3 less Dawnblade's 1) and an action point (Hala's go again): enough for
+    // Glistening Steelblade's cost of 1.
+    let mut gs = dorinthea_with_hala(true, &[]);
+    gs.p1.arsenal_lesson_counters = 1;
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    let steelblade = arsenal_card(&gs, PlayerIndex::P1).expect("Glistening Steelblade should be in the arsenal");
+    assert_eq!(steelblade, Card::GlisteningSteelbladeY);
+    assert_eq!((gs.p1.action_points, gs.p1.resources), (1, 2));
+
+    let offered = legal_actions(&gs).iter()
+        .any(|a| a.typ == ActionType::PlayCard && named(&gs, a) == Some(steelblade));
+    assert!(offered, "the fetched Glistening Steelblade should be playable from the arsenal");
+    step_card(&mut gs, ActionType::PlayCard, steelblade);
+    assert!(on_stack(&gs, steelblade));
+    assert_eq!(gs.p1.arsenal, None);
+    assert!(!gs.p1.arsenal_face_up());
+}
+
+#[test]
+fn hala_is_never_offered_as_a_play_from_the_arsenal() {
+    let gs = dorinthea_with_hala(true, &[]);
+    assert!(!legal_actions(&gs).iter()
+        .any(|a| a.typ == ActionType::PlayCard && named(&gs, a) == Some(Card::HalaGoldenhelm)));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Bone Basher (Card::BoneBasher)
 //
 // Rhinar's weapon: a 4-power two-handed brute club with "Once per Turn Action —

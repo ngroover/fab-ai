@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 
-use crate::cards::CardType;
+use crate::cards::{Card, CardType};
 
 #[repr(u8)]
 pub enum ConstantEffect {
@@ -21,6 +21,14 @@ pub enum ConstantEffect {
     /// (see `fab_step::maybe_play6_intimidate`); his lesson counter and Alpha
     /// Rampage search ride the same trigger as his `MentorEffect`.
     OnPlay6Intimidate,
+    /// "Whenever a sword attack you control hits, it gains go again."
+    /// Carried by Hala Goldenhelm, whose text puts the ability behind "While
+    /// Hala is face up in arsenal", so it only applies while she is face up in
+    /// her owner's arsenal. Checked as combat damage resolves
+    /// (`fab_step::resolve_combat_damage`); the go again goes through
+    /// `attack_gains_go_again`, so on Dawnblade it can set off Dorinthea's
+    /// extra attack. Her lesson counter rides the same trigger as her
+    /// `MentorEffect`.
     OnSwordHitMentor,
     /// "When this is destroyed, reveal the top card of your deck. If it has 6
     /// or more power, put it on top of your deck. Otherwise, put it on the
@@ -44,6 +52,20 @@ pub enum MentorEffect {
     /// Alpha Rampage, put it face up in arsenal and shuffle." See
     /// `fab_step::mentor_alpha_rampage_search`.
     AlphaRampageSearch,
+    /// Hala Goldenhelm: "put a lesson counter on Hala. Then if there are 2 or
+    /// more lesson counters on Hala, banish her, search your deck for
+    /// Glistening Steelblade, put it face up in arsenal, and shuffle."
+    GlisteningSteelbladeSearch,
+}
+
+impl MentorEffect {
+    /// The card a mentor's completed lesson searches the deck for.
+    pub fn graduation_card(&self) -> Card {
+        match self {
+            MentorEffect::AlphaRampageSearch => Card::AlphaRampageR,
+            MentorEffect::GlisteningSteelbladeSearch => Card::GlisteningSteelbladeY,
+        }
+    }
 }
 
 #[repr(u8)]
