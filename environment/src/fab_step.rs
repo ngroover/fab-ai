@@ -1059,12 +1059,15 @@ pub(crate) fn play_requirements_met(player: &Player, data: &CardData) -> bool {
 /// attacker, into the attack on the current chain link.
 fn affected_attack(player: &Player, effect: &AttackEffect) -> Option<DeckCardId> {
     let attack = player.current_attack()?;
-    let data = player.card(attack).data();
-    let valid = match effect.attack {
+    is_attack_of_kind(player.card(attack).data(), effect.attack).then_some(attack)
+}
+
+/// Whether an attack with `data` is an attack of `kind`.
+fn is_attack_of_kind(data: &CardData, kind: AttackKind) -> bool {
+    match kind {
         AttackKind::Weapon => is_weapon(data),
         AttackKind::Sword => is_sword(data),
-    };
-    valid.then_some(attack)
+    }
 }
 
 /// Resolve an attack reaction's `effect` on the attack it is played into. It
@@ -1521,15 +1524,12 @@ fn apply_on_play_effect_type(gs: &mut Gamestate, rng: &mut GameRng, owner: Playe
             let player = gs.player_mut(owner);
             player.next_attack_bonus = player.next_attack_bonus.saturating_add(effect.magnitude);
         }
-        OnPlayEffectType::NextWeaponPower => {
-            let player = gs.player_mut(owner);
-            player.next_weapon_attack_bonus = player.next_weapon_attack_bonus.saturating_add(effect.magnitude);
-        }
-        // Run Through: banked for the next sword attack, handed to it as it is
-        // made (`finish_commit`).
-        OnPlayEffectType::NextSwordPower => {
-            let player = gs.player_mut(owner);
-            player.next_sword_attack_bonus = player.next_sword_attack_bonus.saturating_add(effect.magnitude);
+        // En Garde's next weapon attack, Run Through's next sword attack:
+        // banked by kind, handed to that attack as it is made (`finish_commit`).
+        OnPlayEffectType::NextWeaponPower | OnPlayEffectType::NextSwordPower => {
+            let kind = effect.effectType.next_attack_kind().expect("a next-attack-kind power effect");
+            let bonus = gs.player_mut(owner).next_attack_power_bonus_mut(kind);
+            *bonus = bonus.saturating_add(effect.magnitude);
         }
         OnPlayEffectType::NextBruteConditionalPower => {
             let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
@@ -1840,14 +1840,17 @@ fn finish_commit(gs: &mut Gamestate, rng: &mut GameRng, pending: PendingCard) {
             gs.player_mut(owner).set_next_sword_go_again(false);
             attack_gains_go_again(gs, owner, pending.card);
         }
-        // Run Through's "your next sword attack this turn gains +2 power" is
-        // spent as that attack is made, onto the attack's own bonus. Handing
-        // it over here rather than at combat damage keeps it off the sword
-        // attack Run Through was played into, which was made before it.
-        if is_sword(data) && gs.player(owner).next_sword_attack_bonus > 0 {
-            let player = gs.player_mut(owner);
-            player.attack_power_bonus = player.attack_power_bonus.saturating_add(player.next_sword_attack_bonus);
-            player.next_sword_attack_bonus = 0;
+        // Power banked for "your next weapon/sword attack this turn" (En
+        // Garde, Run Through) is spent as that attack is made, onto the
+        // attack's own bonus. Handing it over here rather than at combat
+        // damage keeps it off an attack made before it was banked: Run
+        // Through is played into the sword attack whose next one it pumps.
+        for kind in [AttackKind::Weapon, AttackKind::Sword] {
+            if is_attack_of_kind(data, kind) {
+                let player = gs.player_mut(owner);
+                let banked = std::mem::take(player.next_attack_power_bonus_mut(kind));
+                player.attack_power_bonus = player.attack_power_bonus.saturating_add(banked);
+            }
         }
     }
 
@@ -1928,11 +1931,10 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         .map(|data| data.typ == CardType::AttackAction)
         .unwrap_or(false);
     let attack_action_bonus = if attack_is_attack_action { attacker.next_attack_action_bonus } else { 0 };
-    // Whether the attack is a weapon swing, which gates the banked "next
-    // weapon attack" bonus (En Garde's +3). An attack action card leaves it
-    // banked for a later swing this turn.
+    // Whether the attack is a weapon swing. (The banked "next weapon attack"
+    // bonus, En Garde's +3, is not read here: it joined `attack_power_bonus`
+    // as the swing was made, `finish_commit`.)
     let attack_is_weapon = attack_data.map(is_weapon).unwrap_or(false);
-    let weapon_bonus = if attack_is_weapon { attacker.next_weapon_attack_bonus } else { 0 };
     // The banked "next attack" bonus (Second Swing's +4) is taken by any
     // attack: a weapon swing or an attack action card.
     let next_attack_bonus = if attack_data.is_some() { attacker.next_attack_bonus } else { 0 };
@@ -1980,7 +1982,6 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         .saturating_add(brute_bonus)
         .saturating_add(attack_action_bonus)
         .saturating_add(brute_conditional_bonus)
-        .saturating_add(weapon_bonus)
         .saturating_add(second_attack_bonus)
         .saturating_add(next_attack_bonus)
         .saturating_add(counter_bonus);
@@ -2068,10 +2069,6 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // so a weapon swing leaves it banked for a later attack action this turn.
     if attack_is_attack_action {
         attacker.next_attack_action_bonus = 0;
-    }
-    // And the weapon bonus: spent by a weapon swing only.
-    if attack_is_weapon {
-        attacker.next_weapon_attack_bonus = 0;
     }
     // And the any-attack bonus: spent by whichever attack this is.
     if attack_data.is_some() {

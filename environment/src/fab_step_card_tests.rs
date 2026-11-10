@@ -4435,18 +4435,17 @@ fn en_garde_bonus_is_not_taken_by_an_attack_action_card() {
 
 #[test]
 fn en_garde_bonus_applies_once() {
+    // The bonus is handed to a swing as it is made, so these are real swings:
+    // a Quicken gives the first go again, and Dorinthea an extra attack.
     let mut gs = play_en_garde(&[]);
-    // A swing takes it...
-    place_weapon_on_chain(&mut gs, PlayerIndex::P1);
-    let life_before = gs.p2.life;
-    resolve_combat_damage(&mut gs);
-    assert_eq!(gs.p2.life, life_before - 5);
-    // ...and the next weapon attack gets nothing extra.
-    close_combat_chain(&mut gs);
-    place_weapon_on_chain(&mut gs, PlayerIndex::P1);
-    let life_before = gs.p2.life;
-    resolve_combat_damage(&mut gs);
-    assert_eq!(gs.p2.life, life_before - 2);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    // A swing takes it: 2 + 3...
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 5);
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 0, "spent by the swing");
+    // ...and the next weapon attack gets nothing extra: 2 + 1 (second attack).
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 5 - 3);
 }
 
 #[test]
@@ -6661,4 +6660,16 @@ fn run_through_on_the_extra_swing_grants_no_third_attack_and_its_bonus_ends_with
         step(&mut gs, act);
     }
     assert_eq!(gs.p1.next_sword_attack_bonus, 0);
+}
+
+#[test]
+fn a_club_swing_does_not_take_a_banked_sword_power_bonus() {
+    // Rhinar's deck holds no Run Through, so the bonus is staged: Bone Basher
+    // is a club, not a sword, so its swing leaves the +2 banked.
+    let mut gs = setup_rhinar_action_phase();
+    gs.p1.next_sword_attack_bonus = 2;
+    gs.p1.resources = 2;
+    step_card_from(&mut gs, ActionType::Activate, Card::BoneBasher, Zone::Weapon);
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+    assert_eq!(gs.p1.next_sword_attack_bonus, 2, "still waiting for a sword attack");
 }

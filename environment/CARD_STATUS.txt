@@ -1102,17 +1102,27 @@ on-play-effect helpers).
             applied through `attack_gains_go_again` as the card resolves, so
             on Dawnblade it sets off Dorinthea's extra attack.
           * The +2 is a new on-play `OnPlayEffectType::NextSwordPower`, banked
-            on `Player::next_sword_attack_bonus`. Unlike En Garde's
-            `next_weapon_attack_bonus` (read at combat damage), it is handed
-            onto `attack_power_bonus` as the next sword attack is made
-            (`fab_step::finish_commit`): Run Through is played during a sword
-            attack, which must not take its own +2. An attack action card
-            leaves it banked. Cleared each turn.
+            on `Player::next_sword_attack_bonus`. It shares En Garde's path
+            (`NextWeaponPower`, `next_weapon_attack_bonus`): both name an
+            `AttackKind` (`OnPlayEffectType::next_attack_kind`), are banked
+            through `Player::next_attack_power_bonus_mut`, and are handed onto
+            `attack_power_bonus` as the next attack of that kind is made
+            (`fab_step::finish_commit`). En Garde's bonus used to be read at
+            combat damage instead; it moved because Run Through is played
+            during a sword attack, which must not take its own +2. For the
+            action-speed weapon pumps (En Garde, Sharpen Steel, Warrior's
+            Valor, Driving Blade) the two timings pick the same attack.
+            Sword stays separate from weapon so a non-sword weapon (Bone
+            Basher) leaves it banked. An attack action card leaves it banked.
+            Cleared each turn.
+          * en_garde_bonus_applies_once staged the swing straight onto the
+            chain, skipping the hand-off; it now makes two real swings.
         Tests: run_through_is_a_targeted_sword_go_again_banking_2_for_the_next_sword_attack,
                run_through_gives_dawnblade_go_again_and_an_extra_attack_with_plus_2,
                run_through_is_not_offered_against_an_attack_action_card,
                run_throughs_bonus_is_left_banked_by_an_attack_action_card,
-               run_through_on_the_extra_swing_grants_no_third_attack_and_its_bonus_ends_with_the_turn
+               run_through_on_the_extra_swing_grants_no_third_attack_and_its_bonus_ends_with_the_turn,
+               a_club_swing_does_not_take_a_banked_sword_power_bonus
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards

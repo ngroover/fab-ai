@@ -1,3 +1,4 @@
+use crate::card_effects::AttackKind;
 use crate::cards::{Card, CardType, EquipmentSlot};
 use crate::action::ActionType;
 use crate::card_counts::{CardCounts, DeckCardId, MAX_DECK_IDS};
@@ -529,10 +530,10 @@ pub struct Player {
     /// so it never leaks.
     pub next_brute_attack_conditional_bonus : u8,
     /// Extra power banked for the *next weapon attack* this player makes this
-    /// turn (En Garde's "+3 power"). Applied only when a weapon swing resolves
-    /// combat damage — an attack action card in between neither takes nor
-    /// spends it — then consumed, and cleared at the start of each turn so it
-    /// never leaks.
+    /// turn (En Garde's "+3 power"). Handed onto `attack_power_bonus` as the
+    /// next weapon attack is made (`fab_step::finish_commit`) — an attack
+    /// action card in between neither takes nor spends it — and cleared at the
+    /// start of each turn so it never leaks. See `next_attack_power_bonus_mut`.
     pub next_weapon_attack_bonus : u8,
     /// Extra power banked for the *next attack* this player makes this turn,
     /// of any kind (Second Swing's "+4 power"). Unlike the bonuses above, a
@@ -541,11 +542,9 @@ pub struct Player {
     /// never leaks.
     pub next_attack_bonus : u8,
     /// Extra power banked for the *next sword attack* this player makes this
-    /// turn (Run Through's "+2 power"). Unlike `next_weapon_attack_bonus` it is
-    /// handed over as that attack is made, onto `attack_power_bonus`, rather
-    /// than read at combat damage: Run Through banks it during the reaction
-    /// step of a sword attack, and that attack must not take it. Cleared at the
-    /// start of each turn so it never leaks.
+    /// turn (Run Through's "+2 power"). The sword counterpart of
+    /// `next_weapon_attack_bonus`, handed over the same way; a non-sword weapon
+    /// swing leaves it banked. Cleared at the start of each turn.
     pub next_sword_attack_bonus : u8,
     /// +1 power counters on this player's weapon (Glistening Steelblade puts
     /// them on Dawnblade). Each adds 1 to the weapon's power whenever it
@@ -919,6 +918,15 @@ impl Player {
     /// Set or clear `PlayerFlags::NEXT_WEAPON_ON_HIT_GO_AGAIN`.
     pub fn set_next_weapon_on_hit_go_again(&mut self, on: bool) {
         self.flags.set(PlayerFlags::NEXT_WEAPON_ON_HIT_GO_AGAIN, on);
+    }
+
+    /// The power banked for this player's next attack of `kind` this turn:
+    /// `next_weapon_attack_bonus` or `next_sword_attack_bonus`.
+    pub fn next_attack_power_bonus_mut(&mut self, kind: AttackKind) -> &mut u8 {
+        match kind {
+            AttackKind::Weapon => &mut self.next_weapon_attack_bonus,
+            AttackKind::Sword => &mut self.next_sword_attack_bonus,
+        }
     }
 
     /// Whether this player's next sword attack gains go again

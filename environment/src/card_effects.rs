@@ -174,15 +174,31 @@ pub enum OnPlayEffectType {
     /// this turn (En Garde's "Your next weapon attack this turn gains +3
     /// power"). The weapon counterpart of `NextAttackPower`: only a weapon
     /// swing takes and spends it, so an attack action card in between leaves
-    /// it banked.
+    /// it banked. See `next_attack_kind`.
     NextWeaponPower,
     /// Banks `magnitude` power for the next *sword* attack the owner makes
     /// this turn (Run Through's "Your next sword attack this turn gains +2
-    /// power"). Banked on `Player::next_sword_attack_bonus` and handed to that
-    /// attack as it is made (`fab_step::finish_commit`), so when Run Through
-    /// is played into a sword attack, that attack — already made — does not
-    /// take it; the next swing does.
+    /// power"). Kept apart from `NextWeaponPower` so a non-sword weapon (Bone
+    /// Basher, a club) leaves it banked. See `next_attack_kind`.
     NextSwordPower,
+}
+
+impl OnPlayEffectType {
+    /// For an effect that banks power for the owner's next attack of one kind
+    /// this turn, that kind; `None` for any other effect. Both kinds share one
+    /// path: banked on `Player::next_attack_power_bonus_mut`, and handed onto
+    /// `attack_power_bonus` as the next attack of that kind is made
+    /// (`fab_step::finish_commit`). Handing it over then, rather than at
+    /// combat damage, keeps it off an attack that was already made when the
+    /// bonus was banked — Run Through is played into the very sword attack
+    /// whose *next* one it pumps.
+    pub fn next_attack_kind(&self) -> Option<AttackKind> {
+        match self {
+            OnPlayEffectType::NextWeaponPower => Some(AttackKind::Weapon),
+            OnPlayEffectType::NextSwordPower => Some(AttackKind::Sword),
+            _ => None,
+        }
+    }
 }
 
 pub struct OnPlayEffect {
@@ -269,7 +285,10 @@ pub enum PlayCondition {
     PlayedWeaponAttack,
 }
 
-/// The kind of attack an `AttackEffect` applies to.
+/// The kind of attack an `AttackEffect` applies to, and the kinds a banked
+/// "your next X attack this turn gains +N power" bonus can wait for (see
+/// `OnPlayEffectType::next_attack_kind`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum AttackKind {
     /// Any weapon swing ("weapon attack").
