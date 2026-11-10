@@ -1339,8 +1339,10 @@ on-play-effect helpers).
             piece's printed defense, to no lower than 0, when its block is
             counted. A piece worn down to 0 may still defend, for nothing.
           * Changes random play (one more blocker and an ability that now does
-            something), so the stack-seed sweep was re-run; see
-            `deepest_random_game_finishes_within_the_stack_size`.
+            something), so the stack-seed sweep was re-run: 20M random games
+            still peak at 6 layers, now first at seed 36224, which
+            `deepest_random_game_finishes_within_the_stack_size` now uses.
+            STACK_SIZE stays 7.
         Tests: gallantry_gold_is_1_block_battleworn_warrior_arms_with_a_go_again_action_ability,
                gallantry_gold_needs_a_resource_and_an_action_point,
                gallantry_gold_resolves_keeping_the_action_point_and_is_destroyed,
