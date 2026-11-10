@@ -41,6 +41,7 @@
 //!     the Quicken token (`Card::QuickenToken`)
 //!   - Dorinthea (hero)    (`Card::Dorinthea`) and Dawnblade (`Card::Dawnblade`)
 //!   - In the Swing        (`Card::InTheSwingR`)
+//!   - Ironsong Response   (`Card::IronsongResponseR`), and Reprise
 
 use super::*;
 use crate::cards::Card;
@@ -5429,4 +5430,153 @@ fn in_the_swing_is_not_offered_to_the_defender() {
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     assert_eq!(gs.active_player, PlayerIndex::P2);
     assert!(!in_the_swing_offered(&gs));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ironsong Response (Card::IronsongResponseR)
+//
+// Warrior attack reaction, cost 0, 3 block: "Reprise - If the defending hero
+// has defended with a card from their hand this chain link, your weapon attack
+// gains +3 power." Not a target, so it is playable into any attack; the +3
+// needs both the Reprise condition (the defender's
+// `PlayerFlags::DEFENDED_FROM_HAND`) and a weapon swing as the current attack,
+// read as the card resolves.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea (p1), holding Ironsong Response and Visit the Blacksmith, swings
+/// Dawnblade (pitching Visit) and Rhinar (p2) declares `blockers` — from hand,
+/// or from an equipment slot when he is wearing it. In the reaction step with
+/// Dorinthea holding priority.
+fn ironsong_vs_dawnblade(blockers: &[Card]) -> TestGame {
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB, Card::IronsongResponseR], 0);
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::ClearingBellowB, Card::DodgeB]);
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::Weapon);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    for &card in blockers {
+        let zone = if in_zone(&gs, PlayerIndex::P2, card, Zone::Equipment) { Zone::Equipment } else { Zone::Hand };
+        step_card_from(&mut gs, ActionType::Defend, card, zone);
+    }
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done declaring
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    gs
+}
+
+/// Dorinthea plays Ironsong Response and play runs on to her action phase.
+fn play_ironsong_through_damage(gs: &mut TestGame) {
+    step_card(gs, ActionType::PlayCard, Card::IronsongResponseR);
+    while gs.phase != Phase::Action {
+        step(gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert!(in_zone(gs, PlayerIndex::P1, Card::IronsongResponseR, Zone::Graveyard));
+    assert_eq!(gs.p1.attack_power_bonus, 0, "the bonus never outlives the attack");
+}
+
+#[test]
+fn ironsong_response_is_a_free_reprise_attack_reaction_pumping_a_weapon_attack_by_3() {
+    use crate::card_effects::{OnPlayConditionType, OnPlayEffectType};
+    let data = Card::IronsongResponseR.data();
+    assert_eq!(data.typ, CardType::AttackReaction);
+    assert_eq!((data.cost, data.pitch, data.defense), (0, 1, 3));
+    assert_eq!(data.card_class, CardClass::Warrior);
+    assert!(data.keyword.contains(Keyword::Reprise));
+    let effect = data.play_effect.as_ref().expect("Ironsong Response should carry an on-play effect");
+    assert!(matches!(effect.condition, OnPlayConditionType::Reprise));
+    assert!(matches!(effect.effectType, OnPlayEffectType::CurrentWeaponAttackPower));
+    assert_eq!(effect.magnitude, 3);
+    assert!(data.play_condition.is_none() && data.target_effect.is_none());
+}
+
+#[test]
+fn ironsong_response_pumps_a_weapon_attack_blocked_from_hand() {
+    let mut gs = ironsong_vs_dawnblade(&[Card::ClearingBellowB]);
+    assert!(gs.p2.defended_from_hand());
+    assert!(playable_cards(&gs).contains(&Card::IronsongResponseR));
+    play_ironsong_through_damage(&mut gs);
+    // 2 + 3 against Clearing Bellow's 3.
+    assert_eq!(gs.p2.life, 20 - 2);
+}
+
+#[test]
+fn ironsong_response_does_nothing_against_an_unblocked_attack() {
+    let mut gs = ironsong_vs_dawnblade(&[]);
+    assert!(!gs.p2.defended_from_hand());
+    // Still playable: Reprise is checked as it resolves, not to play it.
+    assert!(playable_cards(&gs).contains(&Card::IronsongResponseR));
+    play_ironsong_through_damage(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 2);
+}
+
+#[test]
+fn ironsong_response_reprise_ignores_equipment_blocks() {
+    let mut gs = ironsong_vs_dawnblade(&[Card::BoneVizier]);
+    assert!(!gs.p2.defended_from_hand());
+    play_ironsong_through_damage(&mut gs);
+    // 2 against Bone Vizier's 1.
+    assert_eq!(gs.p2.life, 20 - 1);
+}
+
+#[test]
+fn ironsong_response_does_nothing_for_an_attack_action_card() {
+    // Rhinar blocks Flock of the Feather Walkers (5 power) from hand: Reprise
+    // is met, but the attack is not a weapon attack.
+    let mut gs = rhinar_defending_flock();
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::ClearingBellowB]);
+    step_card(&mut gs, ActionType::Defend, Card::ClearingBellowB);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert!(gs.p2.defended_from_hand());
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::IronsongResponseR]);
+    play_ironsong_through_damage(&mut gs);
+    assert_eq!(gs.p2.life, 20 - (5 - 3));
+}
+
+#[test]
+fn a_defense_reaction_from_hand_meets_reprise_but_not_from_the_arsenal() {
+    for (zone, from_hand) in [(Zone::Hand, true), (Zone::Arsenal, false)] {
+        let mut gs = ironsong_vs_dawnblade(&[]);
+        if zone == Zone::Arsenal {
+            set_hand(&mut gs, PlayerIndex::P2, &[Card::ClearingBellowB]);
+            put_in_arsenal(&mut gs, PlayerIndex::P2, Card::DodgeB);
+        }
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // Dorinthea
+        step_card_from(&mut gs, ActionType::PlayCard, Card::DodgeB, zone);
+        pass_once_each(&mut gs);
+        assert!(link_cards(&gs, PlayerIndex::P2, 0).contains(&Card::DodgeB));
+        assert_eq!(gs.p2.defended_from_hand(), from_hand, "Dodge played from {:?}", zone);
+    }
+}
+
+#[test]
+fn reprise_is_reset_for_each_chain_link() {
+    // The first swing is blocked from hand; the second, from the chain, is
+    // not. Ironsong Response on the second swing gets no Reprise.
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB, Card::IronsongResponseR], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::ClearingBellowB]);
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::Weapon);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    pass_once_each(&mut gs);
+    step_card(&mut gs, ActionType::Defend, Card::ClearingBellowB);
+    while gs.phase != Phase::Action {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert!(gs.p2.defended_from_hand(), "still the first link");
+    assert_eq!(gs.p2.life, 20, "2 power against a 3 block");
+    dawnblade_into_reaction_step(&mut gs, None);
+    assert!(!gs.p2.defended_from_hand(), "the second swing opened a fresh link");
+    play_ironsong_through_damage(&mut gs);
+    // 2 + 1 (Dawnblade's second attack), no +3.
+    assert_eq!(gs.p2.life, 20 - 3);
+}
+
+#[test]
+fn reprise_is_cleared_as_the_chain_closes() {
+    let mut gs = ironsong_vs_dawnblade(&[Card::ClearingBellowB]);
+    play_ironsong_through_damage(&mut gs);
+    assert!(gs.p2.defended_from_hand());
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // closes the chain
+    assert!(!gs.p2.defended_from_hand());
 }

@@ -359,6 +359,13 @@ bitflags::bitflags! {
         /// also records that the ability has been used. Cleared at the start of
         /// each turn.
         const EXTRA_WEAPON_ATTACK = 1 << 8;
+        /// This player, defending, has defended the current chain link with a
+        /// card from their hand: a blocker declared from hand, or a defense
+        /// reaction played from hand (not equipment, and not a card played
+        /// from the arsenal). What Reprise asks of "the defending hero"
+        /// (Ironsong Response). Set as the card joins the link; cleared as
+        /// each new attack opens a link, as the chain closes, and on reset.
+        const DEFENDED_FROM_HAND = 1 << 9;
         /// All four of the above.
         /// Whether the opponent knows the face-down card in this player's
         /// arsenal: it was arsenaled from a hand made entirely of known copies
@@ -856,6 +863,17 @@ impl Player {
     /// Set or clear `PlayerFlags::EXTRA_WEAPON_ATTACK`.
     pub fn set_extra_weapon_attack(&mut self, on: bool) {
         self.flags.set(PlayerFlags::EXTRA_WEAPON_ATTACK, on);
+    }
+
+    /// Whether this player has defended the current chain link with a card
+    /// from their hand (`PlayerFlags::DEFENDED_FROM_HAND`) — Reprise.
+    pub const fn defended_from_hand(&self) -> bool {
+        self.flags.contains(PlayerFlags::DEFENDED_FROM_HAND)
+    }
+
+    /// Set or clear `PlayerFlags::DEFENDED_FROM_HAND`.
+    pub fn set_defended_from_hand(&mut self, on: bool) {
+        self.flags.set(PlayerFlags::DEFENDED_FROM_HAND, on);
     }
 
     /// Whether the opponent knows the face-down arsenal card

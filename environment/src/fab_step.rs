@@ -617,6 +617,9 @@ fn commit_blocker(gs: &mut Gamestate, id: DeckCardId, from: Zone) {
     let player = gs.player_mut(pid);
     take_from_zone(player, id, from);
     player.chain_link[link].add(id);
+    if from == Zone::Hand {
+        player.set_defended_from_hand(true);
+    }
 }
 
 /// Put a `DefendTrigger` on the stack for each declared blocker carrying a
@@ -838,11 +841,17 @@ fn reveal_top_keep_6(gs: &mut Gamestate, pid: PlayerIndex) {
 /// block is summed with theirs against this attack alone. Unlike `commit_blocker`
 /// the card comes from the stack, which `resolve_top_of_stack` has already popped
 /// it from, so there is no zone to take it out of first.
-fn commit_defense_reaction(gs: &mut Gamestate, owner: PlayerIndex, id: DeckCardId) {
+fn commit_defense_reaction(gs: &mut Gamestate, owner: PlayerIndex, id: DeckCardId, from: Zone) {
     // Only the turn player attacks, so the link being defended is the current
     // link of the turn player's chain.
     let link = current_chain_link(gs.player(gs.turn_player));
-    gs.player_mut(owner).chain_link[link].add(id);
+    let player = gs.player_mut(owner);
+    player.chain_link[link].add(id);
+    // Played from hand, it is a card from hand defending this link (Reprise);
+    // played from the arsenal, it is not.
+    if from == Zone::Hand {
+        player.set_defended_from_hand(true);
+    }
 }
 
 /// Resolve the layer at the top of the stack (its most recently added one),
@@ -951,6 +960,8 @@ fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
         });
         attacker.chain_link[link].add(top);
         attacker.chain_links_open = link as u8 + 1;
+        // A fresh link: nothing has defended it yet (Reprise).
+        gs.player_mut(owner.opponent()).set_defended_from_hand(false);
         gs.phase = Phase::Defend;
     } else if commits_as_defense(pending.typ, data, owner, gs.turn_player) {
         // A defense reaction resolving in the defender's reaction window joins
@@ -958,7 +969,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
         // for the graveyard, so its block counts towards stopping this attack
         // (see `resolve_combat_damage`). It leaves for the graveyard with the
         // rest of the link when the chain closes.
-        commit_defense_reaction(gs, owner, top);
+        commit_defense_reaction(gs, owner, top, pending.from);
         if gs.stack_is_empty() {
             close_priority_window(gs);
         } else {
@@ -1377,6 +1388,10 @@ fn apply_on_play_effect(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerInde
             };
             mine < theirs
         }
+        // Reprise: the defending hero — the owner's opponent, as only the
+        // attacker plays attack reactions — has defended this chain link with a
+        // card from their hand.
+        OnPlayConditionType::Reprise => gs.player(owner.opponent()).defended_from_hand(),
         OnPlayConditionType::Always => true,
     };
     if !condition_met {
@@ -1457,6 +1472,17 @@ fn apply_on_play_effect(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerInde
         // chain, which is when it attacks — after any Quicken already held was
         // spent on playing it (see `trigger_quickens`).
         OnPlayEffectType::CreateQuicken => create_quicken(gs, owner),
+        // "Your weapon attack gains `magnitude` power" (Ironsong Response): the
+        // owner's current attack, if it is a weapon swing. Banked like
+        // `ConditionalPower` and spent at combat damage.
+        OnPlayEffectType::CurrentWeaponAttackPower => {
+            let player = gs.player_mut(owner);
+            let is_weapon_attack = player.current_attack()
+                .is_some_and(|id| is_weapon(player.card(id).data()));
+            if is_weapon_attack {
+                player.attack_power_bonus = player.attack_power_bonus.saturating_add(effect.magnitude);
+            }
+        }
     }
 }
 
@@ -1957,6 +1983,7 @@ fn close_combat_chain(gs: &mut Gamestate) {
         }
         // Every mark has now been acted on.
         gs.player_mut(pid).clear_destroy_on_chain_close();
+        gs.player_mut(pid).set_defended_from_hand(false);
     }
 }
 

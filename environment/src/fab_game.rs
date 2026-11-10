@@ -202,6 +202,7 @@ fn place_cards_for(player: &mut Player, start: &StartingCards) {
     player.set_arsenal_face_up(false);
     player.set_arsenal_known(false);
     player.set_extra_weapon_attack(false);
+    player.set_defended_from_hand(false);
     player.clear_destroy_on_chain_close();
     player.arsenal_lesson_counters = 0;
     player.chain_link = [CardCounts::EMPTY; CHAIN_LINKS];

@@ -123,6 +123,10 @@ pub enum OnPlayConditionType {
     DrawDiscardHit6,
     HasIntimidated,
     HasLessLife,
+    /// Reprise: "If the defending hero has defended with a card from their
+    /// hand this chain link" (Ironsong Response). Read as the card resolves,
+    /// from the defender's `PlayerFlags::DEFENDED_FROM_HAND`.
+    Reprise,
     /// No condition: the effect always applies when the card resolves.
     Always,
 }
@@ -157,6 +161,11 @@ pub enum OnPlayEffectType {
     /// swing takes and spends it, so an attack action card in between leaves
     /// it banked.
     NextWeaponPower,
+    /// "Your weapon attack gains `magnitude` power" (Ironsong Response): the
+    /// owner's current attack gains the power, but only if it is a weapon
+    /// attack. Not a target, so the card is playable into any attack; on an
+    /// attack action card it does nothing.
+    CurrentWeaponAttackPower,
 }
 
 pub struct OnPlayEffect {

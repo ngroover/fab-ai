@@ -877,6 +877,37 @@ on-play-effect helpers).
                in_the_swing_needs_a_weapon_attack_to_target,
                in_the_swing_is_not_offered_to_the_defender
 
+  [x] Ironsong Response   (Card::IronsongResponseR)
+        "Reprise - If the defending hero has defended with a card from their
+        hand this chain link, your weapon attack gains +3 power." (Warrior
+        attack reaction, cost 0, pitch 1, 3 block.)
+          * Reprise is a new `PlayerFlags::DEFENDED_FROM_HAND` bit on the
+            defender. It is set when a blocker is declared from hand
+            (`commit_blocker`) or a defense reaction played from hand joins
+            the link (`commit_defense_reaction`, which now takes the zone).
+            Equipment and a defense reaction from the arsenal do not set it.
+            It is cleared as each new attack opens a link, as the chain
+            closes, and on reset. `Player` does not grow.
+          * The effect is an on-play effect: condition
+            `OnPlayConditionType::Reprise`, effect
+            `OnPlayEffectType::CurrentWeaponAttackPower` (+3 to the current
+            attack, only if it is a weapon swing), both read as the card
+            resolves. A defense reaction played after Ironsong has resolved
+            does not count.
+          * "Your weapon attack" is not a target, so the card stays playable
+            into any attack, as before; it just does nothing without Reprise
+            or on an attack action card.
+          * Legal actions and rng draws are unchanged, so random play is
+            identical; the deepest-stack seed (247504, 6 layers) still holds.
+        Tests: ironsong_response_is_a_free_reprise_attack_reaction_pumping_a_weapon_attack_by_3,
+               ironsong_response_pumps_a_weapon_attack_blocked_from_hand,
+               ironsong_response_does_nothing_against_an_unblocked_attack,
+               ironsong_response_reprise_ignores_equipment_blocks,
+               ironsong_response_does_nothing_for_an_attack_action_card,
+               a_defense_reaction_from_hand_meets_reprise_but_not_from_the_arsenal,
+               reprise_is_reset_for_each_chain_link,
+               reprise_is_cleared_as_the_chain_closes
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -915,7 +946,7 @@ on-play-effect helpers).
   [x] En Garde                       (Card::EnGardeR)  — see COMPLETE section above
   [x] Flock of the Feather Walkers   (Card::FlockOfTheFeatherWalkersR)  — see COMPLETE section above
   [x] In the Swing                   (Card::InTheSwingR)  — see COMPLETE section above
-  [ ] Ironsong Response              (Card::IronsongResponseR)
+  [x] Ironsong Response              (Card::IronsongResponseR)  — see COMPLETE section above
   [ ] Second Swing                   (Card::SecondSwingR)
   [ ] Sharpen Steel                  (Card::SharpenSteelR)
   [ ] Thrust                         (Card::ThrustR)
