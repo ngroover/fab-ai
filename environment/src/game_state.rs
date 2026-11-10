@@ -3,6 +3,9 @@ use crate::card_effects::AttackKind;
 /// How many weapon attacks a turn can bank power for by their order
 /// (`Player::weapon_attack_power`): the first and the second (Slice and Dice).
 pub const WEAPON_ATTACK_ORDINALS: usize = 2;
+/// The equipment slots that can carry -1 defense counters
+/// (`Player::equipment_defense_counters`): head, chest, arms and legs.
+pub const EQUIPMENT_SLOTS: usize = 4;
 use crate::cards::{Card, CardType, EquipmentSlot};
 use crate::action::ActionType;
 use crate::card_counts::{CardCounts, DeckCardId, MAX_DECK_IDS};
@@ -566,6 +569,19 @@ pub struct Player {
     /// as each weapon attack is made (`fab_step::finish_commit`), and cleared
     /// at the start of each turn.
     pub weapon_attack_power : [u8; WEAPON_ATTACK_ORDINALS],
+    /// Power every weapon attack this player makes gains for the rest of the
+    /// turn (Gallantry Gold's "Your weapon attacks gain +1 power this turn"; each
+    /// activation adds its own). Unlike the "next weapon attack" bonuses it is
+    /// not spent by an attack: it is read at every weapon attack's combat
+    /// damage, and cleared at the start of each turn and on reset.
+    pub weapon_attacks_power_this_turn : u8,
+    /// -1 defense counters on the equipment in each slot (Head, Chest, Arms,
+    /// Legs, as `EquipmentSlot` orders them): Battleworn puts one on a piece
+    /// that defended as the combat chain closes (Gallantry Gold). Each takes 1
+    /// off the piece's printed defense, to no lower than 0. A slot holds at
+    /// most one piece, and a piece that leaves play never returns, so the
+    /// counters stay with the slot until reset. See `defense_of`.
+    pub equipment_defense_counters : [u8; EQUIPMENT_SLOTS],
     /// Per-player yes/no state packed into one byte: see `PlayerFlags` for
     /// what each flag means, and the `Player` accessors of the same names.
     pub flags : PlayerFlags,
@@ -865,6 +881,8 @@ impl Player {
             weapon_power_counters: 0,
             dawnblade_hit_counter_effects: 0,
             weapon_attack_power: [0; WEAPON_ATTACK_ORDINALS],
+            weapon_attacks_power_this_turn: 0,
+            equipment_defense_counters: [0; EQUIPMENT_SLOTS],
             flags: PlayerFlags::empty(),
             arsenal_lesson_counters: 0,
             // Logging is opted into via `reset(gs, decks, true)`; off until then.
@@ -1028,6 +1046,42 @@ impl Player {
             EquipmentSlot::Arms => PlayerFlags::DESTROY_ARMS_ON_CHAIN_CLOSE,
             EquipmentSlot::Legs => PlayerFlags::DESTROY_LEGS_ON_CHAIN_CLOSE,
             EquipmentSlot::Weapon => PlayerFlags::empty(),
+        }
+    }
+
+    /// The index of `slot` into `equipment_defense_counters`, or none for the
+    /// weapon slot (no counter of that kind goes on a weapon).
+    fn equipment_slot_index(slot: &EquipmentSlot) -> Option<usize> {
+        match slot {
+            EquipmentSlot::Head => Some(0),
+            EquipmentSlot::Chest => Some(1),
+            EquipmentSlot::Arms => Some(2),
+            EquipmentSlot::Legs => Some(3),
+            EquipmentSlot::Weapon => None,
+        }
+    }
+
+    /// The -1 defense counters on the equipment in `slot`.
+    pub fn equipment_defense_counters(&self, slot: &EquipmentSlot) -> u8 {
+        Self::equipment_slot_index(slot).map_or(0, |i| self.equipment_defense_counters[i])
+    }
+
+    /// Put a -1 defense counter on the equipment in `slot` (Battleworn).
+    pub fn add_equipment_defense_counter(&mut self, slot: &EquipmentSlot) {
+        if let Some(i) = Self::equipment_slot_index(slot) {
+            self.equipment_defense_counters[i] = self.equipment_defense_counters[i].saturating_add(1);
+        }
+    }
+
+    /// The defense `data` blocks for when this player defends with it: its
+    /// printed defense, less any -1 defense counters on it if it is a piece of
+    /// equipment (Battleworn), to no lower than 0.
+    pub fn defense_of(&self, data: &crate::cards::CardData) -> u8 {
+        match (&data.typ, &data.slot) {
+            (CardType::Equipment, Some(slot)) => {
+                data.defense.saturating_sub(self.equipment_defense_counters(slot))
+            }
+            _ => data.defense,
         }
     }
 

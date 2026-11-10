@@ -210,6 +210,8 @@ fn place_cards_for(player: &mut Player, start: &StartingCards) {
     player.weapon_power_counters = 0;
     player.dawnblade_hit_counter_effects = 0;
     player.weapon_attack_power = [0; crate::game_state::WEAPON_ATTACK_ORDINALS];
+    player.weapon_attacks_power_this_turn = 0;
+    player.equipment_defense_counters = [0; crate::game_state::EQUIPMENT_SLOTS];
     player.clear_destroy_on_chain_close();
     player.arsenal_lesson_counters = 0;
     player.chain_link = [CardCounts::EMPTY; CHAIN_LINKS];

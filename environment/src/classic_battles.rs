@@ -1461,7 +1461,9 @@ static CARD_CATALOG: [CardData; 53] = [
             no_block: false,
             slot: Some(EquipmentSlot::Arms),
             card_class: CardClass::Warrior,
-            keyword: Keyword::Battleworn,
+            // Go Again is on the ability; as for Blossom of Spring, the card
+            // keyword is only read as the ability resolves.
+            keyword: Keyword::GoAgain.union(Keyword::Battleworn),
             hero_life: 0,
             hero_intellect: 0,
             constant_effect: None,

@@ -125,6 +125,16 @@ impl Ability {
         }
     }
 
+    /// Power every weapon attack its controller makes gains for the rest of
+    /// the turn once this ability resolves. Gallantry Gold's "Your weapon
+    /// attacks gain +1 power this turn"; no other ability grants any.
+    pub fn weapon_attacks_power_gained(&self) -> u8 {
+        match self {
+            Ability::WeaponPlus1 => 1,
+            _ => 0,
+        }
+    }
+
     /// The card type at which this ability is activated. Action-speed abilities
     /// cost an action point on your turn; instant-speed abilities can be used at
     /// any time you have priority (e.g. during the defend step).

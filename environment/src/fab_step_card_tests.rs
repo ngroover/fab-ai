@@ -4217,9 +4217,8 @@ fn blossom_of_spring_stays_destroyed_on_rhinars_next_turn() {
 // top card of your deck. If it has 6 or more power, put it on top of your
 // deck. Otherwise, put it on the bottom. Blade Break."
 //
-// Any worn equipment may be declared as a blocker (bar Battleworn pieces, whose
-// counter is not modelled yet): it leaves its slot for the chain link and goes
-// back when the chain closes. Blade Break instead destroys it as the chain
+// Any worn equipment may be declared as a blocker: it leaves its slot for the
+// chain link and goes back when the chain closes. Blade Break instead destroys it as the chain
 // closes, which is what fires Bone Vizier's reveal.
 //
 // Dorinthea (p1) attacks with Flock of the Feather Walkers (5 power) and Rhinar
@@ -4281,15 +4280,6 @@ fn rhinar_may_defend_with_any_of_his_worn_equipment() {
         Card::IronhideGauntlet,
         Card::IronhideLegs,
     ]));
-}
-
-#[test]
-fn battleworn_equipment_is_not_offered_as_a_blocker_yet() {
-    let gs = dorinthea_defending_muscle_mutt();
-    let offered = equipment_blockers(&gs);
-    assert!(in_zone(&gs, PlayerIndex::P2, Card::GallantryGold, Zone::Equipment));
-    assert!(!offered.contains(&Card::GallantryGold));
-    assert!(offered.contains(&Card::IronrotHelm));
 }
 
 #[test]
@@ -7601,4 +7591,213 @@ fn slice_and_dice_does_not_outlive_the_turn() {
         step(&mut gs, act);
     }
     assert_eq!(gs.p1.weapon_attack_power, [0, 0]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gallantry Gold (Card::GallantryGold)
+//
+// Warrior arms equipment, 1 defense: "Action — {r}, destroy Gallantry Gold:
+// Your weapon attacks gain +1 power this turn. Go again. Battleworn (When the
+// combat chain closes, if this defended, put a -1 defense counter on it.)"
+//
+// The activation is action speed and costs a resource; destroying the card is
+// part of the cost, so it leaves its slot as it is paid for and ends in the
+// graveyard (as for Blossom of Spring). The +1 is for every weapon attack for
+// the rest of the turn, not just the next one. Battleworn sends it back to its
+// slot after it defends, with a -1 defense counter that stays on it.
+//
+// Activation tests: Dorinthea (p1) on her turn against Rhinar (p2).
+// Blocking tests: Rhinar (p1) attacks with Muscle Mutt (6) into Dorinthea (p2).
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn gallantry_gold_offered(gs: &Gamestate) -> bool {
+    legal_actions(gs).iter().any(|a| {
+        a.typ == ActionType::Activate && card_of(gs, a) == Card::GallantryGold
+    })
+}
+
+/// Dorinthea (p1), holding `hand` with `resources` floating, activates
+/// Gallantry Gold — pitching `pitch` if given — and both players pass so the
+/// ability resolves. Back in her action phase.
+fn activate_and_resolve_gallantry_gold(hand: &[Card], resources: u8, pitch: Option<Card>) -> TestGame {
+    let mut gs = dorinthea_holding(hand, resources);
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::GallantryGold, Zone::Equipment));
+    step_card(&mut gs, ActionType::Activate, Card::GallantryGold);
+    if let Some(card) = pitch {
+        assert_eq!(gs.phase, Phase::ActionPitch);
+        step_card(&mut gs, ActionType::Pitch, card);
+    }
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    assert_eq!(stack_top_card(&gs), Some(Card::GallantryGold));
+    // Destroying it is part of the cost, so it is already out of its slot.
+    assert!(!in_zone(&gs, PlayerIndex::P1, Card::GallantryGold, Zone::Equipment));
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    gs
+}
+
+#[test]
+fn gallantry_gold_is_1_block_battleworn_warrior_arms_with_a_go_again_action_ability() {
+    let data = Card::GallantryGold.data();
+    assert_eq!(data.typ, CardType::Equipment);
+    assert!(matches!(data.slot, Some(crate::cards::EquipmentSlot::Arms)));
+    assert_eq!(data.card_class, CardClass::Warrior);
+    assert_eq!(data.defense, 1);
+    assert!(data.keyword.contains(Keyword::GoAgain));
+    assert!(data.keyword.contains(Keyword::Battleworn));
+    assert!(!data.keyword.contains(Keyword::BladeBreak));
+    let ability = data.ability.as_ref().expect("Gallantry Gold has an ability");
+    assert!(matches!(ability, Ability::WeaponPlus1));
+    assert_eq!(ability.resource_cost(), 1);
+    assert_eq!(ability.card_type(), CardType::Action);
+    assert_eq!(ability.weapon_attacks_power_gained(), 1);
+    assert_eq!(ability.resources_gained(), 0);
+    assert!(!ability.once_per_turn());
+    assert!(!ability.discards_a_card());
+    assert!(!ability.only_while_defending());
+}
+
+#[test]
+fn gallantry_gold_needs_a_resource_and_an_action_point() {
+    let gs = dorinthea_holding(&[], 1);
+    assert!(gallantry_gold_offered(&gs));
+    let gs = dorinthea_holding(&[Card::VisitTheBlacksmithB], 0);
+    assert!(gallantry_gold_offered(&gs), "a card in hand can pitch for it");
+    let gs = dorinthea_holding(&[], 0);
+    assert!(!gallantry_gold_offered(&gs), "nothing to pay {{r}} with");
+    let mut gs = dorinthea_holding(&[], 1);
+    gs.p1.action_points = 0;
+    assert!(!gallantry_gold_offered(&gs));
+}
+
+#[test]
+fn gallantry_gold_resolves_keeping_the_action_point_and_is_destroyed() {
+    let gs = activate_and_resolve_gallantry_gold(&[], 1, None);
+    assert_eq!(gs.p1.resources, 0, "it cost {{r}}");
+    assert_eq!(gs.p1.action_points, 1, "Go again: the action point comes back");
+    assert_eq!(gs.p1.weapon_attacks_power_this_turn, 1);
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::GallantryGold, Zone::Graveyard));
+    assert!(!in_zone(&gs, PlayerIndex::P1, Card::GallantryGold, Zone::Equipment));
+    assert!(gs.p1.chain_link.iter().all(|l| l.is_empty()), "an armor ability is not an attack");
+    assert!(gs.stack_is_empty());
+    assert!(!gallantry_gold_offered(&gs), "destroyed, so it is used once per game");
+}
+
+#[test]
+fn gallantry_gold_can_be_paid_for_by_pitching() {
+    let gs = activate_and_resolve_gallantry_gold(&[Card::VisitTheBlacksmithB], 0, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p1.resources, 2, "Visit the Blacksmith pitched for 3");
+    assert_eq!(gs.p1.weapon_attacks_power_this_turn, 1);
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::GallantryGold, Zone::Graveyard));
+}
+
+#[test]
+fn gallantry_gold_gives_dawnblade_plus_1() {
+    let mut gs = activate_and_resolve_gallantry_gold(&[], 2, None);
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - (2 + 1));
+}
+
+#[test]
+fn gallantry_gold_gives_every_weapon_attack_this_turn_plus_1() {
+    // A Quicken gives the first swing go again, so Dorinthea attacks with
+    // Dawnblade twice. Both get Gallantry Gold's +1; the second also gets
+    // Dawnblade's own "+1 the second time you attack with it each turn".
+    let mut gs = activate_and_resolve_gallantry_gold(&[Card::VisitTheBlacksmithB], 1, None);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, 20 - (2 + 1));
+    assert!(gs.p1.extra_weapon_attack());
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - (2 + 1) - (2 + 1 + 1));
+}
+
+#[test]
+fn gallantry_gold_does_not_pump_an_attack_action_card() {
+    // Flock of the Feather Walkers (5 power) is an attack, but not a weapon
+    // attack.
+    let hand = [Card::FlockOfTheFeatherWalkersR, Card::ToughenUpB, Card::SharpenSteelR];
+    let mut gs = activate_and_resolve_gallantry_gold(&hand, 1, None);
+    attack_with_flock(&mut gs, Some(Card::ToughenUpB));
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 5);
+}
+
+#[test]
+fn gallantry_gold_bonus_ends_with_the_turn() {
+    let mut gs = activate_and_resolve_gallantry_gold(&[], 1, None);
+    while gs.turn_player == PlayerIndex::P1 {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.p1.weapon_attacks_power_this_turn, 0);
+}
+
+#[test]
+fn dorinthea_may_defend_with_gallantry_gold() {
+    let gs = dorinthea_defending_muscle_mutt();
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::GallantryGold, Zone::Equipment));
+    assert!(equipment_blockers(&gs).contains(&Card::GallantryGold));
+}
+
+#[test]
+fn gallantry_gold_blocks_for_1_then_returns_to_its_slot_with_a_counter() {
+    use crate::cards::EquipmentSlot;
+    let mut gs = dorinthea_blocks_muscle_mutt_with_equipment(&[Card::GallantryGold]);
+    assert_eq!(gs.p2.life, 20 - (6 - 1));
+    // No counter until the chain closes.
+    assert_eq!(gs.p2.equipment_defense_counters(&EquipmentSlot::Arms), 0);
+    close_chain_by_passing(&mut gs);
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::GallantryGold, Zone::Equipment), "Battleworn is not Blade Break");
+    assert!(!in_zone(&gs, PlayerIndex::P2, Card::GallantryGold, Zone::Graveyard));
+    assert_eq!(gs.p2.equipment_defense_counters(&EquipmentSlot::Arms), 1);
+    // Only the piece that defended gets a counter.
+    for slot in [EquipmentSlot::Head, EquipmentSlot::Chest, EquipmentSlot::Legs] {
+        assert_eq!(gs.p2.equipment_defense_counters(&slot), 0);
+    }
+}
+
+#[test]
+fn gallantry_gold_with_a_counter_blocks_for_nothing_but_may_still_defend() {
+    use crate::cards::EquipmentSlot;
+    let mut gs = dorinthea_defending_muscle_mutt();
+    gs.p2.add_equipment_defense_counter(&EquipmentSlot::Arms);
+    assert!(equipment_blockers(&gs).contains(&Card::GallantryGold));
+    step_card_from(&mut gs, ActionType::Defend, Card::GallantryGold, Zone::Equipment);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done declaring
+    while gs.phase != Phase::Action {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.p2.life, 20 - 6, "1 defense less its -1 counter");
+    // Another counter goes on it; its defense stays at 0, never below.
+    close_chain_by_passing(&mut gs);
+    assert_eq!(gs.p2.equipment_defense_counters(&EquipmentSlot::Arms), 2);
+    assert_eq!(gs.p2.defense_of(Card::GallantryGold.data()), 0);
+    assert!(in_zone(&gs, PlayerIndex::P2, Card::GallantryGold, Zone::Equipment));
+}
+
+#[test]
+fn gallantry_gold_counters_do_not_touch_other_blockers() {
+    use crate::cards::EquipmentSlot;
+    let mut gs = dorinthea_defending_muscle_mutt();
+    gs.p2.add_equipment_defense_counter(&EquipmentSlot::Arms);
+    step_card_from(&mut gs, ActionType::Defend, Card::IronrotHelm, Zone::Equipment);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    while gs.phase != Phase::Action {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.p2.life, 20 - (6 - 1), "Ironrot Helm still blocks for 1");
+}
+
+#[test]
+fn gallantry_gold_can_still_be_activated_after_defending() {
+    use crate::cards::EquipmentSlot;
+    let mut gs = dorinthea_holding(&[], 2);
+    gs.p1.add_equipment_defense_counter(&EquipmentSlot::Arms);
+    assert!(gallantry_gold_offered(&gs));
+    step_card(&mut gs, ActionType::Activate, Card::GallantryGold);
+    pass_once_each(&mut gs);
+    assert_eq!(gs.p1.weapon_attacks_power_this_turn, 1);
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - (2 + 1));
 }

@@ -594,10 +594,9 @@ on-play-effect helpers).
           * Blocking with equipment (new): `legal_defend_phase` offers every
             worn piece as a Defend from `Zone::Equipment`, and `commit_blocker`
             moves it from its slot onto the defended link, where its printed
-            defense counts like any blocker's. Battleworn pieces (Gallantry
-            Gold) are held back by `can_equipment_defend` until the -1 defense
-            counter is modelled; otherwise they would block at full strength
-            every turn.
+            defense counts like any blocker's. (Battleworn pieces were held
+            back until Gallantry Gold modelled the -1 defense counter; see its
+            entry.)
           * `close_combat_chain` sends defending equipment back to its slot,
             unless it has Blade Break, which destroys it (`destroy_equipment`):
             to the graveyard, never to return. This also covers Ironrot Helm
@@ -611,7 +610,6 @@ on-play-effect helpers).
             851660 (20M-game sweep, still 7 layers max, STACK_SIZE kept).
         Tests: bone_vizier_is_a_1_block_brute_helm_with_blade_break_and_a_destroy_trigger,
                rhinar_may_defend_with_any_of_his_worn_equipment,
-               battleworn_equipment_is_not_offered_as_a_blocker_yet,
                bone_vizier_blocks_for_1,
                bone_vizier_is_destroyed_when_the_chain_closes_and_keeps_a_6_power_card_on_top,
                bone_vizier_destruction_bottoms_a_card_with_less_than_6_power,
@@ -1315,6 +1313,48 @@ on-play-effect helpers).
                glistening_steelblade_fetched_by_hala_can_be_played_from_the_arsenal_that_turn,
                hala_is_never_offered_as_a_play_from_the_arsenal
 
+  [x] Gallantry Gold (Card::GallantryGold)
+        Warrior arms equipment, 1 defense. "Action — {r}, destroy Gallantry
+        Gold: Your weapon attacks gain +1 power this turn. Go again.
+        Battleworn (When the combat chain closes, if this defended, put a -1
+        defense counter on it.)"
+          * Offered by `push_equipment_activations` as an Activate from the
+            equipment zone: action speed, so it needs an action point, and it
+            costs {r}, paid from floating resources or by pitching.
+          * Destroying the card is part of the cost, as for Blossom of Spring:
+            it leaves its slot when the activation is paid for and goes to the
+            graveyard when the ability resolves, so it can be used once per game.
+          * On resolution `Ability::weapon_attacks_power_gained` (1) is added to
+            `Player::weapon_attacks_power_this_turn`, which every weapon attack
+            reads at combat damage for the rest of the turn. It is not spent by
+            an attack, so a second Dawnblade swing gets it too, and an attack
+            action card never does. Cleared at the start of each turn and on reset.
+          * Go Again is the card's `Keyword::GoAgain` (alongside Battleworn),
+            read as the ability resolves, so the action point is kept.
+          * Battleworn: equipment may now always be declared as a blocker (the
+            `can_equipment_defend` gate is gone). As the chain closes, a
+            Battleworn piece that defended goes back to its slot and gets a -1
+            defense counter (`Player::equipment_defense_counters`, one per
+            equipment slot). `Player::defense_of` takes the counters off the
+            piece's printed defense, to no lower than 0, when its block is
+            counted. A piece worn down to 0 may still defend, for nothing.
+          * Changes random play (one more blocker and an ability that now does
+            something), so the stack-seed sweep was re-run; see
+            `deepest_random_game_finishes_within_the_stack_size`.
+        Tests: gallantry_gold_is_1_block_battleworn_warrior_arms_with_a_go_again_action_ability,
+               gallantry_gold_needs_a_resource_and_an_action_point,
+               gallantry_gold_resolves_keeping_the_action_point_and_is_destroyed,
+               gallantry_gold_can_be_paid_for_by_pitching,
+               gallantry_gold_gives_dawnblade_plus_1,
+               gallantry_gold_gives_every_weapon_attack_this_turn_plus_1,
+               gallantry_gold_does_not_pump_an_attack_action_card,
+               gallantry_gold_bonus_ends_with_the_turn,
+               dorinthea_may_defend_with_gallantry_gold,
+               gallantry_gold_blocks_for_1_then_returns_to_its_slot_with_a_counter,
+               gallantry_gold_with_a_counter_blocks_for_nothing_but_may_still_defend,
+               gallantry_gold_counters_do_not_touch_other_blockers,
+               gallantry_gold_can_still_be_activated_after_defending
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1377,7 +1417,7 @@ on-play-effect helpers).
   [x] Dorinthea (hero)       (Card::Dorinthea)  — see COMPLETE section above
   [x] Hala Goldenhelm        (Card::HalaGoldenhelm)  — see COMPLETE section above
   [x] Dawnblade (weapon)     (Card::Dawnblade)  — see COMPLETE section above
-  [ ] Gallantry Gold         (Card::GallantryGold)
+  [x] Gallantry Gold         (Card::GallantryGold)  — see COMPLETE section above
   [x] Ironrot Helm           (Card::IronrotHelm)  — see COMPLETE section above
   [x] Ironrot Legs           (Card::IronrotLegs)  — see COMPLETE section above
 

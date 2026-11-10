@@ -161,6 +161,9 @@ fn begin_turn(gs: &mut Gamestate) {
     // So does Slice and Dice.
     gs.p1.weapon_attack_power = [0; WEAPON_ATTACK_ORDINALS];
     gs.p2.weapon_attack_power = [0; WEAPON_ATTACK_ORDINALS];
+    // And Gallantry Gold's "your weapon attacks gain +1 power this turn".
+    gs.p1.weapon_attacks_power_this_turn = 0;
+    gs.p2.weapon_attacks_power_this_turn = 0;
     // "At the start of your turn, you may turn [a face-down mentor] face up":
     // when the turn player has one in their arsenal, the turn opens on that
     // decision instead of going straight to the Action phase (see
@@ -1016,6 +1019,12 @@ fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
         if gained > 0 {
             let player = gs.player_mut(owner);
             player.resources = player.resources.saturating_add(gained);
+        }
+        // Gallantry Gold's "Your weapon attacks gain +1 power this turn".
+        let weapon_power = activated_ability(pending.typ, data).map_or(0, |a| a.weapon_attacks_power_gained());
+        if weapon_power > 0 {
+            let player = gs.player_mut(owner);
+            player.weapon_attacks_power_this_turn = player.weapon_attacks_power_this_turn.saturating_add(weapon_power);
         }
         // A resolving non-attack action — an action card, or an activated
         // action-speed ability — spends the owner's action point unless it has
@@ -1978,6 +1987,9 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // +1 counters on the weapon (Glistening Steelblade's, on Dawnblade) add to
     // its power every time it attacks.
     let counter_bonus = if attack_is_weapon { attacker.weapon_power_counters } else { 0 };
+    // Gallantry Gold: "Your weapon attacks gain +1 power this turn" — every
+    // weapon attack for the rest of the turn, not just the next.
+    let turn_weapon_bonus = if attack_is_weapon { attacker.weapon_attacks_power_this_turn } else { 0 };
     // Dawnblade: "The second time you attack with Dawnblade each turn, it gains
     // +1 power until the end of turn" — so its second attack and any after it
     // this turn. Each swing is counted in `abilities_used` as it is committed.
@@ -2020,10 +2032,12 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         .saturating_add(attack_action_bonus)
         .saturating_add(brute_conditional_bonus)
         .saturating_add(second_attack_bonus)
-        .saturating_add(counter_bonus);
-    // The block is the blockers' printed defense plus whatever was granted to
-    // them during the combat (Rally the Rearguard's +3 block).
-    let blocked = chain_link_total(defender, link, |d| d.defense)
+        .saturating_add(counter_bonus)
+        .saturating_add(turn_weapon_bonus);
+    // The block is the blockers' defense — printed, less any -1 defense
+    // counters on a Battleworn piece of equipment — plus whatever was granted
+    // to them during the combat (Rally the Rearguard's +3 block).
+    let blocked = chain_link_total(defender, link, |d| defender.defense_of(d))
         .saturating_add(defender.chain_defense_bonus[link]);
     let damage = power.saturating_sub(blocked);
 
@@ -2169,6 +2183,15 @@ fn close_combat_chain(gs: &mut Gamestate) {
                         if data.keyword.contains(Keyword::BladeBreak) || marked {
                             destroy_equipment(gs, pid, id);
                         } else {
+                            // Battleworn: "When the combat chain closes, if
+                            // this defended, put a -1 defense counter on it"
+                            // (Gallantry Gold). It goes back to its slot, and
+                            // blocks for 1 less from then on.
+                            if data.keyword.contains(Keyword::Battleworn) {
+                                if let Some(slot) = &data.slot {
+                                    gs.player_mut(pid).add_equipment_defense_counter(slot);
+                                }
+                            }
                             put_in_zone(gs.player_mut(pid), id, Zone::Equipment);
                         }
                     } else {
@@ -2236,9 +2259,9 @@ fn chain_link_count(player: &Player, link: usize, pred: impl Fn(&CardData) -> bo
         .sum()
 }
 
-/// Sum a printed per-card stat (`power` for the attacker, `defense` for the
-/// defender) over every copy on `player`'s chain link `link`. Bonuses granted
-/// during combat are kept per link (`Player::chain_defense_bonus`) and added
+/// Sum a per-card stat (`power` for the attacker; for the defender, defense
+/// less any -1 defense counters, `Player::defense_of`) over every copy on
+/// `player`'s chain link `link`. Bonuses granted during combat are kept per link (`Player::chain_defense_bonus`) and added
 /// by the caller.
 fn chain_link_total(player: &Player, link: usize, stat: impl Fn(&CardData) -> u8) -> u8 {
     player.chain_link[link]
