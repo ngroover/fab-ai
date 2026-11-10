@@ -375,6 +375,10 @@ bitflags::bitflags! {
         /// Blade). Spent as that attack is made (`fab_step::commit_pending_to_stack`);
         /// cleared each turn and on reset.
         const NEXT_WEAPON_GO_AGAIN = 1 << 11;
+        /// This player's next Dawnblade attack this turn gains go again
+        /// (Glistening Steelblade). Spent as that attack is made; cleared each
+        /// turn and on reset.
+        const NEXT_DAWNBLADE_GO_AGAIN = 1 << 12;
         /// All four of the above.
         /// Whether the opponent knows the face-down card in this player's
         /// arsenal: it was arsenaled from a hand made entirely of known copies
@@ -531,6 +535,16 @@ pub struct Player {
     /// reach combat damage spends it. Cleared at the start of each turn so it
     /// never leaks.
     pub next_attack_bonus : u8,
+    /// +1 power counters on this player's weapon (Glistening Steelblade puts
+    /// them on Dawnblade). Each adds 1 to the weapon's power whenever it
+    /// attacks. Counters stay on the card for the rest of the game — the
+    /// weapon never leaves play — and are cleared only on reset.
+    pub weapon_power_counters : u8,
+    /// How many "Whenever Dawnblade hits a hero this turn, put a +1 counter on
+    /// it" effects this player has made this turn (one per Glistening
+    /// Steelblade resolved). Each Dawnblade hit puts this many counters on it.
+    /// Cleared at the start of each turn.
+    pub dawnblade_hit_counter_effects : u8,
     /// Per-player yes/no state packed into one byte: see `PlayerFlags` for
     /// what each flag means, and the `Player` accessors of the same names.
     pub flags : PlayerFlags,
@@ -826,6 +840,8 @@ impl Player {
             next_brute_attack_conditional_bonus: 0,
             next_weapon_attack_bonus: 0,
             next_attack_bonus: 0,
+            weapon_power_counters: 0,
+            dawnblade_hit_counter_effects: 0,
             flags: PlayerFlags::empty(),
             arsenal_lesson_counters: 0,
             // Logging is opted into via `reset(gs, decks, true)`; off until then.
@@ -890,6 +906,17 @@ impl Player {
     /// Set or clear `PlayerFlags::NEXT_WEAPON_ON_HIT_GO_AGAIN`.
     pub fn set_next_weapon_on_hit_go_again(&mut self, on: bool) {
         self.flags.set(PlayerFlags::NEXT_WEAPON_ON_HIT_GO_AGAIN, on);
+    }
+
+    /// Whether this player's next Dawnblade attack gains go again
+    /// (`PlayerFlags::NEXT_DAWNBLADE_GO_AGAIN`).
+    pub const fn next_dawnblade_go_again(&self) -> bool {
+        self.flags.contains(PlayerFlags::NEXT_DAWNBLADE_GO_AGAIN)
+    }
+
+    /// Set or clear `PlayerFlags::NEXT_DAWNBLADE_GO_AGAIN`.
+    pub fn set_next_dawnblade_go_again(&mut self, on: bool) {
+        self.flags.set(PlayerFlags::NEXT_DAWNBLADE_GO_AGAIN, on);
     }
 
     /// Whether this player's next weapon attack gains go again

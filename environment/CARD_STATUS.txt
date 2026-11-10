@@ -1042,6 +1042,34 @@ on-play-effect helpers).
                driving_blade_with_a_quicken_still_grants_one_extra_attack,
                driving_blade_does_not_outlive_the_turn
 
+  [x] Glistening Steelblade   (Card::GlisteningSteelbladeY)
+        "Dorinthea Specialization. Your next Dawnblade attack this turn has go
+        again. Whenever Dawnblade hits a hero this turn, put a +1 counter on
+        it. Go again." (Warrior action, cost 1, pitch 2, 3 block.)
+          * Specialization is the keyword only: decks are fixed, so there is
+            no deck building to enforce.
+          * The go again is a `next_attack_effect` `{ IsDawnblade, GoAgain }`
+            on a new `PlayerFlags::NEXT_DAWNBLADE_GO_AGAIN` bit, granted as the
+            next Dawnblade swing is made (beside Driving Blade's), so it holds
+            hit or not and sets off Dorinthea's extra attack. An attack action
+            card in between leaves it banked.
+          * The hit trigger is a new on-play `DawnbladeHitCounterThisTurn`,
+            counted per turn in `Player::dawnblade_hit_counter_effects` (two
+            copies, two counters per hit). After a Dawnblade hit's damage,
+            that many counters go on `Player::weapon_power_counters`, which
+            add to the weapon's power on every later swing and stay for the
+            rest of the game (cleared only on reset). The trigger count is
+            cleared each turn.
+          * `Player` stays 184 bytes.
+          * Changes damage and go again, so random play moved; see the
+            stack-seed sweep.
+        Tests: glistening_steelblade_is_a_dorinthea_specialization_with_go_again_and_a_hit_trigger,
+               each_dawnblade_hit_after_glistening_steelblade_adds_a_counter,
+               dawnblades_counters_outlast_the_turn_but_the_hit_trigger_does_not,
+               a_blocked_dawnblade_swing_gets_no_counter_but_keeps_its_go_again,
+               two_glistening_steelblades_put_two_counters_on_each_hit,
+               glistening_steelblades_go_again_waits_for_dawnblade
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1086,7 +1114,7 @@ on-play-effect helpers).
   [x] Thrust                         (Card::ThrustR)  — see COMPLETE section above
   [x] Warrior's Valor                (Card::WarriorsValorR)  — see COMPLETE section above
   [x] Driving Blade                  (Card::DrivingBladeY)  — see COMPLETE section above
-  [ ] Glistening Steelblade          (Card::GlisteningSteelbladeY)
+  [x] Glistening Steelblade          (Card::GlisteningSteelbladeY)  — see COMPLETE section above
   [ ] On a Knife Edge                (Card::OnAKnifeEdgeY)
   [ ] Out for Blood                  (Card::OutForBloodY)
   [ ] Run Through                    (Card::RunThroughY)

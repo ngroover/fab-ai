@@ -148,6 +148,12 @@ fn begin_turn(gs: &mut Gamestate) {
     gs.p2.set_next_weapon_on_hit_go_again(false);
     gs.p1.set_next_weapon_go_again(false);
     gs.p2.set_next_weapon_go_again(false);
+    gs.p1.set_next_dawnblade_go_again(false);
+    gs.p2.set_next_dawnblade_go_again(false);
+    // Glistening Steelblade's "whenever Dawnblade hits a hero this turn" ends
+    // with the turn; the counters it put on Dawnblade stay.
+    gs.p1.dawnblade_hit_counter_effects = 0;
+    gs.p2.dawnblade_hit_counter_effects = 0;
     // "At the start of your turn, you may turn [a face-down mentor] face up":
     // when the turn player has one in their arsenal, the turn opens on that
     // decision instead of going straight to the Action phase (see
@@ -1401,6 +1407,10 @@ fn bank_next_attack_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &Next
         NextAttackEffectType::GoAgain if effect.attackType == NextAttackType::IsWeapon => {
             gs.player_mut(owner).set_next_weapon_go_again(true);
         }
+        // Glistening Steelblade: the next Dawnblade attack has go again.
+        NextAttackEffectType::GoAgain if effect.attackType == NextAttackType::IsDawnblade => {
+            gs.player_mut(owner).set_next_dawnblade_go_again(true);
+        }
         _ => unimplemented!("this next_attack_effect combination is not supported yet"),
     }
 }
@@ -1493,6 +1503,12 @@ fn apply_on_play_effect_type(gs: &mut Gamestate, rng: &mut GameRng, owner: Playe
         // The next attack the owner makes this turn, of any kind, gains
         // `magnitude` power (Second Swing). Banked and spent by the next attack
         // to reach combat damage.
+        // Glistening Steelblade: one more "whenever Dawnblade hits a hero this
+        // turn, put a +1 counter on it" for the owner. Read at combat damage.
+        OnPlayEffectType::DawnbladeHitCounterThisTurn => {
+            let player = gs.player_mut(owner);
+            player.dawnblade_hit_counter_effects = player.dawnblade_hit_counter_effects.saturating_add(effect.magnitude);
+        }
         OnPlayEffectType::NextAttackPower => {
             let player = gs.player_mut(owner);
             player.next_attack_bonus = player.next_attack_bonus.saturating_add(effect.magnitude);
@@ -1799,6 +1815,12 @@ fn finish_commit(gs: &mut Gamestate, rng: &mut GameRng, pending: PendingCard) {
             gs.player_mut(owner).set_next_weapon_go_again(false);
             attack_gains_go_again(gs, owner, pending.card);
         }
+        // Glistening Steelblade's "your next Dawnblade attack has go again",
+        // likewise spent as that attack is made.
+        if gs.player(owner).card(pending.card) == Card::Dawnblade && gs.player(owner).next_dawnblade_go_again() {
+            gs.player_mut(owner).set_next_dawnblade_go_again(false);
+            attack_gains_go_again(gs, owner, pending.card);
+        }
     }
 
     // "Whenever you play a card" triggers fire once the card has been played —
@@ -1886,6 +1908,9 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // The banked "next attack" bonus (Second Swing's +4) is taken by any
     // attack: a weapon swing or an attack action card.
     let next_attack_bonus = if attack_data.is_some() { attacker.next_attack_bonus } else { 0 };
+    // +1 counters on the weapon (Glistening Steelblade's, on Dawnblade) add to
+    // its power every time it attacks.
+    let counter_bonus = if attack_is_weapon { attacker.weapon_power_counters } else { 0 };
     // Dawnblade: "The second time you attack with Dawnblade each turn, it gains
     // +1 power until the end of turn" — so its second attack and any after it
     // this turn. Each swing is counted in `abilities_used` as it is committed.
@@ -1929,7 +1954,8 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         .saturating_add(brute_conditional_bonus)
         .saturating_add(weapon_bonus)
         .saturating_add(second_attack_bonus)
-        .saturating_add(next_attack_bonus);
+        .saturating_add(next_attack_bonus)
+        .saturating_add(counter_bonus);
     // The block is the blockers' printed defense plus whatever was granted to
     // them during the combat (Rally the Rearguard's +3 block).
     let blocked = chain_link_total(defender, link, |d| d.defense)
@@ -1949,6 +1975,20 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         let attack = gs.player(attacker_id).attack_on_link(link)
             .expect("a weapon attack is on the link");
         attack_gains_go_again(gs, attacker_id, attack);
+    }
+    // Glistening Steelblade: "Whenever Dawnblade hits a hero this turn, put a +1
+    // counter on it" — one counter per such effect, after this hit's damage, so
+    // it counts from Dawnblade's next attack on.
+    let is_dawnblade = attack_card == Some(Card::Dawnblade);
+    let attacker = gs.player_mut(attacker_id);
+    let new_counters = attacker.dawnblade_hit_counter_effects;
+    if is_dawnblade && damage > 0 && new_counters > 0 {
+        attacker.weapon_power_counters = attacker.weapon_power_counters.saturating_add(new_counters);
+        let total = attacker.weapon_power_counters;
+        if gs.logging_enabled() {
+            gs.log_public(format!("{}'s Dawnblade hits and gets {} +1 counter(s) ({} in all)",
+                player_name(attacker_id), new_counters, total));
+        }
     }
     let attacker = gs.player(attacker_id);
 

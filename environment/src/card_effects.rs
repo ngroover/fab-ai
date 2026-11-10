@@ -151,6 +151,11 @@ pub enum OnPlayEffectType {
     /// next attack action card"). The class-agnostic sibling of
     /// `NextBrutePower`; like it, a weapon swing neither takes nor spends it.
     NextAttackActionPower,
+    /// "Whenever Dawnblade hits a hero this turn, put a +1 counter on it"
+    /// (Glistening Steelblade): one more such effect for the owner this turn
+    /// (`Player::dawnblade_hit_counter_effects`); each Dawnblade hit then puts
+    /// that many counters on it (`Player::weapon_power_counters`).
+    DawnbladeHitCounterThisTurn,
     /// Banks `magnitude` power for the next attack the owner makes this turn,
     /// of any kind — a weapon swing or an attack action card (Second Swing's
     /// "your next attack this turn gains +4 power"). Banked on

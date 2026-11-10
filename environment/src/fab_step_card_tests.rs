@@ -47,6 +47,7 @@
 //!   - Thrust              (`Card::ThrustR`)
 //!   - Warrior's Valor     (`Card::WarriorsValorR`)
 //!   - Driving Blade       (`Card::DrivingBladeY`)
+//!   - Glistening Steelblade (`Card::GlisteningSteelbladeY`)
 
 use super::*;
 use crate::cards::Card;
@@ -6269,4 +6270,147 @@ fn driving_blade_does_not_outlive_the_turn() {
     }
     assert_eq!(gs.p1.next_weapon_attack_bonus, 0);
     assert!(!gs.p1.next_weapon_go_again());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Glistening Steelblade (Card::GlisteningSteelbladeY)
+//
+// Warrior action, Dorinthea Specialization, cost 1, 3 block: "Your next
+// Dawnblade attack this turn has go again. Whenever Dawnblade hits a hero this
+// turn, put a +1 counter on it. Go again." The go again is a
+// `next_attack_effect` `{ IsDawnblade, GoAgain }`, granted as the swing is made
+// (so it sets off Dorinthea's extra attack, hit or not). The hit trigger is an
+// on-play `DawnbladeHitCounterThisTurn`, counted per turn in
+// `Player::dawnblade_hit_counter_effects`; each hit adds that many counters to
+// `Player::weapon_power_counters`, which stay and add to every later swing.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea plays `copies` Glistening Steelblades, the first pitching Visit
+/// the Blacksmith, and they resolve.
+fn play_glistening_steelblades(gs: &mut TestGame, copies: usize) {
+    for n in 0..copies {
+        step_card(gs, ActionType::PlayCard, Card::GlisteningSteelbladeY);
+        if n == 0 {
+            step_card(gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+        }
+        pass_once_each(gs);
+        assert_eq!(gs.phase, Phase::Action);
+    }
+    assert_eq!(gs.p1.action_points, 1, "go again");
+}
+
+#[test]
+fn glistening_steelblade_is_a_dorinthea_specialization_with_go_again_and_a_hit_trigger() {
+    use crate::card_effects::{NextAttackEffectType, NextAttackType, OnPlayConditionType, OnPlayEffectType};
+    let data = Card::GlisteningSteelbladeY.data();
+    assert_eq!(data.typ, CardType::Action);
+    assert_eq!((data.cost, data.pitch, data.defense), (1, 2, 3));
+    assert_eq!(data.card_class, CardClass::Warrior);
+    assert!(data.keyword.contains(Keyword::DorintheaSpecialization));
+    assert!(data.keyword.contains(Keyword::GoAgain));
+    let next = data.next_attack_effect.as_ref().expect("it should carry a next-attack effect");
+    assert_eq!(next.attackType, NextAttackType::IsDawnblade);
+    assert!(matches!(next.effectType, NextAttackEffectType::GoAgain));
+    let hit = data.play_effect.as_ref().expect("it should carry an on-play effect");
+    assert!(matches!(hit.condition, OnPlayConditionType::Always));
+    assert!(matches!(hit.effectType, OnPlayEffectType::DawnbladeHitCounterThisTurn));
+    assert_eq!(hit.magnitude, 1);
+
+    let mut gs = dorinthea_holding(&[Card::GlisteningSteelbladeY, Card::VisitTheBlacksmithB], 0);
+    play_glistening_steelblades(&mut gs, 1);
+    assert!(gs.p1.next_dawnblade_go_again());
+    assert_eq!(gs.p1.dawnblade_hit_counter_effects, 1);
+    assert_eq!(gs.p1.weapon_power_counters, 0, "no counter until Dawnblade hits");
+}
+
+#[test]
+fn each_dawnblade_hit_after_glistening_steelblade_adds_a_counter() {
+    // Go again unlocks the extra swing. First swing: 2, then a counter. Second
+    // swing: 2 + 1 (second attack) + 1 (counter), then another counter.
+    let mut gs = dorinthea_holding(&[Card::GlisteningSteelbladeY, Card::VisitTheBlacksmithB], 0);
+    play_glistening_steelblades(&mut gs, 1);
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 2);
+    assert_eq!(gs.p1.action_points, 1, "go again");
+    assert!(gs.p1.extra_weapon_attack());
+    assert_eq!(gs.p1.weapon_power_counters, 1);
+
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 2 - 4);
+    assert_eq!(gs.p1.weapon_power_counters, 2);
+    assert_eq!(gs.p1.action_points, 0, "the go again was for the next attack only");
+}
+
+#[test]
+fn dawnblades_counters_outlast_the_turn_but_the_hit_trigger_does_not() {
+    let mut gs = dorinthea_holding(&[Card::GlisteningSteelbladeY, Card::VisitTheBlacksmithB], 0);
+    play_glistening_steelblades(&mut gs, 1);
+    dawnblade_unblocked(&mut gs, None);
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p1.weapon_power_counters, 2);
+    while gs.turn_player == PlayerIndex::P1 {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    while !(gs.turn_player == PlayerIndex::P1 && gs.phase == Phase::Action) {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.p1.weapon_power_counters, 2, "counters stay on Dawnblade");
+    assert_eq!(gs.p1.dawnblade_hit_counter_effects, 0, "\"this turn\" is over");
+    assert!(!gs.p1.next_dawnblade_go_again());
+
+    // The next turn's first swing: 2 + 2 counters, and no new counter.
+    let life_before = gs.p2.life;
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::VisitTheBlacksmithB]);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, life_before - 4);
+    assert_eq!(gs.p1.weapon_power_counters, 2);
+}
+
+#[test]
+fn a_blocked_dawnblade_swing_gets_no_counter_but_keeps_its_go_again() {
+    // Clearing Bellow blocks the 2-power swing completely.
+    let mut gs = dorinthea_holding(&[Card::GlisteningSteelbladeY, Card::VisitTheBlacksmithB], 0);
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::ClearingBellowB]);
+    play_glistening_steelblades(&mut gs, 1);
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::Weapon);
+    pass_once_each(&mut gs);
+    step_card(&mut gs, ActionType::Defend, Card::ClearingBellowB);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20);
+    assert_eq!(gs.p1.weapon_power_counters, 0, "it did not hit");
+    assert_eq!(gs.p1.action_points, 1, "go again all the same");
+    assert!(gs.p1.extra_weapon_attack());
+}
+
+#[test]
+fn two_glistening_steelblades_put_two_counters_on_each_hit() {
+    let mut gs = dorinthea_holding(&[
+        Card::GlisteningSteelbladeY, Card::GlisteningSteelbladeY, Card::VisitTheBlacksmithB,
+    ], 0);
+    play_glistening_steelblades(&mut gs, 2);
+    assert_eq!(gs.p1.dawnblade_hit_counter_effects, 2);
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 2);
+    assert_eq!(gs.p1.weapon_power_counters, 2);
+}
+
+#[test]
+fn glistening_steelblades_go_again_waits_for_dawnblade() {
+    // Flock of the Feather Walkers in between (revealing Sharpen Steel): it
+    // takes neither the go again nor a counter.
+    let mut gs = dorinthea_holding(&[
+        Card::GlisteningSteelbladeY, Card::VisitTheBlacksmithB,
+        Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR,
+    ], 0);
+    play_glistening_steelblades(&mut gs, 1);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    if gs.phase == Phase::RevealChoice {
+        step_card(&mut gs, ActionType::Reveal, Card::SharpenSteelR);
+    }
+    pass_once_each(&mut gs);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 5);
+    assert_eq!(gs.p1.action_points, 0, "Flock has no go again of its own");
+    assert!(gs.p1.next_dawnblade_go_again());
+    assert_eq!(gs.p1.weapon_power_counters, 0);
 }
