@@ -1815,6 +1815,14 @@ fn finish_commit(gs: &mut Gamestate, rng: &mut GameRng, pending: PendingCard) {
     // Quicken its owner holds.
     if commits_as_attack(pending.typ, data) {
         trigger_quickens(gs, owner, pending.card);
+        // The banked "your next attack this turn gains N power" (Second Swing,
+        // Out for Blood's Reprise) is taken by this attack as it is made, into
+        // the power it carries to combat damage. Taking it here rather than at
+        // damage is what lets an attack reaction bank it for a *later* attack:
+        // the attack it is played into was made before it.
+        let player = gs.player_mut(owner);
+        player.attack_power_bonus = player.attack_power_bonus.saturating_add(player.next_attack_bonus);
+        player.next_attack_bonus = 0;
         // Driving Blade's banked "your next weapon attack gains go again" is
         // spent as that attack is made, like a Quicken.
         if is_weapon(data) && gs.player(owner).next_weapon_go_again() {
@@ -1916,9 +1924,6 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // banked for a later swing this turn.
     let attack_is_weapon = attack_data.map(is_weapon).unwrap_or(false);
     let weapon_bonus = if attack_is_weapon { attacker.next_weapon_attack_bonus } else { 0 };
-    // The banked "next attack" bonus (Second Swing's +4) is taken by any
-    // attack: a weapon swing or an attack action card.
-    let next_attack_bonus = if attack_data.is_some() { attacker.next_attack_bonus } else { 0 };
     // +1 counters on the weapon (Glistening Steelblade's, on Dawnblade) add to
     // its power every time it attacks.
     let counter_bonus = if attack_is_weapon { attacker.weapon_power_counters } else { 0 };
@@ -1965,7 +1970,6 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         .saturating_add(brute_conditional_bonus)
         .saturating_add(weapon_bonus)
         .saturating_add(second_attack_bonus)
-        .saturating_add(next_attack_bonus)
         .saturating_add(counter_bonus);
     // The block is the blockers' printed defense plus whatever was granted to
     // them during the combat (Rally the Rearguard's +3 block).
@@ -2055,10 +2059,6 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // And the weapon bonus: spent by a weapon swing only.
     if attack_is_weapon {
         attacker.next_weapon_attack_bonus = 0;
-    }
-    // And the any-attack bonus: spent by whichever attack this is.
-    if attack_data.is_some() {
-        attacker.next_attack_bonus = 0;
     }
     // The conditional brute bonus is spent by any brute attack, whether or not
     // the blocker count let it pay out: the attack it was banked for has now

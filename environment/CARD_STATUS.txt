@@ -1094,6 +1094,29 @@ on-play-effect helpers).
                a_club_swing_does_not_take_a_banked_sword_go_again,
                on_a_knife_edge_does_not_outlive_the_turn
 
+  [x] Out for Blood   (Card::OutForBloodY)
+        "Target weapon attack gains +2 power. Reprise - If the defending hero
+        has defended with a card from their hand this chain link, your next
+        attack this turn gains +1 power." (Warrior attack reaction, cost 1,
+        pitch 2, 3 block.)
+          * The +2 is an `attack_effect` (weapon, targeted, `Always`, +2), so
+            the card is offered only into a weapon attack. The Reprise half is
+            an on-play `Reprise` -> `NextAttackPower` 1. The card now carries
+            the Reprise keyword.
+          * Timing change: `next_attack_bonus` used to be taken by whichever
+            attack next reached combat damage, which would have handed Out for
+            Blood's +1 to the attack it is played into. An attack now takes it
+            as it is made (`commit_pending_to_stack`, into
+            `attack_power_bonus`), so a bonus banked during an attack waits for
+            the next one. Second Swing, banked before the attack, is
+            unaffected.
+          * Changes damage, so random play moved; not re-swept.
+        Tests: out_for_blood_is_a_targeted_weapon_plus_2_with_a_reprise_for_the_next_attack,
+               out_for_blood_gives_an_unblocked_swing_plus_2_and_banks_nothing,
+               out_for_blood_reprise_banks_1_for_the_next_attack_not_this_one,
+               out_for_blood_is_not_offered_against_an_attack_action_card,
+               a_next_attack_bonus_banked_before_the_attack_is_still_taken_by_it
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1140,7 +1163,7 @@ on-play-effect helpers).
   [x] Driving Blade                  (Card::DrivingBladeY)  — see COMPLETE section above
   [x] Glistening Steelblade          (Card::GlisteningSteelbladeY)  — see COMPLETE section above
   [x] On a Knife Edge                (Card::OnAKnifeEdgeY)  — see COMPLETE section above
-  [ ] Out for Blood                  (Card::OutForBloodY)
+  [x] Out for Blood                  (Card::OutForBloodY)  — see COMPLETE section above
   [ ] Run Through                    (Card::RunThroughY)
   [ ] Slice and Dice                 (Card::SliceAndDiceY)
   [ ] Blade Flash                    (Card::BladeFlashB)

@@ -535,10 +535,12 @@ pub struct Player {
     /// never leaks.
     pub next_weapon_attack_bonus : u8,
     /// Extra power banked for the *next attack* this player makes this turn,
-    /// of any kind (Second Swing's "+4 power"). Unlike the bonuses above, a
-    /// weapon swing and an attack action card both take it: the next attack to
-    /// reach combat damage spends it. Cleared at the start of each turn so it
-    /// never leaks.
+    /// of any kind (Second Swing's "+4 power", Out for Blood's Reprise +1).
+    /// Unlike the bonuses above, a weapon swing and an attack action card both
+    /// take it, and it is taken as the attack is made — moved into
+    /// `attack_power_bonus` (`fab_step::commit_pending_to_stack`) — so one
+    /// banked during an attack waits for the next. Cleared at the start of
+    /// each turn so it never leaks.
     pub next_attack_bonus : u8,
     /// +1 power counters on this player's weapon (Glistening Steelblade puts
     /// them on Dawnblade). Each adds 1 to the weapon's power whenever it
