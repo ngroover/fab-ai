@@ -43,6 +43,7 @@
 //!   - In the Swing        (`Card::InTheSwingR`)
 //!   - Ironsong Response   (`Card::IronsongResponseR`), and Reprise
 //!   - Second Swing        (`Card::SecondSwingR`)
+//!   - Sharpen Steel       (`Card::SharpenSteelR`)
 
 use super::*;
 use crate::cards::Card;
@@ -5813,4 +5814,99 @@ fn second_swing_played_before_both_dawnblade_swings_adds_nothing() {
     dawnblade_unblocked(&mut gs, None);
     assert_eq!(gs.p2.life, 20 - 2 - 3);
     assert_eq!(uses_this_turn(&gs, Card::Dawnblade), 2);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sharpen Steel (Card::SharpenSteelR)
+//
+// Warrior action, cost 0, 3 block: "Your next weapon attack this turn gains +3
+// power. Go again." En Garde's effect at no cost: the +3 is banked on
+// `Player::next_weapon_attack_bonus` and spent by the next weapon swing; an
+// attack action card in between leaves it banked.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea plays Sharpen Steel (free) and it resolves.
+fn play_sharpen_steel(gs: &mut TestGame) {
+    step_card(gs, ActionType::PlayCard, Card::SharpenSteelR);
+    assert_eq!(gs.phase, Phase::ActionInstant, "free: straight to the stack");
+    pass_once_each(gs);
+    assert_eq!(gs.phase, Phase::Action);
+}
+
+#[test]
+fn sharpen_steel_is_a_free_go_again_action_banking_3_for_the_next_weapon_attack() {
+    use crate::card_effects::{OnPlayConditionType, OnPlayEffectType};
+    let data = Card::SharpenSteelR.data();
+    assert_eq!(data.typ, CardType::Action);
+    assert_eq!((data.cost, data.pitch, data.defense), (0, 1, 3));
+    assert_eq!(data.card_class, CardClass::Warrior);
+    assert!(data.keyword.contains(Keyword::GoAgain));
+    let effect = data.play_effect.as_ref().expect("Sharpen Steel should carry an on-play effect");
+    assert!(matches!(effect.condition, OnPlayConditionType::Always));
+    assert!(matches!(effect.effectType, OnPlayEffectType::NextWeaponPower));
+    assert_eq!(effect.magnitude, 3);
+    assert!(data.attack_effect.is_none() && data.play_condition.is_none());
+}
+
+#[test]
+fn sharpen_steel_banks_3_and_keeps_the_action_point() {
+    let mut gs = dorinthea_holding(&[Card::SharpenSteelR], 0);
+    assert!(playable_cards(&gs).contains(&Card::SharpenSteelR), "playable with nothing to pitch");
+    play_sharpen_steel(&mut gs);
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 3);
+    assert_eq!(gs.p1.action_points, 1);
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::SharpenSteelR, Zone::Graveyard));
+}
+
+#[test]
+fn sharpen_steel_pumps_the_next_dawnblade_swing_by_3() {
+    let mut gs = dorinthea_holding(&[Card::SharpenSteelR, Card::VisitTheBlacksmithB], 0);
+    play_sharpen_steel(&mut gs);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, 20 - (2 + 3));
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 0, "spent by the swing");
+}
+
+#[test]
+fn sharpen_steel_bonus_is_left_banked_by_an_attack_action_card() {
+    // Sharpen Steel, then Flock of the Feather Walkers (pitching Visit the
+    // Blacksmith, revealing the second Sharpen Steel): Flock hits for its own 5
+    // and the +3 waits for a weapon attack.
+    let mut gs = dorinthea_holding(&[
+        Card::SharpenSteelR, Card::SharpenSteelR,
+        Card::FlockOfTheFeatherWalkersR, Card::VisitTheBlacksmithB,
+    ], 0);
+    play_sharpen_steel(&mut gs);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    if gs.phase == Phase::RevealChoice {
+        step_card(&mut gs, ActionType::Reveal, Card::SharpenSteelR);
+    }
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 5);
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 3);
+}
+
+#[test]
+fn two_sharpen_steels_stack() {
+    let mut gs = dorinthea_holding(&[
+        Card::SharpenSteelR, Card::SharpenSteelR, Card::VisitTheBlacksmithB,
+    ], 0);
+    play_sharpen_steel(&mut gs);
+    play_sharpen_steel(&mut gs);
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 6);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, 20 - (2 + 6));
+}
+
+#[test]
+fn sharpen_steel_bonus_does_not_outlive_the_turn() {
+    let mut gs = dorinthea_holding(&[Card::SharpenSteelR], 0);
+    play_sharpen_steel(&mut gs);
+    while gs.turn_player == PlayerIndex::P1 {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 0);
 }

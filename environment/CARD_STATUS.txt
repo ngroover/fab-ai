@@ -960,6 +960,22 @@ on-play-effect helpers).
                second_swings_bonus_does_not_outlive_the_turn,
                second_swing_played_before_both_dawnblade_swings_adds_nothing
 
+  [x] Sharpen Steel   (Card::SharpenSteelR)
+        "Your next weapon attack this turn gains +3 power. Go again." (Warrior
+        action, cost 0, pitch 1, 3 block.)
+          * En Garde's effect at no cost: an on-play effect,
+            `OnPlayConditionType::Always` / `OnPlayEffectType::NextWeaponPower`
+            / 3, banked on `Player::next_weapon_attack_bonus` and spent by the
+            next weapon swing. An attack action card in between leaves it
+            banked; two copies stack. Catalog entry only, no engine change.
+          * Changes damage, so random play moved; see the stack-seed sweep.
+        Tests: sharpen_steel_is_a_free_go_again_action_banking_3_for_the_next_weapon_attack,
+               sharpen_steel_banks_3_and_keeps_the_action_point,
+               sharpen_steel_pumps_the_next_dawnblade_swing_by_3,
+               sharpen_steel_bonus_is_left_banked_by_an_attack_action_card,
+               two_sharpen_steels_stack,
+               sharpen_steel_bonus_does_not_outlive_the_turn
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1000,7 +1016,7 @@ on-play-effect helpers).
   [x] In the Swing                   (Card::InTheSwingR)  — see COMPLETE section above
   [x] Ironsong Response              (Card::IronsongResponseR)  — see COMPLETE section above
   [x] Second Swing                   (Card::SecondSwingR)  — see COMPLETE section above
-  [ ] Sharpen Steel                  (Card::SharpenSteelR)
+  [x] Sharpen Steel                  (Card::SharpenSteelR)  — see COMPLETE section above
   [ ] Thrust                         (Card::ThrustR)
   [ ] Warrior's Valor                (Card::WarriorsValorR)
   [ ] Driving Blade                  (Card::DrivingBladeY)
