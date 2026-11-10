@@ -1416,7 +1416,9 @@ fn graduate_mentor(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex, fe
 
     let player = gs.player_mut(owner);
     if let Some(pos) = found {
-        let slot = player.deck.remove(pos).expect("the search found this card");
+        // The deck is shuffled next, so its order need not be kept: swap the
+        // last card into the gap rather than shifting every card behind it.
+        let slot = player.deck.swap_remove(pos).expect("the search found this card");
         put_in_zone(player, slot.card(), Zone::Arsenal);
         turn_arsenal_face_up(player);
     }

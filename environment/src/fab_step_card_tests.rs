@@ -3747,6 +3747,27 @@ fn hala_graduation_shuffles_the_deck() {
 }
 
 #[test]
+fn hala_graduation_shuffle_hides_cards_bottomed_from_the_pitch_zone() {
+    // Pitched cards go to the bottom of the deck known to both players
+    // (`DeckSlot::known`). Stage the bottom three as if bottomed on earlier
+    // turns; the graduation shuffle must hide them, as it hides every card.
+    let mut gs = dorinthea_with_hala(true, &[]);
+    gs.p1.arsenal_lesson_counters = 1;
+    let n = gs.p1.deck_size() as usize;
+    for i in n - 3..n {
+        gs.p1.deck.get_mut(i).unwrap().set_known(true);
+    }
+    assert_eq!(gs.p1.deck.iter().filter(|s| s.is_known()).count(), 3);
+
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::HalaGoldenhelm, Zone::Banish), "she graduated");
+    assert!(gs.p1.deck.iter().all(|s| !s.is_known()), "a shuffled deck holds no known card");
+    assert!((0..gs.p1.deck_size()).all(|i|
+        gs.p1.deck_slot_visibility(i as usize) == Some(CardVisibleState::Hidden)));
+}
+
+#[test]
 fn hala_graduates_even_with_no_glistening_steelblade_left_to_find() {
     let mut gs = dorinthea_with_hala(true, &[]);
     gs.p1.arsenal_lesson_counters = 1;

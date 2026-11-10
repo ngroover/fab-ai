@@ -153,6 +153,20 @@ impl<T: Copy, const N: usize> RingBuffer<T, N> {
         Some(item)
     }
 
+    /// Remove and return the `i`th element counting from the front, filling
+    /// its place with the back element: constant time, but the order is not
+    /// kept. Use it only where the order is about to be thrown away anyway
+    /// (a search followed by a shuffle). `None` when `i` is past the back.
+    pub fn swap_remove(&mut self, i: usize) -> Option<T> {
+        let item = self.get(i)?;
+        let back = self.pop_back().expect("non-empty: it holds element i");
+        if i < self.len() {
+            let slot = self.slot(i);
+            self.items[slot] = back;
+        }
+        Some(item)
+    }
+
     pub fn clear(&mut self) {
         self.head = 0;
         self.len = 0;
@@ -276,6 +290,31 @@ mod tests {
         assert_eq!(b.remove(0), Some(1));
         assert_eq!(contents(&b), vec![3, 4]);
         assert_eq!(b.remove(2), None);
+    }
+
+    #[test]
+    fn swap_remove_fills_the_gap_with_the_back_element() {
+        let mut b: RingBuffer<u8, 8> = RingBuffer::new(0);
+        // Start the head near the end of the array so the elements wrap.
+        for _ in 0..6 {
+            b.push_back(0);
+            b.pop_front();
+        }
+        for i in 1..=5 {
+            b.push_back(i);
+        }
+        assert_eq!(b.swap_remove(1), Some(2));
+        assert_eq!(contents(&b), vec![1, 5, 3, 4]);
+        // The back element itself: nothing to move.
+        assert_eq!(b.swap_remove(3), Some(4));
+        assert_eq!(contents(&b), vec![1, 5, 3]);
+        assert_eq!(b.swap_remove(0), Some(1));
+        assert_eq!(contents(&b), vec![3, 5]);
+        assert_eq!(b.swap_remove(2), None);
+        assert_eq!(b.swap_remove(1), Some(5));
+        assert_eq!(b.swap_remove(0), Some(3));
+        assert!(b.is_empty());
+        assert_eq!(b.swap_remove(0), None);
     }
 
     #[test]

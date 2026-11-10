@@ -1291,6 +1291,13 @@ on-play-effect helpers).
             resolves (the only path to `resolve_combat_damage`), rather than
             inside it. Nothing can act in between. It is skipped if the hit
             ended the game.
+          * `graduate_mentor` takes the fetched card out of the deck with
+            `RingBuffer::swap_remove` (the back card fills the gap) rather
+            than `remove`, which shifted every card behind it: the deck is
+            shuffled straight after, so its order need not be kept. The
+            shuffle (`shuffle_deck_for`) also clears the known bit on every
+            deck slot, so cards bottomed from the pitch zone (put in known)
+            are hidden again.
           * Ruk'utan's lesson moved onto the same shared helpers
             (`mentor_alpha_rampage_search` is gone), with no change in
             behaviour.
@@ -1303,6 +1310,7 @@ on-play-effect helpers).
                hala_does_not_trigger_on_an_attack_action_card_hit,
                hala_graduates_on_the_second_hit_fetching_glistening_steelblade_face_up,
                hala_graduation_shuffles_the_deck,
+               hala_graduation_shuffle_hides_cards_bottomed_from_the_pitch_zone,
                hala_graduates_even_with_no_glistening_steelblade_left_to_find,
                glistening_steelblade_fetched_by_hala_can_be_played_from_the_arsenal_that_turn,
                hala_is_never_offered_as_a_play_from_the_arsenal
