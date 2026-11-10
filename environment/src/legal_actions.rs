@@ -888,7 +888,7 @@ mod tests {
             defend_effect: None,
             next_attack_effect: None,
             additional_cost: None,
-            target_effect: None,
+            attack_effect: None,
             play_condition: None,
             play_effect: None,
             mentor_effect: None,

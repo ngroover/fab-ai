@@ -2,7 +2,7 @@ use crate::action::{Action,ActionType};
 use crate::card_counts::{CardCounts, DeckCardId};
 use crate::game_state::{CHAIN_LINKS,MAX_QUICKENS,DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
 use crate::cards::{Card,CardClass,CardData,CardType,Keyword,WeaponType};
-use crate::card_effects::{Ability,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,MentorEffect,PlayCondition,TargetEffect,TargetEffectType,TargetType};
+use crate::card_effects::{Ability,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,MentorEffect,PlayCondition,AttackEffect,AttackEffectType,AttackKind};
 use crate::fab_game::{shuffle_deck_for, GameRng};
 use crate::deck_cards::TokenCard;
 use rand::RngExt;
@@ -981,11 +981,11 @@ fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
         // the destroyed card ends up: it left its equipment slot when the
         // activation was paid for (`commit_pending_to_stack`) and never returns.
         gs.player_mut(owner).add_to(Zone::Graveyard, top);
-        // An attack reaction's effect on the attack it targets (In the Swing's
-        // "+3 power"). The target was checked as the card was offered; it is
-        // checked again here, and the effect fizzles if it no longer holds.
-        if let Some(effect) = &data.target_effect {
-            apply_target_effect(gs, owner, effect);
+        // An attack reaction's effect on the attack it is played into (In the
+        // Swing's and Ironsong Response's +3), if that attack is still of the
+        // right kind and the effect's condition holds.
+        if let Some(effect) = &data.attack_effect {
+            apply_attack_effect(gs, rng, owner, effect);
         }
         // An activated ability's own effect, e.g. Blossom of Spring's "Gain {r}".
         // The resource floats like a pitched one until spent or the turn ends.
@@ -1023,32 +1023,37 @@ pub(crate) fn play_requirements_met(player: &Player, data: &CardData) -> bool {
         Some(PlayCondition::PlayedWeaponAttack) => player.weapon_attacks_this_turn() >= 1,
     };
     condition_met
-        && data.target_effect.as_ref().is_none_or(|effect| target_attack(player, effect).is_some())
+        && data.attack_effect.as_ref()
+            .is_none_or(|effect| !effect.targeted || affected_attack(player, effect).is_some())
 }
 
-/// The attack `effect` would target for `player`: their current attack, when
-/// it is of the kind the effect names. Attack reactions are only played by the
+/// The attack `effect` applies to for `player`: their current attack, when it
+/// is of the kind the effect names. Attack reactions are only played by the
 /// attacker, into the attack on the current chain link.
-fn target_attack(player: &Player, effect: &TargetEffect) -> Option<DeckCardId> {
+fn affected_attack(player: &Player, effect: &AttackEffect) -> Option<DeckCardId> {
     let attack = player.current_attack()?;
     let data = player.card(attack).data();
-    let valid = match effect.targetType {
-        TargetType::TargetWeapon => is_weapon(data),
-        TargetType::TargetSword => is_weapon(data) && matches!(data.weapon_type, Some(WeaponType::Sword2h)),
+    let valid = is_weapon(data) && match effect.attack {
+        AttackKind::Weapon => true,
+        AttackKind::Sword => matches!(data.weapon_type, Some(WeaponType::Sword2h)),
     };
     valid.then_some(attack)
 }
 
-/// Resolve an attack reaction's `effect` on the attack it targets. With no
-/// valid target left the effect does nothing.
-fn apply_target_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &TargetEffect) {
-    let Some(attack) = target_attack(gs.player(owner), effect) else { return };
-    match effect.effectType {
-        TargetEffectType::BoostPower => {
+/// Resolve an attack reaction's `effect` on the attack it is played into. It
+/// does nothing if that attack is not of the kind the effect names, or if its
+/// condition does not hold.
+fn apply_attack_effect(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex, effect: &AttackEffect) {
+    let Some(attack) = affected_attack(gs.player(owner), effect) else { return };
+    if !on_play_condition_met(gs, rng, owner, &effect.condition) {
+        return;
+    }
+    match effect.effect {
+        AttackEffectType::GainPower => {
             let player = gs.player_mut(owner);
             player.attack_power_bonus = player.attack_power_bonus.saturating_add(effect.magnitude);
         }
-        TargetEffectType::GiveGoAgain => attack_gains_go_again(gs, owner, attack),
+        AttackEffectType::GainGoAgain => attack_gains_go_again(gs, owner, attack),
     }
 }
 
@@ -1370,7 +1375,17 @@ fn graduate_mentor(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex, fe
 /// applied only when the condition holds. `owner` is the player whose card is
 /// resolving. Effects the engine does not model yet are no-ops.
 fn apply_on_play_effect(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex, effect: &OnPlayEffect) {
-    let condition_met = match effect.condition {
+    if !on_play_condition_met(gs, rng, owner, &effect.condition) {
+        return;
+    }
+    apply_on_play_effect_type(gs, rng, owner, effect);
+}
+
+/// Evaluate an effect's condition for `owner` as its card resolves. Shared by
+/// on-play effects and attack effects (`AttackEffect::condition`). Some
+/// conditions act as they are checked: `DrawDiscardHit6` draws and discards.
+fn on_play_condition_met(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex, condition: &OnPlayConditionType) -> bool {
+    match condition {
         OnPlayConditionType::DrawDiscardHit6 => draw_then_discard_hit6(gs, rng, owner),
         // "If you've intimidated this turn" (e.g. Beast Mode): met when the
         // owner has resolved an Intimidate trigger earlier this turn.
@@ -1393,10 +1408,11 @@ fn apply_on_play_effect(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerInde
         // card from their hand.
         OnPlayConditionType::Reprise => gs.player(owner.opponent()).defended_from_hand(),
         OnPlayConditionType::Always => true,
-    };
-    if !condition_met {
-        return;
     }
+}
+
+/// Apply an on-play effect whose condition has been met.
+fn apply_on_play_effect_type(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex, effect: &OnPlayEffect) {
     match effect.effectType {
         // The resolving attack gains `magnitude` power. The card is on its way to
         // link 0 of the owner's combat chain; the bonus is banked on the player
@@ -1472,17 +1488,6 @@ fn apply_on_play_effect(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerInde
         // chain, which is when it attacks — after any Quicken already held was
         // spent on playing it (see `trigger_quickens`).
         OnPlayEffectType::CreateQuicken => create_quicken(gs, owner),
-        // "Your weapon attack gains `magnitude` power" (Ironsong Response): the
-        // owner's current attack, if it is a weapon swing. Banked like
-        // `ConditionalPower` and spent at combat damage.
-        OnPlayEffectType::CurrentWeaponAttackPower => {
-            let player = gs.player_mut(owner);
-            let is_weapon_attack = player.current_attack()
-                .is_some_and(|id| is_weapon(player.card(id).data()));
-            if is_weapon_attack {
-                player.attack_power_bonus = player.attack_power_bonus.saturating_add(effect.magnitude);
-            }
-        }
     }
 }
 

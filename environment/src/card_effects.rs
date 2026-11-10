@@ -161,11 +161,6 @@ pub enum OnPlayEffectType {
     /// swing takes and spends it, so an attack action card in between leaves
     /// it banked.
     NextWeaponPower,
-    /// "Your weapon attack gains `magnitude` power" (Ironsong Response): the
-    /// owner's current attack gains the power, but only if it is a weapon
-    /// attack. Not a target, so the card is playable into any attack; on an
-    /// attack action card it does nothing.
-    CurrentWeaponAttackPower,
 }
 
 pub struct OnPlayEffect {
@@ -231,18 +226,6 @@ pub enum AdditionalCostType {
     DiscardCard,
 }
 
-/// What an attack reaction may target. Attack reactions only ever target the
-/// attack on the current chain link, so the target type is a requirement on
-/// that attack: with no such attack to target the card cannot be played (see
-/// `fab_step::play_requirements_met`).
-#[repr(u8)]
-pub enum TargetType {
-    TargetSword,
-    /// "Target weapon attack" (In the Swing): the current attack is a weapon
-    /// swing.
-    TargetWeapon,
-}
-
 /// A "Play [this] only if ..." restriction, checked before the card is offered
 /// (see `fab_step::play_requirements_met`).
 #[repr(u8)]
@@ -255,17 +238,43 @@ pub enum PlayCondition {
     PlayedWeaponAttack,
 }
 
+/// The kind of attack an `AttackEffect` applies to.
 #[repr(u8)]
-pub enum TargetEffectType {
-    GiveGoAgain,
-    /// The target attack gains `magnitude` power, banked on the attacker's
-    /// `attack_power_bonus` until combat damage.
-    BoostPower,
+pub enum AttackKind {
+    /// Any weapon swing ("weapon attack").
+    Weapon,
+    /// A swing with a sword ("sword attack").
+    Sword,
 }
 
-pub struct TargetEffect {
-    pub targetType : TargetType,
-    pub effectType : TargetEffectType,
+#[repr(u8)]
+pub enum AttackEffectType {
+    /// The attack gains `magnitude` power, banked on the attacker's
+    /// `attack_power_bonus` until combat damage.
+    GainPower,
+    /// The attack gains go again (`fab_step::attack_gains_go_again`).
+    GainGoAgain,
+}
+
+/// An effect on the attack an attack reaction is played into — the attack on
+/// the attacker's current chain link. Covers both wordings:
+///
+/// - "Target weapon/sword attack gains ..." (`targeted`, e.g. In the Swing):
+///   the card cannot be played without such an attack to target (see
+///   `fab_step::play_requirements_met`).
+/// - "Your weapon/sword attack gains ..." (not `targeted`, e.g. Ironsong
+///   Response): the card is playable into any attack and does nothing on one
+///   of the wrong kind.
+///
+/// Either way the effect applies as the card resolves, only if the current
+/// attack is still of the right kind and `condition` holds then (Ironsong
+/// Response's Reprise). Effects on a *later* attack ("your next attack this
+/// turn gains ...") are on-play effects instead.
+pub struct AttackEffect {
+    pub attack : AttackKind,
+    pub targeted : bool,
+    pub condition : OnPlayConditionType,
+    pub effect : AttackEffectType,
     pub magnitude : u8,
 }
 

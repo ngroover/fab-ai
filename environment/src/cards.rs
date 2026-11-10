@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 use crate::card_effects::{ConstantEffect,Ability,DefendEffect,
-    NextAttackEffect,AdditionalCostType,OnPlayEffect,TargetEffect,
+    NextAttackEffect,AdditionalCostType,OnPlayEffect,AttackEffect,
     PlayCondition,MentorEffect};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -81,7 +81,7 @@ pub struct CardData {
     pub defend_effect : Option<DefendEffect>,
     pub next_attack_effect : Option<NextAttackEffect>,
     pub additional_cost : Option<AdditionalCostType>,
-    pub target_effect : Option<TargetEffect>,
+    pub attack_effect : Option<AttackEffect>,
     pub play_condition : Option<PlayCondition>,
     pub play_effect : Option<OnPlayEffect>,
     /// What a mentor's lessons build towards (see `MentorEffect`). `None` for

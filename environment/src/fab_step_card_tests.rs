@@ -843,7 +843,7 @@ fn assert_vanilla_attack(card: Card, cost: u8, power: u8, defense: u8, class: Ca
     assert!(data.ability.is_none(), "{:?} should have no activated ability", card);
     assert!(data.defend_effect.is_none(), "{:?} should have no defend effect", card);
     assert!(data.next_attack_effect.is_none(), "{:?} should have no next-attack effect", card);
-    assert!(data.target_effect.is_none(), "{:?} should have no target effect", card);
+    assert!(data.attack_effect.is_none(), "{:?} should have no attack effect", card);
 }
 
 /// Seat `card` on p1's combat chain against an undefended opponent and resolve
@@ -1303,7 +1303,7 @@ fn assert_vanilla_defense_reaction(card: Card, cost: u8, defense: u8) {
     assert!(data.ability.is_none(), "{:?} should have no activated ability", card);
     assert!(data.defend_effect.is_none(), "{:?} should have no defend effect", card);
     assert!(data.next_attack_effect.is_none(), "{:?} should have no next-attack effect", card);
-    assert!(data.target_effect.is_none(), "{:?} should have no target effect", card);
+    assert!(data.attack_effect.is_none(), "{:?} should have no attack effect", card);
 }
 
 /// Rhinar (p1) attacks with Muscle Mutt (a vanilla 6-power generic attack) and
@@ -1689,7 +1689,7 @@ fn titanium_bauble_is_a_vanilla_3_pitch_3_block_resource() {
     assert!(data.ability.is_none(), "Titanium Bauble should have no activated ability");
     assert!(data.defend_effect.is_none(), "Titanium Bauble should have no defend effect");
     assert!(data.next_attack_effect.is_none(), "Titanium Bauble should have no next-attack effect");
-    assert!(data.target_effect.is_none(), "Titanium Bauble should have no target effect");
+    assert!(data.attack_effect.is_none(), "Titanium Bauble should have no attack effect");
     assert!(data.constant_effect.is_none(), "Titanium Bauble should have no constant effect");
 }
 
@@ -5360,15 +5360,17 @@ fn second_dawnblade_swing_reaction_step() -> TestGame {
 
 #[test]
 fn in_the_swing_is_a_free_attack_reaction_that_pumps_a_weapon_attack_by_3() {
-    use crate::card_effects::{PlayCondition, TargetEffectType, TargetType};
+    use crate::card_effects::{AttackEffectType, AttackKind, OnPlayConditionType, PlayCondition};
     let data = Card::InTheSwingR.data();
     assert_eq!(data.typ, CardType::AttackReaction);
     assert_eq!((data.cost, data.pitch, data.defense), (0, 1, 3));
     assert_eq!(data.card_class, CardClass::Warrior);
     assert!(matches!(data.play_condition, Some(PlayCondition::Played2WeaponAttacks)));
-    let effect = data.target_effect.as_ref().expect("In the Swing should carry a target effect");
-    assert!(matches!(effect.targetType, TargetType::TargetWeapon));
-    assert!(matches!(effect.effectType, TargetEffectType::BoostPower));
+    let effect = data.attack_effect.as_ref().expect("In the Swing should carry an attack effect");
+    assert!(matches!(effect.attack, AttackKind::Weapon));
+    assert!(effect.targeted, "\"target weapon attack\"");
+    assert!(matches!(effect.condition, OnPlayConditionType::Always));
+    assert!(matches!(effect.effect, AttackEffectType::GainPower));
     assert_eq!(effect.magnitude, 3);
     assert!(data.play_effect.is_none());
 }
@@ -5476,17 +5478,19 @@ fn play_ironsong_through_damage(gs: &mut TestGame) {
 
 #[test]
 fn ironsong_response_is_a_free_reprise_attack_reaction_pumping_a_weapon_attack_by_3() {
-    use crate::card_effects::{OnPlayConditionType, OnPlayEffectType};
+    use crate::card_effects::{AttackEffectType, AttackKind, OnPlayConditionType};
     let data = Card::IronsongResponseR.data();
     assert_eq!(data.typ, CardType::AttackReaction);
     assert_eq!((data.cost, data.pitch, data.defense), (0, 1, 3));
     assert_eq!(data.card_class, CardClass::Warrior);
     assert!(data.keyword.contains(Keyword::Reprise));
-    let effect = data.play_effect.as_ref().expect("Ironsong Response should carry an on-play effect");
+    let effect = data.attack_effect.as_ref().expect("Ironsong Response should carry an attack effect");
+    assert!(matches!(effect.attack, AttackKind::Weapon));
+    assert!(!effect.targeted, "\"your weapon attack\" is not a target");
     assert!(matches!(effect.condition, OnPlayConditionType::Reprise));
-    assert!(matches!(effect.effectType, OnPlayEffectType::CurrentWeaponAttackPower));
+    assert!(matches!(effect.effect, AttackEffectType::GainPower));
     assert_eq!(effect.magnitude, 3);
-    assert!(data.play_condition.is_none() && data.target_effect.is_none());
+    assert!(data.play_condition.is_none() && data.play_effect.is_none());
 }
 
 #[test]
@@ -5579,4 +5583,34 @@ fn reprise_is_cleared_as_the_chain_closes() {
     assert!(gs.p2.defended_from_hand());
     step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // closes the chain
     assert!(!gs.p2.defended_from_hand());
+}
+
+#[test]
+fn a_sword_attack_effect_applies_to_dawnblade_but_not_bone_basher() {
+    use crate::card_effects::{AttackEffect, AttackEffectType, AttackKind, OnPlayConditionType};
+    let effect = |attack| AttackEffect {
+        attack,
+        targeted: true,
+        condition: OnPlayConditionType::Always,
+        effect: AttackEffectType::GainPower,
+        magnitude: 1,
+    };
+    let (sword, weapon) = (effect(AttackKind::Sword), effect(AttackKind::Weapon));
+
+    // Dawnblade (a two-handed sword) swinging on link 0.
+    let mut gs = setup_dorinthea_action_phase();
+    move_to_chain(&mut gs, PlayerIndex::P1, Zone::Weapon, Card::Dawnblade, 0);
+    assert!(affected_attack(&gs.p1, &sword).is_some());
+    assert!(affected_attack(&gs.p1, &weapon).is_some());
+
+    // Bone Basher (a two-handed club) is a weapon attack, not a sword attack.
+    let mut gs = setup_rhinar_action_phase();
+    move_to_chain(&mut gs, PlayerIndex::P1, Zone::Weapon, Card::BoneBasher, 0);
+    assert!(affected_attack(&gs.p1, &sword).is_none());
+    assert!(affected_attack(&gs.p1, &weapon).is_some());
+
+    // An attack action card is neither.
+    let gs = rhinar_defending_flock();
+    assert!(affected_attack(&gs.p1, &sword).is_none());
+    assert!(affected_attack(&gs.p1, &weapon).is_none());
 }
