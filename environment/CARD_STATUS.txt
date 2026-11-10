@@ -1223,6 +1223,25 @@ on-play-effect helpers).
                only_the_ironrot_piece_that_defended_is_destroyed,
                ironrot_pieces_that_did_not_defend_stay_in_their_slots
 
+  [x] Visit the Blacksmith   (Card::VisitTheBlacksmithB)
+        "Your next sword attack this turn gains +1 power. Go again." (Generic
+        action, cost 0, pitch 3, 2 block.)
+          * Catalog entry only: an on-play `OnPlayEffectType::NextSwordPower`
+            of 1, Run Through's path. Banked on
+            `Player::next_sword_attack_bonus` and handed onto
+            `attack_power_bonus` as the next sword attack (Dawnblade) is made
+            (`fab_step::finish_commit`). An attack action card, or a club
+            swing, leaves it banked; cleared each turn. Two Visits stack.
+          * Changes random play. 1M-game stack sweep: still peaks at 6
+            layers, first at seed 35221; STACK_SIZE stays 7.
+        Tests: visit_the_blacksmith_is_a_free_go_again_action_banking_1_for_the_next_sword_attack,
+               visit_the_blacksmith_banks_1_and_keeps_the_action_point,
+               visit_the_blacksmith_pumps_the_next_dawnblade_swing_by_1,
+               visit_the_blacksmith_bonus_applies_to_one_swing_only,
+               visit_the_blacksmith_bonus_is_left_banked_by_an_attack_action_card,
+               two_visits_to_the_blacksmith_stack,
+               visit_the_blacksmith_bonus_does_not_outlive_the_turn
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1276,7 +1295,7 @@ on-play-effect helpers).
   [ ] Hit and Run                    (Card::HitAndRunB)
   [x] Sigil of Solace                (Card::SigilofSolaceB)  — see COMPLETE section above
   [x] Toughen Up                     (Card::ToughenUpB)  — see COMPLETE section above
-  [ ] Visit the Blacksmith           (Card::VisitTheBlacksmithB)
+  [x] Visit the Blacksmith           (Card::VisitTheBlacksmithB)  — see COMPLETE section above
 
 
 ------------------------------------------------------------------------------

@@ -1369,7 +1369,14 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effects: &[],
+            // "Your next sword attack this turn gains +1 power." Banked like
+            // Run Through's +2 and handed to the next sword attack as it is
+            // made.
+            play_effects: &[OnPlayEffect {
+                condition: OnPlayConditionType::Always,
+                effectType: OnPlayEffectType::NextSwordPower,
+                magnitude: 1,
+            }],
             mentor_effect: None,
         },
         // ── DORINTHEA — MENTOR ──────────────────────────────────────────

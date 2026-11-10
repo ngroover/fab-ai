@@ -6891,6 +6891,123 @@ fn a_club_swing_does_not_take_a_banked_sword_power_bonus() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Visit the Blacksmith (Card::VisitTheBlacksmithB)
+//
+// Generic action, cost 0, pitch 3, 2 block: "Your next sword attack this turn
+// gains +1 power. Go again." An on-play `NextSwordPower` of 1, Run Through's
+// path: banked on `Player::next_sword_attack_bonus` and handed to the next
+// sword attack (Dawnblade) as it is made. An attack action card in between
+// leaves it banked; a club swing does too
+// (`a_club_swing_does_not_take_a_banked_sword_power_bonus`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea plays Visit the Blacksmith (free) and it resolves.
+fn play_visit_the_blacksmith(gs: &mut TestGame) {
+    step_card(gs, ActionType::PlayCard, Card::VisitTheBlacksmithB);
+    assert_eq!(gs.phase, Phase::ActionInstant, "free: straight to the stack");
+    pass_once_each(gs);
+    assert_eq!(gs.phase, Phase::Action);
+}
+
+#[test]
+fn visit_the_blacksmith_is_a_free_go_again_action_banking_1_for_the_next_sword_attack() {
+    use crate::card_effects::{OnPlayConditionType, OnPlayEffectType};
+    let data = Card::VisitTheBlacksmithB.data();
+    assert_eq!(data.typ, CardType::Action);
+    assert_eq!((data.cost, data.pitch, data.defense), (0, 3, 2));
+    assert_eq!(data.card_class, CardClass::Generic);
+    assert!(data.keyword.contains(Keyword::GoAgain));
+    assert_eq!(data.play_effects.len(), 1);
+    let effect = &data.play_effects[0];
+    assert!(matches!(effect.condition, OnPlayConditionType::Always));
+    assert!(matches!(effect.effectType, OnPlayEffectType::NextSwordPower));
+    assert_eq!(effect.magnitude, 1);
+    assert!(data.attack_effect.is_none() && data.play_condition.is_none());
+    assert!(data.next_attack_effect.is_none(), "power only: no go again for the sword attack");
+}
+
+#[test]
+fn visit_the_blacksmith_banks_1_and_keeps_the_action_point() {
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB], 0);
+    assert!(playable_cards(&gs).contains(&Card::VisitTheBlacksmithB), "playable with nothing to pitch");
+    play_visit_the_blacksmith(&mut gs);
+    assert_eq!(gs.p1.next_sword_attack_bonus, 1);
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 0, "a sword bonus, not a weapon one");
+    assert_eq!(gs.p1.action_points, 1);
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::VisitTheBlacksmithB, Zone::Graveyard));
+}
+
+#[test]
+fn visit_the_blacksmith_pumps_the_next_dawnblade_swing_by_1() {
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB, Card::VisitTheBlacksmithB], 0);
+    play_visit_the_blacksmith(&mut gs);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, 20 - (2 + 1));
+    assert_eq!(gs.p1.next_sword_attack_bonus, 0, "spent by the swing");
+}
+
+#[test]
+fn visit_the_blacksmith_bonus_applies_to_one_swing_only() {
+    // A Quicken gives the first swing go again, so Dorinthea's ability grants
+    // a second swing (paid from the 2 left floating by the pitch). Only the
+    // first takes Visit's +1; the second has just Dawnblade's own +1 for a
+    // second attack this turn.
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB, Card::VisitTheBlacksmithB], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    play_visit_the_blacksmith(&mut gs);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, 20 - (2 + 1));
+    assert_eq!(gs.p1.next_sword_attack_bonus, 0);
+    assert!(gs.p1.extra_weapon_attack());
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - (2 + 1) - (2 + 1));
+}
+
+#[test]
+fn visit_the_blacksmith_bonus_is_left_banked_by_an_attack_action_card() {
+    // Visit the Blacksmith, then Flock of the Feather Walkers (pitching a
+    // second Visit, revealing a third): Flock hits for its own 5 and the +1
+    // waits for a sword attack.
+    let mut gs = dorinthea_holding(&[
+        Card::VisitTheBlacksmithB, Card::FlockOfTheFeatherWalkersR,
+        Card::VisitTheBlacksmithB, Card::VisitTheBlacksmithB,
+    ], 0);
+    play_visit_the_blacksmith(&mut gs);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    if gs.phase == Phase::RevealChoice {
+        step_card(&mut gs, ActionType::Reveal, Card::VisitTheBlacksmithB);
+    }
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 5);
+    assert_eq!(gs.p1.next_sword_attack_bonus, 1);
+}
+
+#[test]
+fn two_visits_to_the_blacksmith_stack() {
+    let mut gs = dorinthea_holding(&[
+        Card::VisitTheBlacksmithB, Card::VisitTheBlacksmithB, Card::VisitTheBlacksmithB,
+    ], 0);
+    play_visit_the_blacksmith(&mut gs);
+    play_visit_the_blacksmith(&mut gs);
+    assert_eq!(gs.p1.next_sword_attack_bonus, 2);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, 20 - (2 + 2));
+}
+
+#[test]
+fn visit_the_blacksmith_bonus_does_not_outlive_the_turn() {
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB], 0);
+    play_visit_the_blacksmith(&mut gs);
+    while gs.turn_player == PlayerIndex::P1 {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.p1.next_sword_attack_bonus, 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Out for Blood (Card::OutForBloodY)
 //
 // Warrior attack reaction, cost 1, 3 block: "Target weapon attack gains +2
