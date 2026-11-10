@@ -976,6 +976,25 @@ on-play-effect helpers).
                two_sharpen_steels_stack,
                sharpen_steel_bonus_does_not_outlive_the_turn
 
+  [x] Thrust   (Card::ThrustR)
+        "Target sword attack gains +3 power." (Generic attack reaction, cost
+        1, pitch 1, 2 block.)
+          * Catalog entry only: an `attack_effect` (`AttackKind::Sword`,
+            targeted, `Always`, `GainPower` 3). Offered only into a sword
+            attack (Dawnblade); the +3 is banked on `attack_power_bonus` as it
+            resolves and spent at combat damage. Paid from floating resources
+            or by pitching in the reaction step; two copies stack.
+          * Rhinar's deck holds no Thrust, so the club case (Bone Basher) is
+            only covered by
+            a_sword_attack_effect_applies_to_dawnblade_but_not_bone_basher.
+          * Changes damage, so random play moved; see the stack-seed sweep.
+        Tests: thrust_is_a_1_cost_attack_reaction_giving_a_targeted_sword_attack_plus_3,
+               thrust_gives_a_dawnblade_swing_plus_3,
+               thrust_is_paid_for_by_pitching_in_the_reaction_step,
+               thrust_is_not_offered_against_an_attack_action_card,
+               thrust_is_not_offered_without_the_resources_to_pay_for_it,
+               two_thrusts_stack
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1017,7 +1036,7 @@ on-play-effect helpers).
   [x] Ironsong Response              (Card::IronsongResponseR)  — see COMPLETE section above
   [x] Second Swing                   (Card::SecondSwingR)  — see COMPLETE section above
   [x] Sharpen Steel                  (Card::SharpenSteelR)  — see COMPLETE section above
-  [ ] Thrust                         (Card::ThrustR)
+  [x] Thrust                         (Card::ThrustR)  — see COMPLETE section above
   [ ] Warrior's Valor                (Card::WarriorsValorR)
   [ ] Driving Blade                  (Card::DrivingBladeY)
   [ ] Glistening Steelblade          (Card::GlisteningSteelbladeY)

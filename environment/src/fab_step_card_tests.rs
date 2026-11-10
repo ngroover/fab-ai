@@ -44,6 +44,7 @@
 //!   - Ironsong Response   (`Card::IronsongResponseR`), and Reprise
 //!   - Second Swing        (`Card::SecondSwingR`)
 //!   - Sharpen Steel       (`Card::SharpenSteelR`)
+//!   - Thrust              (`Card::ThrustR`)
 
 use super::*;
 use crate::cards::Card;
@@ -5909,4 +5910,103 @@ fn sharpen_steel_bonus_does_not_outlive_the_turn() {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     }
     assert_eq!(gs.p1.next_weapon_attack_bonus, 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Thrust (Card::ThrustR)
+//
+// Generic attack reaction, cost 1, 2 block: "Target sword attack gains +3
+// power." An `AttackEffect` (sword, targeted, +3): it is offered only into a
+// sword attack — Dawnblade, a two-handed sword — and the +3 is banked on
+// `attack_power_bonus` as it resolves. (Bone Basher, a club, is not a sword
+// attack, but Rhinar's deck holds no Thrust; the sword/club split is covered by
+// `a_sword_attack_effect_applies_to_dawnblade_but_not_bone_basher`.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn thrust_is_a_1_cost_attack_reaction_giving_a_targeted_sword_attack_plus_3() {
+    use crate::card_effects::{AttackEffectType, AttackKind, OnPlayConditionType};
+    let data = Card::ThrustR.data();
+    assert_eq!(data.typ, CardType::AttackReaction);
+    assert_eq!((data.cost, data.pitch, data.defense), (1, 1, 2));
+    assert_eq!(data.card_class, CardClass::Generic);
+    let effect = data.attack_effect.as_ref().expect("Thrust should carry an attack effect");
+    assert!(matches!(effect.attack, AttackKind::Sword));
+    assert!(effect.targeted, "\"target sword attack\"");
+    assert!(matches!(effect.condition, OnPlayConditionType::Always));
+    assert!(matches!(effect.effect, AttackEffectType::GainPower));
+    assert_eq!(effect.magnitude, 3);
+    assert!(data.play_effect.is_none() && data.play_condition.is_none());
+}
+
+#[test]
+fn thrust_gives_a_dawnblade_swing_plus_3() {
+    // Visit the Blacksmith pays for the swing with 2 left over, one of which
+    // pays for Thrust.
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB, Card::ThrustR], 0);
+    dawnblade_into_reaction_step(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert!(playable_cards(&gs).contains(&Card::ThrustR));
+    step_card(&mut gs, ActionType::PlayCard, Card::ThrustR);
+    assert!(on_stack(&gs, Card::ThrustR));
+    assert_eq!(gs.p1.resources, 1);
+    pass_once_each(&mut gs);
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::ThrustR, Zone::Graveyard));
+    close_reaction_step(&mut gs);
+    assert_eq!(gs.p2.life, 20 - (2 + 3));
+    assert_eq!(gs.p1.attack_power_bonus, 0, "spent with the attack");
+}
+
+#[test]
+fn thrust_is_paid_for_by_pitching_in_the_reaction_step() {
+    // Sharpen Steel (pitch 1) pays exactly for the swing; Thrust is then paid
+    // by pitching Visit the Blacksmith.
+    let mut gs = dorinthea_holding(&[
+        Card::SharpenSteelR, Card::VisitTheBlacksmithB, Card::ThrustR,
+    ], 0);
+    dawnblade_into_reaction_step(&mut gs, Some(Card::SharpenSteelR));
+    assert_eq!(gs.p1.resources, 0);
+    assert!(playable_cards(&gs).contains(&Card::ThrustR));
+    step_card(&mut gs, ActionType::PlayCard, Card::ThrustR);
+    assert_eq!(gs.phase, Phase::ReactionPitch);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.p1.resources, 2);
+    pass_once_each(&mut gs);
+    close_reaction_step(&mut gs);
+    assert_eq!(gs.p2.life, 20 - (2 + 3));
+}
+
+#[test]
+fn thrust_is_not_offered_against_an_attack_action_card() {
+    let mut gs = rhinar_defending_flock();
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // no blockers
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::ThrustR, Card::VisitTheBlacksmithB]);
+    assert!(!playable_cards(&gs).contains(&Card::ThrustR), "no sword attack to target");
+}
+
+#[test]
+fn thrust_is_not_offered_without_the_resources_to_pay_for_it() {
+    // Sharpen Steel pays for the swing and is the last card to pitch: Thrust
+    // is a sword attack's to target, but cannot be paid for.
+    let mut gs = dorinthea_holding(&[Card::SharpenSteelR, Card::ThrustR], 0);
+    dawnblade_into_reaction_step(&mut gs, Some(Card::SharpenSteelR));
+    assert_eq!(gs.p1.resources, 0);
+    assert!(!playable_cards(&gs).contains(&Card::ThrustR));
+}
+
+#[test]
+fn two_thrusts_stack() {
+    let mut gs = dorinthea_holding(&[
+        Card::VisitTheBlacksmithB, Card::ThrustR, Card::ThrustR,
+    ], 0);
+    dawnblade_into_reaction_step(&mut gs, Some(Card::VisitTheBlacksmithB));
+    step_card(&mut gs, ActionType::PlayCard, Card::ThrustR);
+    step_card(&mut gs, ActionType::PlayCard, Card::ThrustR);
+    assert_eq!(gs.p1.resources, 0);
+    while gs.phase != Phase::Action {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.p2.life, 20 - (2 + 3 + 3));
 }
