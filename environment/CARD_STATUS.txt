@@ -1124,6 +1124,31 @@ on-play-effect helpers).
                run_through_on_the_extra_swing_grants_no_third_attack_and_its_bonus_ends_with_the_turn,
                a_club_swing_does_not_take_a_banked_sword_power_bonus
 
+  [x] Out for Blood   (Card::OutForBloodY)
+        "Target weapon attack gains +2 power. Reprise - If the defending hero
+        has defended with a card from their hand this chain link, your next
+        attack this turn gains +1 power." (Warrior attack reaction, cost 1,
+        pitch 2, 3 block.)
+          * The +2 is an `AttackEffect` (weapon, targeted, `GainPower`): only
+            offered into a weapon attack, banked on `attack_power_bonus` as
+            the card resolves.
+          * The Reprise +1 is an on-play `NextAttackPower` with a `Reprise`
+            condition, read as the card resolves (so a Dodge still on the
+            stack does not count yet, as with Ironsong Response).
+          * `NextAttackPower` (Second Swing's) now joins the shared next-attack
+            hand-off as `AttackKind::Any`: banked on `next_attack_bonus` and
+            handed onto `attack_power_bonus` as the next attack of any kind is
+            made (`fab_step::finish_commit`), rather than read at combat
+            damage — otherwise the attack Out for Blood is played into would
+            take its own +1. Second Swing is action-speed, so its timing is
+            unchanged in effect.
+        Tests: out_for_blood_pumps_a_targeted_weapon_attack_by_2_with_a_reprise_plus_1_for_the_next_attack,
+               out_for_blood_gives_an_unblocked_swing_plus_2_and_no_reprise,
+               out_for_blood_reprise_banks_plus_1_that_the_current_attack_does_not_take,
+               out_for_blood_reprise_plus_1_goes_to_the_next_attack,
+               out_for_blood_is_not_offered_against_an_attack_action_card,
+               out_for_blood_reprise_bonus_does_not_outlive_the_turn
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1170,7 +1195,7 @@ on-play-effect helpers).
   [x] Driving Blade                  (Card::DrivingBladeY)  — see COMPLETE section above
   [x] Glistening Steelblade          (Card::GlisteningSteelbladeY)  — see COMPLETE section above
   [x] On a Knife Edge                (Card::OnAKnifeEdgeY)  — see COMPLETE section above
-  [ ] Out for Blood                  (Card::OutForBloodY)
+  [x] Out for Blood                  (Card::OutForBloodY)  — see COMPLETE section above
   [x] Run Through                    (Card::RunThroughY)  — see COMPLETE section above
   [ ] Slice and Dice                 (Card::SliceAndDiceY)
   [ ] Blade Flash                    (Card::BladeFlashB)

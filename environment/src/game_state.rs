@@ -921,9 +921,11 @@ impl Player {
     }
 
     /// The power banked for this player's next attack of `kind` this turn:
-    /// `next_weapon_attack_bonus` or `next_sword_attack_bonus`.
+    /// `next_attack_bonus`, `next_weapon_attack_bonus` or
+    /// `next_sword_attack_bonus`.
     pub fn next_attack_power_bonus_mut(&mut self, kind: AttackKind) -> &mut u8 {
         match kind {
+            AttackKind::Any => &mut self.next_attack_bonus,
             AttackKind::Weapon => &mut self.next_weapon_attack_bonus,
             AttackKind::Sword => &mut self.next_sword_attack_bonus,
         }

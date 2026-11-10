@@ -1148,9 +1148,19 @@ static CARD_CATALOG: [CardData; 53] = [
             defend_effect: None,
             next_attack_effect: None,
             additional_cost: None,
-            attack_effect: None,
+            attack_effect: Some(AttackEffect {
+                attack: AttackKind::Weapon,
+                targeted: true,
+                condition: OnPlayConditionType::Always,
+                effect: AttackEffectType::GainPower,
+                magnitude: 2,
+            }),
             play_condition: None,
-            play_effect: None,
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::Reprise,
+                effectType: OnPlayEffectType::NextAttackPower,
+                magnitude: 1,
+            }),
             mentor_effect: None,
         },
         // Run Through

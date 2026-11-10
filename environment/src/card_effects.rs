@@ -158,9 +158,9 @@ pub enum OnPlayEffectType {
     DawnbladeHitCounterThisTurn,
     /// Banks `magnitude` power for the next attack the owner makes this turn,
     /// of any kind — a weapon swing or an attack action card (Second Swing's
-    /// "your next attack this turn gains +4 power"). Banked on
-    /// `Player::next_attack_bonus`; the next attack to reach combat damage
-    /// takes and spends it.
+    /// "your next attack this turn gains +4 power", Out for Blood's Reprise
+    /// +1). Banked on `Player::next_attack_bonus`; the next attack made takes
+    /// and spends it. See `next_attack_kind`.
     NextAttackPower,
     /// Banks a *conditional* `magnitude` power for the next Brute attack the
     /// owner makes this turn (Barraging Beatdown's "your next Brute attack this
@@ -194,6 +194,7 @@ impl OnPlayEffectType {
     /// whose *next* one it pumps.
     pub fn next_attack_kind(&self) -> Option<AttackKind> {
         match self {
+            OnPlayEffectType::NextAttackPower => Some(AttackKind::Any),
             OnPlayEffectType::NextWeaponPower => Some(AttackKind::Weapon),
             OnPlayEffectType::NextSwordPower => Some(AttackKind::Sword),
             _ => None,
@@ -291,6 +292,9 @@ pub enum PlayCondition {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum AttackKind {
+    /// Any attack: a weapon swing or an attack action card ("your next
+    /// attack").
+    Any,
     /// Any weapon swing ("weapon attack").
     Weapon,
     /// A swing with a sword ("sword attack").

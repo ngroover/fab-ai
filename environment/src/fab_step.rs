@@ -1065,6 +1065,7 @@ fn affected_attack(player: &Player, effect: &AttackEffect) -> Option<DeckCardId>
 /// Whether an attack with `data` is an attack of `kind`.
 fn is_attack_of_kind(data: &CardData, kind: AttackKind) -> bool {
     match kind {
+        AttackKind::Any => true,
         AttackKind::Weapon => is_weapon(data),
         AttackKind::Sword => is_sword(data),
     }
@@ -1509,24 +1510,18 @@ fn apply_on_play_effect_type(gs: &mut Gamestate, rng: &mut GameRng, owner: Playe
         // property of how the defender answers the attack, so it can only be
         // read when combat damage resolves — see `resolve_combat_damage`.
         // The next weapon attack the owner makes this turn gains `magnitude`
-        // power (e.g. En Garde). Banked like the bonuses above and applied
-        // only when a weapon swing resolves combat damage.
-        // The next attack the owner makes this turn, of any kind, gains
-        // `magnitude` power (Second Swing). Banked and spent by the next attack
-        // to reach combat damage.
+        // power (e.g. En Garde), and likewise the next attack of any kind
+        // (Second Swing): see the shared arm below.
         // Glistening Steelblade: one more "whenever Dawnblade hits a hero this
         // turn, put a +1 counter on it" for the owner. Read at combat damage.
         OnPlayEffectType::DawnbladeHitCounterThisTurn => {
             let player = gs.player_mut(owner);
             player.dawnblade_hit_counter_effects = player.dawnblade_hit_counter_effects.saturating_add(effect.magnitude);
         }
-        OnPlayEffectType::NextAttackPower => {
-            let player = gs.player_mut(owner);
-            player.next_attack_bonus = player.next_attack_bonus.saturating_add(effect.magnitude);
-        }
-        // En Garde's next weapon attack, Run Through's next sword attack:
+        // Second Swing's next attack, En Garde's next weapon attack, Run
+        // Through's next sword attack:
         // banked by kind, handed to that attack as it is made (`finish_commit`).
-        OnPlayEffectType::NextWeaponPower | OnPlayEffectType::NextSwordPower => {
+        OnPlayEffectType::NextAttackPower | OnPlayEffectType::NextWeaponPower | OnPlayEffectType::NextSwordPower => {
             let kind = effect.effectType.next_attack_kind().expect("a next-attack-kind power effect");
             let bonus = gs.player_mut(owner).next_attack_power_bonus_mut(kind);
             *bonus = bonus.saturating_add(effect.magnitude);
@@ -1840,12 +1835,13 @@ fn finish_commit(gs: &mut Gamestate, rng: &mut GameRng, pending: PendingCard) {
             gs.player_mut(owner).set_next_sword_go_again(false);
             attack_gains_go_again(gs, owner, pending.card);
         }
-        // Power banked for "your next weapon/sword attack this turn" (En
-        // Garde, Run Through) is spent as that attack is made, onto the
-        // attack's own bonus. Handing it over here rather than at combat
-        // damage keeps it off an attack made before it was banked: Run
-        // Through is played into the sword attack whose next one it pumps.
-        for kind in [AttackKind::Weapon, AttackKind::Sword] {
+        // Power banked for "your next [weapon/sword] attack this turn"
+        // (Second Swing, En Garde, Run Through, Out for Blood) is spent as
+        // that attack is made, onto the attack's own bonus. Handing it over
+        // here rather than at combat damage keeps it off an attack made
+        // before it was banked: Run Through and Out for Blood are played into
+        // the attack whose next one they pump.
+        for kind in [AttackKind::Any, AttackKind::Weapon, AttackKind::Sword] {
             if is_attack_of_kind(data, kind) {
                 let player = gs.player_mut(owner);
                 let banked = std::mem::take(player.next_attack_power_bonus_mut(kind));
@@ -1931,13 +1927,11 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         .map(|data| data.typ == CardType::AttackAction)
         .unwrap_or(false);
     let attack_action_bonus = if attack_is_attack_action { attacker.next_attack_action_bonus } else { 0 };
-    // Whether the attack is a weapon swing. (The banked "next weapon attack"
-    // bonus, En Garde's +3, is not read here: it joined `attack_power_bonus`
-    // as the swing was made, `finish_commit`.)
+    // Whether the attack is a weapon swing. (The banked "next attack" /
+    // "next weapon attack" bonuses, Second Swing's +4 and En Garde's +3, are
+    // not read here: they joined `attack_power_bonus` as the attack was made,
+    // `finish_commit`.)
     let attack_is_weapon = attack_data.map(is_weapon).unwrap_or(false);
-    // The banked "next attack" bonus (Second Swing's +4) is taken by any
-    // attack: a weapon swing or an attack action card.
-    let next_attack_bonus = if attack_data.is_some() { attacker.next_attack_bonus } else { 0 };
     // +1 counters on the weapon (Glistening Steelblade's, on Dawnblade) add to
     // its power every time it attacks.
     let counter_bonus = if attack_is_weapon { attacker.weapon_power_counters } else { 0 };
@@ -1983,7 +1977,6 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         .saturating_add(attack_action_bonus)
         .saturating_add(brute_conditional_bonus)
         .saturating_add(second_attack_bonus)
-        .saturating_add(next_attack_bonus)
         .saturating_add(counter_bonus);
     // The block is the blockers' printed defense plus whatever was granted to
     // them during the combat (Rally the Rearguard's +3 block).
@@ -2069,10 +2062,6 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // so a weapon swing leaves it banked for a later attack action this turn.
     if attack_is_attack_action {
         attacker.next_attack_action_bonus = 0;
-    }
-    // And the any-attack bonus: spent by whichever attack this is.
-    if attack_data.is_some() {
-        attacker.next_attack_bonus = 0;
     }
     // The conditional brute bonus is spent by any brute attack, whether or not
     // the blocker count let it pay out: the attack it was banked for has now

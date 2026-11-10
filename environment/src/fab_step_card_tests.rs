@@ -50,6 +50,7 @@
 //!   - Glistening Steelblade (`Card::GlisteningSteelbladeY`)
 //!   - On a Knife Edge     (`Card::OnAKnifeEdgeY`)
 //!   - Run Through         (`Card::RunThroughY`)
+//!   - Out for Blood       (`Card::OutForBloodY`)
 
 use super::*;
 use crate::cards::Card;
@@ -6672,4 +6673,126 @@ fn a_club_swing_does_not_take_a_banked_sword_power_bonus() {
     step_card_from(&mut gs, ActionType::Activate, Card::BoneBasher, Zone::Weapon);
     assert_eq!(gs.p1.attack_power_bonus, 0);
     assert_eq!(gs.p1.next_sword_attack_bonus, 2, "still waiting for a sword attack");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Out for Blood (Card::OutForBloodY)
+//
+// Warrior attack reaction, cost 1, 3 block: "Target weapon attack gains +2
+// power. Reprise - If the defending hero has defended with a card from their
+// hand this chain link, your next attack this turn gains +1 power." The +2 is
+// an `AttackEffect` (weapon, targeted); the Reprise +1 is an on-play
+// `NextAttackPower` with a `Reprise` condition, banked on `next_attack_bonus`
+// and handed to the next attack as it is made — not to the attack Out for
+// Blood was played into.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea, holding Out for Blood and Visit the Blacksmith (and a Quicken
+/// when `quicken`), swings Dawnblade pitching Visit; Rhinar declares
+/// `blockers` from hand; Dorinthea plays Out for Blood from the float and it
+/// resolves. Still in the reaction step, 1 resource floating.
+fn out_for_blood_vs_dawnblade(blockers: &[Card], quicken: bool) -> TestGame {
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB, Card::OutForBloodY], 0);
+    if quicken {
+        give_quicken(&mut gs, PlayerIndex::P1);
+    }
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::ClearingBellowB]);
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::Weapon);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    for &card in blockers {
+        step_card(&mut gs, ActionType::Defend, card);
+    }
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done declaring
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    assert!(playable_cards(&gs).contains(&Card::OutForBloodY));
+    step_card(&mut gs, ActionType::PlayCard, Card::OutForBloodY);
+    assert_eq!(gs.p1.resources, 1);
+    pass_once_each(&mut gs);
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::OutForBloodY, Zone::Graveyard));
+    gs
+}
+
+#[test]
+fn out_for_blood_pumps_a_targeted_weapon_attack_by_2_with_a_reprise_plus_1_for_the_next_attack() {
+    use crate::card_effects::{AttackEffectType, AttackKind, OnPlayConditionType, OnPlayEffectType};
+    let data = Card::OutForBloodY.data();
+    assert_eq!(data.typ, CardType::AttackReaction);
+    assert_eq!((data.cost, data.pitch, data.defense), (1, 2, 3));
+    assert_eq!(data.card_class, CardClass::Warrior);
+    let effect = data.attack_effect.as_ref().expect("Out for Blood should carry an attack effect");
+    assert!(matches!(effect.attack, AttackKind::Weapon));
+    assert!(effect.targeted, "\"target weapon attack\"");
+    assert!(matches!(effect.condition, OnPlayConditionType::Always));
+    assert!(matches!(effect.effect, AttackEffectType::GainPower));
+    assert_eq!(effect.magnitude, 2);
+    let next = data.play_effect.as_ref().expect("Out for Blood should carry an on-play effect");
+    assert!(matches!(next.condition, OnPlayConditionType::Reprise));
+    assert!(matches!(next.effectType, OnPlayEffectType::NextAttackPower));
+    assert_eq!(next.magnitude, 1);
+    assert!(data.next_attack_effect.is_none() && data.play_condition.is_none());
+    assert!(data.keyword.is_empty(), "no go again");
+}
+
+#[test]
+fn out_for_blood_gives_an_unblocked_swing_plus_2_and_no_reprise() {
+    let mut gs = out_for_blood_vs_dawnblade(&[], false);
+    assert!(!gs.p2.defended_from_hand());
+    assert_eq!(gs.p1.attack_power_bonus, 2);
+    assert_eq!(gs.p1.next_attack_bonus, 0, "no Reprise");
+    close_reaction_step(&mut gs);
+    assert_eq!(gs.p2.life, 20 - (2 + 2));
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+}
+
+#[test]
+fn out_for_blood_reprise_banks_plus_1_that_the_current_attack_does_not_take() {
+    // Clearing Bellow (3) from hand: Reprise. 2 + 2 against 3.
+    let mut gs = out_for_blood_vs_dawnblade(&[Card::ClearingBellowB], false);
+    assert!(gs.p2.defended_from_hand());
+    assert_eq!(gs.p1.next_attack_bonus, 1);
+    close_reaction_step(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 1);
+    assert_eq!(gs.p1.next_attack_bonus, 1, "still banked for the next attack");
+}
+
+#[test]
+fn out_for_blood_reprise_plus_1_goes_to_the_next_attack() {
+    // A Quicken gives the first swing go again and Dorinthea an extra attack:
+    // 2 + 2 against Clearing Bellow's 3, then 2 + 1 (second attack) + 1.
+    let mut gs = out_for_blood_vs_dawnblade(&[Card::ClearingBellowB], true);
+    close_reaction_step(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 1);
+    assert_eq!(gs.p1.action_points, 1, "go again from the Quicken");
+    dawnblade_into_reaction_step(&mut gs, None);
+    assert_eq!(gs.p1.next_attack_bonus, 0, "spent as the attack was made");
+    close_reaction_step(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 1 - 4);
+}
+
+#[test]
+fn out_for_blood_is_not_offered_against_an_attack_action_card() {
+    let mut gs = rhinar_defending_flock();
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // no blockers
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::OutForBloodY, Card::VisitTheBlacksmithB]);
+    assert!(!playable_cards(&gs).contains(&Card::OutForBloodY), "no weapon attack to target");
+}
+
+#[test]
+fn out_for_blood_reprise_bonus_does_not_outlive_the_turn() {
+    let mut gs = out_for_blood_vs_dawnblade(&[Card::ClearingBellowB], false);
+    close_reaction_step(&mut gs);
+    while gs.turn_player == PlayerIndex::P1 {
+        let act = if gs.phase == Phase::PitchOrder {
+            legal_actions(&gs)[0]
+        } else {
+            Action{ typ: ActionType::Pass, card: None}
+        };
+        step(&mut gs, act);
+    }
+    assert_eq!(gs.p1.next_attack_bonus, 0);
 }
