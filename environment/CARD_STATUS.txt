@@ -893,11 +893,23 @@ on-play-effect helpers).
             `OnPlayConditionType::Reprise`, +3 power, read as the card
             resolves. A defense reaction played after Ironsong has resolved
             does not count.
+          * Answering a defense reaction needed a rules fix: the reaction step
+            used to close (and deal damage) as soon as a resolution emptied the
+            stack, so the attacker never got priority after the defender's
+            Dodge resolved. Now every resolution in the reaction step returns
+            priority to the turn player, and the step closes only when both
+            players pass in succession on an empty stack
+            (`fab_step::after_resolution`). The action step's instant window
+            still closes as its stack empties, handing back to the Action phase
+            with the turn player holding priority. Tests that relied on the
+            early close now finish the step with
+            `test_support::close_reaction_step`. New test:
+            the_reaction_step_stays_open_after_each_resolution.
           * "Your weapon attack" is not a target, so the card stays playable
             into any attack, as before; it just does nothing without Reprise
             or on an attack action card.
-          * Legal actions and rng draws are unchanged, so random play is
-            identical; the deepest-stack seed (247504, 6 layers) still holds.
+          * The card itself left random play unchanged; the reaction-step fix
+            did not (see the stack-seed note below).
           * AttackEffect: In the Swing and Ironsong Response share one
             effect type, `CardData::attack_effect` (replacing `target_effect`
             and the short-lived `OnPlayEffectType::CurrentWeaponAttackPower`).
@@ -915,7 +927,9 @@ on-play-effect helpers).
                ironsong_response_does_nothing_against_an_unblocked_attack,
                ironsong_response_reprise_ignores_equipment_blocks,
                ironsong_response_does_nothing_for_an_attack_action_card,
-               a_defense_reaction_from_hand_meets_reprise_but_not_from_the_arsenal,
+               ironsong_response_answers_a_dodge_from_hand_with_plus_3,
+               ironsong_response_gets_no_reprise_from_a_dodge_out_of_the_arsenal,
+               ironsong_response_played_before_the_dodge_resolves_gets_no_reprise,
                reprise_is_reset_for_each_chain_link,
                reprise_is_cleared_as_the_chain_closes,
                a_sword_attack_effect_applies_to_dawnblade_but_not_bone_basher

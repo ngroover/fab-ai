@@ -862,10 +862,10 @@ fn commit_defense_reaction(gs: &mut Gamestate, owner: PlayerIndex, id: DeckCardI
 ///   itself), moves onto the next free link of its owner's combat chain, and we
 ///   advance to the next itinerary phase — the `Defend` frame banked when the
 ///   attack was committed, with the defender active to declare blocks.
-/// - Anything **else** resolves to its owner's graveyard. If the stack is now
-///   empty the window closes and we advance to the next itinerary phase;
-///   otherwise priority returns to the turn player and we keep responding in the
-///   live priority window (Instant or Reaction).
+/// - Anything **else** resolves to its owner's graveyard (or, for a defense
+///   reaction, onto the chain). Priority then returns to the turn player; an
+///   instant window whose stack is now empty closes instead, but the reaction
+///   step only closes on a double pass (see `after_resolution`).
 fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
     let Some(pending) = gs.pop_stack() else {
         return;
@@ -890,13 +890,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
             gs.log_public(format!("{}'s {:?} ability resolves", player_name(owner), card));
         }
         apply_defending_ability(gs, owner, top);
-        if gs.stack_is_empty() {
-            close_priority_window(gs);
-        } else {
-            // More entries still to resolve: priority returns to the turn player
-            // for a fresh round in the same window.
-            gs.active_player = gs.turn_player;
-        }
+        after_resolution(gs);
         return;
     }
 
@@ -970,11 +964,7 @@ fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
         // (see `resolve_combat_damage`). It leaves for the graveyard with the
         // rest of the link when the chain closes.
         commit_defense_reaction(gs, owner, top, pending.from);
-        if gs.stack_is_empty() {
-            close_priority_window(gs);
-        } else {
-            gs.active_player = gs.turn_player;
-        }
+        after_resolution(gs);
     } else {
         // A resolved card goes to the graveyard, face up. For an armor ability
         // whose cost is destroying its card (Blossom of Spring), this is where
@@ -1001,14 +991,29 @@ fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
         if uses_action_point(pending.typ, data) && !data.keyword.contains(Keyword::GoAgain) {
             spend_action_point(gs, owner);
         }
-        if gs.stack_is_empty() {
-            close_priority_window(gs);
-        } else {
-            // Cards remain on the stack: priority returns to the turn player for
-            // a fresh round of responses and we stay in the live priority window
-            // (`gs.phase` is already that window).
-            gs.active_player = gs.turn_player;
-        }
+        after_resolution(gs);
+    }
+}
+
+/// Where priority goes once a layer has resolved off the stack in a priority
+/// window, other than an attack resolving onto the chain.
+///
+/// In the reaction step it always returns to the turn player, and the step
+/// closes only when both players pass in succession on an empty stack
+/// (`handle_priority_pass`). So after the defender's defense reaction resolves,
+/// the attacker can still answer it with an attack reaction (Ironsong
+/// Response's Reprise reads the block it added), and the defender can answer
+/// that in turn.
+///
+/// The action step's instant window still closes as its stack empties: it
+/// hands back to the `Action` phase with the turn player holding priority,
+/// where instants are playable anyway. With layers left, priority returns to
+/// the turn player for a fresh round in the same window.
+fn after_resolution(gs: &mut Gamestate) {
+    if gs.stack_is_empty() && gs.phase != Phase::Reaction {
+        close_priority_window(gs);
+    } else {
+        gs.active_player = gs.turn_player;
     }
 }
 
@@ -3026,12 +3031,13 @@ mod tests {
         assert_eq!(gs.active_player, PlayerIndex::P2);
         assert!(on_stack(&gs, sigil));
 
-        // Both players pass: the reaction resolves to its owner's graveyard, the
-        // stack empties, and play returns to the turn player's Action phase.
+        // Both players pass: the reaction resolves to its owner's graveyard and
+        // the stack empties. The step stays open with the turn player holding
+        // priority; both pass again and play returns to the Action phase.
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         assert!(in_zone(&gs, PlayerIndex::P2, sigil, Zone::Graveyard));
-        assert!(gs.stack_is_empty());
+        close_reaction_step(&mut gs);
         assert_eq!(gs.phase, Phase::Action);
         assert_eq!(gs.active_player, gs.turn_player);
     }
@@ -3510,10 +3516,12 @@ mod tests {
         assert_eq!(gs.phase, Phase::Reaction);
 
         // Both pass: Toughen Up resolves onto the defender's side of the combat
-        // chain (a defense reaction blocks with its printed defense), the window
-        // closes, combat damage resolves, and play returns to the Action phase.
+        // chain (a defense reaction blocks with its printed defense). Both pass
+        // again on the empty stack: the step closes, combat damage resolves,
+        // and play returns to the Action phase.
         step(gs, Action{ typ: ActionType::Pass, card: None});
         step(gs, Action{ typ: ActionType::Pass, card: None});
+        close_reaction_step(gs);
         assert_eq!(gs.phase, Phase::Action);
 
         (hand[1], hand[2])

@@ -42,7 +42,7 @@ use crate::action::{Action, ActionType, CardRef};
 use crate::card_counts::{CardCounts, DeckCardId};
 use crate::cards::{Card, CardType};
 use crate::fab_game::GameRng;
-use crate::game_state::{DeckSlot, Gamestate, PendingCard, PlayerIndex, Zone};
+use crate::game_state::{DeckSlot, Gamestate, PendingCard, Phase, PlayerIndex, Zone};
 
 /// `card`'s id in `pid`'s deck.
 pub fn id(gs: &Gamestate, pid: PlayerIndex, card: Card) -> DeckCardId {
@@ -393,4 +393,16 @@ pub fn stage_second_weapon_swing(gs: &mut Gamestate, pid: PlayerIndex) {
     while player.abilities_used.count(weapon) < 2 {
         player.abilities_used.add(weapon);
     }
+}
+
+/// Close the reaction step once everything on the stack has resolved: the
+/// turn player holds priority again (a resolution never closes the step), and
+/// both players pass in succession, so combat damage is dealt.
+pub fn close_reaction_step(gs: &mut TestGame) {
+    assert_eq!(gs.phase, Phase::Reaction, "the reaction step stays open after a resolution");
+    assert!(gs.stack_is_empty());
+    assert_eq!(gs.active_player, gs.turn_player, "priority returns to the turn player");
+    step(gs, Action{ typ: ActionType::Pass, card: None});
+    step(gs, Action{ typ: ActionType::Pass, card: None});
+    assert_ne!(gs.phase, Phase::Reaction);
 }

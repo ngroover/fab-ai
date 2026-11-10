@@ -1499,6 +1499,7 @@ fn defender_reacts_with(gs: &mut TestGame, card: Card) -> Card {
     step_card(gs, ActionType::PlayCard, idx);
     step(gs, Action{ typ: ActionType::Pass, card: None});
     step(gs, Action{ typ: ActionType::Pass, card: None});
+    close_reaction_step(gs);
     idx
 }
 
@@ -1534,6 +1535,7 @@ fn toughen_up_adds_its_block_to_the_combat_chain() {
         assert_eq!(gs.phase, Phase::Reaction);
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        close_reaction_step(&mut gs);
         idx
     };
 
@@ -1562,6 +1564,7 @@ fn a_defense_reaction_stacks_with_a_declared_blocker() {
     step_card(&mut gs, ActionType::PlayCard, dodge);
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    close_reaction_step(&mut gs);
 
     // Both sit on the same chain link, so their defense is summed: 3 + 2 = 5
     // against 6 power leaves 1 damage.
@@ -1571,6 +1574,31 @@ fn a_defense_reaction_stacks_with_a_declared_blocker() {
     expected.sort_by_key(|c| *c as u8);
     assert_eq!(on_link, expected);
     assert_eq!(gs.p2.life, 20 - 1);
+}
+
+#[test]
+fn the_reaction_step_stays_open_after_each_resolution() {
+    // Rhinar defends Muscle Mutt (6) with two Dodges, one at a time. After the
+    // first resolves, priority returns to the attacker rather than the step
+    // closing; she passes, and he can play the second.
+    let mut gs = rhinar_defending_muscle_mutt();
+    pass_to_defender_reaction(&mut gs);
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::DodgeB, Card::DodgeB]);
+    step_card(&mut gs, ActionType::PlayCard, Card::DodgeB);
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Reaction, "a resolution does not close the step");
+    assert_eq!(gs.active_player, PlayerIndex::P1, "priority returns to the turn player");
+    assert_eq!(gs.p2.life, 20, "no damage yet");
+
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // attacker
+    assert_eq!(gs.active_player, PlayerIndex::P2);
+    assert!(playable_cards(&gs).contains(&Card::DodgeB));
+    step_card(&mut gs, ActionType::PlayCard, Card::DodgeB);
+    pass_once_each(&mut gs);
+    close_reaction_step(&mut gs);
+    // 6 against 2 + 2.
+    assert_eq!(gs.p2.life, 20 - 2);
+    assert_eq!(gs.phase, Phase::Action);
 }
 
 #[test]
@@ -1613,6 +1641,7 @@ fn dodge_can_be_played_from_the_arsenal() {
     // It blocks from the chain just as it would played from hand: 6 - 2 = 4.
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    close_reaction_step(&mut gs);
     assert!(in_zone(&gs, PlayerIndex::P2, dodge, Zone::CombatChain));
     assert_eq!(link_cards(&gs, PlayerIndex::P2, 0), vec![dodge]);
     assert_eq!(gs.p2.life, 20 - 4);
@@ -1653,6 +1682,7 @@ fn toughen_up_from_the_arsenal_is_paid_for_by_pitching_the_whole_hand() {
     // 4 block against Muscle Mutt's 6 power leaves 2 damage.
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    close_reaction_step(&mut gs);
     assert!(in_zone(&gs, PlayerIndex::P2, tu, Zone::CombatChain));
     assert_eq!(gs.p2.life, 20 - 2);
 }
@@ -2240,6 +2270,7 @@ fn the_defend_trigger_window_hands_over_to_the_reaction_window_not_to_damage() {
     // Muscle Mutt's 6 leaves 1.
     step_card(&mut gs, ActionType::PlayCard, dodge);
     pass_once_each(&mut gs);
+    close_reaction_step(&mut gs);
     assert!(in_zone(&gs, PlayerIndex::P2, dodge, Zone::CombatChain));
     assert_eq!(gs.p2.life, 20 - 1);
 }
@@ -2765,11 +2796,12 @@ fn rally_ability_adds_3_block_when_it_resolves() {
 fn rally_ability_blocks_3_more_of_the_attack() {
     let (mut gs, rally) = rally_blocking_muscle_mutt(&[Card::DodgeB]);
 
-    // Both pass: the activation resolves and, the stack being empty again, the
-    // window closes and combat damage is dealt in the same step.
+    // Both pass: the activation resolves. Both pass again on the empty stack:
+    // the step closes and combat damage is dealt.
     step_card(&mut gs, ActionType::Activate, rally);
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    close_reaction_step(&mut gs);
 
     // Muscle Mutt's 6 power against 2 printed + 3 granted = 5 block: 1 damage,
     // where the unpumped block would have let 4 through.
@@ -2868,11 +2900,12 @@ fn rally_ability_costs_no_action_point() {
 #[test]
 fn rally_block_bonus_is_cleared_when_the_chain_closes() {
     let (mut gs, rally) = rally_blocking_muscle_mutt(&[Card::DodgeB]);
-    // Both pass: the activation resolves and, with the stack empty, the window
-    // closes and combat damage is dealt — Rally is still on the chain, pumped.
+    // The activation resolves, then the step closes and combat damage is
+    // dealt — Rally is still on the chain, pumped.
     step_card(&mut gs, ActionType::Activate, rally);
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    close_reaction_step(&mut gs);
     assert_eq!(block_bonus(&gs, rally), 3);
     assert!(in_zone(&gs, PlayerIndex::P2, rally, Zone::CombatChain));
 
@@ -3078,6 +3111,7 @@ fn rally_ability_still_works_when_the_discard_would_have_intimidated() {
     step_card(&mut gs, ActionType::Activate, rally);
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    close_reaction_step(&mut gs);
 
     assert_eq!(block_bonus(&gs, rally), 3);
     // Muscle Mutt's 6 against 2 printed + 3 granted: 1 damage to Rhinar.
@@ -5537,20 +5571,57 @@ fn ironsong_response_does_nothing_for_an_attack_action_card() {
     assert_eq!(gs.p2.life, 20 - (5 - 3));
 }
 
-#[test]
-fn a_defense_reaction_from_hand_meets_reprise_but_not_from_the_arsenal() {
-    for (zone, from_hand) in [(Zone::Hand, true), (Zone::Arsenal, false)] {
-        let mut gs = ironsong_vs_dawnblade(&[]);
-        if zone == Zone::Arsenal {
-            set_hand(&mut gs, PlayerIndex::P2, &[Card::ClearingBellowB]);
-            put_in_arsenal(&mut gs, PlayerIndex::P2, Card::DodgeB);
-        }
-        step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // Dorinthea
-        step_card_from(&mut gs, ActionType::PlayCard, Card::DodgeB, zone);
-        pass_once_each(&mut gs);
-        assert!(link_cards(&gs, PlayerIndex::P2, 0).contains(&Card::DodgeB));
-        assert_eq!(gs.p2.defended_from_hand(), from_hand, "Dodge played from {:?}", zone);
+/// Against an unblocked Dawnblade swing, Dorinthea passes her first priority,
+/// Rhinar plays Dodge from `zone` (hand or arsenal), and it resolves onto the
+/// link. The step stays open with Dorinthea holding priority again.
+fn dodge_from(zone: Zone) -> TestGame {
+    let mut gs = ironsong_vs_dawnblade(&[]);
+    if zone == Zone::Arsenal {
+        set_hand(&mut gs, PlayerIndex::P2, &[Card::ClearingBellowB]);
+        put_in_arsenal(&mut gs, PlayerIndex::P2, Card::DodgeB);
     }
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // Dorinthea
+    step_card_from(&mut gs, ActionType::PlayCard, Card::DodgeB, zone);
+    pass_once_each(&mut gs);
+    assert!(link_cards(&gs, PlayerIndex::P2, 0).contains(&Card::DodgeB));
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.active_player, PlayerIndex::P1, "the attacker answers the defense reaction");
+    gs
+}
+
+#[test]
+fn ironsong_response_answers_a_dodge_from_hand_with_plus_3() {
+    let mut gs = dodge_from(Zone::Hand);
+    assert!(gs.p2.defended_from_hand());
+    assert!(playable_cards(&gs).contains(&Card::IronsongResponseR));
+    play_ironsong_through_damage(&mut gs);
+    // 2 + 3 against Dodge's 2.
+    assert_eq!(gs.p2.life, 20 - 3);
+}
+
+#[test]
+fn ironsong_response_gets_no_reprise_from_a_dodge_out_of_the_arsenal() {
+    let mut gs = dodge_from(Zone::Arsenal);
+    assert!(!gs.p2.defended_from_hand());
+    play_ironsong_through_damage(&mut gs);
+    // 2 against Dodge's 2.
+    assert_eq!(gs.p2.life, 20);
+}
+
+#[test]
+fn ironsong_response_played_before_the_dodge_resolves_gets_no_reprise() {
+    // Answering Dodge while it is still on the stack: Ironsong resolves first,
+    // before Dodge is defending.
+    let mut gs = ironsong_vs_dawnblade(&[]);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // Dorinthea
+    step_card(&mut gs, ActionType::PlayCard, Card::DodgeB);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // Rhinar
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    assert!(on_stack(&gs, Card::DodgeB));
+    play_ironsong_through_damage(&mut gs);
+    assert!(link_cards(&gs, PlayerIndex::P2, 0).contains(&Card::DodgeB));
+    // 2 against Dodge's 2.
+    assert_eq!(gs.p2.life, 20);
 }
 
 #[test]
