@@ -2,7 +2,7 @@ use crate::action::{Action,ActionType};
 use crate::card_counts::{CardCounts, DeckCardId};
 use crate::game_state::{CHAIN_LINKS,MAX_QUICKENS,DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
 use crate::cards::{Card,CardClass,CardData,CardType,Keyword,WeaponType};
-use crate::card_effects::{Ability,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,MentorEffect,PlayCondition,AttackEffect,AttackEffectType,AttackKind};
+use crate::card_effects::{Ability,NextAttackEffect,NextAttackEffectType,NextAttackType,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,MentorEffect,PlayCondition,AttackEffect,AttackEffectType,AttackKind};
 use crate::fab_game::{shuffle_deck_for, GameRng};
 use crate::deck_cards::TokenCard;
 use rand::RngExt;
@@ -143,6 +143,9 @@ fn begin_turn(gs: &mut Gamestate) {
     // Dorinthea's extra Dawnblade attack lasts for the turn it was granted in.
     gs.p1.set_extra_weapon_attack(false);
     gs.p2.set_extra_weapon_attack(false);
+    // So does an unspent "next weapon attack gains go again on hit".
+    gs.p1.set_next_weapon_on_hit_go_again(false);
+    gs.p2.set_next_weapon_on_hit_go_again(false);
     // "At the start of your turn, you may turn [a face-down mentor] face up":
     // when the turn player has one in their arsenal, the turn opens on that
     // decision instead of going straight to the Action phase (see
@@ -931,6 +934,11 @@ fn resolve_top_of_stack(gs: &mut Gamestate, rng: &mut GameRng) {
     if let Some(effect) = &data.play_effect {
         apply_on_play_effect(gs, rng, owner, effect);
     }
+    // A grant to the owner's next attack of some kind (Warrior's Valor's "When
+    // this attack hits, it gains go again"), banked until that attack.
+    if let Some(effect) = &data.next_attack_effect {
+        bank_next_attack_effect(gs, owner, effect);
+    }
 
     // A card joins its owner's combat chain when it is attacking: a played
     // attack action card, or a weapon being swung (the weapon itself joins the
@@ -1374,6 +1382,20 @@ fn graduate_mentor(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex, fe
         turn_arsenal_face_up(player);
     }
     shuffle_deck_for(player, rng);
+}
+
+/// Bank `effect` for `owner`'s next attack of the kind it names, as its card
+/// resolves. Only the combinations a catalog card uses are supported; any other
+/// is an engine gap to fill when a card needs it, so it fails loudly.
+fn bank_next_attack_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &NextAttackEffect) {
+    match &effect.effectType {
+        // Warrior's Valor: "When this attack hits, it gains go again", for the
+        // next weapon attack. Read at combat damage (`resolve_combat_damage`).
+        NextAttackEffectType::GainOnHitGoAgain if effect.attackType == NextAttackType::IsWeapon => {
+            gs.player_mut(owner).set_next_weapon_on_hit_go_again(true);
+        }
+        _ => unimplemented!("this next_attack_effect combination is not supported yet"),
+    }
 }
 
 /// Resolve a card's "when you play" effect as it resolves off the stack. The
@@ -1900,6 +1922,22 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     let blocked = chain_link_total(defender, link, |d| d.defense)
         .saturating_add(defender.chain_defense_bonus[link]);
     let damage = power.saturating_sub(blocked);
+
+    // Warrior's Valor: a weapon attack carrying "When this attack hits, it
+    // gains go again" gains it now if it hit — dealt damage to the hero. It
+    // gains it like any other grant (`attack_gains_go_again`), so on Dawnblade
+    // it also sets off Dorinthea's extra attack. The grant is spent by this
+    // swing, hit or not.
+    let weapon_on_hit_go_again = attack_is_weapon && attacker.next_weapon_on_hit_go_again();
+    if attack_is_weapon {
+        gs.player_mut(attacker_id).set_next_weapon_on_hit_go_again(false);
+    }
+    if weapon_on_hit_go_again && damage > 0 {
+        let attack = gs.player(attacker_id).attack_on_link(link)
+            .expect("a weapon attack is on the link");
+        attack_gains_go_again(gs, attacker_id, attack);
+    }
+    let attacker = gs.player(attacker_id);
 
     // Whether the attacking card (link 0 of the attacker's chain) has Go Again;
     // if so the turn player keeps their action point and may act again. An on-play

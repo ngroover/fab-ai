@@ -1,5 +1,5 @@
 use crate::cards::{Card, CardClass, CardData, CardType, Color, EquipmentSlot, Keyword, WeaponType};
-use crate::card_effects::{AdditionalCostType, Ability, ConstantEffect, DefendEffect, MentorEffect, OnPlayConditionType, OnPlayEffect, OnPlayEffectType, PlayCondition, AttackEffect, AttackEffectType, AttackKind};
+use crate::card_effects::{AdditionalCostType, Ability, ConstantEffect, DefendEffect, MentorEffect, OnPlayConditionType, OnPlayEffect, OnPlayEffectType, PlayCondition, AttackEffect, AttackEffectType, AttackKind, NextAttackEffect, NextAttackEffectType, NextAttackType};
 
 /// Catalog of every card in the Rhinar vs Dorinthea classic battle.
 ///
@@ -1021,11 +1021,18 @@ static CARD_CATALOG: [CardData; 53] = [
             constant_effect: None,
             ability: None,
             defend_effect: None,
-            next_attack_effect: None,
+            next_attack_effect: Some(NextAttackEffect {
+                attackType: NextAttackType::IsWeapon,
+                effectType: NextAttackEffectType::GainOnHitGoAgain,
+            }),
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::Always,
+                effectType: OnPlayEffectType::NextWeaponPower,
+                magnitude: 3,
+            }),
             mentor_effect: None,
         },
         // ── DORINTHEA — YELLOW ──────────────────────────────────────────

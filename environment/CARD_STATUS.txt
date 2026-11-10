@@ -995,6 +995,30 @@ on-play-effect helpers).
                thrust_is_not_offered_without_the_resources_to_pay_for_it,
                two_thrusts_stack
 
+  [x] Warrior's Valor   (Card::WarriorsValorR)
+        "Your next weapon attack this turn gains +3 power and 'When this
+        attack hits, it gains go again.' Go again." (Warrior action, cost 1,
+        pitch 1, 3 block.)
+          * The +3 is an on-play `NextWeaponPower` 3, as En Garde.
+          * The on-hit go again is the first use of the catalog's
+            `next_attack_effect` field: `{ IsWeapon, GainOnHitGoAgain }`,
+            banked as resolving by `fab_step::bank_next_attack_effect` on a
+            new `PlayerFlags::NEXT_WEAPON_ON_HIT_GO_AGAIN` bit. Other
+            combinations hit `unimplemented!` until a card needs them.
+            `NextAttackType` now derives `PartialEq`/`Copy`.
+          * At combat damage, a weapon swing carrying it gains go again if it
+            hit (dealt damage), through `attack_gains_go_again` — so on
+            Dawnblade it also sets off Dorinthea's extra attack. The grant is
+            spent by that swing, hit or not; an attack action card in between
+            leaves both halves banked. Cleared each turn and on reset.
+          * Changes damage and go again, so random play moved; see the
+            stack-seed sweep.
+        Tests: warriors_valor_banks_3_and_on_hit_go_again_for_the_next_weapon_attack,
+               a_dawnblade_hit_with_warriors_valor_gains_go_again_and_an_extra_attack,
+               a_fully_blocked_swing_with_warriors_valor_gains_no_go_again,
+               warriors_valor_is_left_banked_by_an_attack_action_card,
+               warriors_valor_does_not_outlive_the_turn
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1037,7 +1061,7 @@ on-play-effect helpers).
   [x] Second Swing                   (Card::SecondSwingR)  — see COMPLETE section above
   [x] Sharpen Steel                  (Card::SharpenSteelR)  — see COMPLETE section above
   [x] Thrust                         (Card::ThrustR)  — see COMPLETE section above
-  [ ] Warrior's Valor                (Card::WarriorsValorR)
+  [x] Warrior's Valor                (Card::WarriorsValorR)  — see COMPLETE section above
   [ ] Driving Blade                  (Card::DrivingBladeY)
   [ ] Glistening Steelblade          (Card::GlisteningSteelbladeY)
   [ ] On a Knife Edge                (Card::OnAKnifeEdgeY)

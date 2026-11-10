@@ -45,6 +45,7 @@
 //!   - Second Swing        (`Card::SecondSwingR`)
 //!   - Sharpen Steel       (`Card::SharpenSteelR`)
 //!   - Thrust              (`Card::ThrustR`)
+//!   - Warrior's Valor     (`Card::WarriorsValorR`)
 
 use super::*;
 use crate::cards::Card;
@@ -6009,4 +6010,117 @@ fn two_thrusts_stack() {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     }
     assert_eq!(gs.p2.life, 20 - (2 + 3 + 3));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Warrior's Valor (Card::WarriorsValorR)
+//
+// Warrior action, cost 1, 3 block: "Your next weapon attack this turn gains +3
+// power and 'When this attack hits, it gains go again.' Go again." The +3 is
+// En Garde's `NextWeaponPower`; the on-hit go again is a `next_attack_effect`
+// banked as `PlayerFlags::NEXT_WEAPON_ON_HIT_GO_AGAIN` and read at combat
+// damage. On Dawnblade, gaining go again sets off Dorinthea's extra attack.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea plays Warrior's Valor, pitching Visit the Blacksmith (2 left
+/// floating), and it resolves.
+fn play_warriors_valor(gs: &mut TestGame) {
+    step_card(gs, ActionType::PlayCard, Card::WarriorsValorR);
+    step_card(gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    pass_once_each(gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!((gs.p1.action_points, gs.p1.resources), (1, 2));
+}
+
+#[test]
+fn warriors_valor_banks_3_and_on_hit_go_again_for_the_next_weapon_attack() {
+    use crate::card_effects::{NextAttackEffectType, NextAttackType, OnPlayConditionType, OnPlayEffectType};
+    let data = Card::WarriorsValorR.data();
+    assert_eq!(data.typ, CardType::Action);
+    assert_eq!((data.cost, data.pitch, data.defense), (1, 1, 3));
+    assert_eq!(data.card_class, CardClass::Warrior);
+    assert!(data.keyword.contains(Keyword::GoAgain));
+    let power = data.play_effect.as_ref().expect("Warrior's Valor should carry an on-play effect");
+    assert!(matches!(power.condition, OnPlayConditionType::Always));
+    assert!(matches!(power.effectType, OnPlayEffectType::NextWeaponPower));
+    assert_eq!(power.magnitude, 3);
+    let next = data.next_attack_effect.as_ref().expect("Warrior's Valor should carry a next-attack effect");
+    assert_eq!(next.attackType, NextAttackType::IsWeapon);
+    assert!(matches!(next.effectType, NextAttackEffectType::GainOnHitGoAgain));
+
+    let mut gs = dorinthea_holding(&[Card::WarriorsValorR, Card::VisitTheBlacksmithB], 0);
+    play_warriors_valor(&mut gs);
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 3);
+    assert!(gs.p1.next_weapon_on_hit_go_again());
+}
+
+#[test]
+fn a_dawnblade_hit_with_warriors_valor_gains_go_again_and_an_extra_attack() {
+    let mut gs = dorinthea_holding(&[Card::WarriorsValorR, Card::VisitTheBlacksmithB], 0);
+    play_warriors_valor(&mut gs);
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - (2 + 3));
+    assert_eq!(gs.p1.action_points, 1, "it hit, so it gained go again");
+    assert!(gs.p1.extra_weapon_attack(), "and Dorinthea may attack with it again");
+    assert!(!gs.p1.next_weapon_on_hit_go_again(), "spent");
+
+    // The extra swing: 2 + 1, and no go again this time.
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 5 - 3);
+    assert_eq!(gs.p1.action_points, 0);
+}
+
+#[test]
+fn a_fully_blocked_swing_with_warriors_valor_gains_no_go_again() {
+    // Clearing Bellow (3) declared and Dodge (2) played: 5 block against
+    // 2 + 3 power, so the attack does not hit.
+    let mut gs = dorinthea_holding(&[Card::WarriorsValorR, Card::VisitTheBlacksmithB], 0);
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::ClearingBellowB, Card::DodgeB]);
+    play_warriors_valor(&mut gs);
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::Weapon);
+    pass_once_each(&mut gs);
+    step_card(&mut gs, ActionType::Defend, Card::ClearingBellowB);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done declaring
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // Dorinthea
+    step_card(&mut gs, ActionType::PlayCard, Card::DodgeB);
+    pass_once_each(&mut gs);
+    close_reaction_step(&mut gs);
+    assert_eq!(gs.p2.life, 20);
+    assert_eq!(gs.p1.action_points, 0, "no hit, no go again");
+    assert!(!gs.p1.extra_weapon_attack());
+    assert!(!gs.p1.next_weapon_on_hit_go_again(), "spent by the swing all the same");
+}
+
+#[test]
+fn warriors_valor_is_left_banked_by_an_attack_action_card() {
+    // Warrior's Valor, then Flock of the Feather Walkers (revealing Sharpen
+    // Steel): Flock hits for its own 5 without go again, and both halves wait
+    // for a weapon attack.
+    let mut gs = dorinthea_holding(&[
+        Card::WarriorsValorR, Card::VisitTheBlacksmithB,
+        Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR,
+    ], 0);
+    play_warriors_valor(&mut gs);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    if gs.phase == Phase::RevealChoice {
+        step_card(&mut gs, ActionType::Reveal, Card::SharpenSteelR);
+    }
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 5);
+    assert_eq!(gs.p1.action_points, 0, "Flock hit, but has no go again of its own");
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 3);
+    assert!(gs.p1.next_weapon_on_hit_go_again());
+}
+
+#[test]
+fn warriors_valor_does_not_outlive_the_turn() {
+    let mut gs = dorinthea_holding(&[Card::WarriorsValorR, Card::VisitTheBlacksmithB], 0);
+    play_warriors_valor(&mut gs);
+    while gs.turn_player == PlayerIndex::P1 {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 0);
+    assert!(!gs.p1.next_weapon_on_hit_go_again());
 }

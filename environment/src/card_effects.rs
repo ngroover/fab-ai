@@ -202,6 +202,7 @@ impl DefendEffect {
 }
 
 bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct NextAttackType : u8 {
         const IsBrute = 0b1;
         const IsAttackAction = 0b10;
@@ -215,10 +216,18 @@ bitflags! {
 #[repr(u8)]
 pub enum NextAttackEffectType {
     GainPower,
+    /// The attack gains "When this attack hits, it gains go again" (Warrior's
+    /// Valor). Supported for `NextAttackType::IsWeapon`: banked as
+    /// `PlayerFlags::NEXT_WEAPON_ON_HIT_GO_AGAIN` and read at combat damage.
     GainOnHitGoAgain,
     GoAgain,
 }
 
+/// A grant to the owner's *next* attack of some kind this turn, set as the card
+/// resolves and banked on the player until that attack is made. The power half
+/// of such cards is an on-play effect (`OnPlayEffectType::NextWeaponPower`);
+/// this carries the rest. Only the combinations a card in the catalog uses are
+/// supported (see `fab_step::bank_next_attack_effect`).
 pub struct NextAttackEffect {
     pub attackType : NextAttackType,
     pub effectType : NextAttackEffectType,
