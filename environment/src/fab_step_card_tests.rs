@@ -2125,13 +2125,15 @@ fn only_instants_are_offered_while_a_defend_trigger_is_on_the_stack() {
     // The attacker holds an instant and an attack reaction; only the instant is
     // offered while the trigger is pending.
     assert_eq!(gs.active_player, PlayerIndex::P1);
-    set_hand(&mut gs, PlayerIndex::P1, &[Card::SigilofSolaceB, Card::BladeFlashB]);
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::SigilofSolaceB, Card::IronsongResponseR]);
     gs.p1.resources = 5; // affordability is not what rules the reaction out
-    assert_eq!(Card::BladeFlashB.data().typ, CardType::AttackReaction);
+    // Ironsong Response is untargeted ("your weapon attack"), so it is
+    // playable into Flock on its own terms; only the trigger rules it out.
+    assert_eq!(Card::IronsongResponseR.data().typ, CardType::AttackReaction);
     let attacker = playable_cards(&gs);
     assert!(attacker.contains(&Card::SigilofSolaceB),
         "an instant may be played above a pending defend trigger");
-    assert!(!attacker.contains(&Card::BladeFlashB),
+    assert!(!attacker.contains(&Card::IronsongResponseR),
         "an attack reaction may not");
 
     // Playing that instant does not reopen the window. The trigger is no longer
@@ -2144,7 +2146,7 @@ fn only_instants_are_offered_while_a_defend_trigger_is_on_the_stack() {
     assert_eq!(gs.active_player, PlayerIndex::P1, "playing a card keeps priority");
     assert_ne!(gs.stack_top().map(|p| p.typ), Some(ActionType::DefendTrigger),
         "the instant is on top now, the trigger underneath");
-    assert!(!playable_cards(&gs).contains(&Card::BladeFlashB),
+    assert!(!playable_cards(&gs).contains(&Card::IronsongResponseR),
         "an attack reaction stays shut out while a trigger is anywhere on the stack");
 
     // Same for the defender, given priority over the instant: no defense
@@ -6015,6 +6017,118 @@ fn two_thrusts_stack() {
         step(&mut gs, Action{ typ: ActionType::Pass, card: None});
     }
     assert_eq!(gs.p2.life, 20 - (2 + 3 + 3));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Blade Flash (Card::BladeFlashB)
+//
+// Generic attack reaction, cost 1, 2 block: "Target sword attack gains go
+// again." Thrust's `AttackEffect` with `GainGoAgain`: offered only into a sword
+// attack (Dawnblade), and the go again is granted as it resolves through
+// `attack_gains_go_again`, so on Dawnblade it also sets off Dorinthea's extra
+// attack. The go again belongs to that attack alone.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn blade_flash_is_a_1_cost_attack_reaction_giving_a_targeted_sword_attack_go_again() {
+    use crate::card_effects::{AttackEffectType, AttackKind, OnPlayConditionType};
+    let data = Card::BladeFlashB.data();
+    assert_eq!(data.typ, CardType::AttackReaction);
+    assert_eq!((data.cost, data.pitch, data.defense), (1, 3, 2));
+    assert_eq!(data.card_class, CardClass::Generic);
+    assert!(data.keyword.is_empty());
+    let effect = data.attack_effect.as_ref().expect("Blade Flash should carry an attack effect");
+    assert!(matches!(effect.attack, AttackKind::Sword));
+    assert!(effect.targeted, "\"target sword attack\"");
+    assert!(matches!(effect.condition, OnPlayConditionType::Always));
+    assert!(matches!(effect.effect, AttackEffectType::GainGoAgain));
+    assert!(data.play_effects.is_empty() && data.play_condition.is_none());
+    assert!(data.next_attack_effect.is_none());
+}
+
+#[test]
+fn blade_flash_gives_a_dawnblade_swing_go_again_and_an_extra_attack() {
+    // Visit the Blacksmith pays for the swing with 2 left over, one of which
+    // pays for Blade Flash.
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB, Card::BladeFlashB], 0);
+    dawnblade_into_reaction_step(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert!(playable_cards(&gs).contains(&Card::BladeFlashB));
+    step_card(&mut gs, ActionType::PlayCard, Card::BladeFlashB);
+    assert!(on_stack(&gs, Card::BladeFlashB));
+    assert_eq!(gs.p1.resources, 1);
+    assert!(!gs.p1.attack_go_again_bonus(), "not before it resolves");
+    pass_once_each(&mut gs);
+    assert!(in_zone(&gs, PlayerIndex::P1, Card::BladeFlashB, Zone::Graveyard));
+    assert!(gs.p1.attack_go_again_bonus());
+    assert!(gs.p1.extra_weapon_attack(), "Dawnblade gained go again");
+    close_reaction_step(&mut gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.p2.life, 20 - 2, "no power from Blade Flash");
+    assert_eq!(gs.p1.action_points, 1, "go again");
+
+    // The extra swing (2 + 1) gets no go again of its own: Blade Flash's
+    // belonged to the first attack.
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 2 - 3);
+    assert_eq!(gs.p1.action_points, 0);
+}
+
+#[test]
+fn blade_flash_is_paid_for_by_pitching_in_the_reaction_step() {
+    // Sharpen Steel (pitch 1) pays exactly for the swing; Blade Flash is then
+    // paid by pitching Visit the Blacksmith.
+    let mut gs = dorinthea_holding(&[
+        Card::SharpenSteelR, Card::VisitTheBlacksmithB, Card::BladeFlashB,
+    ], 0);
+    dawnblade_into_reaction_step(&mut gs, Some(Card::SharpenSteelR));
+    assert_eq!(gs.p1.resources, 0);
+    assert!(playable_cards(&gs).contains(&Card::BladeFlashB));
+    step_card(&mut gs, ActionType::PlayCard, Card::BladeFlashB);
+    assert_eq!(gs.phase, Phase::ReactionPitch);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.p1.resources, 2);
+    pass_once_each(&mut gs);
+    close_reaction_step(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 2);
+    assert_eq!(gs.p1.action_points, 1);
+}
+
+#[test]
+fn blade_flash_is_not_offered_against_an_attack_action_card() {
+    let mut gs = rhinar_defending_flock();
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // no blockers
+    assert_eq!(gs.phase, Phase::Reaction);
+    assert_eq!(gs.active_player, PlayerIndex::P1);
+    set_hand(&mut gs, PlayerIndex::P1, &[Card::BladeFlashB, Card::VisitTheBlacksmithB]);
+    assert!(!playable_cards(&gs).contains(&Card::BladeFlashB), "no sword attack to target");
+}
+
+#[test]
+fn blade_flash_is_not_offered_without_the_resources_to_pay_for_it() {
+    let mut gs = dorinthea_holding(&[Card::SharpenSteelR, Card::BladeFlashB], 0);
+    dawnblade_into_reaction_step(&mut gs, Some(Card::SharpenSteelR));
+    assert_eq!(gs.p1.resources, 0);
+    assert!(!playable_cards(&gs).contains(&Card::BladeFlashB));
+}
+
+#[test]
+fn blade_flash_on_the_extra_swing_gives_go_again_but_no_third_attack() {
+    // A Quicken gives the first swing go again (and the extra attack); Blade
+    // Flash on the second swing gives it go again too, but Dorinthea's extra
+    // attack is once per turn.
+    let mut gs = dorinthea_holding(&[Card::VisitTheBlacksmithB, Card::BladeFlashB], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, 18);
+    dawnblade_into_reaction_step(&mut gs, None);
+    assert_eq!(gs.p1.weapon_attacks_this_turn(), 2);
+    step_card(&mut gs, ActionType::PlayCard, Card::BladeFlashB);
+    pass_once_each(&mut gs);
+    close_reaction_step(&mut gs);
+    assert_eq!(gs.p2.life, 18 - 3);
+    assert_eq!(gs.p1.action_points, 1, "the second swing gained go again");
+    assert!(!dawnblade_swing_offered(&gs), "but Dawnblade may not attack a third time");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

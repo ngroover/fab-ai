@@ -1182,6 +1182,31 @@ on-play-effect helpers).
                slice_and_dice_does_not_pump_a_club_swing,
                slice_and_dice_does_not_outlive_the_turn
 
+  [x] Blade Flash   (Card::BladeFlashB)
+        "Target sword attack gains go again." (Generic attack reaction, cost
+        1, pitch 3, 2 block.)
+          * Catalog entry only: the same `attack_effect` as Run Through's go
+            again half (`AttackKind::Sword`, targeted, `Always`,
+            `AttackEffectType::GainGoAgain`). Offered only into a sword
+            attack (Dawnblade); as it resolves the attack gains go again
+            through `attack_gains_go_again`, so on Dawnblade it also sets off
+            Dorinthea's extra attack. The go again is the current attack's
+            alone: the extra swing gets none from it.
+          * On the extra swing it still grants go again, but there is no third
+            attack (Dorinthea's extra attack is once per turn).
+          * `only_instants_are_offered_while_a_defend_trigger_is_on_the_stack`
+            used Blade Flash as its attack reaction against Flock; now that
+            Blade Flash needs a sword attack it would be ruled out for the
+            wrong reason, so that test uses Ironsong Response (untargeted).
+          * Changes go again, so random play moved. 1M-game stack sweep: still
+            peaks at 6 layers, first at seed 35221; STACK_SIZE stays 7.
+        Tests: blade_flash_is_a_1_cost_attack_reaction_giving_a_targeted_sword_attack_go_again,
+               blade_flash_gives_a_dawnblade_swing_go_again_and_an_extra_attack,
+               blade_flash_is_paid_for_by_pitching_in_the_reaction_step,
+               blade_flash_is_not_offered_against_an_attack_action_card,
+               blade_flash_is_not_offered_without_the_resources_to_pay_for_it,
+               blade_flash_on_the_extra_swing_gives_go_again_but_no_third_attack
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1231,7 +1256,7 @@ on-play-effect helpers).
   [x] Out for Blood                  (Card::OutForBloodY)  — see COMPLETE section above
   [x] Run Through                    (Card::RunThroughY)  — see COMPLETE section above
   [x] Slice and Dice                 (Card::SliceAndDiceY)  — see COMPLETE section above
-  [ ] Blade Flash                    (Card::BladeFlashB)
+  [x] Blade Flash                    (Card::BladeFlashB)  — see COMPLETE section above
   [ ] Hit and Run                    (Card::HitAndRunB)
   [x] Sigil of Solace                (Card::SigilofSolaceB)  — see COMPLETE section above
   [x] Toughen Up                     (Card::ToughenUpB)  — see COMPLETE section above
