@@ -371,6 +371,10 @@ bitflags::bitflags! {
         /// weapon swing to reach combat damage, hit or not; cleared each turn
         /// and on reset.
         const NEXT_WEAPON_ON_HIT_GO_AGAIN = 1 << 10;
+        /// This player's next weapon attack this turn gains go again (Driving
+        /// Blade). Spent as that attack is made (`fab_step::commit_pending_to_stack`);
+        /// cleared each turn and on reset.
+        const NEXT_WEAPON_GO_AGAIN = 1 << 11;
         /// All four of the above.
         /// Whether the opponent knows the face-down card in this player's
         /// arsenal: it was arsenaled from a hand made entirely of known copies
@@ -886,6 +890,17 @@ impl Player {
     /// Set or clear `PlayerFlags::NEXT_WEAPON_ON_HIT_GO_AGAIN`.
     pub fn set_next_weapon_on_hit_go_again(&mut self, on: bool) {
         self.flags.set(PlayerFlags::NEXT_WEAPON_ON_HIT_GO_AGAIN, on);
+    }
+
+    /// Whether this player's next weapon attack gains go again
+    /// (`PlayerFlags::NEXT_WEAPON_GO_AGAIN`).
+    pub const fn next_weapon_go_again(&self) -> bool {
+        self.flags.contains(PlayerFlags::NEXT_WEAPON_GO_AGAIN)
+    }
+
+    /// Set or clear `PlayerFlags::NEXT_WEAPON_GO_AGAIN`.
+    pub fn set_next_weapon_go_again(&mut self, on: bool) {
+        self.flags.set(PlayerFlags::NEXT_WEAPON_GO_AGAIN, on);
     }
 
     /// Whether this player has defended the current chain link with a card

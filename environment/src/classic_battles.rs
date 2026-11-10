@@ -1054,11 +1054,18 @@ static CARD_CATALOG: [CardData; 53] = [
             constant_effect: None,
             ability: None,
             defend_effect: None,
-            next_attack_effect: None,
+            next_attack_effect: Some(NextAttackEffect {
+                attackType: NextAttackType::IsWeapon,
+                effectType: NextAttackEffectType::GoAgain,
+            }),
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::Always,
+                effectType: OnPlayEffectType::NextWeaponPower,
+                magnitude: 2,
+            }),
             mentor_effect: None,
         },
         // Glistening Steelblade

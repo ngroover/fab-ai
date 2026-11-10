@@ -1019,6 +1019,28 @@ on-play-effect helpers).
                warriors_valor_is_left_banked_by_an_attack_action_card,
                warriors_valor_does_not_outlive_the_turn
 
+  [x] Driving Blade   (Card::DrivingBladeY)
+        "Your next weapon attack this turn gains +2 power and go again. Go
+        again." (Warrior action, cost 2, pitch 2, 3 block.)
+          * The +2 is an on-play `NextWeaponPower` 2, as En Garde.
+          * The go again is a `next_attack_effect` `{ IsWeapon, GoAgain }`,
+            banked by `bank_next_attack_effect` on a new
+            `PlayerFlags::NEXT_WEAPON_GO_AGAIN` bit and granted as the next
+            weapon attack is made (`commit_pending_to_stack`, beside the
+            Quicken trigger), through `attack_gains_go_again`. So it holds
+            whether or not the swing hits (unlike Warrior's Valor), and on
+            Dawnblade it sets off Dorinthea's extra attack. With a Quicken too,
+            the extra attack is still granted once. An attack action card in
+            between leaves both halves banked. Cleared each turn and on reset.
+          * Changes damage and go again, so random play moved; see the
+            stack-seed sweep.
+        Tests: driving_blade_banks_2_and_go_again_for_the_next_weapon_attack,
+               driving_blade_gives_dawnblade_go_again_and_an_extra_attack,
+               driving_blades_go_again_does_not_need_the_swing_to_hit,
+               driving_blade_is_left_banked_by_an_attack_action_card,
+               driving_blade_with_a_quicken_still_grants_one_extra_attack,
+               driving_blade_does_not_outlive_the_turn
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1062,7 +1084,7 @@ on-play-effect helpers).
   [x] Sharpen Steel                  (Card::SharpenSteelR)  — see COMPLETE section above
   [x] Thrust                         (Card::ThrustR)  — see COMPLETE section above
   [x] Warrior's Valor                (Card::WarriorsValorR)  — see COMPLETE section above
-  [ ] Driving Blade                  (Card::DrivingBladeY)
+  [x] Driving Blade                  (Card::DrivingBladeY)  — see COMPLETE section above
   [ ] Glistening Steelblade          (Card::GlisteningSteelbladeY)
   [ ] On a Knife Edge                (Card::OnAKnifeEdgeY)
   [ ] Out for Blood                  (Card::OutForBloodY)

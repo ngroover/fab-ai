@@ -146,6 +146,8 @@ fn begin_turn(gs: &mut Gamestate) {
     // So does an unspent "next weapon attack gains go again on hit".
     gs.p1.set_next_weapon_on_hit_go_again(false);
     gs.p2.set_next_weapon_on_hit_go_again(false);
+    gs.p1.set_next_weapon_go_again(false);
+    gs.p2.set_next_weapon_go_again(false);
     // "At the start of your turn, you may turn [a face-down mentor] face up":
     // when the turn player has one in their arsenal, the turn opens on that
     // decision instead of going straight to the Action phase (see
@@ -1394,6 +1396,11 @@ fn bank_next_attack_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &Next
         NextAttackEffectType::GainOnHitGoAgain if effect.attackType == NextAttackType::IsWeapon => {
             gs.player_mut(owner).set_next_weapon_on_hit_go_again(true);
         }
+        // Driving Blade: the next weapon attack gains go again, granted as
+        // that attack is made (`commit_pending_to_stack`).
+        NextAttackEffectType::GoAgain if effect.attackType == NextAttackType::IsWeapon => {
+            gs.player_mut(owner).set_next_weapon_go_again(true);
+        }
         _ => unimplemented!("this next_attack_effect combination is not supported yet"),
     }
 }
@@ -1786,6 +1793,12 @@ fn finish_commit(gs: &mut Gamestate, rng: &mut GameRng, pending: PendingCard) {
     // Quicken its owner holds.
     if commits_as_attack(pending.typ, data) {
         trigger_quickens(gs, owner, pending.card);
+        // Driving Blade's banked "your next weapon attack gains go again" is
+        // spent as that attack is made, like a Quicken.
+        if is_weapon(data) && gs.player(owner).next_weapon_go_again() {
+            gs.player_mut(owner).set_next_weapon_go_again(false);
+            attack_gains_go_again(gs, owner, pending.card);
+        }
     }
 
     // "Whenever you play a card" triggers fire once the card has been played —

@@ -46,6 +46,7 @@
 //!   - Sharpen Steel       (`Card::SharpenSteelR`)
 //!   - Thrust              (`Card::ThrustR`)
 //!   - Warrior's Valor     (`Card::WarriorsValorR`)
+//!   - Driving Blade       (`Card::DrivingBladeY`)
 
 use super::*;
 use crate::cards::Card;
@@ -6123,4 +6124,141 @@ fn warriors_valor_does_not_outlive_the_turn() {
     }
     assert_eq!(gs.p1.next_weapon_attack_bonus, 0);
     assert!(!gs.p1.next_weapon_on_hit_go_again());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Driving Blade (Card::DrivingBladeY)
+//
+// Warrior action, cost 2, 3 block: "Your next weapon attack this turn gains +2
+// power and go again. Go again." The +2 is `NextWeaponPower`; the go again is a
+// `next_attack_effect` banked as `PlayerFlags::NEXT_WEAPON_GO_AGAIN` and
+// granted as the next weapon attack is made, like a Quicken — so it does not
+// depend on the attack hitting, and on Dawnblade it sets off Dorinthea's extra
+// attack.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea plays Driving Blade, pitching Visit the Blacksmith (1 left
+/// floating), and it resolves.
+fn play_driving_blade(gs: &mut TestGame) {
+    step_card(gs, ActionType::PlayCard, Card::DrivingBladeY);
+    step_card(gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    pass_once_each(gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!((gs.p1.action_points, gs.p1.resources), (1, 1));
+}
+
+#[test]
+fn driving_blade_banks_2_and_go_again_for_the_next_weapon_attack() {
+    use crate::card_effects::{NextAttackEffectType, NextAttackType, OnPlayConditionType, OnPlayEffectType};
+    let data = Card::DrivingBladeY.data();
+    assert_eq!(data.typ, CardType::Action);
+    assert_eq!((data.cost, data.pitch, data.defense), (2, 2, 3));
+    assert_eq!(data.card_class, CardClass::Warrior);
+    assert!(data.keyword.contains(Keyword::GoAgain));
+    let power = data.play_effect.as_ref().expect("Driving Blade should carry an on-play effect");
+    assert!(matches!(power.condition, OnPlayConditionType::Always));
+    assert!(matches!(power.effectType, OnPlayEffectType::NextWeaponPower));
+    assert_eq!(power.magnitude, 2);
+    let next = data.next_attack_effect.as_ref().expect("Driving Blade should carry a next-attack effect");
+    assert_eq!(next.attackType, NextAttackType::IsWeapon);
+    assert!(matches!(next.effectType, NextAttackEffectType::GoAgain));
+
+    let mut gs = dorinthea_holding(&[Card::DrivingBladeY, Card::VisitTheBlacksmithB], 0);
+    play_driving_blade(&mut gs);
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 2);
+    assert!(gs.p1.next_weapon_go_again());
+}
+
+#[test]
+fn driving_blade_gives_dawnblade_go_again_and_an_extra_attack() {
+    let mut gs = dorinthea_holding(&[
+        Card::DrivingBladeY, Card::VisitTheBlacksmithB, Card::SharpenSteelR,
+    ], 0);
+    play_driving_blade(&mut gs);
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::Weapon);
+    // Granted as the attack is made, before it resolves.
+    assert!(gs.p1.attack_go_again_bonus());
+    assert!(gs.p1.extra_weapon_attack());
+    assert!(!gs.p1.next_weapon_go_again(), "spent");
+    pass_once_each(&mut gs);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20 - (2 + 2));
+    assert_eq!(gs.p1.action_points, 1);
+
+    // The extra swing (paid with Sharpen Steel): 2 + 1, no go again.
+    dawnblade_unblocked(&mut gs, Some(Card::SharpenSteelR));
+    assert_eq!(gs.p2.life, 20 - 4 - 3);
+    assert_eq!(gs.p1.action_points, 0);
+}
+
+#[test]
+fn driving_blades_go_again_does_not_need_the_swing_to_hit() {
+    // Clearing Bellow (3) declared and Dodge (2) played: 5 block against
+    // 2 + 2 power. Unlike Warrior's Valor, the go again holds.
+    let mut gs = dorinthea_holding(&[Card::DrivingBladeY, Card::VisitTheBlacksmithB], 0);
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::ClearingBellowB, Card::DodgeB]);
+    play_driving_blade(&mut gs);
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::Weapon);
+    pass_once_each(&mut gs);
+    step_card(&mut gs, ActionType::Defend, Card::ClearingBellowB);
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // done declaring
+    step(&mut gs, Action{ typ: ActionType::Pass, card: None}); // Dorinthea
+    step_card(&mut gs, ActionType::PlayCard, Card::DodgeB);
+    pass_once_each(&mut gs);
+    close_reaction_step(&mut gs);
+    assert_eq!(gs.p2.life, 20);
+    assert_eq!(gs.p1.action_points, 1, "go again all the same");
+    assert!(gs.p1.extra_weapon_attack());
+}
+
+#[test]
+fn driving_blade_is_left_banked_by_an_attack_action_card() {
+    // Driving Blade, then Flock of the Feather Walkers (its 1 paid from the
+    // float, revealing Sharpen Steel): Flock hits for 5 without go again, and
+    // both halves wait for a weapon attack.
+    let mut gs = dorinthea_holding(&[
+        Card::DrivingBladeY, Card::VisitTheBlacksmithB,
+        Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR,
+    ], 0);
+    play_driving_blade(&mut gs);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    if gs.phase == Phase::RevealChoice {
+        step_card(&mut gs, ActionType::Reveal, Card::SharpenSteelR);
+    }
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 5);
+    assert_eq!(gs.p1.action_points, 0);
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 2);
+    assert!(gs.p1.next_weapon_go_again());
+}
+
+#[test]
+fn driving_blade_with_a_quicken_still_grants_one_extra_attack() {
+    // Both grant Dawnblade go again as it attacks; Dorinthea's ability fires
+    // only the first time, so there is one extra swing and no third.
+    let mut gs = dorinthea_holding(&[
+        Card::DrivingBladeY, Card::VisitTheBlacksmithB, Card::SharpenSteelR,
+    ], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    play_driving_blade(&mut gs);
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p1.action_points, 1);
+    dawnblade_unblocked(&mut gs, Some(Card::SharpenSteelR));
+    assert_eq!(gs.p2.life, 20 - 4 - 3);
+    assert_eq!(gs.p1.action_points, 0);
+    gs.p1.action_points = 1;
+    assert!(!dawnblade_swing_offered(&gs), "no third attack");
+}
+
+#[test]
+fn driving_blade_does_not_outlive_the_turn() {
+    let mut gs = dorinthea_holding(&[Card::DrivingBladeY, Card::VisitTheBlacksmithB], 0);
+    play_driving_blade(&mut gs);
+    while gs.turn_player == PlayerIndex::P1 {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 0);
+    assert!(!gs.p1.next_weapon_go_again());
 }
