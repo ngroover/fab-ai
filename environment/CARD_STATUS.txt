@@ -1186,8 +1186,9 @@ on-play-effect helpers).
         "Target sword attack gains go again." (Generic attack reaction, cost
         1, pitch 3, 2 block.)
           * Catalog entry only: the same `attack_effect` as Run Through's go
-            again half (`AttackKind::Sword`, targeted, `Always`,
-            `AttackEffectType::GainGoAgain`). Offered only into a sword
+            again half, shared as the `classic_battles.rs` constant
+            `TARGET_SWORD_ATTACK_GAINS_GO_AGAIN` (`AttackKind::Sword`,
+            targeted, `Always`, `AttackEffectType::GainGoAgain`). Offered only into a sword
             attack (Dawnblade); as it resolves the attack gains go again
             through `attack_gains_go_again`, so on Dawnblade it also sets off
             Dorinthea's extra attack. The go again is the current attack's

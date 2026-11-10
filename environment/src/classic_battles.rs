@@ -1,6 +1,18 @@
 use crate::cards::{Card, CardClass, CardData, CardType, Color, EquipmentSlot, Keyword, WeaponType};
 use crate::card_effects::{AdditionalCostType, Ability, ConstantEffect, DefendEffect, MentorEffect, OnPlayConditionType, OnPlayEffect, OnPlayEffectType, PlayCondition, AttackEffect, AttackEffectType, AttackKind, NextAttackEffect, NextAttackEffectType, NextAttackType};
 
+/// "Target sword attack gains go again." — the whole of Blade Flash and the
+/// first half of Run Through. Applied as the card resolves through
+/// `fab_step::attack_gains_go_again`, so on Dawnblade it also sets off
+/// Dorinthea's extra attack.
+const TARGET_SWORD_ATTACK_GAINS_GO_AGAIN: AttackEffect = AttackEffect {
+    attack: AttackKind::Sword,
+    targeted: true,
+    condition: OnPlayConditionType::Always,
+    effect: AttackEffectType::GainGoAgain,
+    magnitude: 0,
+};
+
 /// Catalog of every card in the Rhinar vs Dorinthea classic battle.
 ///
 /// The array is positional: index `i` corresponds to the `Card` enum variant
@@ -1183,13 +1195,7 @@ static CARD_CATALOG: [CardData; 53] = [
             defend_effect: None,
             next_attack_effect: None,
             additional_cost: None,
-            attack_effect: Some(AttackEffect {
-                attack: AttackKind::Sword,
-                targeted: true,
-                condition: OnPlayConditionType::Always,
-                effect: AttackEffectType::GainGoAgain,
-                magnitude: 0,
-            }),
+            attack_effect: Some(TARGET_SWORD_ATTACK_GAINS_GO_AGAIN),
             play_condition: None,
             play_effects: &[OnPlayEffect {
                 condition: OnPlayConditionType::Always,
@@ -1255,13 +1261,7 @@ static CARD_CATALOG: [CardData; 53] = [
             defend_effect: None,
             next_attack_effect: None,
             additional_cost: None,
-            attack_effect: Some(AttackEffect {
-                attack: AttackKind::Sword,
-                targeted: true,
-                condition: OnPlayConditionType::Always,
-                effect: AttackEffectType::GainGoAgain,
-                magnitude: 0,
-            }),
+            attack_effect: Some(TARGET_SWORD_ATTACK_GAINS_GO_AGAIN),
             play_condition: None,
             play_effects: &[],
             mentor_effect: None,
