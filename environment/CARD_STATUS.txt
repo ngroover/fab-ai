@@ -1070,6 +1070,25 @@ on-play-effect helpers).
                two_glistening_steelblades_put_two_counters_on_each_hit,
                glistening_steelblades_go_again_waits_for_dawnblade
 
+  [x] On a Knife Edge   (Card::OnAKnifeEdgeY)
+        "Your next sword attack this turn gains go again. Go again." (Generic
+        action, cost 0, pitch 2, 2 block.)
+          * A `next_attack_effect` `{ IsSword, GoAgain }` on a new
+            `PlayerFlags::NEXT_SWORD_GO_AGAIN` bit, granted as the next sword
+            swing is made (beside Driving Blade's and Glistening
+            Steelblade's), through `attack_gains_go_again`: hit or not, and on
+            Dawnblade it sets off Dorinthea's extra attack. An attack action
+            card or a club swing (Bone Basher) leaves it banked. Cleared each
+            turn and on reset.
+          * `fab_step::is_sword` is now shared by this and `AttackKind::Sword`.
+          * Changes go again, so random play moved; see the stack-seed sweep.
+        Tests: on_a_knife_edge_banks_go_again_for_the_next_sword_attack,
+               on_a_knife_edge_gives_dawnblade_go_again_and_an_extra_attack,
+               on_a_knife_edges_go_again_does_not_need_the_swing_to_hit,
+               on_a_knife_edge_is_left_banked_by_an_attack_action_card,
+               a_club_swing_does_not_take_a_banked_sword_go_again,
+               on_a_knife_edge_does_not_outlive_the_turn
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1115,7 +1134,7 @@ on-play-effect helpers).
   [x] Warrior's Valor                (Card::WarriorsValorR)  — see COMPLETE section above
   [x] Driving Blade                  (Card::DrivingBladeY)  — see COMPLETE section above
   [x] Glistening Steelblade          (Card::GlisteningSteelbladeY)  — see COMPLETE section above
-  [ ] On a Knife Edge                (Card::OnAKnifeEdgeY)
+  [x] On a Knife Edge                (Card::OnAKnifeEdgeY)  — see COMPLETE section above
   [ ] Out for Blood                  (Card::OutForBloodY)
   [ ] Run Through                    (Card::RunThroughY)
   [ ] Slice and Dice                 (Card::SliceAndDiceY)

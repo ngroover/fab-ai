@@ -48,6 +48,7 @@
 //!   - Warrior's Valor     (`Card::WarriorsValorR`)
 //!   - Driving Blade       (`Card::DrivingBladeY`)
 //!   - Glistening Steelblade (`Card::GlisteningSteelbladeY`)
+//!   - On a Knife Edge     (`Card::OnAKnifeEdgeY`)
 
 use super::*;
 use crate::cards::Card;
@@ -6413,4 +6414,117 @@ fn glistening_steelblades_go_again_waits_for_dawnblade() {
     assert_eq!(gs.p1.action_points, 0, "Flock has no go again of its own");
     assert!(gs.p1.next_dawnblade_go_again());
     assert_eq!(gs.p1.weapon_power_counters, 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// On a Knife Edge (Card::OnAKnifeEdgeY)
+//
+// Generic action, cost 0, 2 block: "Your next sword attack this turn gains go
+// again. Go again." A `next_attack_effect` `{ IsSword, GoAgain }` on
+// `PlayerFlags::NEXT_SWORD_GO_AGAIN`, granted as the next sword swing is made
+// — hit or not, and on Dawnblade it sets off Dorinthea's extra attack.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea plays On a Knife Edge (free) and it resolves.
+fn play_on_a_knife_edge(gs: &mut TestGame) {
+    step_card(gs, ActionType::PlayCard, Card::OnAKnifeEdgeY);
+    assert_eq!(gs.phase, Phase::ActionInstant, "free: straight to the stack");
+    pass_once_each(gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.p1.action_points, 1, "go again");
+}
+
+#[test]
+fn on_a_knife_edge_banks_go_again_for_the_next_sword_attack() {
+    use crate::card_effects::{NextAttackEffectType, NextAttackType};
+    let data = Card::OnAKnifeEdgeY.data();
+    assert_eq!(data.typ, CardType::Action);
+    assert_eq!((data.cost, data.pitch, data.defense), (0, 2, 2));
+    assert_eq!(data.card_class, CardClass::Generic);
+    assert!(data.keyword.contains(Keyword::GoAgain));
+    let next = data.next_attack_effect.as_ref().expect("it should carry a next-attack effect");
+    assert_eq!(next.attackType, NextAttackType::IsSword);
+    assert!(matches!(next.effectType, NextAttackEffectType::GoAgain));
+    assert!(data.play_effect.is_none() && data.attack_effect.is_none());
+
+    let mut gs = dorinthea_holding(&[Card::OnAKnifeEdgeY], 0);
+    play_on_a_knife_edge(&mut gs);
+    assert!(gs.p1.next_sword_go_again());
+    assert_eq!(gs.p1.next_weapon_attack_bonus, 0, "no power");
+}
+
+#[test]
+fn on_a_knife_edge_gives_dawnblade_go_again_and_an_extra_attack() {
+    let mut gs = dorinthea_holding(&[Card::OnAKnifeEdgeY, Card::VisitTheBlacksmithB], 0);
+    play_on_a_knife_edge(&mut gs);
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::Weapon);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    assert!(gs.p1.attack_go_again_bonus(), "granted as the attack is made");
+    assert!(gs.p1.extra_weapon_attack());
+    assert!(!gs.p1.next_sword_go_again(), "spent");
+    pass_once_each(&mut gs);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 2);
+    assert_eq!(gs.p1.action_points, 1);
+
+    // The extra swing: 2 + 1, no go again.
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 2 - 3);
+    assert_eq!(gs.p1.action_points, 0);
+}
+
+#[test]
+fn on_a_knife_edges_go_again_does_not_need_the_swing_to_hit() {
+    let mut gs = dorinthea_holding(&[Card::OnAKnifeEdgeY, Card::VisitTheBlacksmithB], 0);
+    set_hand(&mut gs, PlayerIndex::P2, &[Card::ClearingBellowB]);
+    play_on_a_knife_edge(&mut gs);
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::Weapon);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    pass_once_each(&mut gs);
+    step_card(&mut gs, ActionType::Defend, Card::ClearingBellowB);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20, "Clearing Bellow blocks all 2");
+    assert_eq!(gs.p1.action_points, 1, "go again all the same");
+    assert!(gs.p1.extra_weapon_attack());
+}
+
+#[test]
+fn on_a_knife_edge_is_left_banked_by_an_attack_action_card() {
+    let mut gs = dorinthea_holding(&[
+        Card::OnAKnifeEdgeY, Card::VisitTheBlacksmithB,
+        Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR,
+    ], 0);
+    play_on_a_knife_edge(&mut gs);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    if gs.phase == Phase::RevealChoice {
+        step_card(&mut gs, ActionType::Reveal, Card::SharpenSteelR);
+    }
+    pass_once_each(&mut gs);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 5);
+    assert_eq!(gs.p1.action_points, 0, "Flock is not a sword attack");
+    assert!(gs.p1.next_sword_go_again());
+}
+
+#[test]
+fn a_club_swing_does_not_take_a_banked_sword_go_again() {
+    // Rhinar's deck holds no On a Knife Edge, so the grant is staged: Bone
+    // Basher is a club, so its swing leaves it banked and gains no go again.
+    let mut gs = setup_rhinar_action_phase();
+    gs.p1.set_next_sword_go_again(true);
+    gs.p1.resources = 2;
+    step_card_from(&mut gs, ActionType::Activate, Card::BoneBasher, Zone::Weapon);
+    assert!(!gs.p1.attack_go_again_bonus());
+    assert!(gs.p1.next_sword_go_again(), "still waiting for a sword attack");
+}
+
+#[test]
+fn on_a_knife_edge_does_not_outlive_the_turn() {
+    let mut gs = dorinthea_holding(&[Card::OnAKnifeEdgeY], 0);
+    play_on_a_knife_edge(&mut gs);
+    while gs.turn_player == PlayerIndex::P1 {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert!(!gs.p1.next_sword_go_again());
 }

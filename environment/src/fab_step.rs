@@ -150,6 +150,8 @@ fn begin_turn(gs: &mut Gamestate) {
     gs.p2.set_next_weapon_go_again(false);
     gs.p1.set_next_dawnblade_go_again(false);
     gs.p2.set_next_dawnblade_go_again(false);
+    gs.p1.set_next_sword_go_again(false);
+    gs.p2.set_next_sword_go_again(false);
     // Glistening Steelblade's "whenever Dawnblade hits a hero this turn" ends
     // with the turn; the counters it put on Dawnblade stay.
     gs.p1.dawnblade_hit_counter_effects = 0;
@@ -1056,9 +1058,9 @@ pub(crate) fn play_requirements_met(player: &Player, data: &CardData) -> bool {
 fn affected_attack(player: &Player, effect: &AttackEffect) -> Option<DeckCardId> {
     let attack = player.current_attack()?;
     let data = player.card(attack).data();
-    let valid = is_weapon(data) && match effect.attack {
-        AttackKind::Weapon => true,
-        AttackKind::Sword => matches!(data.weapon_type, Some(WeaponType::Sword2h)),
+    let valid = match effect.attack {
+        AttackKind::Weapon => is_weapon(data),
+        AttackKind::Sword => is_sword(data),
     };
     valid.then_some(attack)
 }
@@ -1410,6 +1412,10 @@ fn bank_next_attack_effect(gs: &mut Gamestate, owner: PlayerIndex, effect: &Next
         // Glistening Steelblade: the next Dawnblade attack has go again.
         NextAttackEffectType::GoAgain if effect.attackType == NextAttackType::IsDawnblade => {
             gs.player_mut(owner).set_next_dawnblade_go_again(true);
+        }
+        // On a Knife Edge: the next sword attack gains go again.
+        NextAttackEffectType::GoAgain if effect.attackType == NextAttackType::IsSword => {
+            gs.player_mut(owner).set_next_sword_go_again(true);
         }
         _ => unimplemented!("this next_attack_effect combination is not supported yet"),
     }
@@ -1821,6 +1827,11 @@ fn finish_commit(gs: &mut Gamestate, rng: &mut GameRng, pending: PendingCard) {
             gs.player_mut(owner).set_next_dawnblade_go_again(false);
             attack_gains_go_again(gs, owner, pending.card);
         }
+        // On a Knife Edge's "your next sword attack gains go again", likewise.
+        if is_sword(data) && gs.player(owner).next_sword_go_again() {
+            gs.player_mut(owner).set_next_sword_go_again(false);
+            attack_gains_go_again(gs, owner, pending.card);
+        }
     }
 
     // "Whenever you play a card" triggers fire once the card has been played —
@@ -2127,6 +2138,11 @@ fn destroy_equipment(gs: &mut Gamestate, pid: PlayerIndex, id: DeckCardId) {
 /// decklist in `fab_game`.
 fn is_weapon(data: &CardData) -> bool {
     matches!(data.typ, CardType::Weapon)
+}
+
+/// Whether `data` is a sword: a weapon of a sword type (Dawnblade).
+fn is_sword(data: &CardData) -> bool {
+    is_weapon(data) && matches!(data.weapon_type, Some(WeaponType::Sword2h))
 }
 
 /// Deduct one action point from `player`, flooring at 0 so it never underflows.

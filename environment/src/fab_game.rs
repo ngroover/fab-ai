@@ -206,6 +206,7 @@ fn place_cards_for(player: &mut Player, start: &StartingCards) {
     player.set_next_weapon_on_hit_go_again(false);
     player.set_next_weapon_go_again(false);
     player.set_next_dawnblade_go_again(false);
+    player.set_next_sword_go_again(false);
     player.weapon_power_counters = 0;
     player.dawnblade_hit_counter_effects = 0;
     player.clear_destroy_on_chain_close();
