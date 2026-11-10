@@ -865,8 +865,11 @@ on-play-effect helpers).
             reaction step. Two speed tests that used it as their sample attack
             reaction now restage the attack as a second Dawnblade swing
             (`test_support::stage_second_weapon_swing`).
-          * Rules change moved random play: the seven-layer stack seed is now
-            SEED_TBD.
+          * Rules change moved random play: a 20M-game sweep now peaks at 6
+            stack layers (first at seed 247504), down from 7, as In the Swing
+            no longer adds a layer to most reaction steps. STACK_SIZE kept at
+            7; the seven-layer test is now
+            `deepest_random_game_finishes_within_the_stack_size`.
         Tests: in_the_swing_is_a_free_attack_reaction_that_pumps_a_weapon_attack_by_3,
                in_the_swing_is_not_offered_on_the_first_weapon_attack,
                in_the_swing_is_offered_on_the_second_weapon_attack,

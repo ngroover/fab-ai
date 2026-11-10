@@ -54,10 +54,12 @@ pub const PLAYER_CARDS: usize = 45;
 /// keep adding instants, reactions and activations without passing, so a single
 /// reaction window can legitimately stack six or more layers (e.g. four attack
 /// reactions answered by two Dodges). Sized to the deepest stack random play
-/// reaches: a sweep of 20 million random games went no deeper than 7, first in
-/// seed 643619 (see `simulator::tests::stack_depth_histogram` and
-/// `random_game_with_a_seven_layer_stack_finishes`). Deliberate play could in
-/// principle go deeper; raise this if it ever panics.
+/// reached: a sweep of 20 million random games went no deeper than 7 (seed
+/// 643619) before In the Swing was gated on two weapon attacks, and no deeper
+/// than 6 since (seed 247504; see `simulator::tests::stack_depth_histogram` and
+/// `deepest_random_game_finishes_within_the_stack_size`). Kept at 7 for
+/// headroom: deliberate play could in principle go deeper; raise this if it
+/// ever panics.
 pub const STACK_SIZE: usize = 7;
 /// How many cards a decklist puts in the deck: everything but the hero, the
 /// weapon and the four pieces of equipment.

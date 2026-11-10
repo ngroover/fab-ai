@@ -164,16 +164,17 @@ mod tests {
         deepest
     }
 
-    /// Seed 643619 is the first of 20 million random games to reach seven
-    /// layers at once — the deepest the sweep found, and so what `STACK_SIZE`
-    /// is sized to. It must finish without overflowing the stack. (The seed
-    /// moves whenever a rules change alters random play; re-run
-    /// `stack_depth_histogram` with 20,000,000 games to find the new one.)
+    /// Seed 247504 is the first of 20 million random games to reach six
+    /// layers at once — the deepest the sweep found. It must finish without
+    /// overflowing the stack. (The seed moves whenever a rules change alters
+    /// random play; re-run `stack_depth_histogram` with 20,000,000 games to find
+    /// the new one. Before In the Swing was gated, random play reached seven,
+    /// first at seed 643619, and `STACK_SIZE` keeps room for that.)
     #[test]
-    fn random_game_with_a_seven_layer_stack_finishes() {
+    fn deepest_random_game_finishes_within_the_stack_size() {
         use crate::game_state::STACK_SIZE;
-        let deepest = max_stack_depth(643619);
-        assert_eq!(deepest, 7);
+        let deepest = max_stack_depth(247504);
+        assert_eq!(deepest, 6);
         assert!(deepest <= STACK_SIZE);
     }
 
@@ -190,7 +191,7 @@ mod tests {
     /// `STACK_SIZE` headroom. Slow, so ignored by default; run with
     /// `cargo test --release stack_depth_histogram -- --ignored --nocapture`
     /// (`STACK_SWEEP_GAMES` sets the game count, default 1,000,000; 20,000,000
-    /// reaches the seven-layer game `STACK_SIZE` is sized to).
+    /// reaches the deepest game, `deepest_random_game_finishes_within_the_stack_size`).
     #[test]
     #[ignore]
     fn stack_depth_histogram() {
