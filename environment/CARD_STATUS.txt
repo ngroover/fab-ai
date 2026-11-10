@@ -957,7 +957,8 @@ on-play-effect helpers).
                second_swing_before_any_weapon_attack_banks_nothing,
                second_swing_after_a_weapon_attack_pumps_the_next_swing_by_4,
                second_swing_pumps_an_attack_action_card_too,
-               second_swings_bonus_does_not_outlive_the_turn
+               second_swings_bonus_does_not_outlive_the_turn,
+               second_swing_played_before_both_dawnblade_swings_adds_nothing
 
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards

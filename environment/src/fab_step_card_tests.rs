@@ -5789,3 +5789,28 @@ fn second_swings_bonus_does_not_outlive_the_turn() {
     }
     assert_eq!(gs.p1.next_attack_bonus, 0);
 }
+
+#[test]
+fn second_swing_played_before_both_dawnblade_swings_adds_nothing() {
+    // Second Swing first (pitching Visit the Blacksmith for 3), then a
+    // Quicken-powered Dawnblade swing and its extra attack. Second Swing's
+    // condition failed as it resolved, and attacking afterwards does not bring
+    // the +4 back: the swings hit for 2 and 2 + 1.
+    let mut gs = dorinthea_holding(&[Card::SecondSwingR, Card::VisitTheBlacksmithB], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    step_card(&mut gs, ActionType::PlayCard, Card::SecondSwingR);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.p1.next_attack_bonus, 0, "no weapon attack yet: nothing banked");
+    assert_eq!((gs.p1.action_points, gs.p1.resources), (1, 2), "Second Swing's own go again");
+
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 2);
+    assert!(gs.p1.extra_weapon_attack(), "the Quicken, not Second Swing, unlocks the extra swing");
+    assert_eq!(gs.p1.next_attack_bonus, 0);
+
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 2 - 3);
+    assert_eq!(uses_this_turn(&gs, Card::Dawnblade), 2);
+}
