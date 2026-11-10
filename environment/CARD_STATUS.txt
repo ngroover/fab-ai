@@ -1242,6 +1242,31 @@ on-play-effect helpers).
                two_visits_to_the_blacksmith_stack,
                visit_the_blacksmith_bonus_does_not_outlive_the_turn
 
+  [x] Hit and Run   (Card::HitAndRunB)
+        "Your next weapon attack this turn gains go again. If you have attacked
+        with a weapon this turn, your next attack this turn gains +1 power. Go
+        again." (Warrior action, cost 0, pitch 3, 3 block.)
+          * Catalog entry only, from two existing pieces:
+            - the go again is Driving Blade's `next_attack_effect`
+              (`NextAttackType::IsWeapon`, `NextAttackEffectType::GoAgain`),
+              banked as `PlayerFlags::NEXT_WEAPON_GO_AGAIN` and granted as the
+              next weapon attack is made (once paid for). On Dawnblade it sets
+              off Dorinthea's extra attack. An attack action card leaves it
+              banked.
+            - the +1 is Second Swing's on-play `NextAttackPower` with the
+              `HasAttackedWithWeapon` condition, read as the card resolves and
+              banked on `Player::next_attack_bonus`; the next attack of any
+              kind (weapon or attack action card) takes it.
+          * Both halves are cleared at end of turn.
+          * Changes random play. 1M-game stack sweep: still peaks at 6
+            layers, first at seed 35221; STACK_SIZE stays 7.
+        Tests: hit_and_run_banks_weapon_go_again_and_a_conditional_1_for_the_next_attack,
+               hit_and_run_before_any_weapon_attack_banks_go_again_but_no_power,
+               hit_and_run_gives_dawnblade_go_again_and_an_extra_attack,
+               hit_and_run_after_a_weapon_attack_pumps_the_next_swing_and_gives_it_go_again,
+               hit_and_run_power_goes_to_an_attack_action_card_but_its_go_again_waits_for_a_weapon,
+               hit_and_run_does_not_outlive_the_turn
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1292,7 +1317,7 @@ on-play-effect helpers).
   [x] Run Through                    (Card::RunThroughY)  — see COMPLETE section above
   [x] Slice and Dice                 (Card::SliceAndDiceY)  — see COMPLETE section above
   [x] Blade Flash                    (Card::BladeFlashB)  — see COMPLETE section above
-  [ ] Hit and Run                    (Card::HitAndRunB)
+  [x] Hit and Run                    (Card::HitAndRunB)  — see COMPLETE section above
   [x] Sigil of Solace                (Card::SigilofSolaceB)  — see COMPLETE section above
   [x] Toughen Up                     (Card::ToughenUpB)  — see COMPLETE section above
   [x] Visit the Blacksmith           (Card::VisitTheBlacksmithB)  — see COMPLETE section above

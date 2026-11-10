@@ -6490,6 +6490,134 @@ fn driving_blade_does_not_outlive_the_turn() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Hit and Run (Card::HitAndRunB)
+//
+// Warrior action, cost 0, pitch 3, 3 block: "Your next weapon attack this turn
+// gains go again. If you have attacked with a weapon this turn, your next
+// attack this turn gains +1 power. Go again." The go again is Driving Blade's
+// `next_attack_effect` (`PlayerFlags::NEXT_WEAPON_GO_AGAIN`, granted as the
+// next weapon attack is made); the +1 is Second Swing's conditional
+// `NextAttackPower`, read as the card resolves and banked on
+// `Player::next_attack_bonus` for the next attack of any kind.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea plays Hit and Run (free) and it resolves.
+fn play_hit_and_run(gs: &mut TestGame) {
+    step_card(gs, ActionType::PlayCard, Card::HitAndRunB);
+    assert_eq!(gs.phase, Phase::ActionInstant, "free: straight to the stack");
+    pass_once_each(gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert!(in_zone(gs, PlayerIndex::P1, Card::HitAndRunB, Zone::Graveyard));
+}
+
+#[test]
+fn hit_and_run_banks_weapon_go_again_and_a_conditional_1_for_the_next_attack() {
+    use crate::card_effects::{NextAttackEffectType, NextAttackType, OnPlayConditionType, OnPlayEffectType};
+    let data = Card::HitAndRunB.data();
+    assert_eq!(data.typ, CardType::Action);
+    assert_eq!((data.cost, data.pitch, data.defense), (0, 3, 3));
+    assert_eq!(data.card_class, CardClass::Warrior);
+    assert!(data.keyword.contains(Keyword::GoAgain));
+    let next = data.next_attack_effect.as_ref().expect("Hit and Run should carry a next-attack effect");
+    assert_eq!(next.attackType, NextAttackType::IsWeapon);
+    assert!(matches!(next.effectType, NextAttackEffectType::GoAgain));
+    assert_eq!(data.play_effects.len(), 1);
+    let power = &data.play_effects[0];
+    assert!(matches!(power.condition, OnPlayConditionType::HasAttackedWithWeapon));
+    assert!(matches!(power.effectType, OnPlayEffectType::NextAttackPower));
+    assert_eq!(power.magnitude, 1);
+    assert!(data.attack_effect.is_none() && data.play_condition.is_none());
+}
+
+#[test]
+fn hit_and_run_before_any_weapon_attack_banks_go_again_but_no_power() {
+    let mut gs = dorinthea_holding(&[Card::HitAndRunB], 0);
+    assert!(playable_cards(&gs).contains(&Card::HitAndRunB), "playable with nothing to pitch");
+    play_hit_and_run(&mut gs);
+    assert!(gs.p1.next_weapon_go_again());
+    assert_eq!(gs.p1.next_attack_bonus, 0, "no weapon attack yet");
+    assert_eq!(gs.p1.action_points, 1, "go again");
+}
+
+#[test]
+fn hit_and_run_gives_dawnblade_go_again_and_an_extra_attack() {
+    // Hit and Run first, then Dawnblade (pitching Visit the Blacksmith): the
+    // banked go again sets off Dorinthea's extra attack. No +1 anywhere, as
+    // there had been no weapon attack when Hit and Run resolved.
+    let mut gs = dorinthea_holding(&[Card::HitAndRunB, Card::VisitTheBlacksmithB], 0);
+    play_hit_and_run(&mut gs);
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::Weapon);
+    assert!(gs.p1.next_weapon_go_again(), "not yet: the swing is still being paid for");
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    // Granted as the attack is made (once paid for), before it resolves.
+    assert!(gs.p1.attack_go_again_bonus());
+    assert!(gs.p1.extra_weapon_attack());
+    assert!(!gs.p1.next_weapon_go_again(), "spent");
+    pass_once_each(&mut gs);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 20 - 2);
+    assert_eq!((gs.p1.action_points, gs.p1.resources), (1, 2));
+
+    // The extra swing: 2 + 1 (Dawnblade's second attack), no go again.
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 2 - 3);
+    assert_eq!(gs.p1.action_points, 0);
+}
+
+#[test]
+fn hit_and_run_after_a_weapon_attack_pumps_the_next_swing_and_gives_it_go_again() {
+    // After a Quicken-powered swing (18 life, extra attack unlocked), Hit and
+    // Run banks both halves; the extra swing takes them: 2 + 1 (second
+    // attack) + 1, and go again. Dorinthea's ability already fired, so there
+    // is no third swing.
+    let mut gs = after_a_dawnblade_swing(&[Card::HitAndRunB]);
+    play_hit_and_run(&mut gs);
+    assert_eq!(gs.p1.next_attack_bonus, 1);
+    assert!(gs.p1.next_weapon_go_again());
+    assert_eq!(gs.p1.action_points, 1);
+
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 18 - (2 + 1 + 1));
+    assert_eq!(gs.p1.next_attack_bonus, 0, "spent by that attack");
+    assert!(!gs.p1.next_weapon_go_again(), "spent by that attack");
+    assert_eq!(gs.p1.action_points, 1, "the extra swing has go again");
+    assert!(!dawnblade_swing_offered(&gs), "no third attack");
+}
+
+#[test]
+fn hit_and_run_power_goes_to_an_attack_action_card_but_its_go_again_waits_for_a_weapon() {
+    // After the swing, Hit and Run then Flock of the Feather Walkers (its 1
+    // paid from the float, revealing Sharpen Steel): Flock takes the +1 (any
+    // attack) but not the go again (weapon attacks only).
+    let mut gs = after_a_dawnblade_swing(&[
+        Card::HitAndRunB, Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR,
+    ]);
+    play_hit_and_run(&mut gs);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    if gs.phase == Phase::RevealChoice {
+        step_card(&mut gs, ActionType::Reveal, Card::SharpenSteelR);
+    }
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 18 - (5 + 1));
+    assert_eq!(gs.p1.next_attack_bonus, 0);
+    assert_eq!(gs.p1.action_points, 0, "Flock has no go again");
+    assert!(gs.p1.next_weapon_go_again(), "still waiting for a weapon attack");
+}
+
+#[test]
+fn hit_and_run_does_not_outlive_the_turn() {
+    let mut gs = after_a_dawnblade_swing(&[Card::HitAndRunB]);
+    play_hit_and_run(&mut gs);
+    while gs.turn_player == PlayerIndex::P1 {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.p1.next_attack_bonus, 0);
+    assert!(!gs.p1.next_weapon_go_again());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Glistening Steelblade (Card::GlisteningSteelbladeY)
 //
 // Warrior action, Dorinthea Specialization, cost 1, 3 block: "Your next

@@ -1284,11 +1284,23 @@ static CARD_CATALOG: [CardData; 53] = [
             constant_effect: None,
             ability: None,
             defend_effect: None,
-            next_attack_effect: None,
+            // "Your next weapon attack this turn gains go again." Banked like
+            // Driving Blade's and granted as that attack is made.
+            next_attack_effect: Some(NextAttackEffect {
+                attackType: NextAttackType::IsWeapon,
+                effectType: NextAttackEffectType::GoAgain,
+            }),
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effects: &[],
+            // "If you have attacked with a weapon this turn, your next attack
+            // this turn gains +1 power." Second Swing's condition, read as the
+            // card resolves; the +1 goes to the next attack of any kind.
+            play_effects: &[OnPlayEffect {
+                condition: OnPlayConditionType::HasAttackedWithWeapon,
+                effectType: OnPlayEffectType::NextAttackPower,
+                magnitude: 1,
+            }],
             mentor_effect: None,
         },
         // Sigil of Solace
