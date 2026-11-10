@@ -1149,6 +1149,33 @@ on-play-effect helpers).
                out_for_blood_is_not_offered_against_an_attack_action_card,
                out_for_blood_reprise_bonus_does_not_outlive_the_turn
 
+  [x] Slice and Dice   (Card::SliceAndDiceY)
+        "The first time you attack with a weapon this turn, if it's a sword or
+        dagger it gains +1 power. The second time you attack with a weapon
+        this turn if it's a sword or dagger it gains +2 power. Go again."
+        (Warrior action, cost 0, pitch 2, 3 block.)
+          * A new on-play `OnPlayEffectType::FirstAndSecondWeaponAttackPower`
+            adds one per copy to `Player::slice_and_dice_effects` for the turn,
+            like Glistening Steelblade's per-turn count.
+          * Read as each weapon attack is made (`fab_step::finish_commit`),
+            after the swing is counted in `abilities_used`: the first weapon
+            attack this turn takes +1 and the second +2 per effect onto
+            `attack_power_bonus`, if it is a sword or dagger
+            (`fab_step::is_sword_or_dagger`; the catalog has no dagger type
+            yet, so a sword). A third attack takes nothing.
+          * Counts weapon attacks, not sword attacks: a club swing would still
+            be "the first time you attack with a weapon", just without power.
+          * Swings made before it resolves are missed: played after the first
+            swing, only the second is pumped. Two copies give +2 / +4.
+          * Cleared each turn and on reset.
+        Tests: slice_and_dice_is_a_free_go_again_action_pumping_the_first_two_weapon_attacks,
+               slice_and_dice_gives_the_first_swing_plus_1_and_the_second_plus_2,
+               slice_and_dice_pumps_the_swing_as_it_is_made,
+               slice_and_dice_played_after_the_first_swing_still_pumps_the_second,
+               two_slice_and_dices_stack,
+               slice_and_dice_does_not_pump_a_club_swing,
+               slice_and_dice_does_not_outlive_the_turn
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -1197,7 +1224,7 @@ on-play-effect helpers).
   [x] On a Knife Edge                (Card::OnAKnifeEdgeY)  — see COMPLETE section above
   [x] Out for Blood                  (Card::OutForBloodY)  — see COMPLETE section above
   [x] Run Through                    (Card::RunThroughY)  — see COMPLETE section above
-  [ ] Slice and Dice                 (Card::SliceAndDiceY)
+  [x] Slice and Dice                 (Card::SliceAndDiceY)  — see COMPLETE section above
   [ ] Blade Flash                    (Card::BladeFlashB)
   [ ] Hit and Run                    (Card::HitAndRunB)
   [x] Sigil of Solace                (Card::SigilofSolaceB)  — see COMPLETE section above

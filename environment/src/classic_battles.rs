@@ -1220,7 +1220,11 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::Always,
+                effectType: OnPlayEffectType::FirstAndSecondWeaponAttackPower,
+                magnitude: 1,
+            }),
             mentor_effect: None,
         },
         // ── DORINTHEA — BLUE ────────────────────────────────────────────

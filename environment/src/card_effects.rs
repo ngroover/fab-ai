@@ -181,6 +181,15 @@ pub enum OnPlayEffectType {
     /// power"). Kept apart from `NextWeaponPower` so a non-sword weapon (Bone
     /// Basher, a club) leaves it banked. See `next_attack_kind`.
     NextSwordPower,
+    /// Slice and Dice: "The first time you attack with a weapon this turn, if
+    /// it's a sword or dagger it gains +1 power. The second time you attack
+    /// with a weapon this turn, if it's a sword or dagger it gains +2 power."
+    /// Adds `magnitude` (one per copy) to `Player::slice_and_dice_effects` for
+    /// the turn. As each weapon attack is made it is counted
+    /// (`Player::weapon_attacks_this_turn`); the first takes +1 and the second
+    /// +2 per effect, if it is a sword or dagger (`fab_step::finish_commit`).
+    /// Attacks already made when the card resolves are missed.
+    FirstAndSecondWeaponAttackPower,
 }
 
 impl OnPlayEffectType {

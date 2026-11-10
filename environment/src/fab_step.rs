@@ -158,6 +158,9 @@ fn begin_turn(gs: &mut Gamestate) {
     // with the turn; the counters it put on Dawnblade stay.
     gs.p1.dawnblade_hit_counter_effects = 0;
     gs.p2.dawnblade_hit_counter_effects = 0;
+    // So does Slice and Dice.
+    gs.p1.slice_and_dice_effects = 0;
+    gs.p2.slice_and_dice_effects = 0;
     // "At the start of your turn, you may turn [a face-down mentor] face up":
     // when the turn player has one in their arsenal, the turn opens on that
     // decision instead of going straight to the Action phase (see
@@ -1514,6 +1517,12 @@ fn apply_on_play_effect_type(gs: &mut Gamestate, rng: &mut GameRng, owner: Playe
         // (Second Swing): see the shared arm below.
         // Glistening Steelblade: one more "whenever Dawnblade hits a hero this
         // turn, put a +1 counter on it" for the owner. Read at combat damage.
+        // Slice and Dice: one more "first/second weapon attack this turn"
+        // pump for the owner, read as each weapon attack is made.
+        OnPlayEffectType::FirstAndSecondWeaponAttackPower => {
+            let player = gs.player_mut(owner);
+            player.slice_and_dice_effects = player.slice_and_dice_effects.saturating_add(effect.magnitude);
+        }
         OnPlayEffectType::DawnbladeHitCounterThisTurn => {
             let player = gs.player_mut(owner);
             player.dawnblade_hit_counter_effects = player.dawnblade_hit_counter_effects.saturating_add(effect.magnitude);
@@ -1872,6 +1881,22 @@ fn finish_commit(gs: &mut Gamestate, rng: &mut GameRng, pending: PendingCard) {
         }
     }
 
+    // Slice and Dice: the first weapon attack this turn gains +1 and the
+    // second +2 per effect, if it is a sword or dagger. Read after the swing
+    // was counted above, so the count includes this attack.
+    if commits_as_attack(pending.typ, data) && is_weapon(data) {
+        let player = gs.player_mut(owner);
+        let per_effect = match player.weapon_attacks_this_turn() {
+            1 => 1,
+            2 => 2,
+            _ => 0,
+        };
+        if is_sword_or_dagger(data) && per_effect > 0 {
+            let bonus = per_effect * player.slice_and_dice_effects;
+            player.attack_power_bonus = player.attack_power_bonus.saturating_add(bonus);
+        }
+    }
+
     // The card now lives on the stack, so it is no longer "pending" — clear it.
     // A new layer landing on the stack also interrupts any pending resolution, so
     // the consecutive-pass count resets.
@@ -2146,6 +2171,12 @@ fn is_weapon(data: &CardData) -> bool {
 /// Whether `data` is a sword: a weapon of a sword type (Dawnblade).
 fn is_sword(data: &CardData) -> bool {
     is_weapon(data) && matches!(data.weapon_type, Some(WeaponType::Sword2h))
+}
+
+/// Whether `data` is a sword or a dagger (Slice and Dice). The catalog has no
+/// dagger weapon type yet, so this is a sword today.
+fn is_sword_or_dagger(data: &CardData) -> bool {
+    is_sword(data)
 }
 
 /// Deduct one action point from `player`, flooring at 0 so it never underflows.

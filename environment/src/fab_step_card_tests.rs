@@ -51,6 +51,7 @@
 //!   - On a Knife Edge     (`Card::OnAKnifeEdgeY`)
 //!   - Run Through         (`Card::RunThroughY`)
 //!   - Out for Blood       (`Card::OutForBloodY`)
+//!   - Slice and Dice      (`Card::SliceAndDiceY`)
 
 use super::*;
 use crate::cards::Card;
@@ -6795,4 +6796,126 @@ fn out_for_blood_reprise_bonus_does_not_outlive_the_turn() {
         step(&mut gs, act);
     }
     assert_eq!(gs.p1.next_attack_bonus, 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slice and Dice (Card::SliceAndDiceY)
+//
+// Warrior action, cost 0, 3 block: "The first time you attack with a weapon
+// this turn, if it's a sword or dagger it gains +1 power. The second time you
+// attack with a weapon this turn if it's a sword or dagger it gains +2 power.
+// Go again." An on-play `FirstAndSecondWeaponAttackPower` adds one to
+// `Player::slice_and_dice_effects` for the turn; as each weapon attack is made
+// it is counted, and the first takes +1 and the second +2 per effect, onto
+// `attack_power_bonus`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea plays Slice and Dice (free) and it resolves.
+fn play_slice_and_dice(gs: &mut TestGame) {
+    let ap = gs.p1.action_points;
+    step_card(gs, ActionType::PlayCard, Card::SliceAndDiceY);
+    assert_eq!(gs.phase, Phase::ActionInstant, "free: straight to the stack");
+    pass_once_each(gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.p1.action_points, ap, "go again");
+}
+
+#[test]
+fn slice_and_dice_is_a_free_go_again_action_pumping_the_first_two_weapon_attacks() {
+    use crate::card_effects::{OnPlayConditionType, OnPlayEffectType};
+    let data = Card::SliceAndDiceY.data();
+    assert_eq!(data.typ, CardType::Action);
+    assert_eq!((data.cost, data.pitch, data.defense), (0, 2, 3));
+    assert_eq!(data.card_class, CardClass::Warrior);
+    assert!(data.keyword.contains(Keyword::GoAgain));
+    let effect = data.play_effect.as_ref().expect("Slice and Dice should carry an on-play effect");
+    assert!(matches!(effect.condition, OnPlayConditionType::Always));
+    assert!(matches!(effect.effectType, OnPlayEffectType::FirstAndSecondWeaponAttackPower));
+    assert_eq!(effect.magnitude, 1);
+    assert!(data.attack_effect.is_none() && data.next_attack_effect.is_none());
+
+    let mut gs = dorinthea_holding(&[Card::SliceAndDiceY], 0);
+    play_slice_and_dice(&mut gs);
+    assert_eq!(gs.p1.slice_and_dice_effects, 1);
+}
+
+#[test]
+fn slice_and_dice_gives_the_first_swing_plus_1_and_the_second_plus_2() {
+    // A Quicken gives the first swing go again, and Dorinthea an extra one.
+    let mut gs = dorinthea_holding(&[Card::SliceAndDiceY, Card::VisitTheBlacksmithB], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    play_slice_and_dice(&mut gs);
+    // 2 + 1.
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, 20 - 3);
+    // 2 + 1 (Dawnblade's second attack) + 2.
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 3 - 5);
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+}
+
+#[test]
+fn slice_and_dice_pumps_the_swing_as_it_is_made() {
+    let mut gs = dorinthea_holding(&[Card::SliceAndDiceY, Card::VisitTheBlacksmithB], 0);
+    play_slice_and_dice(&mut gs);
+    step_card_from(&mut gs, ActionType::Activate, Card::Dawnblade, Zone::Weapon);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    assert_eq!(gs.p1.weapon_attacks_this_turn(), 1);
+    assert_eq!(gs.p1.attack_power_bonus, 1);
+}
+
+#[test]
+fn slice_and_dice_played_after_the_first_swing_still_pumps_the_second() {
+    // The first swing has already happened, so its +1 is missed; the second
+    // still takes +2.
+    let mut gs = dorinthea_holding(&[Card::SliceAndDiceY, Card::VisitTheBlacksmithB], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, 20 - 2);
+    play_slice_and_dice(&mut gs);
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 2 - 5);
+}
+
+#[test]
+fn two_slice_and_dices_stack() {
+    let mut gs = dorinthea_holding(&[
+        Card::SliceAndDiceY, Card::SliceAndDiceY, Card::VisitTheBlacksmithB,
+    ], 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    play_slice_and_dice(&mut gs);
+    play_slice_and_dice(&mut gs);
+    assert_eq!(gs.p1.slice_and_dice_effects, 2);
+    // 2 + 2, then 2 + 1 + 4.
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, 20 - 4);
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 4 - 7);
+}
+
+#[test]
+fn slice_and_dice_does_not_pump_a_club_swing() {
+    // Rhinar's deck holds no Slice and Dice, so the effect is staged: Bone
+    // Basher is a club, neither a sword nor a dagger.
+    let mut gs = setup_rhinar_action_phase();
+    gs.p1.slice_and_dice_effects = 1;
+    gs.p1.resources = 2;
+    step_card_from(&mut gs, ActionType::Activate, Card::BoneBasher, Zone::Weapon);
+    assert_eq!(gs.p1.weapon_attacks_this_turn(), 1);
+    assert_eq!(gs.p1.attack_power_bonus, 0);
+}
+
+#[test]
+fn slice_and_dice_does_not_outlive_the_turn() {
+    let mut gs = dorinthea_holding(&[Card::SliceAndDiceY], 0);
+    play_slice_and_dice(&mut gs);
+    while gs.turn_player == PlayerIndex::P1 {
+        let act = if gs.phase == Phase::PitchOrder {
+            legal_actions(&gs)[0]
+        } else {
+            Action{ typ: ActionType::Pass, card: None}
+        };
+        step(&mut gs, act);
+    }
+    assert_eq!(gs.p1.slice_and_dice_effects, 0);
 }

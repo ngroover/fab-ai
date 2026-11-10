@@ -556,6 +556,12 @@ pub struct Player {
     /// Steelblade resolved). Each Dawnblade hit puts this many counters on it.
     /// Cleared at the start of each turn.
     pub dawnblade_hit_counter_effects : u8,
+    /// How many Slice and Dice effects this player has this turn: "the first
+    /// time you attack with a weapon this turn, if it's a sword or dagger it
+    /// gains +1 power; the second time, +2". Each copy adds one; read as each
+    /// weapon attack is made (`fab_step::finish_commit`), and cleared at the
+    /// start of each turn.
+    pub slice_and_dice_effects : u8,
     /// Per-player yes/no state packed into one byte: see `PlayerFlags` for
     /// what each flag means, and the `Player` accessors of the same names.
     pub flags : PlayerFlags,
@@ -854,6 +860,7 @@ impl Player {
             next_sword_attack_bonus: 0,
             weapon_power_counters: 0,
             dawnblade_hit_counter_effects: 0,
+            slice_and_dice_effects: 0,
             flags: PlayerFlags::empty(),
             arsenal_lesson_counters: 0,
             // Logging is opted into via `reset(gs, decks, true)`; off until then.
