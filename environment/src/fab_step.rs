@@ -130,6 +130,8 @@ fn begin_turn(gs: &mut Gamestate) {
     // Likewise clear any unconsumed "next weapon attack" bonus (En Garde).
     gs.p1.next_weapon_attack_bonus = 0;
     gs.p2.next_weapon_attack_bonus = 0;
+    gs.p1.next_attack_bonus = 0;
+    gs.p2.next_attack_bonus = 0;
     // Clear the per-turn "has intimidated" flag so a prior turn's Intimidate
     // can never satisfy this turn's "if you've intimidated" conditions.
     gs.p1.set_has_intimidated(false);
@@ -1412,6 +1414,8 @@ fn on_play_condition_met(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerInd
         // attacker plays attack reactions — has defended this chain link with a
         // card from their hand.
         OnPlayConditionType::Reprise => gs.player(owner.opponent()).defended_from_hand(),
+        // "If you have attacked with a weapon this turn" (Second Swing).
+        OnPlayConditionType::HasAttackedWithWeapon => gs.player(owner).weapon_attacks_this_turn() >= 1,
         OnPlayConditionType::Always => true,
     }
 }
@@ -1445,7 +1449,7 @@ fn apply_on_play_effect_type(gs: &mut Gamestate, rng: &mut GameRng, owner: Playe
         // power, whatever its class (e.g. Come to Fight). Banked like the brute
         // bonus above and applied only when an attack action card resolves combat
         // damage, so a weapon swing in between neither takes nor spends it.
-        OnPlayEffectType::NextAttackPower => {
+        OnPlayEffectType::NextAttackActionPower => {
             let player = if owner == PlayerIndex::P1 { &mut gs.p1 } else { &mut gs.p2 };
             player.next_attack_action_bonus = player.next_attack_action_bonus.saturating_add(effect.magnitude);
         }
@@ -1457,6 +1461,13 @@ fn apply_on_play_effect_type(gs: &mut Gamestate, rng: &mut GameRng, owner: Playe
         // The next weapon attack the owner makes this turn gains `magnitude`
         // power (e.g. En Garde). Banked like the bonuses above and applied
         // only when a weapon swing resolves combat damage.
+        // The next attack the owner makes this turn, of any kind, gains
+        // `magnitude` power (Second Swing). Banked and spent by the next attack
+        // to reach combat damage.
+        OnPlayEffectType::NextAttackPower => {
+            let player = gs.player_mut(owner);
+            player.next_attack_bonus = player.next_attack_bonus.saturating_add(effect.magnitude);
+        }
         OnPlayEffectType::NextWeaponPower => {
             let player = gs.player_mut(owner);
             player.next_weapon_attack_bonus = player.next_weapon_attack_bonus.saturating_add(effect.magnitude);
@@ -1837,6 +1848,9 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // banked for a later swing this turn.
     let attack_is_weapon = attack_data.map(is_weapon).unwrap_or(false);
     let weapon_bonus = if attack_is_weapon { attacker.next_weapon_attack_bonus } else { 0 };
+    // The banked "next attack" bonus (Second Swing's +4) is taken by any
+    // attack: a weapon swing or an attack action card.
+    let next_attack_bonus = if attack_data.is_some() { attacker.next_attack_bonus } else { 0 };
     // Dawnblade: "The second time you attack with Dawnblade each turn, it gains
     // +1 power until the end of turn" — so its second attack and any after it
     // this turn. Each swing is counted in `abilities_used` as it is committed.
@@ -1879,7 +1893,8 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         .saturating_add(attack_action_bonus)
         .saturating_add(brute_conditional_bonus)
         .saturating_add(weapon_bonus)
-        .saturating_add(second_attack_bonus);
+        .saturating_add(second_attack_bonus)
+        .saturating_add(next_attack_bonus);
     // The block is the blockers' printed defense plus whatever was granted to
     // them during the combat (Rally the Rearguard's +3 block).
     let blocked = chain_link_total(defender, link, |d| d.defense)
@@ -1938,6 +1953,10 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // And the weapon bonus: spent by a weapon swing only.
     if attack_is_weapon {
         attacker.next_weapon_attack_bonus = 0;
+    }
+    // And the any-attack bonus: spent by whichever attack this is.
+    if attack_data.is_some() {
+        attacker.next_attack_bonus = 0;
     }
     // The conditional brute bonus is spent by any brute attack, whether or not
     // the blocker count let it pay out: the attack it was banked for has now

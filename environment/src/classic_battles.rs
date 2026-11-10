@@ -526,7 +526,7 @@ static CARD_CATALOG: [CardData; 53] = [
             // for the next attack action card of any class.
             play_effect: Some(OnPlayEffect {
                 condition: OnPlayConditionType::Always,
-                effectType: OnPlayEffectType::NextAttackPower,
+                effectType: OnPlayEffectType::NextAttackActionPower,
                 magnitude: 1,
             }),
             mentor_effect: None,
@@ -936,7 +936,11 @@ static CARD_CATALOG: [CardData; 53] = [
             additional_cost: None,
             attack_effect: None,
             play_condition: None,
-            play_effect: None,
+            play_effect: Some(OnPlayEffect {
+                condition: OnPlayConditionType::HasAttackedWithWeapon,
+                effectType: OnPlayEffectType::NextAttackPower,
+                magnitude: 4,
+            }),
             mentor_effect: None,
         },
         // Sharpen Steel

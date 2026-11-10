@@ -151,12 +151,13 @@ on-play-effect helpers).
 
   [x] Come to Fight (Card::ComeToFightB)
         Go Again. On play, the next attack action card you play this turn gets
-        +1 power. The new NextAttackPower effect banks the bonus on the player
+        +1 power. The NextAttackActionPower effect (named NextAttackPower
+        until Second Swing took that name) banks the bonus on the player
         as `next_attack_action_bonus`; it is the class-agnostic sibling of
         Awakening Bellow's brute-only bank, so an attack action card of any
         class takes it, while a weapon swing — not an attack action card —
         leaves it banked for a later attack action that turn.
-        Tests: come_to_fight_effect_is_next_attack_power,
+        Tests: come_to_fight_effect_is_next_attack_action_power,
                come_to_fight_banks_plus1_for_the_next_attack,
                come_to_fight_followup_generic_attack_gets_plus1,
                come_to_fight_followup_brute_attack_also_gets_plus1,
@@ -934,6 +935,30 @@ on-play-effect helpers).
                reprise_is_cleared_as_the_chain_closes,
                a_sword_attack_effect_applies_to_dawnblade_but_not_bone_basher
 
+  [x] Second Swing   (Card::SecondSwingR)
+        "If you have attacked with a weapon this turn, your next attack this
+        turn gains +4 power. Go again." (Warrior action, cost 1, pitch 1, 3
+        block.)
+          * An on-play effect: new condition
+            `OnPlayConditionType::HasAttackedWithWeapon`
+            (`Player::weapon_attacks_this_turn() >= 1`, read as the card
+            resolves) and new effect `OnPlayEffectType::NextAttackPower`,
+            which banks the +4 on a new `Player::next_attack_bonus`.
+          * Unlike En Garde's weapon-only and Come to Fight's attack-action-only
+            banks, the next attack of any kind takes it: the next weapon swing
+            or attack action card to reach combat damage adds and spends it.
+            Cleared at the start of each turn.
+          * The old `NextAttackPower` (Come to Fight: attack action cards only)
+            is renamed `NextAttackActionPower`, so the name says which attacks
+            take it.
+          * `Player` stays 184 bytes (the new byte fills padding).
+          * Changes damage, so random play moved; see the stack-seed sweep.
+        Tests: second_swing_is_a_go_again_action_that_banks_4_for_the_next_attack,
+               second_swing_before_any_weapon_attack_banks_nothing,
+               second_swing_after_a_weapon_attack_pumps_the_next_swing_by_4,
+               second_swing_pumps_an_attack_action_card_too,
+               second_swings_bonus_does_not_outlive_the_turn
+
 ------------------------------------------------------------------------------
  TODO — RHINAR (Brute) attack/action cards
 ------------------------------------------------------------------------------
@@ -973,7 +998,7 @@ on-play-effect helpers).
   [x] Flock of the Feather Walkers   (Card::FlockOfTheFeatherWalkersR)  — see COMPLETE section above
   [x] In the Swing                   (Card::InTheSwingR)  — see COMPLETE section above
   [x] Ironsong Response              (Card::IronsongResponseR)  — see COMPLETE section above
-  [ ] Second Swing                   (Card::SecondSwingR)
+  [x] Second Swing                   (Card::SecondSwingR)  — see COMPLETE section above
   [ ] Sharpen Steel                  (Card::SharpenSteelR)
   [ ] Thrust                         (Card::ThrustR)
   [ ] Warrior's Valor                (Card::WarriorsValorR)

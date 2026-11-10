@@ -127,6 +127,10 @@ pub enum OnPlayConditionType {
     /// hand this chain link" (Ironsong Response). Read as the card resolves,
     /// from the defender's `PlayerFlags::DEFENDED_FROM_HAND`.
     Reprise,
+    /// "If you have attacked with a weapon this turn" (Second Swing): the
+    /// owner has made at least one weapon attack this turn
+    /// (`Player::weapon_attacks_this_turn`).
+    HasAttackedWithWeapon,
     /// No condition: the effect always applies when the card resolves.
     Always,
 }
@@ -146,6 +150,12 @@ pub enum OnPlayEffectType {
     /// this turn, whatever its class (e.g. Come to Fight's "+1 power to your
     /// next attack action card"). The class-agnostic sibling of
     /// `NextBrutePower`; like it, a weapon swing neither takes nor spends it.
+    NextAttackActionPower,
+    /// Banks `magnitude` power for the next attack the owner makes this turn,
+    /// of any kind — a weapon swing or an attack action card (Second Swing's
+    /// "your next attack this turn gains +4 power"). Banked on
+    /// `Player::next_attack_bonus`; the next attack to reach combat damage
+    /// takes and spends it.
     NextAttackPower,
     /// Banks a *conditional* `magnitude` power for the next Brute attack the
     /// owner makes this turn (Barraging Beatdown's "your next Brute attack this

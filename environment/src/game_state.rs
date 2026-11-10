@@ -516,6 +516,12 @@ pub struct Player {
     /// spends it — then consumed, and cleared at the start of each turn so it
     /// never leaks.
     pub next_weapon_attack_bonus : u8,
+    /// Extra power banked for the *next attack* this player makes this turn,
+    /// of any kind (Second Swing's "+4 power"). Unlike the bonuses above, a
+    /// weapon swing and an attack action card both take it: the next attack to
+    /// reach combat damage spends it. Cleared at the start of each turn so it
+    /// never leaks.
+    pub next_attack_bonus : u8,
     /// Per-player yes/no state packed into one byte: see `PlayerFlags` for
     /// what each flag means, and the `Player` accessors of the same names.
     pub flags : PlayerFlags,
@@ -810,6 +816,7 @@ impl Player {
             next_attack_action_bonus: 0,
             next_brute_attack_conditional_bonus: 0,
             next_weapon_attack_bonus: 0,
+            next_attack_bonus: 0,
             flags: PlayerFlags::empty(),
             arsenal_lesson_counters: 0,
             // Logging is opted into via `reset(gs, decks, true)`; off until then.

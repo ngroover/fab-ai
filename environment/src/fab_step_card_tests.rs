@@ -42,6 +42,7 @@
 //!   - Dorinthea (hero)    (`Card::Dorinthea`) and Dawnblade (`Card::Dawnblade`)
 //!   - In the Swing        (`Card::InTheSwingR`)
 //!   - Ironsong Response   (`Card::IronsongResponseR`), and Reprise
+//!   - Second Swing        (`Card::SecondSwingR`)
 
 use super::*;
 use crate::cards::Card;
@@ -1144,7 +1145,7 @@ fn bank_come_to_fight_bonus() -> TestGame {
 }
 
 #[test]
-fn come_to_fight_effect_is_next_attack_power() {
+fn come_to_fight_effect_is_next_attack_action_power() {
     use crate::card_effects::{OnPlayConditionType, OnPlayEffectType};
     use crate::cards::Keyword;
     let data = Card::ComeToFightB.data();
@@ -1157,7 +1158,7 @@ fn come_to_fight_effect_is_next_attack_power() {
 
     let effect = data.play_effect.as_ref().expect("Come to Fight should carry an on-play effect");
     assert!(matches!(effect.condition, OnPlayConditionType::Always));
-    assert!(matches!(effect.effectType, OnPlayEffectType::NextAttackPower));
+    assert!(matches!(effect.effectType, OnPlayEffectType::NextAttackActionPower));
     assert_eq!(effect.magnitude, 1);
 }
 
@@ -5684,4 +5685,107 @@ fn a_sword_attack_effect_applies_to_dawnblade_but_not_bone_basher() {
     let gs = rhinar_defending_flock();
     assert!(affected_attack(&gs.p1, &sword).is_none());
     assert!(affected_attack(&gs.p1, &weapon).is_none());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Second Swing (Card::SecondSwingR)
+//
+// Warrior action, cost 1, 3 block: "If you have attacked with a weapon this
+// turn, your next attack this turn gains +4 power. Go again." The condition is
+// read as the card resolves; the +4 is banked on `Player::next_attack_bonus`
+// and spent by the next attack of any kind to reach combat damage.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dorinthea (p1) holding `rest` plus Visit the Blacksmith (pitch 3) and a
+/// Quicken swings Dawnblade unblocked, pitching Visit: 2 damage, go again, 2
+/// resources floating, back in her action phase.
+fn after_a_dawnblade_swing(rest: &[Card]) -> TestGame {
+    let mut hand = vec![Card::VisitTheBlacksmithB];
+    hand.extend_from_slice(rest);
+    let mut gs = dorinthea_holding(&hand, 0);
+    give_quicken(&mut gs, PlayerIndex::P1);
+    dawnblade_unblocked(&mut gs, Some(Card::VisitTheBlacksmithB));
+    assert_eq!(gs.p2.life, 18);
+    assert_eq!((gs.p1.action_points, gs.p1.resources), (1, 2));
+    gs
+}
+
+/// Dorinthea plays Second Swing out of floating resources and it resolves.
+fn play_second_swing(gs: &mut TestGame) {
+    step_card(gs, ActionType::PlayCard, Card::SecondSwingR);
+    assert_eq!(gs.phase, Phase::ActionInstant);
+    pass_once_each(gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert!(in_zone(gs, PlayerIndex::P1, Card::SecondSwingR, Zone::Graveyard));
+}
+
+#[test]
+fn second_swing_is_a_go_again_action_that_banks_4_for_the_next_attack() {
+    use crate::card_effects::{OnPlayConditionType, OnPlayEffectType};
+    let data = Card::SecondSwingR.data();
+    assert_eq!(data.typ, CardType::Action);
+    assert_eq!((data.cost, data.pitch, data.defense), (1, 1, 3));
+    assert_eq!(data.card_class, CardClass::Warrior);
+    assert!(data.keyword.contains(Keyword::GoAgain));
+    let effect = data.play_effect.as_ref().expect("Second Swing should carry an on-play effect");
+    assert!(matches!(effect.condition, OnPlayConditionType::HasAttackedWithWeapon));
+    assert!(matches!(effect.effectType, OnPlayEffectType::NextAttackPower));
+    assert_eq!(effect.magnitude, 4);
+    assert!(data.attack_effect.is_none() && data.play_condition.is_none());
+}
+
+#[test]
+fn second_swing_before_any_weapon_attack_banks_nothing() {
+    let mut gs = dorinthea_holding(&[Card::SecondSwingR, Card::VisitTheBlacksmithB], 0);
+    step_card(&mut gs, ActionType::PlayCard, Card::SecondSwingR);
+    step_card(&mut gs, ActionType::Pitch, Card::VisitTheBlacksmithB);
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Action);
+    assert_eq!(gs.p1.next_attack_bonus, 0);
+    assert_eq!(gs.p1.action_points, 1, "go again all the same");
+    // The swing that follows is a plain 2.
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 20 - 2);
+}
+
+#[test]
+fn second_swing_after_a_weapon_attack_pumps_the_next_swing_by_4() {
+    let mut gs = after_a_dawnblade_swing(&[Card::SecondSwingR]);
+    play_second_swing(&mut gs);
+    assert_eq!(gs.p1.next_attack_bonus, 4);
+    assert_eq!(gs.p1.action_points, 1, "go again");
+    // Dawnblade's extra attack: 2 + 1 (second attack) + 4.
+    dawnblade_unblocked(&mut gs, None);
+    assert_eq!(gs.p2.life, 18 - 7);
+    assert_eq!(gs.p1.next_attack_bonus, 0, "spent by that attack");
+}
+
+#[test]
+fn second_swing_pumps_an_attack_action_card_too() {
+    // After the swing, Second Swing then Flock of the Feather Walkers (5),
+    // revealing Sharpen Steel for Flock's cost.
+    let mut gs = after_a_dawnblade_swing(&[
+        Card::SecondSwingR, Card::FlockOfTheFeatherWalkersR, Card::SharpenSteelR,
+    ]);
+    play_second_swing(&mut gs);
+    step_card(&mut gs, ActionType::PlayCard, Card::FlockOfTheFeatherWalkersR);
+    if gs.phase == Phase::RevealChoice {
+        step_card(&mut gs, ActionType::Reveal, Card::SharpenSteelR);
+    }
+    pass_once_each(&mut gs);
+    assert_eq!(gs.phase, Phase::Defend);
+    no_blocks_back_to_action(&mut gs);
+    assert_eq!(gs.p2.life, 18 - (5 + 4));
+    assert_eq!(gs.p1.next_attack_bonus, 0);
+}
+
+#[test]
+fn second_swings_bonus_does_not_outlive_the_turn() {
+    let mut gs = after_a_dawnblade_swing(&[Card::SecondSwingR]);
+    play_second_swing(&mut gs);
+    assert_eq!(gs.p1.next_attack_bonus, 4);
+    while gs.turn_player == PlayerIndex::P1 {
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+    }
+    assert_eq!(gs.p1.next_attack_bonus, 0);
 }
