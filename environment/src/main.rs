@@ -5,10 +5,13 @@ mod card_counts;
 mod cards;
 mod card_effects;
 mod classic_battles;
+mod cli;
 mod deck_cards;
 mod decks;
+mod display;
 mod fab_game;
 mod game_state;
+mod human_agent;
 mod legal_actions;
 mod fab_step;
 mod simulator;
@@ -24,22 +27,30 @@ use game_state::Phase;
 use simulator::Simulator;
 
 fn main() {
-    let num_games: usize = match std::env::args().nth(1) {
-        Some(arg) => match arg.parse() {
-            Ok(n) => n,
-            Err(_) => {
-                eprintln!("usage: environment [num_games]");
-                std::process::exit(1);
-            }
-        },
-        None => 1,
-    };
-
     // Seed from the clock so every execution plays different games.
     let time_seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock before unix epoch")
         .as_nanos() as u64;
+
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // `environment play`: an interactive game in the terminal.
+    if args.first().map(String::as_str) == Some("play") {
+        cli::play(&args[1..], time_seed);
+        return;
+    }
+
+    let num_games: usize = match args.first() {
+        Some(arg) => match arg.parse() {
+            Ok(n) => n,
+            Err(_) => {
+                eprintln!("usage: environment [num_games]");
+                eprintln!("       environment play [--seed N] [--reveal]");
+                std::process::exit(1);
+            }
+        },
+        None => 1,
+    };
 
     let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(time_seed));
     let mut sim = Simulator::new(
