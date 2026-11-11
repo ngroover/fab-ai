@@ -30,7 +30,9 @@ cd environment && cargo play
 
 Numbered menus pick each player's hero (Rhinar or Dorinthea) and agent (human or
 random). A human player can print the game state, print the game log, or choose
-an action at every decision. Options: `cargo play --seed 7` for a reproducible
+an action at every decision. A decision with only one legal action is played
+automatically (it still shows up in the log), so players and agents are only
+asked when there is a real choice. Options: `cargo play --seed 7` for a reproducible
 game, `cargo play --reveal` to also show hidden information (the opponent's hand,
 the full log).
 

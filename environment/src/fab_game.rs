@@ -243,16 +243,36 @@ impl FabGame {
         let state = gamestate_from_decklists(&decks);
         FabGame { decks, state, rng: new_rng(seed) }
     }
+
+    /// Play every forced decision: while the game is live and the player to
+    /// act has exactly one legal action, take it. Leaves the game either over
+    /// or at a decision with a real choice (two or more legal actions), so
+    /// nobody driving the game through `simulator::Game` — a human at the
+    /// terminal, an agent — is ever asked to "choose" from a single option.
+    /// The forced actions are logged like any other.
+    fn play_forced_actions(&mut self) {
+        while !self.state.is_game_over() {
+            let legal = crate::legal_actions::legal_actions(&self.state);
+            if legal.len() != 1 {
+                break;
+            }
+            crate::fab_step::step(&mut self.state, &mut self.rng, legal[0]);
+        }
+    }
 }
 
 /// The generic `simulator::Game` view of a FaB game, bridging the engine's
 /// free functions (`reset`, `legal_actions`, `step`) so the simulator can
-/// drive a game without knowing anything FaB-specific.
+/// drive a game without knowing anything FaB-specific. On top of the raw
+/// engine, `reset` and `step` also play out any forced decisions that follow
+/// (see `play_forced_actions`), so `legal_actions` only ever offers a real
+/// choice; the free functions still stop at every decision.
 impl crate::simulator::Game for FabGame {
     type Action = Action;
 
     fn reset(&mut self, logging: bool) {
         reset(&mut self.state, &self.decks, &mut self.rng, logging);
+        self.play_forced_actions();
     }
 
     type ActionList = LegalActions;
@@ -263,6 +283,7 @@ impl crate::simulator::Game for FabGame {
 
     fn step(&mut self, action: Action) {
         crate::fab_step::step(&mut self.state, &mut self.rng, action);
+        self.play_forced_actions();
     }
 
     fn is_over(&self) -> bool {

@@ -20,7 +20,9 @@ pub trait Game {
     type ActionList: std::ops::Deref<Target = [Self::Action]>;
 
     /// The actions the player to act may legally take right now. Empty only in
-    /// a terminal state.
+    /// a terminal state. An implementation may resolve forced decisions (a
+    /// single legal action) itself inside `reset` and `step`, as `FabGame`
+    /// does, so that agents are only consulted when there is a real choice.
     fn legal_actions(&self) -> Self::ActionList;
 
     /// Apply one action, advancing the game.
@@ -106,6 +108,29 @@ mod tests {
         assert!(steps > 0);
     }
 
+    /// A decision with a single legal action is played by the game itself, so
+    /// agents are only ever offered a real choice.
+    #[test]
+    fn agents_are_never_offered_a_single_choice() {
+        struct Checked(RandomAgent);
+        impl Agent<FabGame> for Checked {
+            fn select_action(&mut self, game: &FabGame, legal: &[crate::action::Action]) -> crate::action::Action {
+                assert!(legal.len() >= 2, "offered a forced {:?} in {:?}", legal, game.state.phase);
+                self.0.select_action(game, legal)
+            }
+        }
+        for seed in 0..200u64 {
+            let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+            let mut sim = Simulator::new(
+                game,
+                Checked(RandomAgent::new(Some(seed + 1))),
+                Checked(RandomAgent::new(Some(seed + 2))),
+            );
+            sim.run(false);
+            assert!(sim.game.is_over(), "seed {} did not finish", seed);
+        }
+    }
+
     #[cfg(feature = "logging")]
     #[test]
     fn run_with_logging_records_a_game_log() {
@@ -143,23 +168,30 @@ mod tests {
         }
     }
 
-    /// Play the random game for `seed` (the same seeding the other sweeps use)
-    /// to completion and return the deepest the stack got.
+    /// Play the random game for `seed` to completion and return the deepest
+    /// the stack got. Drives the raw engine (`legal_actions` / `fab_step::step`)
+    /// rather than `FabGame`'s `Game` impl, so the stack is measured after
+    /// every single step — `Game::step` also plays out forced decisions, which
+    /// would hide the depth reached in between — and the agents draw at every
+    /// decision, forced ones included.
     fn max_stack_depth(seed: u64) -> usize {
-        let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
-        let mut sim = Simulator::new(game, RandomAgent::new(Some(seed + 1)), RandomAgent::new(Some(seed + 2)));
-        sim.game.reset(false);
+        use crate::fab_step::step;
+        use crate::legal_actions::legal_actions;
+        let mut game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+        let mut p1_agent = RandomAgent::new(Some(seed + 1));
+        let mut p2_agent = RandomAgent::new(Some(seed + 2));
+        crate::fab_game::reset(&mut game.state, &game.decks, &mut game.rng, false);
         let mut deepest = 0;
-        while !sim.game.is_over() {
-            let legal = sim.game.legal_actions();
+        while !game.is_over() {
+            let legal = legal_actions(&game.state);
             assert!(!legal.is_empty(), "seed {} deadlocked", seed);
-            let action = if sim.game.player_to_act() == 0 {
-                sim.p1_agent.select_action(&sim.game, &legal)
+            let action = if game.player_to_act() == 0 {
+                p1_agent.select_action(&game, &legal)
             } else {
-                sim.p2_agent.select_action(&sim.game, &legal)
+                p2_agent.select_action(&game, &legal)
             };
-            sim.game.step(action);
-            deepest = deepest.max(sim.game.state.stack.len());
+            step(&mut game.state, &mut game.rng, action);
+            deepest = deepest.max(game.state.stack.len());
         }
         deepest
     }
