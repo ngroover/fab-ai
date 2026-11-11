@@ -94,7 +94,7 @@ pub fn play(args: &[String], default_seed: u64) {
     if !any_human {
         match game_log(gs, None) {
             Some(log) => log.iter().for_each(|entry| println!("  | {}", entry)),
-            None => println!("(No game log: build with `--features logging`, or use `cargo play`.)"),
+            None => println!("(No game log: this build has logging compiled out; rebuild without `--no-default-features`.)"),
         }
     }
 

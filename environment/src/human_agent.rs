@@ -77,8 +77,8 @@ pub fn game_log(_gs: &Gamestate, _viewer: Option<PlayerIndex>) -> Option<&[Strin
     None
 }
 
-const NO_LOG: &str = "No game log: this build has logging off. Rebuild with \
-`--features logging` (or use `cargo play`).";
+const NO_LOG: &str = "No game log: this build has logging compiled out. Rebuild \
+without `--no-default-features`.";
 
 pub struct HumanAgent<I: LineSource, O: Write> {
     input: I,

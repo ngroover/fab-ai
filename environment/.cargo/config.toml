@@ -1,3 +1,3 @@
 [alias]
-# `cargo play`: the interactive terminal game, built with the game log on.
-play = "run --release --features logging -- play"
+# `cargo play`: the interactive terminal game.
+play = "run --release -- play"

@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-# Game logs (`Gamestate::log` / `Player::log`). Off by default so the game
-# state carries no log fields; enable with `cargo build --features logging`.
+# Game logs (`Gamestate::log` / `Player::log`). On by default; build with
+# `--no-default-features` to compile them out, so the game state carries no
+# log fields (for measuring raw simulation speed).
+default = ["logging"]
 logging = []
 
 [dependencies]

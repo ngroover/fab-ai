@@ -33,3 +33,6 @@ random). A human player can print the game state, print the game log, or choose
 an action at every decision. Options: `cargo play --seed 7` for a reproducible
 game, `cargo play --reveal` to also show hidden information (the opponent's hand,
 the full log).
+
+The game log is compiled in by default. To compile it out when measuring raw
+simulation speed: `cargo run --release --no-default-features -- 100000`
