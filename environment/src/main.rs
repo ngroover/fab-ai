@@ -7,6 +7,7 @@ mod card_effects;
 mod classic_battles;
 mod cli;
 mod deck_cards;
+mod determinize;
 mod decks;
 mod display;
 mod fab_game;
