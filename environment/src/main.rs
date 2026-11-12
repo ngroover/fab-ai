@@ -13,6 +13,7 @@ mod display;
 mod fab_game;
 mod game_state;
 mod human_agent;
+mod ismcts;
 mod legal_actions;
 mod fab_step;
 mod simulator;
@@ -22,6 +23,8 @@ mod test_support;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agents::RandomAgent;
+use cli::Seat;
+use ismcts::IsmctsAgent;
 use decks::{build_dorinthea_deck, build_rhinar_deck};
 use fab_game::FabGame;
 use game_state::Phase;
@@ -41,24 +44,44 @@ fn main() {
         return;
     }
 
-    let num_games: usize = match args.first() {
-        Some(arg) => match arg.parse() {
-            Ok(n) => n,
-            Err(_) => {
-                eprintln!("usage: environment [num_games]");
-                eprintln!("       environment play [--seed N] [--reveal]");
-                std::process::exit(1);
-            }
-        },
-        None => 1,
+    // `environment [num_games] [--p1 AGENT] [--p2 AGENT] [--iterations N]`:
+    // play games between two agents and count the results.
+    let usage = || -> ! {
+        eprintln!("usage: environment [num_games] [--p1 random|ismcts] [--p2 random|ismcts] [--iterations N]");
+        eprintln!("       environment play [--seed N] [--reveal] [--iterations N]");
+        std::process::exit(1);
+    };
+    let mut num_games = 1usize;
+    let mut agent_names = ["random".to_string(), "random".to_string()];
+    let mut iterations = cli::DEFAULT_ISMCTS_ITERATIONS;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--p1" | "--p2" => match rest.next() {
+                Some(name) => agent_names[(arg == "--p2") as usize] = name.clone(),
+                None => usage(),
+            },
+            "--iterations" => match rest.next().and_then(|s| s.parse().ok()) {
+                Some(n) => iterations = n,
+                None => usage(),
+            },
+            n => match n.parse() {
+                Ok(n) => num_games = n,
+                Err(_) => usage(),
+            },
+        }
+    }
+    let seat = |player: usize| {
+        let seed = Some(time_seed.wrapping_add(1 + player as u64));
+        match agent_names[player].as_str() {
+            "random" => Seat::Random(RandomAgent::new(seed)),
+            "ismcts" => Seat::Ismcts(IsmctsAgent::new(iterations, seed)),
+            _ => usage(),
+        }
     };
 
     let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(time_seed));
-    let mut sim = Simulator::new(
-        game,
-        RandomAgent::new(Some(time_seed.wrapping_add(1))),
-        RandomAgent::new(Some(time_seed.wrapping_add(2))),
-    );
+    let mut sim = Simulator::new(game, seat(0), seat(1));
 
     let mut rhinar_wins = 0usize;
     let mut dorinthea_wins = 0usize;
@@ -75,7 +98,7 @@ fn main() {
     }
 
     println!("Games played:    {}", num_games);
-    println!("Rhinar wins:     {}", rhinar_wins);
-    println!("Dorinthea wins:  {}", dorinthea_wins);
+    println!("Rhinar wins:     {}  (P1, {})", rhinar_wins, agent_names[0]);
+    println!("Dorinthea wins:  {}  (P2, {})", dorinthea_wins, agent_names[1]);
     println!("Draws:           {}", draws);
 }
