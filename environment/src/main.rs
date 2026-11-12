@@ -1,4 +1,5 @@
 mod action;
+mod action_encoding;
 mod ring_buffer;
 mod agents;
 mod card_counts;
