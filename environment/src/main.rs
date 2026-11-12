@@ -16,6 +16,7 @@ mod game_state;
 mod human_agent;
 mod ismcts;
 mod legal_actions;
+mod network;
 mod observation;
 mod puct;
 mod self_play;
@@ -58,14 +59,16 @@ fn main() {
     // `environment [num_games] [--p1 AGENT] [--p2 AGENT] [--iterations N]`:
     // play games between two agents and count the results.
     let usage = || -> ! {
-        eprintln!("usage: environment [num_games] [--p1 random|ismcts|puct] [--p2 random|ismcts|puct] [--iterations N]");
+        eprintln!("usage: environment [num_games] [--p1 AGENT] [--p2 AGENT] [--iterations N] [--network FILE]");
+        eprintln!("       AGENT is random, ismcts, puct (the search with random playouts) or net (the search with --network)");
         eprintln!("       environment play [--seed N] [--reveal] [--iterations N]");
-        eprintln!("       environment selfplay --out FILE [--games N] [--iterations N] [--threads N] [--seed N]");
+        eprintln!("       environment selfplay --out FILE [--games N] [--iterations N] [--threads N] [--seed N] [--network FILE]");
         std::process::exit(1);
     };
     let mut num_games = 1usize;
     let mut agent_names = ["random".to_string(), "random".to_string()];
     let mut iterations = cli::DEFAULT_ISMCTS_ITERATIONS;
+    let mut network: Option<std::sync::Arc<network::Network>> = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
@@ -75,6 +78,10 @@ fn main() {
             },
             "--iterations" => match rest.next().and_then(|s| s.parse().ok()) {
                 Some(n) => iterations = n,
+                None => usage(),
+            },
+            "--network" => match rest.next() {
+                Some(path) => network = Some(network::load_or_exit(path)),
                 None => usage(),
             },
             n => match n.parse() {
@@ -90,6 +97,13 @@ fn main() {
             "ismcts" => Seat::Ismcts(IsmctsAgent::new(iterations, seed)),
             // No network yet: uniform priors, and a random playout for a value.
             "puct" => Seat::Puct(PuctAgent::new(RolloutEvaluator::new(seed), iterations, seed)),
+            "net" => match &network {
+                Some(network) => Seat::Net(PuctAgent::new(network::evaluator_or_exit(network), iterations, seed)),
+                None => {
+                    eprintln!("the net agent needs --network FILE");
+                    usage()
+                }
+            },
             _ => usage(),
         }
     };

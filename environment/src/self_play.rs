@@ -322,12 +322,13 @@ pub fn run<E: Evaluator>(
 }
 
 /// `environment selfplay --out FILE [--games N] [--iterations N] [--threads N]
-/// [--seed N] [--sampled-moves N]`: play self-play games with the rollout
-/// evaluator and write their records to `FILE`.
+/// [--seed N] [--sampled-moves N] [--network FILE]`: play self-play games and
+/// write their records to `FILE`. The search judges positions with the
+/// network in `--network`, or with random playouts when there is none.
 pub fn main(args: &[String], time_seed: u64) {
     let usage = || -> ! {
         eprintln!("usage: environment selfplay --out FILE [--games N] [--iterations N] \
-            [--threads N] [--seed N] [--sampled-moves N]");
+            [--threads N] [--seed N] [--sampled-moves N] [--network FILE]");
         std::process::exit(1);
     };
     let mut config = Config::default();
@@ -335,12 +336,17 @@ pub fn main(args: &[String], time_seed: u64) {
     let mut threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     let mut seed = time_seed;
     let mut path: Option<&str> = None;
+    let mut network = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         let Some(value) = rest.next() else { usage() };
         let parsed = match arg.as_str() {
             "--out" => {
                 path = Some(value);
+                true
+            }
+            "--network" => {
+                network = Some(crate::network::load_or_exit(value));
                 true
             }
             "--games" => value.parse().map(|n| games = n).is_ok(),
@@ -360,9 +366,18 @@ pub fn main(args: &[String], time_seed: u64) {
     }
 
     let start = Instant::now();
+    // Fail on a network of the wrong sizes before playing anything.
+    if let Some(network) = &network {
+        crate::network::evaluator_or_exit(network);
+    }
     let result = std::fs::File::create(path).and_then(|file| {
         let mut out = BufWriter::new(file);
-        run(&mut out, games, threads, seed, &config, |seed| RolloutEvaluator::new(Some(seed)))
+        match &network {
+            Some(network) => run(&mut out, games, threads, seed, &config, |_| {
+                crate::network::evaluator_or_exit(network)
+            }),
+            None => run(&mut out, games, threads, seed, &config, |seed| RolloutEvaluator::new(Some(seed))),
+        }
     });
     let summary = match result {
         Ok(summary) => summary,
@@ -372,8 +387,9 @@ pub fn main(args: &[String], time_seed: u64) {
         }
     };
     let seconds = start.elapsed().as_secs_f64();
-    println!("Games played:    {}  ({} iterations, seed {seed}, {threads} threads)",
-        summary.games, config.iterations);
+    println!("Games played:    {}  ({} iterations, seed {seed}, {threads} threads, {})",
+        summary.games, config.iterations,
+        if network.is_some() { "network" } else { "random playouts" });
     println!("Rhinar wins:     {}", summary.p1_wins);
     println!("Dorinthea wins:  {}", summary.p2_wins);
     println!("Draws:           {}", summary.draws);

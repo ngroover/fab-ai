@@ -8,6 +8,7 @@ environment/src/self_play.rs documents, so the tests need no Rust build.
 
 from __future__ import annotations
 
+import math
 import os
 import struct
 import tempfile
@@ -220,6 +221,30 @@ class TrainNetworkTest(unittest.TestCase):
             f.write(data[:-4])
         with self.assertRaises(ValueError):
             tn.load_network(self.path("cut.bin"))
+
+    def test_forward_matches_the_rust_evaluator(self):
+        """The Rust forward pass (environment/src/network.rs,
+        `forward_matches_the_pytorch_network`) builds this same network from
+        this same formula and expects these same numbers."""
+        net = tn.PolicyValueNet(7, 6, [5, 4])
+        k = 0
+        with torch.no_grad():
+            for layer in net.layers():
+                for tensor in (layer.weight, layer.bias):
+                    values = [0.5 * math.sin(0.37 * (k + i) + 0.1) for i in range(tensor.numel())]
+                    tensor.copy_(torch.tensor(values, dtype=torch.float32).reshape(tensor.shape))
+                    k += tensor.numel()
+        obs = torch.tensor([0.0 if i % 3 == 0 else math.cos(0.91 * i) for i in range(7)],
+                           dtype=torch.float32)
+
+        # Through the weights file, as the Rust side gets it.
+        tn.save_network(net, self.path("reference.bin"))
+        with torch.no_grad():
+            logits, value = tn.load_network(self.path("reference.bin"))(obs.unsqueeze(0))
+        expected = [0.4166978, 0.6056518, 0.5340008, 0.261982, 0.1099094, 0.0992357]
+        for got, want in zip(logits[0].tolist(), expected):
+            self.assertAlmostEqual(got, want, places=5)
+        self.assertAlmostEqual(value.item(), -0.5396721, places=5)
 
     def test_command_line_trains_and_continues(self):
         write_records(self.path("a.bin"), learnable_records(games=20, plies=6))
