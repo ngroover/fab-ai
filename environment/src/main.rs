@@ -18,6 +18,7 @@ mod ismcts;
 mod legal_actions;
 mod observation;
 mod puct;
+mod self_play;
 mod fab_step;
 mod simulator;
 #[cfg(test)]
@@ -48,11 +49,18 @@ fn main() {
         return;
     }
 
+    // `environment selfplay`: play self-play games and record them.
+    if args.first().map(String::as_str) == Some("selfplay") {
+        self_play::main(&args[1..], time_seed);
+        return;
+    }
+
     // `environment [num_games] [--p1 AGENT] [--p2 AGENT] [--iterations N]`:
     // play games between two agents and count the results.
     let usage = || -> ! {
         eprintln!("usage: environment [num_games] [--p1 random|ismcts|puct] [--p2 random|ismcts|puct] [--iterations N]");
         eprintln!("       environment play [--seed N] [--reveal] [--iterations N]");
+        eprintln!("       environment selfplay --out FILE [--games N] [--iterations N] [--threads N] [--seed N]");
         std::process::exit(1);
     };
     let mut num_games = 1usize;
