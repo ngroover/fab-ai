@@ -15,6 +15,7 @@ mod game_state;
 mod human_agent;
 mod ismcts;
 mod legal_actions;
+mod observation;
 mod fab_step;
 mod simulator;
 #[cfg(test)]
