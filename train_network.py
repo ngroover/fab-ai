@@ -14,7 +14,11 @@ trained to answer with
 
 - a **policy**: the share of the search's visits each legal action got
   (cross-entropy, over the legal actions only), and
-- a **value**: how the game ended for the mover, 1 / -1 / 0 (squared error).
+- a **value**: how the game ended for the mover, 1 / -1 / 0, mixed with the
+  search's own estimate of that (squared error; see `--value-mix`).
+
+Every tenth game is held out, and the weights kept are those of the epoch that
+did best on the held-out games.
 
 The network is a plain MLP: the observation through a stack of ReLU layers,
 then a linear policy head with one logit per action slot and a linear value
@@ -87,10 +91,10 @@ class Records:
     def __len__(self) -> int:
         return len(self.outcome)
 
-    def batch(self, rows: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def batch(self, rows: np.ndarray) -> Tuple[torch.Tensor, ...]:
         """Records `rows` as dense tensors: observations `(B, obs_size)`, the
-        legal-action mask and the policy target `(B, action_size)`, and the
-        value target `(B,)`."""
+        legal-action mask and the policy target `(B, action_size)`, then the
+        games' outcomes and the search's own value estimates, `(B,)` each."""
         rows = np.asarray(rows, dtype=np.int64)
         obs = np.zeros((len(rows), self.obs_size), dtype=np.float32)
         r, flat = _gather(self.obs_ptr, rows)
@@ -108,6 +112,7 @@ class Records:
             torch.from_numpy(mask),
             torch.from_numpy(policy),
             torch.from_numpy(self.outcome[rows]),
+            torch.from_numpy(self.root_value[rows]),
         )
 
 
@@ -278,10 +283,11 @@ def losses(
     obs: torch.Tensor,
     mask: torch.Tensor,
     policy: torch.Tensor,
-    outcome: torch.Tensor,
+    value_target: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Per-record policy loss, value loss, and whether the network's favourite
-    legal action is the search's.
+    """Per-record policy loss, value loss (squared error against
+    `value_target`), and whether the network's favourite legal action is the
+    search's.
 
     The policy loss is the cross-entropy between the visit shares and the
     network's distribution over the *legal* actions: an illegal slot's logit
@@ -292,7 +298,7 @@ def losses(
     log_probs = F.log_softmax(logits, dim=1)
     # Illegal slots are -inf with a target of 0; keep 0 * -inf out of the sum.
     policy_loss = -(policy * torch.where(mask, log_probs, torch.zeros_like(log_probs))).sum(dim=1)
-    value_loss = (value - outcome) ** 2
+    value_loss = (value - value_target) ** 2
     agrees = logits.argmax(dim=1) == policy.argmax(dim=1)
     return policy_loss, value_loss, agrees
 
@@ -312,13 +318,15 @@ class Metrics:
 
 def evaluate(net: PolicyValueNet, records: Records, rows: np.ndarray,
              batch_size: int = 4096, device: str = "cpu") -> Metrics:
-    """The network's average losses over records `rows`."""
+    """The network's average losses over records `rows`. The value loss is
+    always measured against the games' outcomes, whatever the network was
+    trained towards."""
     net.eval()
     totals = np.zeros(3)
     with torch.no_grad():
         for start in range(0, len(rows), batch_size):
             batch = [t.to(device) for t in records.batch(rows[start:start + batch_size])]
-            totals += [t.float().sum().item() for t in losses(net, *batch)]
+            totals += [t.float().sum().item() for t in losses(net, *batch[:4])]
     return Metrics(*(totals / max(len(rows), 1)))
 
 
@@ -343,7 +351,7 @@ def target_entropy(records: Records, rows: np.ndarray, batch_size: int = 4096) -
     loss any network could reach."""
     total = 0.0
     for start in range(0, len(rows), batch_size):
-        _, _, policy, _ = records.batch(rows[start:start + batch_size])
+        policy = records.batch(rows[start:start + batch_size])[2]
         total += -(policy * torch.log(policy.clamp_min(1e-12))).sum().item()
     return total / max(len(rows), 1)
 
@@ -358,13 +366,25 @@ def train(
     lr: float = 1e-3,
     weight_decay: float = 1e-4,
     value_weight: float = 1.0,
+    value_mix: float = 0.0,
     seed: int = 0,
     device: str = "cpu",
     log=print,
 ) -> List[Tuple[Metrics, Metrics]]:
     """Fit `net` to `train_rows` for `epochs` passes, logging the training and
-    validation metrics after each. Returns them, one pair per epoch."""
+    validation metrics after each. Returns them, one pair per epoch.
+
+    The value is trained towards `(1 - value_mix) · outcome + value_mix ·
+    root_value`. A game's outcome is the truth but is the same for every
+    position of the game, which invites the network to recognise the game
+    instead of judging the position; the search's estimate is per position.
+
+    With validation rows, `net` is left holding the weights of the epoch
+    that scored best on them (policy loss plus `value_weight` times value
+    loss), not the last epoch's: training on past that point only memorizes.
+    """
     net.to(device)
+    best_score, best_epoch, best_weights = float("inf"), 0, None
     optimizer = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=weight_decay)
     rng = np.random.default_rng(seed)
     history = []
@@ -374,7 +394,9 @@ def train(
         order = rng.permutation(train_rows)
         for start in range(0, len(order), batch_size):
             batch = [t.to(device) for t in records.batch(order[start:start + batch_size])]
-            policy_loss, value_loss, _ = losses(net, *batch)
+            obs, mask, policy, outcome, root_value = batch
+            value_target = (1.0 - value_mix) * outcome + value_mix * root_value
+            policy_loss, value_loss, _ = losses(net, obs, mask, policy, value_target)
             loss = policy_loss.mean() + value_weight * value_loss.mean()
             optimizer.zero_grad()
             loss.backward()
@@ -385,6 +407,13 @@ def train(
         log(f"epoch {epoch:3d}  train: {trained}")
         if len(validation_rows):
             log(f"           valid: {held_out}   ({time.time() - started:.1f}s)")
+            score = held_out.policy_loss + value_weight * held_out.value_loss
+            if score < best_score:
+                best_score, best_epoch = score, epoch
+                best_weights = {k: v.detach().clone() for k, v in net.state_dict().items()}
+    if best_weights is not None:
+        net.load_state_dict(best_weights)
+        log(f"keeping the weights of epoch {best_epoch}, the best on the held-out games")
     return history
 
 
@@ -397,10 +426,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                         help="hidden layer widths (ignored with --init)")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch", type=int, default=256)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--value-weight", type=float, default=1.0,
                         help="weight of the value loss beside the policy loss")
+    parser.add_argument("--value-mix", type=float, default=0.5,
+                        help="share of the value target taken from the search's estimate "
+                             "rather than the game's outcome, 0 to 1")
     parser.add_argument("--validation-every", type=int, default=10,
                         help="hold out every Nth game for validation; 0 for none")
     parser.add_argument("--seed", type=int, default=0)
@@ -430,7 +462,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     train(net, records, train_rows, validation_rows, epochs=args.epochs, batch_size=args.batch,
           lr=args.lr, weight_decay=args.weight_decay, value_weight=args.value_weight,
-          seed=args.seed, device=device)
+          value_mix=args.value_mix, seed=args.seed, device=device)
 
     save_network(net.cpu(), args.out)
     print(f"weights written to {args.out}")

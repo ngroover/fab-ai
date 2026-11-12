@@ -79,7 +79,7 @@ class TrainNetworkTest(unittest.TestCase):
         records = tn.load_records([self.path("a.bin")])
 
         self.assertEqual((len(records), records.obs_size, records.action_size), (2, OBS_SIZE, ACTION_SIZE))
-        obs, mask, policy, outcome = records.batch(np.array([1, 0]))
+        obs, mask, policy, outcome, root_value = records.batch(np.array([1, 0]))
         self.assertEqual(obs.shape, (2, OBS_SIZE))
         # Row 0 of the batch is record 1.
         expected = torch.zeros(OBS_SIZE)
@@ -95,6 +95,7 @@ class TrainNetworkTest(unittest.TestCase):
         self.assertAlmostEqual(policy[0, 11].item(), 0.75)
         self.assertEqual(policy[1].tolist()[0], 0.25)
         self.assertEqual(outcome.tolist(), [-1.0, 1.0])
+        self.assertEqual(root_value.tolist(), [-0.5, 0.25])
         self.assertEqual(records.root_value.tolist(), [0.25, -0.5])
         self.assertEqual(records.player.tolist(), [0, 1])
 
@@ -132,7 +133,7 @@ class TrainNetworkTest(unittest.TestCase):
     def test_policy_loss_ignores_illegal_actions(self):
         write_records(self.path("a.bin"), learnable_records(games=2, plies=4))
         records = tn.load_records([self.path("a.bin")])
-        batch = records.batch(np.arange(len(records)))
+        batch = records.batch(np.arange(len(records)))[:4]
         mask = batch[1]
         net = tn.PolicyValueNet(OBS_SIZE, ACTION_SIZE, [16])
         before = tn.losses(net, *batch)[0]
@@ -163,6 +164,36 @@ class TrainNetworkTest(unittest.TestCase):
         self.assertLess(held_out.value_loss, 0.1 * untrained.value_loss)
         self.assertGreater(held_out.agreement, 0.95)
         self.assertLess(untrained.agreement, 0.3)
+
+    def test_the_best_epoch_is_kept(self):
+        """Training past the best validation score must not cost anything:
+        the network ends up with that epoch's weights."""
+        # Too few games to generalize from, so validation soon gets worse.
+        write_records(self.path("a.bin"), learnable_records(games=8, plies=6))
+        records = tn.load_records([self.path("a.bin")])
+        train_rows, validation_rows = tn.split_by_game(records, 2)
+        net = tn.PolicyValueNet(OBS_SIZE, ACTION_SIZE, [64])
+        history = tn.train(net, records, train_rows, validation_rows, epochs=60,
+                           batch_size=8, lr=1e-2, weight_decay=0.0, log=lambda _: None)
+        scores = [held_out.policy_loss + held_out.value_loss for _, held_out in history]
+        kept = tn.evaluate(net, records, validation_rows)
+        self.assertAlmostEqual(kept.policy_loss + kept.value_loss, min(scores), places=5)
+        self.assertLess(min(scores), scores[-1])
+
+    def test_value_mix_trains_towards_the_search_estimate(self):
+        """Fully mixed, the value learns root_value (half the outcome here)
+        rather than the outcome itself."""
+        write_records(self.path("a.bin"), learnable_records(games=60, plies=12))
+        records = tn.load_records([self.path("a.bin")])
+        rows, _ = tn.split_by_game(records, 0)
+        net = tn.PolicyValueNet(OBS_SIZE, ACTION_SIZE, [32, 32])
+        tn.train(net, records, rows, rows[:0], epochs=40, batch_size=64, lr=3e-3,
+                 value_mix=1.0, log=lambda _: None)
+        obs, _, _, outcome, root_value = records.batch(rows)
+        with torch.no_grad():
+            value = net(obs)[1]
+        self.assertLess(((value - root_value) ** 2).mean().item(), 0.01)
+        self.assertGreater(((value - outcome) ** 2).mean().item(), 0.15)
 
     def test_weights_survive_a_round_trip(self):
         net = tn.PolicyValueNet(OBS_SIZE, ACTION_SIZE, [24, 16])

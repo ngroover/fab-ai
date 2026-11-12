@@ -54,8 +54,10 @@ python3 train_network.py environment/selfplay.bin --out network.bin
 
 Fits a policy/value network (an MLP, `--hidden 256 256` by default) to the
 self-play records: the policy to the search's visit shares, the value to the
-games' results. Every tenth game is held out for validation, and each epoch
-prints both sets' losses beside what an untrained network would score. Give
+games' results (mixed half and half with the search's own estimate; `--value-mix`).
+Every tenth game is held out for validation: each epoch prints both sets' losses
+beside what an untrained network would score, and the weights kept are those of
+the epoch that did best on the held-out games. Give
 several record files to train on all of them, and `--init network.bin` to carry
 on from earlier weights. The weights file format is described at the top of
 `train_network.py`. Needs PyTorch and NumPy.
