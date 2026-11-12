@@ -40,7 +40,7 @@ use crate::game_state::{Gamestate, Player, PlayerIndex, Zone, PLAYER_CARDS};
 /// describe the real deal.
 #[allow(dead_code)] // for search agents; exercised by the tests below
 pub fn shuffle_hidden_information(gs: &mut Gamestate, observer: PlayerIndex, rng: &mut GameRng) {
-    let pending = gs.pending_card;
+    let pending = gs.pending_in_zone();
     shuffle_hidden_deck_slots(gs.player_mut(observer), rng);
 
     let opponent = gs.player_mut(observer.opponent());

@@ -152,3 +152,10 @@ pub enum Card {
     QuickenToken,
 }
 
+impl Card {
+    /// How many cards the game has: one more than the last variant, so
+    /// `QuickenToken` must stay last. `card as usize` is below this for every
+    /// card, which makes it an index into a per-card array (see `observation`).
+    pub const COUNT: usize = Card::QuickenToken as usize + 1;
+}
+

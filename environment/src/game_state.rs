@@ -707,6 +707,14 @@ impl Gamestate {
         self.stack.back()
     }
 
+    /// The card being paid for, while it is still in the zone it is played
+    /// from — where its announcement tells the opponent it is. `None` once it
+    /// has gone on the stack: a play paused for a choice (`RevealChoice`)
+    /// keeps naming its card in `pending_card` after it was paid for.
+    pub fn pending_in_zone(&self) -> Option<PendingCard> {
+        self.pending_card.filter(|_| self.phase != Phase::RevealChoice)
+    }
+
     /// True when nothing is on the stack.
     pub fn stack_is_empty(&self) -> bool {
         self.stack.is_empty()
