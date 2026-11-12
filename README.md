@@ -48,3 +48,14 @@ legal action, and the game's result. Until there is a network the search judges
 positions with random playouts. `--seed N` makes a run reproducible, whatever
 `--threads N` is. The file format is described at the top of
 `environment/src/self_play.rs`.
+
+# Train the network on self-play data
+python3 train_network.py environment/selfplay.bin --out network.bin
+
+Fits a policy/value network (an MLP, `--hidden 256 256` by default) to the
+self-play records: the policy to the search's visit shares, the value to the
+games' results. Every tenth game is held out for validation, and each epoch
+prints both sets' losses beside what an untrained network would score. Give
+several record files to train on all of them, and `--init network.bin` to carry
+on from earlier weights. The weights file format is described at the top of
+`train_network.py`. Needs PyTorch and NumPy.
