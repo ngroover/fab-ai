@@ -61,3 +61,11 @@ the epoch that did best on the held-out games. Give
 several record files to train on all of them, and `--init network.bin` to carry
 on from earlier weights. The weights file format is described at the top of
 `train_network.py`. Needs PyTorch and NumPy.
+
+# Play with a trained network (Rust environment)
+cd environment && cargo run --release -- 100 --p1 net --p2 ismcts --network ../network.bin --iterations 400
+
+The `net` agent is the PUCT search judging positions with the network instead of
+random playouts (`puct`). Swap `--p1` and `--p2` to give it the other hero.
+`selfplay` takes `--network` too, to generate the next round of training data
+with the network.
