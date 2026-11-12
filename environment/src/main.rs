@@ -17,6 +17,7 @@ mod human_agent;
 mod ismcts;
 mod legal_actions;
 mod observation;
+mod puct;
 mod fab_step;
 mod simulator;
 #[cfg(test)]
@@ -27,6 +28,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use agents::RandomAgent;
 use cli::Seat;
 use ismcts::IsmctsAgent;
+use puct::{PuctAgent, RolloutEvaluator};
 use decks::{build_dorinthea_deck, build_rhinar_deck};
 use fab_game::FabGame;
 use game_state::Phase;
@@ -49,7 +51,7 @@ fn main() {
     // `environment [num_games] [--p1 AGENT] [--p2 AGENT] [--iterations N]`:
     // play games between two agents and count the results.
     let usage = || -> ! {
-        eprintln!("usage: environment [num_games] [--p1 random|ismcts] [--p2 random|ismcts] [--iterations N]");
+        eprintln!("usage: environment [num_games] [--p1 random|ismcts|puct] [--p2 random|ismcts|puct] [--iterations N]");
         eprintln!("       environment play [--seed N] [--reveal] [--iterations N]");
         std::process::exit(1);
     };
@@ -78,6 +80,8 @@ fn main() {
         match agent_names[player].as_str() {
             "random" => Seat::Random(RandomAgent::new(seed)),
             "ismcts" => Seat::Ismcts(IsmctsAgent::new(iterations, seed)),
+            // No network yet: uniform priors, and a random playout for a value.
+            "puct" => Seat::Puct(PuctAgent::new(RolloutEvaluator::new(seed), iterations, seed)),
             _ => usage(),
         }
     };

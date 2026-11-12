@@ -19,6 +19,7 @@ pub enum Seat {
     Human(HumanAgent<StdinLines, Stdout>),
     Random(RandomAgent),
     Ismcts(IsmctsAgent),
+    Puct(crate::puct::PuctAgent<crate::puct::RolloutEvaluator>),
 }
 
 /// How many search iterations an ISMCTS seat runs per decision unless told
@@ -31,6 +32,7 @@ impl Agent<FabGame> for Seat {
             Seat::Human(agent) => agent.select_action(game, legal_actions),
             Seat::Random(agent) => agent.select_action(game, legal_actions),
             Seat::Ismcts(agent) => agent.select_action(game, legal_actions),
+            Seat::Puct(agent) => agent.select_action(game, legal_actions),
         }
     }
 }
