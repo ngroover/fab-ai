@@ -38,3 +38,13 @@ the full log).
 
 The game log is compiled in by default. To compile it out when measuring raw
 simulation speed: `cargo run --release --no-default-features -- 100000`
+
+# Generate self-play training data (Rust environment)
+cd environment && cargo run --release -- selfplay --out selfplay.bin --games 1000 --iterations 400
+
+Plays Rhinar against Dorinthea with the PUCT search on both sides and writes one
+record per decision: the mover's observation, the visits the search gave each
+legal action, and the game's result. Until there is a network the search judges
+positions with random playouts. `--seed N` makes a run reproducible, whatever
+`--threads N` is. The file format is described at the top of
+`environment/src/self_play.rs`.

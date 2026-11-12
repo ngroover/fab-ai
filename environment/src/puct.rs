@@ -130,6 +130,8 @@ pub struct PuctAgent<E: Evaluator> {
     rng: SmallRng,
     iterations: u32,
     exploration: f32,
+    /// Dirichlet noise mixed into the root priors: `(alpha, weight)`.
+    root_noise: Option<(f32, f32)>,
     nodes: Vec<Node>,
     /// The nodes the current iteration walked through, each with the player
     /// who chose it.
@@ -153,6 +155,7 @@ impl<E: Evaluator> PuctAgent<E> {
             rng,
             iterations,
             exploration: Self::DEFAULT_EXPLORATION,
+            root_noise: None,
             nodes: Vec::new(),
             path: Vec::new(),
         }
@@ -162,6 +165,44 @@ impl<E: Evaluator> PuctAgent<E> {
     pub fn with_exploration(mut self, exploration: f32) -> Self {
         self.exploration = exploration;
         self
+    }
+
+    /// Mix Dirichlet noise into the root's priors, as AlphaZero does in
+    /// self-play so that games differ and no root action goes unexamined: each
+    /// prior becomes `(1 - weight) · prior + weight · noise`, the noise drawn
+    /// afresh for every search from a Dirichlet distribution with
+    /// concentration `alpha`. Off by default, which is right for playing to
+    /// win.
+    pub fn with_root_noise(mut self, alpha: f32, weight: f32) -> Self {
+        assert!(alpha > 0.0 && (0.0..=1.0).contains(&weight));
+        self.root_noise = Some((alpha, weight));
+        self
+    }
+
+    /// Mix the root noise, if any, into the priors of the root's children.
+    fn add_root_noise(&mut self) {
+        let Some((alpha, weight)) = self.root_noise else {
+            return;
+        };
+        let mut noise = [0.0f32; MAX_LEGAL_ACTIONS];
+        let mut children = 0;
+        let mut child = self.nodes[0].first_child;
+        while child != NONE {
+            noise[children] = gamma(&mut self.rng, alpha);
+            children += 1;
+            child = self.nodes[child as usize].next_sibling;
+        }
+        // Gamma draws divided by their sum are a Dirichlet draw.
+        let total: f32 = noise[..children].iter().sum();
+        if total <= 0.0 {
+            return;
+        }
+        let mut child = self.nodes[0].first_child;
+        for share in &noise[..children] {
+            let node = &mut self.nodes[child as usize];
+            node.prior = (1.0 - weight) * node.prior + weight * share / total;
+            child = node.next_sibling;
+        }
     }
 
     /// The child of `parent` reached by `action`, if the tree has it.
@@ -306,8 +347,12 @@ impl<E: Evaluator> PuctAgent<E> {
             first_child: NONE,
             next_sibling: NONE,
         });
-        for _ in 0..self.iterations {
+        for i in 0..self.iterations {
             self.iterate(&root_game, observer);
+            // The first iteration gave the root its children and priors.
+            if i == 0 {
+                self.add_root_noise();
+            }
         }
 
         let mut stats = Vec::new();
@@ -326,10 +371,33 @@ impl<E: Evaluator> PuctAgent<E> {
     }
 }
 
+/// A draw from the Gamma distribution with shape `alpha` and scale 1
+/// (Marsaglia and Tsang's method), for Dirichlet noise.
+fn gamma(rng: &mut SmallRng, alpha: f32) -> f32 {
+    use rand::RngExt;
+    if alpha < 1.0 {
+        // Gamma(alpha) = Gamma(alpha + 1) · U^(1 / alpha).
+        let u: f32 = rng.random();
+        return gamma(rng, alpha + 1.0) * u.max(f32::MIN_POSITIVE).powf(1.0 / alpha);
+    }
+    let d = alpha - 1.0 / 3.0;
+    let c = 1.0 / (9.0 * d).sqrt();
+    loop {
+        // A standard normal draw, by Box and Muller's transform.
+        let (u1, u2): (f32, f32) = (rng.random(), rng.random());
+        let x = (-2.0 * u1.max(f32::MIN_POSITIVE).ln()).sqrt() * (std::f32::consts::TAU * u2).cos();
+        let v = (1.0 + c * x).powi(3);
+        let u: f32 = rng.random();
+        if v > 0.0 && u.max(f32::MIN_POSITIVE).ln() < 0.5 * x * x + d - d * v + d * v.ln() {
+            return d * v;
+        }
+    }
+}
+
 /// The policy a search's visit counts stand for, as a training target: each
 /// root action's share of the visits, at its `action_encoding` index, for the
 /// player to act in `game`. All zeros if the search made no visits.
-#[allow(dead_code)] // for self-play to come; exercised by the tests
+#[allow(dead_code)] // a dense form of what self-play records; exercised by the tests
 pub fn policy_target(game: &FabGame, stats: &[RootStat], out: &mut [f32; ACTION_SIZE]) {
     out.fill(0.0);
     let player = game.state.player(game.state.active_player);
@@ -488,6 +556,44 @@ mod tests {
         }
         // Both cases came up: actions that kept the decision and that passed it.
         assert_eq!(next_movers.len(), 2);
+    }
+
+    /// Gamma draws have the mean and variance of the distribution — both
+    /// equal to the shape — on either side of the shape-1 split.
+    #[test]
+    fn gamma_draws_have_the_right_mean_and_variance() {
+        let mut rng = SmallRng::seed_from_u64(1);
+        for alpha in [0.3f32, 1.0, 2.5] {
+            let draws: Vec<f32> = (0..40_000).map(|_| gamma(&mut rng, alpha)).collect();
+            assert!(draws.iter().all(|x| x.is_finite() && *x >= 0.0));
+            let mean = draws.iter().sum::<f32>() / draws.len() as f32;
+            let variance = draws.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / draws.len() as f32;
+            assert!((mean - alpha).abs() < 0.05 * alpha.max(1.0), "alpha {alpha}: mean {mean}");
+            assert!((variance - alpha).abs() < 0.1 * alpha.max(1.0), "alpha {alpha}: variance {variance}");
+        }
+    }
+
+    /// Root noise leaves the priors a distribution, changes them, and differs
+    /// from one search to the next; without it the priors are the evaluator's.
+    #[test]
+    fn root_noise_perturbs_the_root_priors() {
+        let game = game_at_a_decision(11);
+        let priors = |agent: &mut PuctAgent<RolloutEvaluator>| -> Vec<f32> {
+            agent.search(&game).iter().map(|s| s.prior).collect()
+        };
+        let uniform = 1.0 / game.legal_actions().len() as f32;
+
+        let mut plain = rollout_agent(20, 1);
+        assert!(priors(&mut plain).iter().all(|p| (p - uniform).abs() < 1e-6));
+
+        let mut noisy = rollout_agent(20, 1).with_root_noise(1.0, 0.25);
+        let first = priors(&mut noisy);
+        let second = priors(&mut noisy);
+        assert!((first.iter().sum::<f32>() - 1.0).abs() < 1e-5);
+        assert!(first.iter().any(|p| (p - uniform).abs() > 1e-3));
+        // A quarter of each prior is noise; the rest is still the evaluator's.
+        assert!(first.iter().all(|&p| p >= 0.75 * uniform - 1e-6));
+        assert_ne!(first, second);
     }
 
     #[test]
