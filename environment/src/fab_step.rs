@@ -561,10 +561,30 @@ fn bottom_pitched_card(gs: &mut Gamestate, pid: PlayerIndex, id: DeckCardId) {
 
 /// End the turn player's turn: they draw back up to intellect, then the turn
 /// and active player both flip to the opponent, whose Action phase begins.
+/// At the end of the first turn of the game the non-turn player draws up to
+/// intellect as well, refilling whatever they spent defending.
 /// Unspent resource points are lost at the end of the turn — both players',
 /// since the defender can bank leftovers from reaction-window pitches too.
 fn end_turn(gs: &mut Gamestate) {
     let pid = gs.turn_player;
+    draw_up_at_end_of_turn(gs, pid);
+    // `turn_count` is bumped in `begin_turn`, so it still reads 1 here while
+    // the first turn of the game is ending.
+    if gs.turn_count == 1 {
+        draw_up_at_end_of_turn(gs, pid.opponent());
+    }
+
+    gs.p1.resources = 0;
+    gs.p2.resources = 0;
+
+    gs.turn_player = gs.turn_player.opponent();
+    gs.active_player = gs.turn_player;
+    gs.phase = Phase::Action;
+    begin_turn(gs);
+}
+
+/// Draw `pid` back up to intellect in the end phase, logging the draw.
+fn draw_up_at_end_of_turn(gs: &mut Gamestate, pid: PlayerIndex) {
     // The cards about to be drawn, named for the log before they leave the deck.
     let drawn_names = if gs.logging_enabled() {
         let player = gs.player(pid);
@@ -579,14 +599,6 @@ fn end_turn(gs: &mut Gamestate) {
     if let Some(names) = drawn_names {
         log_end_of_turn_draw(gs, pid, drawn, &names);
     }
-
-    gs.p1.resources = 0;
-    gs.p2.resources = 0;
-
-    gs.turn_player = gs.turn_player.opponent();
-    gs.active_player = gs.turn_player;
-    gs.phase = Phase::Action;
-    begin_turn(gs);
 }
 
 /// Log that `pid` drew back up to intellect at the end of their turn. The drawn
@@ -3551,6 +3563,54 @@ mod tests {
         assert_eq!(gs.phase, Phase::Action);
         assert_eq!(gs.p2.action_points, 1);
         assert_eq!(gs.turn_count, 2);
+    }
+
+    #[test]
+    fn test_first_turn_end_draws_up_non_turn_player_too() {
+        let mut gs = fresh_game();
+        assert_eq!(gs.turn_player, PlayerIndex::P1);
+
+        // Dorinthea is down two cards, as if she had blocked with them.
+        for _ in 0..2 {
+            let (id, _) = gs.p2.hand.iter().next().expect("P2 should have an opening hand");
+            move_card(&mut gs.p2, id, Zone::Hand, Zone::Graveyard);
+        }
+        assert_eq!(gs.p2.hand_size(), 2);
+        let p2_deck = gs.p2.deck_size();
+
+        // Rhinar passes his action phase and skips arsenaling, ending turn one.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        // Ending the first turn of the game refills both hands.
+        assert_eq!(gs.turn_count, 2);
+        assert_eq!(gs.p2.hand_size(), 4);
+        assert_eq!(gs.p2.deck_size(), p2_deck - 2);
+    }
+
+    #[test]
+    fn test_later_turn_end_draws_up_turn_player_only() {
+        let mut gs = fresh_game();
+        // Turn one, then turn two begins with Dorinthea as the turn player.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        assert_eq!(gs.turn_player, PlayerIndex::P2);
+
+        // Rhinar is down two cards, as if he had blocked with them.
+        for _ in 0..2 {
+            let (id, _) = gs.p1.hand.iter().next().expect("P1 should have a hand");
+            move_card(&mut gs.p1, id, Zone::Hand, Zone::Graveyard);
+        }
+        let p1_deck = gs.p1.deck_size();
+
+        // Dorinthea passes and skips arsenaling, ending turn two.
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+        step(&mut gs, Action{ typ: ActionType::Pass, card: None});
+
+        // Only the turn player draws from turn two on.
+        assert_eq!(gs.turn_count, 3);
+        assert_eq!(gs.p1.hand_size(), 2);
+        assert_eq!(gs.p1.deck_size(), p1_deck);
     }
 
     #[test]
