@@ -47,16 +47,30 @@ fn ask(title: &str, options: &[&str]) -> usize {
     })
 }
 
-fn choose_seat(pid: PlayerIndex, seed: u64, reveal: bool, iterations: u32) -> ([Card; 46], Seat) {
+fn choose_seat(
+    pid: PlayerIndex,
+    seed: u64,
+    reveal: bool,
+    iterations: u32,
+    network: Option<&std::sync::Arc<crate::network::Network>>,
+) -> ([Card; 46], Seat) {
     let name = player_name(pid);
     let deck = match ask(&format!("{}: choose a hero", name), &["Rhinar", "Dorinthea"]) {
         0 => build_rhinar_deck(),
         _ => build_dorinthea_deck(),
     };
-    let seat = match ask(&format!("{}: choose an agent", name), &["Human (terminal input)", "Random", "ISMCTS (tree search)"]) {
-        0 => Seat::Human(HumanAgent::new(StdinLines, std::io::stdout(), reveal)),
-        1 => Seat::Random(RandomAgent::new(Some(seed.wrapping_add(1 + pid.index() as u64)))),
-        _ => Seat::Ismcts(IsmctsAgent::new(iterations, Some(seed.wrapping_add(1 + pid.index() as u64)))),
+    // The network is only on the menu when one was given (`--network`).
+    let mut agents = vec!["Human (terminal input)", "Random", "ISMCTS (tree search)"];
+    if network.is_some() {
+        agents.push("Network (tree search with the trained network)");
+    }
+    let agent_seed = Some(seed.wrapping_add(1 + pid.index() as u64));
+    let seat = match (ask(&format!("{}: choose an agent", name), &agents), network) {
+        (0, _) => Seat::Human(HumanAgent::new(StdinLines, std::io::stdout(), reveal)),
+        (1, _) => Seat::Random(RandomAgent::new(agent_seed)),
+        (3, Some(network)) => Seat::Net(crate::puct::PuctAgent::new(
+            crate::network::evaluator_or_exit(network), iterations, agent_seed)),
+        _ => Seat::Ismcts(IsmctsAgent::new(iterations, agent_seed)),
     };
     (deck, seat)
 }
@@ -64,11 +78,14 @@ fn choose_seat(pid: PlayerIndex, seed: u64, reveal: bool, iterations: u32) -> ([
 /// Run the play mode. `args` are the arguments after `play`:
 /// `--seed N` for a reproducible game, `--reveal` to show human players the
 /// hidden information too (the opponent's hand, the omniscient log),
-/// `--iterations N` for how hard an ISMCTS seat searches each decision.
+/// `--iterations N` for how hard an ISMCTS or network seat searches each
+/// decision, `--network FILE` to offer the trained network in `FILE` as an
+/// agent.
 pub fn play(args: &[String], default_seed: u64) {
     let mut seed = default_seed;
     let mut reveal = false;
     let mut iterations = DEFAULT_ISMCTS_ITERATIONS;
+    let mut network = None;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -81,13 +98,22 @@ pub fn play(args: &[String], default_seed: u64) {
                 Some(n) => iterations = n,
                 None => usage_error("--iterations needs a number"),
             },
+            "--network" => match args.next() {
+                Some(path) => {
+                    let loaded = crate::network::load_or_exit(path);
+                    // Fail on a network of the wrong sizes before the menus.
+                    crate::network::evaluator_or_exit(&loaded);
+                    network = Some(loaded);
+                }
+                None => usage_error("--network needs a file"),
+            },
             other => usage_error(&format!("unknown option {}", other)),
         }
     }
 
     println!("Flesh and Blood - Blitz");
-    let (p1_deck, p1_seat) = choose_seat(PlayerIndex::P1, seed, reveal, iterations);
-    let (p2_deck, p2_seat) = choose_seat(PlayerIndex::P2, seed, reveal, iterations);
+    let (p1_deck, p1_seat) = choose_seat(PlayerIndex::P1, seed, reveal, iterations, network.as_ref());
+    let (p2_deck, p2_seat) = choose_seat(PlayerIndex::P2, seed, reveal, iterations, network.as_ref());
     println!("\nStarting game (seed {}).", seed);
 
     let game = FabGame::new(p1_deck, p2_deck, Some(seed));
@@ -128,6 +154,6 @@ pub fn play(args: &[String], default_seed: u64) {
 }
 
 fn usage_error(msg: &str) -> ! {
-    eprintln!("{}\nusage: environment play [--seed N] [--reveal] [--iterations N]", msg);
+    eprintln!("{}\nusage: environment play [--seed N] [--reveal] [--iterations N] [--network FILE]", msg);
     std::process::exit(1);
 }
