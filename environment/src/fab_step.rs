@@ -585,28 +585,36 @@ fn end_turn(gs: &mut Gamestate) {
 
 /// Draw `pid` back up to intellect in the end phase, logging the draw.
 fn draw_up_at_end_of_turn(gs: &mut Gamestate, pid: PlayerIndex) {
+    let player = gs.player(pid);
+    let need = player.intellect.saturating_sub(player.hand_size()) as usize;
+    draw_and_log(gs, pid, need);
+}
+
+/// `pid` draws up to `num` cards (fewer if the deck runs out), logging the
+/// draw. Returns how many were drawn.
+fn draw_and_log(gs: &mut Gamestate, pid: PlayerIndex, num: usize) -> u8 {
     // The cards about to be drawn, named for the log before they leave the deck.
     let drawn_names = if gs.logging_enabled() {
         let player = gs.player(pid);
-        let need = player.intellect.saturating_sub(player.hand_size()) as usize;
-        Some(player.deck.iter().take(need)
+        Some(player.deck.iter().take(num)
             .map(|slot| format!("{:?}", player.card(slot.card())))
             .collect::<Vec<_>>())
     } else {
         None
     };
-    let drawn = draw_to_intellect(gs.player_mut(pid));
+    let drawn = draw_cards(gs.player_mut(pid), num);
     if let Some(names) = drawn_names {
-        log_end_of_turn_draw(gs, pid, drawn, &names);
+        log_draw(gs, pid, drawn, &names);
     }
+    drawn
 }
 
-/// Log that `pid` drew back up to intellect at the end of their turn. The drawn
+/// Log that `pid` drew cards — at the end of a turn or from a card effect. The drawn
 /// cards are hidden information: the omniscient log and the drawing player's
 /// own log name them (`names`, read off the top of the deck before the draw),
 /// while the opponent's log only records the count. Drawing nothing logs
 /// nothing.
-fn log_end_of_turn_draw(gs: &mut Gamestate, pid: PlayerIndex, drawn: u8, names: &[String]) {
+fn log_draw(gs: &mut Gamestate, pid: PlayerIndex, drawn: u8, names: &[String]) {
     if !gs.logging_enabled() || drawn == 0 {
         return;
     }
@@ -1622,8 +1630,8 @@ fn apply_on_play_effect_type(gs: &mut Gamestate, rng: &mut GameRng, owner: Playe
 /// threshold; returns `false` if the hand is empty after drawing (nothing to
 /// discard, e.g. an empty deck and hand).
 fn draw_then_discard_hit6(gs: &mut Gamestate, rng: &mut GameRng, owner: PlayerIndex) -> bool {
-    // Draw a card.
-    draw_cards(gs.player_mut(owner), 1);
+    // Draw a card. The draw is hidden: only the owner's log names the card.
+    draw_and_log(gs, owner, 1);
 
     // Pick a card to discard at random.
     let Some(pick) = random_hand_card(gs, rng, owner) else {

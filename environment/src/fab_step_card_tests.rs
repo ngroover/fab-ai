@@ -172,6 +172,38 @@ fn wild_ride_discarding_below_power6_grants_no_go_again() {
     assert!(in_zone(&gs, PlayerIndex::P1, pick, Zone::Graveyard));
 }
 
+#[cfg(feature = "logging")]
+#[test]
+fn wild_ride_logs_the_drawn_card_hidden_from_opponent() {
+    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);
+    step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+    move_hand_to_graveyard(&mut gs, PlayerIndex::P1);
+    let pick = find_p1_deck_card(&gs, |power| power >= 6);
+    put_on_top_of_deck(&mut gs, PlayerIndex::P1, pick);
+
+    let effect = Card::WildRideR
+        .data()
+        .play_effects
+        .first()
+        .expect("Wild Ride should carry an on-play effect");
+    apply_on_play_effect(&mut gs.state, &mut gs.rng, PlayerIndex::P1, effect);
+
+    // The draw is hidden — the omniscient log and the owner's log name the
+    // card, the opponent's log only counts it — and it is logged ahead of the
+    // public discard.
+    let named = format!("P1 draws [{:?}]", pick);
+    let discard = format!("P1 discards {:?}", pick);
+    let position = |log: &Option<Vec<String>>, msg: &str| {
+        log.as_ref().unwrap().iter().rposition(|line| line == msg)
+    };
+    let draw_at = position(&gs.log, &named).expect("the full log should name the drawn card");
+    assert!(draw_at < position(&gs.log, &discard).expect("the discard should be logged"));
+    assert!(position(&gs.p1.log, &named).is_some());
+    assert!(position(&gs.p2.log, &named).is_none());
+    assert!(position(&gs.p2.log, "P1 draws 1 cards").is_some());
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Alpha Rampage (Card::AlphaRampageR) and Wrecker Romp (Card::WreckerRompB)
 //
