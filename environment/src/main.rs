@@ -68,7 +68,7 @@ fn main() {
     let usage = || -> ! {
         eprintln!("usage: environment [num_games] [--p1 AGENT] [--p2 AGENT] [--iterations N] [--network FILE]");
         eprintln!("       AGENT is random, ismcts, puct (the search with random playouts) or net (the search with --network)");
-        eprintln!("       environment play [--seed N] [--reveal] [--iterations N]");
+        eprintln!("       environment play [--seed N] [--reveal] [--iterations N] [--network FILE]");
         eprintln!("       environment match --a AGENT --b AGENT [--games N] [--iterations N] [--threads N] [--seed N]");
         eprintln!("       environment selfplay --out FILE [--games N] [--iterations N] [--threads N] [--seed N] [--network FILE]");
         std::process::exit(1);

@@ -28,8 +28,8 @@ FAB_DIST_TOKEN=<password_here> python3 run_distributed.py --steps 10000 --batch 
 # Play in the terminal (Rust environment)
 cd environment && cargo play
 
-Numbered menus pick each player's hero (Rhinar or Dorinthea) and agent (human or
-random). A human player can print the game state, print the game log, or choose
+Numbered menus pick each player's hero (Rhinar or Dorinthea) and agent (human,
+random, ISMCTS, or a trained network with `cargo play --network FILE`). A human player can print the game state, print the game log, or choose
 an action at every decision. A decision with only one legal action is played
 automatically (it still shows up in the log), so players and agents are only
 asked when there is a real choice. Options: `cargo play --seed 7` for a reproducible
@@ -38,6 +38,11 @@ the full log).
 
 The game log is compiled in by default. To compile it out when measuring raw
 simulation speed: `cargo run --release --no-default-features -- 100000`
+
+# Train and play the AlphaZero agent (Rust environment)
+See [TRAINING.md](TRAINING.md) for the full guide: running the self-play / training
+loop, playing against a trained network yourself, and each step on its own. The
+sections below are the short version.
 
 # Generate self-play training data (Rust environment)
 cd environment && cargo run --release -- selfplay --out selfplay.bin --games 1000 --iterations 400
