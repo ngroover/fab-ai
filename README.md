@@ -69,3 +69,15 @@ The `net` agent is the PUCT search judging positions with the network instead of
 random playouts (`puct`). Swap `--p1` and `--p2` to give it the other hero.
 `selfplay` takes `--network` too, to generate the next round of training data
 with the network.
+
+# Run the whole loop: self-play, train, evaluate, repeat
+cd environment && cargo build --release && cd ..
+python3 train_loop.py --dir runs/first --rounds 5
+
+Each round plays self-play games with the newest network (random playouts in the
+first round), trains on the last few rounds' records, and measures the new
+network in matches where each side plays both heroes: against ISMCTS, against
+the previous round's network and against the first round's. Everything goes in
+`--dir`, with one line per round in `results.jsonl`; running the command again
+carries on after the last finished round. A single match can be played with
+`environment match --a net:runs/first/net_004.bin --b ismcts --games 400`.
