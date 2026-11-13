@@ -88,9 +88,17 @@ Useful options (`python3 train_loop.py --help` lists them all):
 
 ## Play against the network
 
+A trained network is checked in at `models/alpha_zero.bin`, so you can play
+without training anything:
+
 ```sh
-$ENV play --network runs/first/net_004.bin --iterations 400
+$ENV play --network models/alpha_zero.bin --iterations 400
 ```
+
+It is the fifth-round network of a run of `python3 train_loop.py --rounds 5
+--seed 1` (4,000 self-play games); `models/alpha_zero_results.jsonl` has that
+run's scores. Over 200 games at 400 iterations it scored 95% against ISMCTS. To
+use one of your own instead, give its path, e.g. `runs/first/net_004.bin`.
 
 Menus then ask, for each player, which hero and which agent. To play Dorinthea
 against the network as Rhinar:
