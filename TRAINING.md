@@ -46,11 +46,15 @@ python3 train_loop.py --dir runs/first --rounds 5
 Each round:
 
 1. **Self-play.** 800 games of the search against itself, using the newest
-   network. The first round has no network yet and uses random playouts.
+   network. The first round has no network yet and uses random playouts. Half
+   the games are Rhinar against Dorinthea, a quarter Rhinar against Rhinar and
+   a quarter Dorinthea against Dorinthea.
 2. **Train.** Fits the network to the last 3 rounds of games, starting from the
    previous round's weights.
 3. **Evaluate.** Plays the new network against ISMCTS, against the previous
    round's network, and against the first round's. Each side plays both heroes.
+   These matches are all Rhinar against Dorinthea: they do not measure mirror
+   play.
 
 It prints a line per step and a table at the end:
 
@@ -81,6 +85,7 @@ Useful options (`python3 train_loop.py --help` lists them all):
 | `--rounds` | 5 | Rounds the run should have in total |
 | `--games` | 800 | Self-play games per round |
 | `--iterations` | 400 | Search iterations per self-play move |
+| `--matchups` | all | `all` for Rhinar v Dorinthea and both mirrors in self-play, `cross` for Rhinar v Dorinthea only |
 | `--window` | 3 | Train on this many of the latest rounds |
 | `--eval-games` | 200 | Games per evaluation match |
 | `--threads` | all cores | Threads for self-play and matches |
@@ -96,7 +101,8 @@ $ENV play --network models/alpha_zero.bin --iterations 400
 ```
 
 It is the fifth-round network of a run of `python3 train_loop.py --rounds 5
---seed 1` (4,000 self-play games); `models/alpha_zero_results.jsonl` has that
+--seed 1 --matchups cross` (4,000 self-play games, all Rhinar against
+Dorinthea, so it has never seen a mirror); `models/alpha_zero_results.jsonl` has that
 run's scores. Over 200 games at 400 iterations it scored 95% against ISMCTS. To
 use one of your own instead, give its path, e.g. `runs/first/net_004.bin`.
 
@@ -141,13 +147,18 @@ $ENV selfplay --out data/round0.bin --games 800 --iterations 400
 $ENV selfplay --out data/round1.bin --games 800 --iterations 400 --network net0.bin
 ```
 
-Plays Rhinar against Dorinthea with the search on both sides and writes one
-record per decision. It prints the number of games, who won, and how many
-records were written. 800 games is roughly 140,000 records and 80 MB.
+Plays the search against itself and writes one record per decision. Out of
+every four games, two are Rhinar against Dorinthea, one is Rhinar against
+Rhinar and one is Dorinthea against Dorinthea, which gives the network the same
+number of decisions for each pairing of its own hero and the opponent's. It
+prints the number of games, who won in each matchup, and how many records were
+written. 800 games is roughly 140,000 records and 80 MB.
 
 Options: `--threads N`, `--seed N` (the same seed gives the same file whatever
 the thread count), `--sampled-moves N` (how many of each game's opening
-decisions are picked at random in proportion to the search's visits; default 20).
+decisions are picked at random in proportion to the search's visits; default 20),
+`--matchups cross` (play only Rhinar against Dorinthea, as before mirrors were
+added).
 
 ### 2. Train: fit a network to the data
 

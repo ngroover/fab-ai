@@ -115,6 +115,7 @@ class TrainLoopTest(unittest.TestCase):
         self.assertEqual([p.get("--network") for p in plays],
                          [None, tl.net_path(self.dir, 0), tl.net_path(self.dir, 1)])
         self.assertEqual(len({p["--seed"] for p in plays}), 3)
+        self.assertEqual({p["--matchups"] for p in plays}, {"all"})
 
         # Evaluation: always the anchor; the previous network from round 1;
         # the first network too from round 2. The new network is always A.

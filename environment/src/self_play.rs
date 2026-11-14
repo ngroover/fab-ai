@@ -52,6 +52,7 @@ use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 
 use crate::action_encoding::{action_index, ACTION_SIZE};
+use crate::cards::Card;
 use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
 use crate::fab_game::FabGame;
 use crate::game_state::Phase;
@@ -76,9 +77,66 @@ pub struct Record {
     pub visits: Vec<(u16, u32)>,
 }
 
+/// The heroes of one self-play game.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Matchup {
+    /// Rhinar (seat 0) against Dorinthea (seat 1).
+    RhinarDorinthea,
+    RhinarMirror,
+    DorintheaMirror,
+}
+
+impl Matchup {
+    pub const ALL: [Matchup; 3] = [Matchup::RhinarDorinthea, Matchup::RhinarMirror, Matchup::DorintheaMirror];
+
+    /// The decklists of seat 0 and seat 1.
+    pub fn decks(self) -> ([Card; 46], [Card; 46]) {
+        match self {
+            Matchup::RhinarDorinthea => (build_rhinar_deck(), build_dorinthea_deck()),
+            Matchup::RhinarMirror => (build_rhinar_deck(), build_rhinar_deck()),
+            Matchup::DorintheaMirror => (build_dorinthea_deck(), build_dorinthea_deck()),
+        }
+    }
+
+    /// The heroes of seat 0 and seat 1, for printing.
+    pub fn heroes(self) -> (&'static str, &'static str) {
+        match self {
+            Matchup::RhinarDorinthea => ("Rhinar", "Dorinthea"),
+            Matchup::RhinarMirror => ("Rhinar", "Rhinar"),
+            Matchup::DorintheaMirror => ("Dorinthea", "Dorinthea"),
+        }
+    }
+}
+
+/// Which matchups a self-play run plays.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Matchups {
+    /// Rhinar against Dorinthea only.
+    Cross,
+    /// Rhinar against Dorinthea and both mirrors.
+    All,
+}
+
+impl Matchups {
+    /// The matchup of game `index`. With `All`, every four games in a row are
+    /// two of Rhinar against Dorinthea and one of each mirror: a mirror game
+    /// gives two records of its pairing for every one a cross game gives of
+    /// each of its two, so this spreads the records evenly over the four
+    /// (own hero, opposing hero) pairings a network can be asked about.
+    pub fn of(self, index: u32) -> Matchup {
+        match (self, index % 4) {
+            (Matchups::Cross, _) | (Matchups::All, 0 | 2) => Matchup::RhinarDorinthea,
+            (Matchups::All, 1) => Matchup::RhinarMirror,
+            (Matchups::All, _) => Matchup::DorintheaMirror,
+        }
+    }
+}
+
 /// How self-play games are played.
 #[derive(Clone, Copy, Debug)]
 pub struct Config {
+    /// The matchups played.
+    pub matchups: Matchups,
     /// Search iterations per decision.
     pub iterations: u32,
     /// How many of a game's first decisions (both players' together) pick a
@@ -94,7 +152,13 @@ impl Default for Config {
     fn default() -> Self {
         // AlphaZero's noise weight; its alpha is about 10 over the typical
         // number of legal moves, which here is a handful. Neither is tuned.
-        Config { iterations: 400, sampled_moves: 20, noise_alpha: 1.0, noise_weight: 0.25 }
+        Config {
+            matchups: Matchups::All,
+            iterations: 400,
+            sampled_moves: 20,
+            noise_alpha: 1.0,
+            noise_weight: 0.25,
+        }
     }
 }
 
@@ -243,18 +307,27 @@ pub fn read_records(r: &mut impl Read) -> io::Result<Vec<Record>> {
     Ok(records)
 }
 
-/// What a self-play run produced.
+/// How the games of one matchup ended.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Summary {
+pub struct Tally {
     pub games: u32,
-    pub records: u64,
     pub p1_wins: u32,
     pub p2_wins: u32,
     pub draws: u32,
 }
 
-/// Play `games` self-play games of Rhinar (seat 0) against Dorinthea (seat 1)
-/// on `threads` threads and write their records to `out`, header first.
+/// What a self-play run produced.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Summary {
+    pub games: u32,
+    pub records: u64,
+    /// The results by matchup, in `Matchup::ALL`'s order.
+    pub tallies: [Tally; 3],
+}
+
+/// Play `games` self-play games on `threads` threads and write their records
+/// to `out`, header first. Game `i` is played between the heroes of
+/// `config.matchups.of(i)`.
 ///
 /// Game `i` is seeded from `seed + i` — its deal, its search and its sampled
 /// moves — and the games are written in order, so a run's output depends only
@@ -285,7 +358,8 @@ pub fn run<E: Evaluator>(
                 // Three streams per game, kept apart: the deal, the search
                 // and the sampled moves.
                 let game_seed = seed.wrapping_add(index as u64);
-                let mut game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(game_seed));
+                let (p1_deck, p2_deck) = config.matchups.of(index).decks();
+                let mut game = FabGame::new(p1_deck, p2_deck, Some(game_seed));
                 let evaluator = make_evaluator(game_seed ^ 0x9E37_79B9_7F4A_7C15);
                 let mut agent = config.agent(evaluator, game_seed ^ 0xC2B2_AE3D_27D4_EB4F);
                 let mut rng = SmallRng::seed_from_u64(game_seed ^ 0x1656_67B1_9E37_79F9);
@@ -306,13 +380,15 @@ pub fn run<E: Evaluator>(
                 for record in &records {
                     write_record(out, record)?;
                 }
+                let tally = &mut summary.tallies[config.matchups.of(summary.games) as usize];
+                tally.games += 1;
+                match phase {
+                    Phase::Player1Win => tally.p1_wins += 1,
+                    Phase::Player2Win => tally.p2_wins += 1,
+                    _ => tally.draws += 1,
+                }
                 summary.games += 1;
                 summary.records += records.len() as u64;
-                match phase {
-                    Phase::Player1Win => summary.p1_wins += 1,
-                    Phase::Player2Win => summary.p2_wins += 1,
-                    _ => summary.draws += 1,
-                }
             }
         }
         Ok(())
@@ -322,13 +398,15 @@ pub fn run<E: Evaluator>(
 }
 
 /// `environment selfplay --out FILE [--games N] [--iterations N] [--threads N]
-/// [--seed N] [--sampled-moves N] [--network FILE]`: play self-play games and
-/// write their records to `FILE`. The search judges positions with the
-/// network in `--network`, or with random playouts when there is none.
+/// [--seed N] [--sampled-moves N] [--matchups all|cross] [--network FILE]`:
+/// play self-play games and write their records to `FILE`. The search judges
+/// positions with the network in `--network`, or with random playouts when
+/// there is none. `--matchups cross` plays only Rhinar against Dorinthea;
+/// the default, `all`, plays the two mirrors as well.
 pub fn main(args: &[String], time_seed: u64) {
     let usage = || -> ! {
         eprintln!("usage: environment selfplay --out FILE [--games N] [--iterations N] \
-            [--threads N] [--seed N] [--sampled-moves N] [--network FILE]");
+            [--threads N] [--seed N] [--sampled-moves N] [--matchups all|cross] [--network FILE]");
         std::process::exit(1);
     };
     let mut config = Config::default();
@@ -354,6 +432,17 @@ pub fn main(args: &[String], time_seed: u64) {
             "--threads" => value.parse().map(|n| threads = n).is_ok(),
             "--seed" => value.parse().map(|n| seed = n).is_ok(),
             "--sampled-moves" => value.parse().map(|n| config.sampled_moves = n).is_ok(),
+            "--matchups" => match value.as_str() {
+                "all" => {
+                    config.matchups = Matchups::All;
+                    true
+                }
+                "cross" => {
+                    config.matchups = Matchups::Cross;
+                    true
+                }
+                _ => false,
+            },
             _ => false,
         };
         if !parsed {
@@ -390,9 +479,13 @@ pub fn main(args: &[String], time_seed: u64) {
     println!("Games played:    {}  ({} iterations, seed {seed}, {threads} threads, {})",
         summary.games, config.iterations,
         if network.is_some() { "network" } else { "random playouts" });
-    println!("Rhinar wins:     {}", summary.p1_wins);
-    println!("Dorinthea wins:  {}", summary.p2_wins);
-    println!("Draws:           {}", summary.draws);
+    for (matchup, tally) in Matchup::ALL.iter().zip(&summary.tallies) {
+        if tally.games > 0 {
+            let (p1, p2) = matchup.heroes();
+            println!("{:<24}{} games: P1 {p1} won {}, P2 {p2} won {}, {} draws",
+                format!("{p1} v {p2}:"), tally.games, tally.p1_wins, tally.p2_wins, tally.draws);
+        }
+    }
     println!("Records:         {}  ({:.1} per game)",
         summary.records, summary.records as f64 / summary.games.max(1) as f64);
     println!("Time:            {seconds:.1}s  ({:.2}s per game)", seconds / summary.games.max(1) as f64);
@@ -482,7 +575,8 @@ mod tests {
         let records = read_records(&mut &bytes[..]).unwrap();
         assert_eq!(summary.games, 3);
         assert_eq!(summary.records, records.len() as u64);
-        assert_eq!(summary.p1_wins + summary.p2_wins + summary.draws, 3);
+        let ended: u32 = summary.tallies.iter().map(|t| t.p1_wins + t.p2_wins + t.draws).sum();
+        assert_eq!(ended, 3);
         // Games in order, each one's decisions in order.
         let order: Vec<(u32, u16)> = records.iter().map(|r| (r.game, r.ply)).collect();
         assert!(order.windows(2).all(|pair| pair[0] < pair[1]));
@@ -517,6 +611,53 @@ mod tests {
         assert_eq!(summary, same);
         let (other, _) = run_to_bytes(6, 4, 34, &config);
         assert!(one != other);
+    }
+
+    /// The heroes a record's observation shows: the mover's own and the
+    /// opponent's, as indices into the hero one-hot (Rhinar 0, Dorinthea 1).
+    fn heroes_of(record: &Record) -> (usize, usize) {
+        let hero = |prefix: &str| {
+            let section = crate::observation::layout().into_iter()
+                .find(|s| s.name == format!("{prefix}hero"))
+                .expect("a hero section");
+            let set: Vec<usize> = record.observation.iter()
+                .map(|&(index, _)| index as usize)
+                .filter(|index| (section.offset..section.offset + section.len).contains(index))
+                .map(|index| index - section.offset)
+                .collect();
+            assert_eq!(set.len(), 1, "one hero bit per player");
+            set[0]
+        };
+        (hero("self."), hero("opponent."))
+    }
+
+    /// `all` deals two cross games and one of each mirror in every four, and
+    /// the records show the heroes dealt; `cross` deals only cross games.
+    #[test]
+    fn mirrors_are_played_and_recorded() {
+        let (bytes, summary) = run_to_bytes(8, 4, 55, &quick());
+        assert_eq!(summary.tallies.map(|t| t.games), [4, 2, 2]);
+        let records = read_records(&mut &bytes[..]).unwrap();
+        for record in &records {
+            let (own, other) = heroes_of(record);
+            match Matchups::All.of(record.game) {
+                Matchup::RhinarDorinthea => assert_eq!((own, other), (record.player as usize, 1 - record.player as usize)),
+                Matchup::RhinarMirror => assert_eq!((own, other), (0, 0)),
+                Matchup::DorintheaMirror => assert_eq!((own, other), (1, 1)),
+            }
+        }
+        // Both seats decide in a mirror, with opposite results.
+        for game in [1, 3] {
+            let seats: std::collections::BTreeSet<(u8, i8)> = records.iter()
+                .filter(|r| r.game == game)
+                .map(|r| (r.player, r.outcome as i8))
+                .collect();
+            assert_eq!(seats.len(), 2, "{seats:?}");
+        }
+
+        let cross = Config { matchups: Matchups::Cross, ..quick() };
+        let (_, summary) = run_to_bytes(8, 4, 55, &cross);
+        assert_eq!(summary.tallies.map(|t| t.games), [8, 0, 0]);
     }
 
     /// Early moves are drawn in proportion to visits, so they vary from draw

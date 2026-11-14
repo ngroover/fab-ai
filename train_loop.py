@@ -5,7 +5,8 @@ Each round
 
 1. **plays** self-play games in the Rust environment with the newest network
    (`environment selfplay`; the first round, with no network yet, uses random
-   playouts),
+   playouts) — Rhinar against Dorinthea and both mirrors, or only the former
+   with `--matchups cross`,
 2. **trains** the network on the records of the last few rounds
    (`train_network.py`), carrying on from the previous round's weights, and
 3. **evaluates** the new network in matches where each side plays both heroes
@@ -21,7 +22,8 @@ and match scores. Running the same command again carries on after the last
 finished round, so a run can be stopped and resumed, or extended with a
 larger `--rounds`.
 
-The evaluation matches are only measurements: their games are not trained on,
+The evaluation matches are all Rhinar against Dorinthea, so they do not
+measure mirror play. They are only measurements: their games are not trained on,
 and the newest network is used for self-play whatever it scored.
 """
 
@@ -82,9 +84,9 @@ def parse_result(output: str) -> Dict[str, float]:
 
 
 def self_play(binary: str, out: str, network: Optional[str], games: int, iterations: int,
-              threads: int, seed: int) -> None:
+              threads: int, seed: int, matchups: str) -> None:
     command = [binary, "selfplay", "--out", out, "--games", str(games), "--iterations", str(iterations),
-               "--threads", str(threads), "--seed", str(seed)]
+               "--threads", str(threads), "--seed", str(seed), "--matchups", matchups]
     if network:
         command += ["--network", network]
     run(command)
@@ -157,7 +159,7 @@ def run_round(directory: str, round_: int, args: argparse.Namespace, log=print) 
     # leaves a half-written file where a finished one is expected.
     partial = records_path(directory, round_) + ".partial"
     self_play(args.binary, partial, previous, args.games, args.iterations, args.threads,
-              args.seed + 1_000_003 * round_)
+              args.seed + 1_000_003 * round_, args.matchups)
     os.replace(partial, records_path(directory, round_))
     played = time.time()
 
@@ -177,6 +179,7 @@ def run_round(directory: str, round_: int, args: argparse.Namespace, log=print) 
         "self_play_network": round_ - 1 if previous else None,
         "games": args.games,
         "iterations": args.iterations,
+        "matchups": args.matchups,
         "training": training,
         "matches": matches,
         "seconds": {
@@ -196,6 +199,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     parser.add_argument("--rounds", type=int, default=5, help="rounds the run should have in all")
     parser.add_argument("--games", type=int, default=800, help="self-play games per round")
     parser.add_argument("--iterations", type=int, default=400, help="search iterations per self-play decision")
+    parser.add_argument("--matchups", choices=["all", "cross"], default="all",
+                        help="self-play matchups: Rhinar v Dorinthea and both mirrors (all), "
+                             "or Rhinar v Dorinthea only (cross)")
     parser.add_argument("--window", type=int, default=3, help="train on this many of the latest rounds")
     parser.add_argument("--epochs", type=int, default=4)
     parser.add_argument("--batch", type=int, default=256)
