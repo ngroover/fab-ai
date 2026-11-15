@@ -34,6 +34,12 @@ pub enum ActionType {
     /// of the Feather Walkers' "reveal a card in your hand with cost 1 or
     /// less"), in the `RevealChoice` phase. `card` is the hand card shown.
     Reveal,
+    /// Pay the resources a resolving effect asks for instead of taking its
+    /// penalty: in the `BloodrotPox` phase, pay 3 so the Bloodrot Pox being
+    /// destroyed deals no damage (`Pass` takes the damage). Carries no card.
+    /// With too few resources banked, the rest is pitched for in
+    /// `BloodrotPoxPitch`.
+    Pay,
     Pass
 }
 

@@ -34,7 +34,7 @@ use crate::deck_cards::{DeckKind, TokenCard};
 use crate::fab_step::current_chain_link;
 use crate::game_state::{
     Gamestate, PendingCard, Phase, Player, PlayerFlags, PlayerIndex, Zone, CHAIN_LINKS,
-    DECK_CARDS, EQUIPMENT_SLOTS, MAX_QUICKENS, MAX_TURNS, STACK_SIZE, WEAPON_ATTACK_ORDINALS,
+    DECK_CARDS, EQUIPMENT_SLOTS, MAX_QUICKENS, MAX_TOKEN_COPIES, MAX_TURNS, STACK_SIZE, WEAPON_ATTACK_ORDINALS,
 };
 
 /// Width of a card plane: one slot per `Card`.
@@ -62,7 +62,7 @@ const LAYER_SIZE: usize = 2 + CARDS + LAYER_TYPES + ZONES;
 const PLAYER_PLANES: usize = 15;
 /// Scalars per player: the single ones, plus one per weapon attack ordinal and
 /// per equipment slot; see `encode_player`.
-const PLAYER_SCALARS: usize = 23 + WEAPON_ATTACK_ORDINALS + EQUIPMENT_SLOTS;
+const PLAYER_SCALARS: usize = 26 + WEAPON_ATTACK_ORDINALS + EQUIPMENT_SLOTS;
 const PLAYER_SIZE: usize = HEROES + PLAYER_PLANES * CARDS + PLAYER_SCALARS + FLAGS;
 const GLOBAL_SIZE: usize = 2 * PHASES + 4;
 
@@ -325,6 +325,9 @@ fn encode_player(gs: &Gamestate, p: &Player, own: bool, link: usize, prefix: &st
     w.flag(arsenal_public);
     w.scalar(p.arsenal_lesson_counters as f32);
     w.scalar(p.token_count(TokenCard::QuickenToken) as f32 / MAX_QUICKENS as f32);
+    for token in [TokenCard::ExertionToken, TokenCard::InertiaToken, TokenCard::BloodrotPoxToken] {
+        w.scalar(p.token_count(token) as f32 / MAX_TOKEN_COPIES as f32);
+    }
     w.scalar(p.attack_power_bonus as f32);
     w.scalar(p.next_brute_attack_action_bonus as f32);
     w.scalar(p.next_attack_action_bonus as f32);

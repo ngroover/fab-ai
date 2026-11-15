@@ -39,6 +39,10 @@ pub enum ConstantEffect {
     /// destroy Quicken and the attack gains go again." Fired by
     /// `fab_step::trigger_quickens` from the owner's token zone.
     OnAttackDestroyForGoAgain,
+    /// Bloodrot Pox: at the beginning of its controller's end phase, destroy
+    /// it; it deals 2 damage to them unless they pay 3 resources. Resolved
+    /// one token at a time by `fab_step::resolve_bloodrot_pox`.
+    OnEndPhaseDestroy2DamageUnlessPay3,
 }
 
 /// What a mentor does with its lessons, on top of its constant effect. A

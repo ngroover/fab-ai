@@ -92,11 +92,12 @@ impl ActionKind {
 pub const KINDS: usize = ActionKind::Reveal as usize + 1;
 
 /// The actions that name no card, in the order of their slots.
-const CARDLESS: [ActionType; 4] = [
+const CARDLESS: [ActionType; 5] = [
     ActionType::Pass,
     ActionType::ChooseFirst,
     ActionType::ChooseSecond,
     ActionType::CloseChain,
+    ActionType::Pay,
 ];
 /// The first cardless slot.
 const CARDLESS_START: usize = KINDS * Card::COUNT;
@@ -191,7 +192,7 @@ mod tests {
             assert_eq!(ActionKind::of(typ, zone), Some(kind));
         }
         assert_eq!(ActionKind::of(ActionType::Pitch, Zone::Arsenal), None);
-        assert_eq!(ACTION_SIZE, KINDS * Card::COUNT + 4);
+        assert_eq!(ACTION_SIZE, KINDS * Card::COUNT + 5);
     }
 
     /// Every slot decodes to an action that encodes back to it, for both

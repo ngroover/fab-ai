@@ -87,6 +87,13 @@ pub const CHAIN_LINKS: usize = 5;
 /// destroyed together, so a second one adds nothing anyway; the cap just
 /// keeps the token zone small.
 pub const MAX_QUICKENS: u8 = 2;
+/// The most copies of any one token the token zone can count (see
+/// `card_counts`).
+pub const MAX_TOKEN_COPIES: u8 = 3;
+/// What a Bloodrot Pox deals its controller in their end phase...
+pub const BLOODROT_POX_DAMAGE: u8 = 2;
+/// ...unless they pay this many resources.
+pub const BLOODROT_POX_COST: u8 = 3;
 
 /// Who can see a card. Cards carry no visibility of their own: it follows from
 /// the zone they are in (see `Player::visibility`), except in the deck, where
@@ -293,8 +300,17 @@ pub enum Phase {
     RevealChoice,
     Reaction,
     ReactionPitch,
-    /// The end of the turn player's action phase: they have passed, the combat
-    /// chain has closed, and they may now move a card into their arsenal.
+    /// The beginning of the turn player's end phase, entered only while they
+    /// control a Bloodrot Pox they could pay for: the token is being
+    /// destroyed and they choose to `Pay` 3 resources or `Pass` and take 2
+    /// damage. One token at a time; the Arsenal phase follows the last. A
+    /// token its controller cannot pay for deals its damage without asking.
+    BloodrotPox,
+    /// Pitching to cover a Bloodrot Pox payment the banked resources fall
+    /// short of, returning to `BloodrotPox` handling once 3 are banked.
+    BloodrotPoxPitch,
+    /// The turn player's end phase, after any Bloodrot Pox: the combat chain
+    /// has closed, and they may now move a card into their arsenal.
     Arsenal,
     /// After the Arsenal phase, when two or more cards sit in a player's pitch
     /// zone: the zone's owner (the active player — the turn player first, then

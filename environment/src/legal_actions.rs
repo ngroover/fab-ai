@@ -22,7 +22,11 @@ pub fn legal_actions(gs: &Gamestate) -> LegalActions {
         },
         Phase::MentorFlip => legal_mentor_flip_phase(gs),
         Phase::Action => legal_action_phase(gs),
-        Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch => legal_pitch_phase(gs),
+        Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch
+            | Phase::BloodrotPoxPitch => legal_pitch_phase(gs),
+        // Entered only when the payment is affordable, so both are offered.
+        Phase::BloodrotPox => [Action::no_card(ActionType::Pay), Action::no_card(ActionType::Pass)]
+            .into_iter().collect(),
         Phase::ActionInstant => legal_instant_phase(gs),
         Phase::Defend => legal_defend_phase(gs),
         Phase::DefendTriggers => legal_defend_triggers_phase(gs),

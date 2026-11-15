@@ -1,6 +1,6 @@
 use crate::action::{Action,ActionType};
 use crate::card_counts::{CardCounts, DeckCardId};
-use crate::game_state::{CHAIN_LINKS,MAX_QUICKENS,WEAPON_ATTACK_ORDINALS,DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
+use crate::game_state::{BLOODROT_POX_COST,BLOODROT_POX_DAMAGE,CHAIN_LINKS,MAX_QUICKENS,WEAPON_ATTACK_ORDINALS,DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
 use crate::cards::{Card,CardClass,CardData,CardType,Keyword,WeaponType};
 use crate::card_effects::{Ability,NextAttackEffect,NextAttackEffectType,NextAttackType,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,PlayCondition,AttackEffect,AttackEffectType,AttackKind};
 use crate::fab_game::{shuffle_deck_for, GameRng};
@@ -22,7 +22,9 @@ pub fn step(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
         Phase::ChooseFirst => handle_choose_first(gs, act),
         Phase::MentorFlip => handle_mentor_flip_phase(gs, act),
         Phase::Action => handle_action_phase(gs, rng, act),
-        Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch => handle_pitch_phase(gs, rng, act),
+        Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch
+            | Phase::BloodrotPoxPitch => handle_pitch_phase(gs, rng, act),
+        Phase::BloodrotPox => handle_bloodrot_pox_phase(gs, act),
         Phase::ActionInstant => handle_action_instant_phase(gs, rng, act),
         Phase::Defend => handle_defend_phase(gs, act),
         Phase::DefendTriggers | Phase::Reaction => handle_reaction_phase(gs, rng, act),
@@ -251,18 +253,19 @@ fn handle_action_phase(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
             close_combat_chain(gs);
         }
         // Passing ends the action phase; nothing is pending. The combat chain
-        // closes and play advances to the turn player's Arsenal phase.
+        // closes and the end phase begins: any Bloodrot Pox the turn player
+        // controls resolves, then comes their Arsenal phase.
         ActionType::Pass => {
             if gs.logging_enabled() {
                 gs.log_public(format!("{} passes", player_name(gs.active_player)));
             }
             gs.pending_card = None;
             close_combat_chain(gs);
-            gs.phase = Phase::Arsenal;
             // Intimidate banishes last only until end of turn: as the turn passes
-            // into the Arsenal phase, every Intimidate-banished card returns to its
+            // into the end phase, every Intimidate-banished card returns to its
             // owner's hand (the ordinary banished zone is left untouched).
             return_intimidate_banished_to_hands(gs);
+            resolve_bloodrot_pox(gs);
         }
         _ => {}
     }
@@ -426,6 +429,91 @@ fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
                 Phase::Reaction
             };
             gs.active_player = gs.turn_player;
+        }
+        _ => {}
+    }
+}
+
+/// The beginning of the end phase: each Bloodrot Pox the turn player controls
+/// is destroyed in turn, dealing them `BLOODROT_POX_DAMAGE` unless they pay
+/// `BLOODROT_POX_COST`. A token they could pay for — from banked resources
+/// plus what their hand pitches for — stops here in the `BloodrotPox` phase
+/// for their choice; one they could not is destroyed and deals its damage
+/// outright. With no token left the Arsenal phase begins, unless the damage
+/// ended the game.
+fn resolve_bloodrot_pox(gs: &mut Gamestate) {
+    let pid = gs.turn_player;
+    gs.active_player = pid;
+    while gs.player(pid).token_count(TokenCard::BloodrotPoxToken) > 0 {
+        let player = gs.player(pid);
+        let pitchable: u32 = player.hand.iter()
+            .map(|(id, n)| player.card(id).data().pitch as u32 * n as u32)
+            .sum();
+        if player.resources as u32 + pitchable >= BLOODROT_POX_COST as u32 {
+            gs.phase = Phase::BloodrotPox;
+            return;
+        }
+        take_bloodrot_pox_damage(gs);
+        if gs.is_game_over() {
+            return;
+        }
+    }
+    gs.phase = Phase::Arsenal;
+}
+
+/// Destroy one of the turn player's Bloodrot Pox unpaid: it deals them
+/// `BLOODROT_POX_DAMAGE`, which can end the game.
+fn take_bloodrot_pox_damage(gs: &mut Gamestate) {
+    let pid = gs.turn_player;
+    let player = gs.player_mut(pid);
+    player.remove_token(TokenCard::BloodrotPoxToken);
+    let life_before = player.life;
+    player.life = player.life.saturating_sub(BLOODROT_POX_DAMAGE);
+    let life_after = player.life;
+    if gs.logging_enabled() {
+        gs.log_public(format!(
+            "{}'s Bloodrot Pox is destroyed and deals {} damage to them (life: {}->{})",
+            player_name(pid), BLOODROT_POX_DAMAGE, life_before, life_after
+        ));
+    }
+    gs.check_game_end();
+}
+
+/// Destroy one of the turn player's Bloodrot Pox paid for out of their banked
+/// resources (which cover it), then move on to the next token or the Arsenal
+/// phase.
+fn pay_for_bloodrot_pox(gs: &mut Gamestate) {
+    let pid = gs.turn_player;
+    let player = gs.player_mut(pid);
+    player.resources -= BLOODROT_POX_COST;
+    player.remove_token(TokenCard::BloodrotPoxToken);
+    if gs.logging_enabled() {
+        gs.log_public(format!(
+            "{} pays {} and their Bloodrot Pox is destroyed without dealing damage",
+            player_name(pid), BLOODROT_POX_COST
+        ));
+    }
+    resolve_bloodrot_pox(gs);
+}
+
+/// Handle the turn player's choice for the Bloodrot Pox being destroyed:
+/// `Pay` its cost — straight away if their banked resources cover it,
+/// otherwise by pitching in `BloodrotPoxPitch` — or `Pass` and take the
+/// damage.
+fn handle_bloodrot_pox_phase(gs: &mut Gamestate, act: Action) {
+    match act.typ {
+        ActionType::Pay => {
+            if gs.player(gs.turn_player).resources >= BLOODROT_POX_COST {
+                pay_for_bloodrot_pox(gs);
+            } else {
+                gs.phase = Phase::BloodrotPoxPitch;
+            }
+        }
+        ActionType::Pass => {
+            take_bloodrot_pox_damage(gs);
+            if !gs.is_game_over() {
+                resolve_bloodrot_pox(gs);
+            }
         }
         _ => {}
     }
@@ -1770,6 +1858,15 @@ fn handle_pitch_phase(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
     move_card(player, id, Zone::Hand, Zone::Pitch);
     player.resources += pitch_val;
     let resources = player.resources;
+
+    // Pitching for a Bloodrot Pox: no card is pending, the payment is made
+    // once enough is banked.
+    if gs.phase == Phase::BloodrotPoxPitch {
+        if resources >= BLOODROT_POX_COST {
+            pay_for_bloodrot_pox(gs);
+        }
+        return;
+    }
 
     // Cost still owed on the pending card; once we can cover it, commit it.
     let pending = gs.pending_card.expect("pitch phase requires a pending card");
