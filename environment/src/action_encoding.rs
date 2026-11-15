@@ -174,6 +174,13 @@ mod tests {
         for seed in 0..games {
             let mut game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(seed));
             game.reset(false);
+            // Nothing creates a Bloodrot Pox yet, so some games start with
+            // them: that is what brings the `Pay` action into play.
+            for player in [&mut game.state.p1, &mut game.state.p2] {
+                for _ in 0..seed % 3 {
+                    player.add_token(crate::deck_cards::TokenCard::BloodrotPoxToken);
+                }
+            }
             let mut choose = new_rng(Some(seed ^ 0x5EED));
             while !game.is_over() {
                 visit(&game);
