@@ -183,8 +183,8 @@ pub fn observation(gs: &Gamestate, observer: PlayerIndex) -> Vec<f32> {
 pub fn layout() -> Vec<Section> {
     // The layout does not depend on the state, so encode any one.
     let decks = crate::fab_game::Decklists::new(
-        crate::decks::build_rhinar_deck(),
-        crate::decks::build_dorinthea_deck(),
+        &crate::decks::build_rhinar_deck(),
+        &crate::decks::build_dorinthea_deck(),
     );
     let gs = crate::fab_game::gamestate_from_decklists(&decks);
     let mut out = vec![0.0; OBS_SIZE];
@@ -385,7 +385,7 @@ mod tests {
     use crate::simulator::Game;
 
     fn new_game(seed: u64) -> FabGame {
-        let mut game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+        let mut game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(seed));
         game.reset(false);
         game
     }

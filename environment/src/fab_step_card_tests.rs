@@ -70,7 +70,7 @@ fn find_p1_deck_card(gs: &Gamestate, pred: impl Fn(u8) -> bool) -> Card {
 
 #[test]
 fn bare_fangs_discarding_power6_grants_plus2_power() {
-    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+    let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
     // Force the draw-then-discard to land on a power-6 card: empty p1's hand,
@@ -96,7 +96,7 @@ fn bare_fangs_discarding_power6_grants_plus2_power() {
 
 #[test]
 fn bare_fangs_discarding_below_power6_grants_no_bonus() {
-    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+    let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
     // Same setup, but seat a sub-6-power card on top so the forced discard
@@ -121,7 +121,7 @@ fn bare_fangs_discarding_below_power6_grants_no_bonus() {
 
 #[test]
 fn wild_ride_discarding_power6_grants_go_again() {
-    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+    let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
     // Force the draw-then-discard to land on a power-6 card: empty p1's hand,
@@ -149,7 +149,7 @@ fn wild_ride_discarding_power6_grants_go_again() {
 
 #[test]
 fn wild_ride_discarding_below_power6_grants_no_go_again() {
-    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+    let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
     // Same setup, but seat a sub-6-power card on top so the forced discard
@@ -175,7 +175,7 @@ fn wild_ride_discarding_below_power6_grants_no_go_again() {
 #[cfg(feature = "logging")]
 #[test]
 fn wild_ride_logs_the_drawn_card_hidden_from_opponent() {
-    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);
+    let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), true);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
     move_hand_to_graveyard(&mut gs, PlayerIndex::P1);
@@ -216,7 +216,7 @@ fn wild_ride_logs_the_drawn_card_hidden_from_opponent() {
 /// Build a fresh game with Rhinar (p1) on his action phase, ready for his hand
 /// to be set up for a legal-actions check.
 fn setup_rhinar_action_phase() -> TestGame {
-    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+    let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
     assert_eq!(gs.phase, Phase::Action);
     assert_eq!(gs.active_player, PlayerIndex::P1);
@@ -228,7 +228,7 @@ fn setup_rhinar_action_phase() -> TestGame {
 /// instants and attack reactions Rhinar's deck has none of — on the turn
 /// player's side.
 fn setup_dorinthea_action_phase() -> TestGame {
-    let mut gs = new_game(build_dorinthea_deck(), build_rhinar_deck(), Some(42), false);
+    let mut gs = new_game(&build_dorinthea_deck(), &build_rhinar_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
     assert_eq!(gs.phase, Phase::Action);
     assert_eq!(gs.active_player, PlayerIndex::P1);
@@ -238,7 +238,7 @@ fn setup_dorinthea_action_phase() -> TestGame {
 /// `setup_rhinar_action_phase` in a Rhinar mirror: both players are Rhinar,
 /// so either side can hold any Rhinar card from their own deck.
 fn setup_rhinar_mirror_action_phase() -> TestGame {
-    let mut gs = new_game(build_rhinar_deck(), build_rhinar_deck(), Some(42), false);
+    let mut gs = new_game(&build_rhinar_deck(), &build_rhinar_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
     assert_eq!(gs.phase, Phase::Action);
     assert_eq!(gs.active_player, PlayerIndex::P1);
@@ -351,7 +351,7 @@ fn pitch_for_discard_cost_card_excludes_the_card_needed_to_discard() {
 
 #[test]
 fn discard_cost_card_discards_a_hand_card_when_played() {
-    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+    let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
 
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -648,7 +648,7 @@ fn bare_fangs_play_effect_power6_discard_also_intimidates() {
     // The play-effect draw-then-discard path (Bare Fangs / Wild Ride) routes
     // through the same constant-ability check, so a power-6 discard intimidates
     // on top of banking the card's own +2 power.
-    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+    let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
     move_hand_to_graveyard(&mut gs, PlayerIndex::P1);
@@ -686,7 +686,7 @@ fn alpha_rampage_power6_discard_intimidates_twice() {
     // When the discarded card is power 6+, the keyword Intimidate (at resolution)
     // and Rhinar's constant ability (at the discard) both fire — two cards leave
     // the opponent's hand.
-    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+    let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
     // Make every non-Alpha-Rampage hand card a power-6 card so whichever one the
@@ -745,7 +745,7 @@ fn play_and_resolve_attack(card: Card) -> (TestGame, Card) {
 /// whose defender needs cards only that deck holds — a Rhinar mirror when the
 /// defender blocks or reacts with Rhinar's own cards.
 fn play_and_resolve_attack_against(defender_deck: [Card; 46], card: Card) -> (TestGame, Card) {
-    let mut gs = new_game(build_rhinar_deck(), defender_deck, Some(42), false);
+    let mut gs = new_game(&build_rhinar_deck(), &defender_deck, Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
     let hand = hand_cards(&gs, PlayerIndex::P1);
@@ -811,7 +811,7 @@ fn smash_instinct_intimidates_on_resolve() {
 
 #[test]
 fn wrecking_ball_discarding_power6_intimidates_twice_under_rhinar() {
-    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+    let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
     // Force the draw-then-discard to land on a power-6 card: empty p1's hand,
@@ -840,7 +840,7 @@ fn wrecking_ball_discarding_power6_intimidates_twice_under_rhinar() {
 
 #[test]
 fn wrecking_ball_discarding_below_power6_does_not_intimidate() {
-    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+    let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
     // Seat a sub-6-power card on top so the forced discard fails the threshold.
@@ -1272,7 +1272,7 @@ fn come_to_fight_bonus_does_not_survive_the_turn() {
 
 #[test]
 fn come_to_fight_played_from_hand_banks_the_bonus_and_keeps_the_action_point() {
-    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+    let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
     // Relabel Muscle Mutt to Come to Fight (cost 1); Rhinar's seed-42 opening
@@ -3355,7 +3355,7 @@ fn declining_leaves_the_mentor_face_down_and_it_is_offered_again_next_turn() {
 fn declining_the_flip_is_not_logged_to_the_opponent() {
     // Same lead-up as `rhinar_second_turn_with_face_down_rukutan`, with logging
     // on so each player's view can be checked.
-    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);
+    let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), true);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
     let ruk = *hand_cards(&gs, PlayerIndex::P1).first().expect("opening hand");
     relabel(&mut gs, PlayerIndex::P1, Zone::Hand, ruk, Card::ChiefRukutan);
@@ -3381,7 +3381,7 @@ fn declining_the_flip_is_not_logged_to_the_opponent() {
 #[test]
 fn flipping_is_logged_publicly() {
     // Turning the mentor face up reveals it anyway, so both players see it.
-    let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);
+    let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), true);
     step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
     let ruk = *hand_cards(&gs, PlayerIndex::P1).first().expect("opening hand");
     relabel(&mut gs, PlayerIndex::P1, Zone::Hand, ruk, Card::ChiefRukutan);
@@ -3588,7 +3588,7 @@ fn a_face_up_card_is_always_visible_to_both_players() {
     use rand::{RngExt, SeedableRng};
     let mut face_up_seen = 0;
     for seed in 0..300u64 {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(seed), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(seed), false);
         let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
         while !gs.is_game_over() {
             let actions = legal_actions(&gs);
@@ -5211,7 +5211,7 @@ fn a_reset_forgets_known_hand_cards() {
     let mut gs = dorinthea_holding(&[Card::SharpenSteelR], 0);
     let id = gs.p1.deck_id(Card::SharpenSteelR);
     gs.p1.mark_known_in_hand(id);
-    let decks = crate::fab_game::Decklists::new(build_dorinthea_deck(), build_rhinar_deck());
+    let decks = crate::fab_game::Decklists::new(&build_dorinthea_deck(), &build_rhinar_deck());
     let TestGame { state, rng } = &mut gs;
     crate::fab_game::reset(state, &decks, rng, false);
     assert!(gs.p1.hand_known.is_empty());

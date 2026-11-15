@@ -171,7 +171,7 @@ mod tests {
     /// Play `games` random games, calling `visit` at every decision.
     fn random_games(games: u64, mut visit: impl FnMut(&FabGame)) {
         for seed in 0..games {
-            let mut game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+            let mut game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(seed));
             game.reset(false);
             let mut choose = new_rng(Some(seed ^ 0x5EED));
             while !game.is_over() {
@@ -198,7 +198,7 @@ mod tests {
     /// decks; a slot for a card outside the deck decodes to nothing.
     #[test]
     fn every_slot_round_trips() {
-        let mut game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(1));
+        let mut game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(1));
         game.reset(false);
         for player in [&game.state.p1, &game.state.p2] {
             let mut decoded = 0;

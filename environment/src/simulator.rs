@@ -87,7 +87,7 @@ mod tests {
 
     #[test]
     fn run_plays_a_random_game_to_a_terminal_state() {
-        let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        let game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42));
         let mut sim = Simulator::new(game, RandomAgent::new(Some(1)), RandomAgent::new(Some(2)));
 
         let steps = sim.run(false);
@@ -98,7 +98,7 @@ mod tests {
 
     #[test]
     fn run_resets_so_a_finished_simulator_can_run_again() {
-        let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        let game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42));
         let mut sim = Simulator::new(game, RandomAgent::new(Some(1)), RandomAgent::new(Some(2)));
 
         sim.run(false);
@@ -120,7 +120,7 @@ mod tests {
             }
         }
         for seed in 0..200u64 {
-            let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+            let game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(seed));
             let mut sim = Simulator::new(
                 game,
                 Checked(RandomAgent::new(Some(seed + 1))),
@@ -134,7 +134,7 @@ mod tests {
     #[cfg(feature = "logging")]
     #[test]
     fn run_with_logging_records_a_game_log() {
-        let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        let game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42));
         let mut sim = Simulator::new(game, RandomAgent::new(Some(1)), RandomAgent::new(Some(2)));
 
         sim.run(true);
@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn random_game_with_a_six_layer_stack_finishes() {
         let seed = 69221;
-        let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+        let game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(seed));
         let mut sim = Simulator::new(game, RandomAgent::new(Some(seed + 1)), RandomAgent::new(Some(seed + 2)));
         sim.run(false);
         assert!(sim.game.is_over());
@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn random_games_terminate_across_many_seeds() {
         for seed in 0..500u64 {
-            let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+            let game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(seed));
             let mut sim = Simulator::new(game, RandomAgent::new(Some(seed + 1)), RandomAgent::new(Some(seed + 2)));
             sim.run(false);
             assert!(sim.game.is_over(), "seed {} deadlocked (no legal actions before terminal state)", seed);
@@ -177,7 +177,7 @@ mod tests {
     fn max_stack_depth(seed: u64) -> usize {
         use crate::fab_step::step;
         use crate::legal_actions::legal_actions;
-        let mut game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+        let mut game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(seed));
         let mut p1_agent = RandomAgent::new(Some(seed + 1));
         let mut p2_agent = RandomAgent::new(Some(seed + 2));
         crate::fab_game::reset(&mut game.state, &game.decks, &mut game.rng, false);

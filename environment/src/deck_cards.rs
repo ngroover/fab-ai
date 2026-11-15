@@ -318,8 +318,8 @@ mod tests {
 
     /// The distinct cards in a decklist a player owns: everything except the
     /// hero.
-    fn owned(deck: impl AsRef<[Card]>) -> BTreeSet<u8> {
-        deck.as_ref().iter().copied()
+    fn owned(deck: &[Card]) -> BTreeSet<u8> {
+        deck.iter().copied()
             .filter(|c| !matches!(c.data().typ, CardType::Hero))
             .map(|c| c as u8)
             .collect()
@@ -331,13 +331,13 @@ mod tests {
 
     #[test]
     fn rhinar_enum_matches_decklist() {
-        assert_eq!(enum_cards::<RhinarCard>(), owned(build_rhinar_deck()));
+        assert_eq!(enum_cards::<RhinarCard>(), owned(&build_rhinar_deck()));
     }
 
     #[test]
     fn dorinthea_enum_matches_decklist() {
-        assert_eq!(enum_cards::<DorintheaCard>(), owned(build_dorinthea_deck()));
-        assert_eq!(enum_cards::<MortimerCard>(), owned(crate::outbreak::build_mortimer_deck()));
+        assert_eq!(enum_cards::<DorintheaCard>(), owned(&build_dorinthea_deck()));
+        assert_eq!(enum_cards::<MortimerCard>(), owned(&crate::outbreak::build_mortimer_deck()));
     }
 
     fn round_trips<D: DeckCard>() {

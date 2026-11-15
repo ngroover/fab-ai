@@ -117,7 +117,7 @@ fn main() {
         }
     };
 
-    let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(time_seed));
+    let game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(time_seed));
     let mut sim = Simulator::new(game, seat(0), seat(1));
 
     let mut rhinar_wins = 0usize;

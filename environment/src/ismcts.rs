@@ -260,7 +260,7 @@ mod tests {
 
     /// A game played to its first real decision.
     fn game_at_a_decision(seed: u64) -> FabGame {
-        let mut game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+        let mut game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(seed));
         game.reset(false);
         // Past choosing who goes first, into a turn with a hand to play.
         let legal = game.legal_actions();
@@ -323,7 +323,7 @@ mod tests {
         let mut wins = 0;
         let games = 6;
         for seed in 0..games {
-            let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+            let game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(seed));
             let ismcts = IsmctsAgent::new(50, Some(seed + 100));
             let random = RandomAgent::new(Some(seed + 200));
             let ismcts_is_p1 = seed % 2 == 0;

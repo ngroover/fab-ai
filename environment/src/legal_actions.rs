@@ -627,7 +627,7 @@ mod tests {
 
     #[test]
     fn legal_actions_in_choose_first_phase() {
-        let gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
 
         let actions = legal_actions(&gs);
 
@@ -639,7 +639,7 @@ mod tests {
 
     #[test]
     fn legal_actions_in_action_phase_playcard() {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -672,7 +672,7 @@ mod tests {
 
     #[test]
     fn legal_actions_in_pitch_phase() {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -702,7 +702,7 @@ mod tests {
 
     #[test]
     fn legal_actions_in_pitch_phase_excludes_pending_card() {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -736,7 +736,7 @@ mod tests {
     /// to Dorinthea and enters the Defend phase. This mirrors the real engine
     /// flow rather than poking `gs.phase` directly.
     fn step_to_dorinthea_defending() -> TestGame {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -761,7 +761,7 @@ mod tests {
     /// Rhinar (p2) with Flock of the Feather Walkers (cost 1), paid with a
     /// pitch-1 Sharpen Steel, leaving two cards in her hand and Rhinar to defend.
     fn step_to_rhinar_defending() -> TestGame {
-        let mut gs = new_game(build_dorinthea_deck(), build_rhinar_deck(), Some(42), false);
+        let mut gs = new_game(&build_dorinthea_deck(), &build_rhinar_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
         assert_eq!(gs.active_player, PlayerIndex::P1);
 
@@ -905,7 +905,7 @@ mod tests {
 
     #[test]
     fn legal_actions_in_arsenal_phase_offers_whole_hand_plus_pass() {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -942,7 +942,7 @@ mod tests {
 
     #[test]
     fn legal_actions_in_arsenal_phase_occupied_only_offers_pass() {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
 
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
@@ -1135,7 +1135,7 @@ mod tests {
 
     #[test]
     fn legal_actions_in_instant_phase_only_offers_pass() {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -1163,7 +1163,7 @@ mod tests {
 
     #[test]
     fn legal_actions_in_action_phase_includes_pass() {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -1179,7 +1179,7 @@ mod tests {
 
     #[test]
     fn legal_actions_in_action_phase_activate_equipment() {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
 
         let go_first = Action{ typ: ActionType::ChooseFirst, card: None};
         step(&mut gs, go_first);
@@ -1216,7 +1216,7 @@ mod tests {
 
     #[test]
     fn legal_actions_in_action_phase_activate_equipment_dorinthea() {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
 
         // Choosing second flips the active player to Dorinthea (p2).
         let go_second = Action{ typ: ActionType::ChooseSecond, card: None};
@@ -1274,7 +1274,7 @@ mod tests {
 
     #[test]
     fn legal_actions_in_action_phase_offers_the_arsenal_card() {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
         // A 0-cost action in the arsenal is playable exactly as it would be
@@ -1288,7 +1288,7 @@ mod tests {
 
     #[test]
     fn legal_actions_in_action_phase_excludes_an_arsenal_card_of_the_wrong_speed() {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
         // A defense reaction is not playable at action speed, in hand or in the
@@ -1300,7 +1300,7 @@ mod tests {
 
     #[test]
     fn legal_actions_in_action_phase_pays_for_the_arsenal_card_out_of_hand() {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
         step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
 
         // Muscle Mutt costs 3 and the arsenal card cannot pitch for itself, so

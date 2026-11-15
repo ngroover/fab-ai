@@ -285,7 +285,7 @@ pub fn run<E: Evaluator>(
                 // Three streams per game, kept apart: the deal, the search
                 // and the sampled moves.
                 let game_seed = seed.wrapping_add(index as u64);
-                let mut game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(game_seed));
+                let mut game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(game_seed));
                 let evaluator = make_evaluator(game_seed ^ 0x9E37_79B9_7F4A_7C15);
                 let mut agent = config.agent(evaluator, game_seed ^ 0xC2B2_AE3D_27D4_EB4F);
                 let mut rng = SmallRng::seed_from_u64(game_seed ^ 0x1656_67B1_9E37_79F9);
@@ -423,7 +423,7 @@ mod tests {
     #[test]
     fn records_describe_the_decisions_of_the_game() {
         let config = quick();
-        let mut game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(5));
+        let mut game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(5));
         let mut agent = config.agent(RolloutEvaluator::new(Some(6)), 7);
         let mut rng = SmallRng::seed_from_u64(8);
         let records = play_game(&mut game, &mut agent, &mut rng, &config, 3);
@@ -431,7 +431,7 @@ mod tests {
         assert!(records.len() > 20);
 
         // Play the same game again, step by step, beside the records.
-        let mut replay = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(5));
+        let mut replay = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(5));
         let mut agent = config.agent(RolloutEvaluator::new(Some(6)), 7);
         let mut rng = SmallRng::seed_from_u64(8);
         replay.reset(false);

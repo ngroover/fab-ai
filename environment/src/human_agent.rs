@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn the_menu_prints_state_and_log_before_taking_an_action() {
-        let mut game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(42));
+        let mut game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42));
         game.reset(true);
         let legal = game.legal_actions();
         let mut out = Vec::new();
@@ -212,7 +212,7 @@ mod tests {
             }
         }
         for seed in 0..20 {
-            let game = FabGame::new(build_dorinthea_deck(), build_rhinar_deck(), Some(seed));
+            let game = FabGame::new(&build_dorinthea_deck(), &build_rhinar_deck(), Some(seed));
             let human = HumanAgent::new(AlwaysThree, std::io::sink(), false);
             let mut sim = Simulator::new(game, human, RandomAgent::new(Some(seed + 1)));
             sim.run(true);

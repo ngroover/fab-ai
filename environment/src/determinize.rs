@@ -150,7 +150,7 @@ mod tests {
     use crate::simulator::Game;
 
     fn dealt_game(seed: u64) -> FabGame {
-        let mut game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+        let mut game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(seed));
         game.reset(false);
         // Hands are dealt once the first player is chosen.
         while game.state.p1.hand.is_empty() || game.state.p2.hand.is_empty() {

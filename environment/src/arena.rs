@@ -106,7 +106,7 @@ impl MatchResult {
 /// Rhinar (seat 0) in even games and Dorinthea (seat 1) in odd ones.
 fn play_game(a: &AgentSpec, b: &AgentSpec, iterations: u32, seed: u64, index: u32) -> MatchResult {
     let game_seed = seed.wrapping_add(index as u64);
-    let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(game_seed));
+    let game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(game_seed));
     let a_seat = a.seat(iterations, game_seed ^ 0x9E37_79B9_7F4A_7C15);
     let b_seat = b.seat(iterations, game_seed ^ 0xC2B2_AE3D_27D4_EB4F);
     let a_hero = (index % 2) as usize;

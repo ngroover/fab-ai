@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn a_game_deals_him_20_life_and_a_hand_of_four() {
-        let mut game = FabGame::new(build_mortimer_deck(), build_rhinar_deck(), Some(42));
+        let mut game = FabGame::new(&build_mortimer_deck(), &build_rhinar_deck(), Some(42));
         game.reset(false);
         let p = &game.state.p1;
         assert_eq!((p.life, p.intellect), (20, 4));
@@ -115,10 +115,10 @@ mod tests {
     fn random_games_with_mortimer_finish() {
         for seed in 0..40u64 {
             let mut game = match seed % 4 {
-                0 => FabGame::new(build_mortimer_deck(), build_rhinar_deck(), Some(seed)),
-                1 => FabGame::new(build_dorinthea_deck(), build_mortimer_deck(), Some(seed)),
-                2 => FabGame::new(build_rhinar_deck(), build_mortimer_deck(), Some(seed)),
-                _ => FabGame::new(build_mortimer_deck(), build_mortimer_deck(), Some(seed)),
+                0 => FabGame::new(&build_mortimer_deck(), &build_rhinar_deck(), Some(seed)),
+                1 => FabGame::new(&build_dorinthea_deck(), &build_mortimer_deck(), Some(seed)),
+                2 => FabGame::new(&build_rhinar_deck(), &build_mortimer_deck(), Some(seed)),
+                _ => FabGame::new(&build_mortimer_deck(), &build_mortimer_deck(), Some(seed)),
             };
             let mut rng = SmallRng::seed_from_u64(seed);
             game.reset(false);

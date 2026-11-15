@@ -377,7 +377,7 @@ mod tests {
 
     #[test]
     fn every_card_has_a_name_and_stats() {
-        let gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
         for (player, deck) in [(&gs.p1, build_rhinar_deck()), (&gs.p2, build_dorinthea_deck())] {
             for card in deck {
                 assert!(!card_name(card).is_empty());
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn actions_are_described_by_card_and_zone() {
-        let gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
         let play = Action::new(ActionType::PlayCard, CardRef::new(RhinarCard::WreckingBallR.id(), Zone::Hand));
         let mut gs_p1 = gs.clone();
         gs_p1.active_player = PlayerIndex::P1;
@@ -400,7 +400,7 @@ mod tests {
 
     #[test]
     fn the_opponents_hand_is_hidden_from_the_viewer() {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
         gs.p1.hand.add(RhinarCard::WreckingBallR.id());
         gs.p1.deck.pop_front();
         let name = card_name(Card::WreckingBallR);

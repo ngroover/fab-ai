@@ -117,7 +117,7 @@ pub fn play(args: &[String], default_seed: u64) {
     let (p2_deck, p2_seat) = choose_seat(PlayerIndex::P2, seed, reveal, iterations, network.as_ref());
     println!("\nStarting game (seed {}).", seed);
 
-    let game = FabGame::new(p1_deck, p2_deck, Some(seed));
+    let game = FabGame::new(&p1_deck, &p2_deck, Some(seed));
     let mut sim = Simulator::new(game, p1_seat, p2_seat);
     sim.run(true);
 

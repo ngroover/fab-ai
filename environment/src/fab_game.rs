@@ -77,10 +77,10 @@ pub struct Decklists {
 }
 
 impl Decklists {
-    pub fn new(p1_deck: impl AsRef<[Card]>, p2_deck: impl AsRef<[Card]>) -> Self {
+    pub fn new(p1_deck: &[Card], p2_deck: &[Card]) -> Self {
         Decklists {
-            p1: StartingCards::from_decklist(p1_deck.as_ref()),
-            p2: StartingCards::from_decklist(p2_deck.as_ref()),
+            p1: StartingCards::from_decklist(p1_deck),
+            p2: StartingCards::from_decklist(p2_deck),
         }
     }
 }
@@ -246,7 +246,7 @@ pub struct FabGame {
 impl FabGame {
     /// A game between two decklists, not yet dealt (the simulator resets it
     /// before play). Pass `Some(seed)` for a reproducible game.
-    pub fn new(p1_deck: impl AsRef<[Card]>, p2_deck: impl AsRef<[Card]>, seed: Option<u64>) -> Self {
+    pub fn new(p1_deck: &[Card], p2_deck: &[Card], seed: Option<u64>) -> Self {
         let decks = Decklists::new(p1_deck, p2_deck);
         let state = gamestate_from_decklists(&decks);
         FabGame { decks, state, rng: new_rng(seed) }
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn test_reset_cards() {
-        let gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), None, false);
+        let gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), None, false);
 
         // Each weapon is in its weapon zone, public.
         assert_eq!(gs.p1.weapon, Some(RhinarCard::BoneBasher.id()));
@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn reset_counts_worn_equipment_and_empties_other_zones() {
-        let gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
         // Four pieces of worn equipment each; the weapon zone is not counted.
         assert_eq!(gs.p1.equipment.len(), 4);
         assert_eq!(gs.p1.equipment.count_as(RhinarCard::BoneBasher), 0);
@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn reset_restores_a_played_out_game() {
-        let decks = Decklists::new(build_rhinar_deck(), build_dorinthea_deck());
+        let decks = Decklists::new(&build_rhinar_deck(), &build_dorinthea_deck());
         let mut rng = new_rng(Some(7));
         let mut gs = gamestate_from_decklists(&decks);
         reset(&mut gs, &decks, &mut rng, false);
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn the_same_seed_deals_the_same_decks() {
         let deal = |seed| {
-            let gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(seed), false);
+            let gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(seed), false);
             gs.p1.deck.iter().map(|s| s.card().get()).collect::<Vec<_>>()
         };
         assert_eq!(deal(42), deal(42));
@@ -384,7 +384,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "cards across its zones and the stack")]
     fn losing_a_card_is_caught() {
-        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), false);
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
         // Take a card off the deck without putting it anywhere.
         gs.p1.deck.pop_front();
         gs.debug_check_card_totals();
@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn starting_cards_keep_the_decklist_order() {
-        let decks = Decklists::new(build_rhinar_deck(), build_dorinthea_deck());
+        let decks = Decklists::new(&build_rhinar_deck(), &build_dorinthea_deck());
         let playable: Vec<_> = build_rhinar_deck().into_iter()
             .filter(|c| !matches!(c.data().typ, CardType::Hero | CardType::Weapon | CardType::Equipment))
             .map(|c| DeckKind::Rhinar.id_of(c).unwrap())
@@ -428,7 +428,7 @@ mod tests {
         // `reset` deals from the decklists, so dealing the same decklists with
         // the same seed twice gives the same game, however it was played out
         // in between.
-        let decks = Decklists::new(build_rhinar_deck(), build_dorinthea_deck());
+        let decks = Decklists::new(&build_rhinar_deck(), &build_dorinthea_deck());
         let deal = || {
             let mut rng = new_rng(Some(42));
             let mut gs = gamestate_from_decklists(&decks);
@@ -447,15 +447,15 @@ mod tests {
     #[test]
     #[should_panic(expected = "decklists for other heroes")]
     fn reset_refuses_decklists_for_other_heroes() {
-        let decks = Decklists::new(build_rhinar_deck(), build_dorinthea_deck());
-        let swapped = Decklists::new(build_dorinthea_deck(), build_rhinar_deck());
+        let decks = Decklists::new(&build_rhinar_deck(), &build_dorinthea_deck());
+        let swapped = Decklists::new(&build_dorinthea_deck(), &build_rhinar_deck());
         let mut gs = gamestate_from_decklists(&decks);
         reset(&mut gs, &swapped, &mut new_rng(Some(42)), false);
     }
 
     #[test]
     fn stack_capacity_is_the_stack_size() {
-        let gs = gamestate_from_decklists(&Decklists::new(build_rhinar_deck(), build_dorinthea_deck()));
+        let gs = gamestate_from_decklists(&Decklists::new(&build_rhinar_deck(), &build_dorinthea_deck()));
         assert_eq!(gs.stack.capacity(), STACK_SIZE);
     }
 }

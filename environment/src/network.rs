@@ -399,7 +399,7 @@ pub mod tests {
     }
 
     fn game_at_a_decision(seed: u64) -> FabGame {
-        let mut game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+        let mut game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(seed));
         game.reset(false);
         let legal = game.legal_actions();
         game.step(legal[0]);
@@ -465,7 +465,7 @@ pub mod tests {
     fn a_network_plays_whole_games() {
         let play = |seed: u64| {
             let agent = |s| PuctAgent::new(NetworkEvaluator::new(random_network(4)).unwrap(), 30, Some(s));
-            let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(seed));
+            let game = FabGame::new(&build_rhinar_deck(), &build_dorinthea_deck(), Some(seed));
             let mut sim = Simulator::new(game, agent(seed + 1), agent(seed + 2));
             sim.run(false);
             (sim.game.state.phase, sim.game.state.turn_count, sim.game.state.p1.life, sim.game.state.p2.life)
