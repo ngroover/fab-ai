@@ -18,15 +18,18 @@ use rand::seq::SliceRandom;
 #[derive(Clone, Debug)]
 pub struct StartingCards {
     pub hero: Card,
-    pub deck: [DeckCardId; DECK_CARDS],
+    pub deck: Vec<DeckCardId>,
     pub equipment: CardCounts,
     pub weapon: Option<DeckCardId>,
 }
 
 impl StartingCards {
-    /// Read a 46-card decklist: one hero, then the weapon, equipment and deck
-    /// cards in any order. Panics on a decklist the engine cannot represent.
-    pub fn from_decklist(decklist: [Card; 46]) -> Self {
+    /// Read a decklist: one hero, then the weapon (if any), equipment and
+    /// deck cards in any order. A full Blitz list is 46 cards — the hero, a
+    /// weapon, four pieces of equipment and a 40-card deck — but a smaller one
+    /// is accepted, for a hero whose card pool is still being built. Panics on
+    /// a decklist the engine cannot represent.
+    pub fn from_decklist(decklist: &[Card]) -> Self {
         let hero = decklist
             .iter()
             .copied()
@@ -41,8 +44,7 @@ impl StartingCards {
         let mut deck = Vec::with_capacity(DECK_CARDS);
         let mut equipment = CardCounts::EMPTY;
         let mut weapon = None;
-        let mut owned = 0;
-        for card in decklist {
+        for &card in decklist {
             match card.data().typ {
                 CardType::Hero => continue,
                 CardType::Weapon => {
@@ -52,15 +54,20 @@ impl StartingCards {
                 CardType::Equipment => equipment.add(id(card)),
                 _ => deck.push(id(card)),
             }
-            owned += 1;
         }
-        assert_eq!(owned, PLAYER_CARDS, "expected exactly {} non-hero cards", PLAYER_CARDS);
-        let deck = deck.try_into().unwrap_or_else(|d: Vec<_>| {
-            panic!("expected a {}-card deck, got {}", DECK_CARDS, d.len())
-        });
-        StartingCards { hero, deck, equipment, weapon }
+        assert!(deck.len() <= DECK_CARDS, "a deck holds at most {} cards, got {}", DECK_CARDS, deck.len());
+        let start = StartingCards { hero, deck, equipment, weapon };
+        assert!(start.owned() <= PLAYER_CARDS, "a player owns at most {} non-hero cards", PLAYER_CARDS);
+        start
+    }
+
+    /// How many (non-hero) cards this player owns: the deck, the equipment
+    /// and the weapon.
+    pub fn owned(&self) -> usize {
+        self.deck.len() + self.equipment.len() as usize + self.weapon.is_some() as usize
     }
 }
+
 
 /// Both players' starting cards: what `reset` deals a fresh game from.
 #[derive(Clone, Debug)]
@@ -70,10 +77,10 @@ pub struct Decklists {
 }
 
 impl Decklists {
-    pub fn new(p1_deck: [Card; 46], p2_deck: [Card; 46]) -> Self {
+    pub fn new(p1_deck: impl AsRef<[Card]>, p2_deck: impl AsRef<[Card]>) -> Self {
         Decklists {
-            p1: StartingCards::from_decklist(p1_deck),
-            p2: StartingCards::from_decklist(p2_deck),
+            p1: StartingCards::from_decklist(p1_deck.as_ref()),
+            p2: StartingCards::from_decklist(p2_deck.as_ref()),
         }
     }
 }
@@ -190,6 +197,7 @@ fn place_cards_for(player: &mut Player, start: &StartingCards) {
         player.deck.push_back(DeckSlot::hidden(id));
     }
     player.equipment = start.equipment;
+    player.owned_cards = start.owned() as u8;
     player.tokens = CardCounts::EMPTY;
     player.weapon = start.weapon;
     player.hand = CardCounts::EMPTY;
@@ -238,7 +246,7 @@ pub struct FabGame {
 impl FabGame {
     /// A game between two decklists, not yet dealt (the simulator resets it
     /// before play). Pass `Some(seed)` for a reproducible game.
-    pub fn new(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: Option<u64>) -> Self {
+    pub fn new(p1_deck: impl AsRef<[Card]>, p2_deck: impl AsRef<[Card]>, seed: Option<u64>) -> Self {
         let decks = Decklists::new(p1_deck, p2_deck);
         let state = gamestate_from_decklists(&decks);
         FabGame { decks, state, rng: new_rng(seed) }

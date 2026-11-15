@@ -47,7 +47,16 @@ pub enum EquipmentSlot {
 pub enum CardClass {
     Generic,
     Brute,
-    Warrior
+    Warrior,
+    Assassin
+}
+
+/// A card's talent, the supertype that sits alongside its class ("Chaos
+/// Assassin"). `None` on `CardData` for a card without one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum Talent {
+    Chaos
 }
 
 bitflags! {
@@ -73,6 +82,8 @@ pub struct CardData {
     pub no_block: bool,
     pub slot: Option<EquipmentSlot>,
     pub card_class: CardClass,
+    #[allow(dead_code)] // no rule reads a talent yet; exercised by the tests
+    pub talent: Option<Talent>,
     pub keyword: Keyword,
     pub hero_life: u8,
     pub hero_intellect: u8,
@@ -147,6 +158,8 @@ pub enum Card {
     GallantryGold,
     IronrotHelm,
     IronrotLegs,
+    /// Mortimer, Living Virus — the Chaos Assassin hero (see `outbreak`).
+    Mortimer,
     /// The Quicken token Flock of the Feather Walkers creates. Not part of any
     /// decklist: it only ever exists in a player's token zone.
     QuickenToken,

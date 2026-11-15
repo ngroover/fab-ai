@@ -44,7 +44,7 @@ const PHASES: usize = Phase::Draw as usize + 1;
 /// Width of a zone one-hot.
 const ZONES: usize = Zone::Stack as usize + 1;
 /// Width of a hero one-hot.
-const HEROES: usize = DeckKind::Dorinthea as usize + 1;
+const HEROES: usize = DeckKind::Mortimer as usize + 1;
 /// How many `PlayerFlags` bits there are; each is written as its own 0/1.
 const FLAGS: usize = 14;
 const _: () = assert!(

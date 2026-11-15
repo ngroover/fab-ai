@@ -19,6 +19,7 @@ mod ismcts;
 mod legal_actions;
 mod network;
 mod observation;
+mod outbreak;
 mod puct;
 mod self_play;
 mod fab_step;

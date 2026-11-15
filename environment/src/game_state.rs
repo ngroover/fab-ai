@@ -53,9 +53,10 @@ impl PlayerIndex {
     }
 }
 
-/// Number of (non-hero) cards each player owns: the 40-card deck plus a weapon
-/// and four pieces of equipment. Every one of them is in exactly one zone at
-/// any time — the conservation `Gamestate::debug_check_card_totals` checks.
+/// The most (non-hero) cards a player can own: the 40-card deck plus a weapon
+/// and four pieces of equipment. A smaller decklist owns fewer
+/// (`Player::owned_cards`). Every one of them is in exactly one zone at any
+/// time — the conservation `Gamestate::debug_check_card_totals` checks.
 pub const PLAYER_CARDS: usize = 45;
 /// Maximum number of layers the stack can hold at once. Committing a card
 /// beyond this limit panics (see `Gamestate::push_to_stack`). Both players may
@@ -422,6 +423,10 @@ pub struct Player {
     /// Which deck card enum this player's `DeckCardId`s belong to — the deck
     /// `hero` plays. Fixed when the game is built.
     pub deck_kind : DeckKind,
+    /// How many (non-hero) cards this player owns, at most `PLAYER_CARDS`:
+    /// the total `Gamestate::debug_check_card_totals` holds their zones to.
+    /// Set by `reset` from the decklist; 0 until then.
+    pub owned_cards : u8,
     /// The deck, top first. Drawn from the front; pitched cards go on the back.
     pub deck : Deck,
     /// The hand: how many copies of each card are in it. The hand is
@@ -733,7 +738,7 @@ impl Gamestate {
         self.stack.pop_back()
     }
 
-    /// Check that each player still has exactly `PLAYER_CARDS` cards across all
+    /// Check that each player still has exactly `owned_cards` cards across all
     /// of their zones and the stack. Cards are only ever moved, never created
     /// or lost, so a different total means some path took a card out of one
     /// zone without putting it in another (or the reverse). Called by `step`
@@ -753,9 +758,9 @@ impl Gamestate {
             }
             let total = player.cards_in_zones() + on_stack;
             assert_eq!(
-                total, PLAYER_CARDS,
+                total, player.owned_cards as usize,
                 "P{} has {} cards across its zones and the stack, not {}",
-                player.pid.get() + 1, total, PLAYER_CARDS,
+                player.pid.get() + 1, total, player.owned_cards,
             );
         }
     }
@@ -862,6 +867,7 @@ impl Player {
             intellect: 0,
             hero,
             deck_kind: DeckKind::for_hero(hero),
+            owned_cards: 0,
             deck: empty_deck(),
             hand: CardCounts::EMPTY,
             hand_known: CardCounts::EMPTY,

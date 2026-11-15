@@ -53,11 +53,12 @@ fn choose_seat(
     reveal: bool,
     iterations: u32,
     network: Option<&std::sync::Arc<crate::network::Network>>,
-) -> ([Card; 46], Seat) {
+) -> (Vec<Card>, Seat) {
     let name = player_name(pid);
-    let deck = match ask(&format!("{}: choose a hero", name), &["Rhinar", "Dorinthea"]) {
-        0 => build_rhinar_deck(),
-        _ => build_dorinthea_deck(),
+    let deck = match ask(&format!("{}: choose a hero", name), &["Rhinar", "Dorinthea", "Mortimer, Living Virus"]) {
+        0 => build_rhinar_deck().to_vec(),
+        1 => build_dorinthea_deck().to_vec(),
+        _ => crate::outbreak::build_mortimer_deck(),
     };
     // The network is only on the menu when one was given (`--network`).
     let mut agents = vec!["Human (terminal input)", "Random", "ISMCTS (tree search)"];

@@ -366,7 +366,7 @@ pub fn uses_this_turn(gs: &Gamestate, card: Card) -> u8 {
 /// one, with an rng seeded from `seed` (`None` for a random one) that deals
 /// the game and that `step` goes on drawing from. Tests that need to reset
 /// again build the `Decklists` themselves.
-pub fn new_game(p1_deck: [Card; 46], p2_deck: [Card; 46], seed: Option<u64>, logging: bool) -> TestGame {
+pub fn new_game(p1_deck: impl AsRef<[Card]>, p2_deck: impl AsRef<[Card]>, seed: Option<u64>, logging: bool) -> TestGame {
     let decks = crate::fab_game::Decklists::new(p1_deck, p2_deck);
     let mut game = TestGame {
         state: crate::fab_game::gamestate_from_decklists(&decks),

@@ -187,6 +187,29 @@ deck_cards! {
     }
 }
 
+deck_cards! {
+    /// Every card Mortimer owns except the hero: the playable deck from
+    /// `outbreak::build_mortimer_deck`, one variant per distinct card,
+    /// followed by the equipment. He has no weapon yet.
+    pub enum MortimerCard for Mortimer {
+        FlockOfTheFeatherWalkersR,
+        MuscleMuttY,
+        RagingOnslaughtY,
+        WoundedBullY,
+        ComeToFightB,
+        DodgeB,
+        RallyTheRearguardB,
+        SigilofSolaceB,
+        TitaniumBaubleB,
+        ToughenUpB,
+        // ── equipment ──
+        IronrotHelm,
+        BlossomOfSpring,
+        IronhideGauntlet,
+        IronrotLegs,
+    }
+}
+
 /// Which deck card enum a player's `DeckCardId`s refer to. `Player` is shared
 /// by both heroes, so this is how untyped engine code turns a `Card` into the
 /// right deck's id and back.
@@ -232,6 +255,7 @@ const _: () = assert!(TokenCard::COUNT <= MAX_DECK_IDS, "TokenCard has more toke
 pub enum DeckKind {
     Rhinar,
     Dorinthea,
+    Mortimer,
 }
 
 impl DeckKind {
@@ -240,6 +264,7 @@ impl DeckKind {
         match hero {
             Card::Rhinar => DeckKind::Rhinar,
             Card::Dorinthea => DeckKind::Dorinthea,
+            Card::Mortimer => DeckKind::Mortimer,
             _ => panic!("no deck card enum for this hero"),
         }
     }
@@ -256,6 +281,10 @@ impl DeckKind {
                 Some(c) => Some(c.id()),
                 None => None,
             },
+            DeckKind::Mortimer => match MortimerCard::from_card(card) {
+                Some(c) => Some(c.id()),
+                None => None,
+            },
         }
     }
 
@@ -266,6 +295,7 @@ impl DeckKind {
         match self {
             DeckKind::Rhinar => RhinarCard::ALL[id.get()].card(),
             DeckKind::Dorinthea => DorintheaCard::ALL[id.get()].card(),
+            DeckKind::Mortimer => MortimerCard::ALL[id.get()].card(),
         }
     }
 
@@ -274,6 +304,7 @@ impl DeckKind {
         match self {
             DeckKind::Rhinar => RhinarCard::COUNT,
             DeckKind::Dorinthea => DorintheaCard::COUNT,
+            DeckKind::Mortimer => MortimerCard::COUNT,
         }
     }
 }
@@ -287,8 +318,8 @@ mod tests {
 
     /// The distinct cards in a decklist a player owns: everything except the
     /// hero.
-    fn owned(deck: [Card; 46]) -> BTreeSet<u8> {
-        deck.into_iter()
+    fn owned(deck: impl AsRef<[Card]>) -> BTreeSet<u8> {
+        deck.as_ref().iter().copied()
             .filter(|c| !matches!(c.data().typ, CardType::Hero))
             .map(|c| c as u8)
             .collect()
@@ -306,6 +337,7 @@ mod tests {
     #[test]
     fn dorinthea_enum_matches_decklist() {
         assert_eq!(enum_cards::<DorintheaCard>(), owned(build_dorinthea_deck()));
+        assert_eq!(enum_cards::<MortimerCard>(), owned(crate::outbreak::build_mortimer_deck()));
     }
 
     fn round_trips<D: DeckCard>() {
@@ -323,6 +355,7 @@ mod tests {
     fn ids_round_trip() {
         round_trips::<RhinarCard>();
         round_trips::<DorintheaCard>();
+        round_trips::<MortimerCard>();
     }
 
     #[test]
@@ -344,19 +377,21 @@ mod tests {
     fn weapon_and_equipment_come_after_the_playable_deck() {
         // The playable cards keep the low ids, so the weapon and equipment
         // only ever add fields past them.
-        fn check<D: DeckCard>() {
+        fn check<D: DeckCard>(playable: usize) {
             for &c in D::ALL {
                 let is_gear = matches!(c.card().data().typ, CardType::Weapon | CardType::Equipment);
-                assert_eq!(is_gear, c.id().get() >= 21, "{:?}", c);
+                assert_eq!(is_gear, c.id().get() >= playable, "{:?}", c);
             }
         }
-        check::<RhinarCard>();
-        check::<DorintheaCard>();
+        check::<RhinarCard>(21);
+        check::<DorintheaCard>(21);
+        check::<MortimerCard>(10);
     }
 
     #[test]
     fn heroes_map_to_their_decks() {
         assert_eq!(DeckKind::for_hero(Card::Rhinar), DeckKind::Rhinar);
         assert_eq!(DeckKind::for_hero(Card::Dorinthea), DeckKind::Dorinthea);
+        assert_eq!(DeckKind::for_hero(Card::Mortimer), DeckKind::Mortimer);
     }
 }

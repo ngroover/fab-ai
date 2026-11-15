@@ -870,6 +870,7 @@ mod tests {
             no_block,
             slot: None,
             card_class: CardClass::Generic,
+            talent: None,
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
