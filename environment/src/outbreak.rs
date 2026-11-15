@@ -1,11 +1,12 @@
-//! Outbreak: Mortimer, Living Virus — his hero card and his decklist.
+//! Outbreak: Mortimer, Living Virus — his hero card and his decklist — and
+//! the set's disease aura tokens (Exertion, Inertia, Bloodrot Pox).
 //!
 //! No Assassin cards are implemented yet, so for now his deck is a placeholder
 //! built from the Generic cards of the Rhinar vs Dorinthea classic battle
 //! (`classic_battles`). It is smaller than a full Blitz list: 20 deck cards,
 //! four pieces of equipment and no weapon.
 
-use crate::cards::{Card, CardClass, CardData, CardType, Keyword, Talent};
+use crate::cards::{Card, CardClass, CardData, CardType, Keyword, Subtype, Talent};
 
 /// Mortimer, Living Virus — Chaos Assassin hero, 20 life, intellect 4.
 /// `classic_battles::CARD_CATALOG` holds this at `Card::Mortimer`'s index.
@@ -22,6 +23,7 @@ pub const MORTIMER: CardData = CardData {
     slot: None,
     card_class: CardClass::Assassin,
     talent: Some(Talent::Chaos),
+    subtype: None,
     keyword: Keyword::empty(),
     hero_life: 20,
     hero_intellect: 4,
@@ -35,6 +37,43 @@ pub const MORTIMER: CardData = CardData {
     play_effects: &[],
     mentor_effect: None,
 };
+
+/// What the three disease aura tokens share: a Generic token that cannot
+/// block, with no effect implemented yet. Nothing creates one yet either.
+const DISEASE_AURA_TOKEN: CardData = CardData {
+    typ: CardType::Token,
+    weapon_type: None,
+    cost: 0,
+    pitch: 0,
+    power: 0,
+    defense: 0,
+    color: None,
+    no_block: true,
+    slot: None,
+    card_class: CardClass::Generic,
+    talent: None,
+    subtype: Some(Subtype::DiseaseAura),
+    keyword: Keyword::empty(),
+    hero_life: 0,
+    hero_intellect: 0,
+    constant_effect: None,
+    ability: None,
+    defend_effect: None,
+    next_attack_effect: None,
+    additional_cost: None,
+    attack_effect: None,
+    play_condition: None,
+    play_effects: &[],
+    mentor_effect: None,
+};
+
+/// Exertion — disease aura token. `classic_battles::CARD_CATALOG` holds this
+/// at `Card::ExertionToken`'s index, and likewise the two below.
+pub const EXERTION_TOKEN: CardData = DISEASE_AURA_TOKEN;
+/// Inertia — disease aura token.
+pub const INERTIA_TOKEN: CardData = DISEASE_AURA_TOKEN;
+/// Bloodrot Pox — disease aura token.
+pub const BLOODROT_POX_TOKEN: CardData = DISEASE_AURA_TOKEN;
 
 /// Mortimer's placeholder deck: the hero, four pieces of Generic equipment and
 /// two copies each of ten Generic cards that do not need a weapon. Every card
@@ -107,6 +146,42 @@ mod tests {
         assert_eq!(p.weapon, None);
         assert_eq!(p.equipment.len(), 4);
         assert_eq!(p.owned_cards, 24);
+    }
+
+    #[test]
+    fn the_disease_tokens_are_disease_auras_and_quicken_is_a_plain_aura() {
+        use crate::deck_cards::TokenCard;
+        for token in [TokenCard::ExertionToken, TokenCard::InertiaToken, TokenCard::BloodrotPoxToken] {
+            let data = token.card().data();
+            assert_eq!(data.typ, CardType::Token, "{:?}", token);
+            assert_eq!(data.subtype, Some(Subtype::DiseaseAura), "{:?}", token);
+            assert!(data.no_block, "{:?}", token);
+            assert_eq!(TokenCard::from_id(token.id()), token);
+        }
+        let quicken = Card::QuickenToken.data().subtype.expect("Quicken has a subtype");
+        assert!(quicken.is_aura() && !quicken.is_disease());
+        assert!(Subtype::DiseaseAura.is_aura() && Subtype::DiseaseAura.is_disease());
+        // Only the tokens have a subtype so far.
+        assert_eq!(Card::Mortimer.data().subtype, None);
+    }
+
+    #[test]
+    fn a_player_holds_disease_tokens_beside_their_cards() {
+        use crate::deck_cards::TokenCard;
+        let mut game = FabGame::new(&build_mortimer_deck(), &build_rhinar_deck(), Some(42));
+        game.reset(false);
+        let p = &mut game.state.p2;
+        p.add_token(TokenCard::BloodrotPoxToken);
+        p.add_token(TokenCard::BloodrotPoxToken);
+        p.add_token(TokenCard::InertiaToken);
+        assert_eq!(p.token_count(TokenCard::BloodrotPoxToken), 2);
+        assert_eq!(p.token_count(TokenCard::InertiaToken), 1);
+        assert_eq!(p.token_count(TokenCard::ExertionToken), 0);
+        assert_eq!(p.token_count(TokenCard::QuickenToken), 0);
+        // Tokens are not among a player's owned cards.
+        game.state.debug_check_card_totals();
+        let shown = crate::display::render_state(&game.state, None);
+        assert!(shown.contains("Tokens: Inertia; 2x Bloodrot Pox"), "{shown}");
     }
 
     /// Random play to the end of the game, in either seat and against either

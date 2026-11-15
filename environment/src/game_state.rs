@@ -458,7 +458,8 @@ pub struct Player {
     /// piece sits in follows from the card itself, so one bitfield covers all
     /// four. The weapon zone is not an equipment zone; see `weapon`.
     pub equipment : CardCounts,
-    /// The tokens this player controls (Quicken), counted by `TokenCard` id —
+    /// The tokens this player controls (Quicken, and the disease auras
+    /// Exertion, Inertia and Bloodrot Pox), counted by `TokenCard` id —
     /// not by deck card id, so read and change it through `token_count`,
     /// `add_token` and `remove_token`. Public, and not counted among the
     /// player's cards (`cards_in_zones`): tokens are created here and cease to

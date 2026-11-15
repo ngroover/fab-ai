@@ -59,6 +59,32 @@ pub enum Talent {
     Chaos
 }
 
+/// A card's subtype, where a rule or an effect cares about one. `None` on
+/// `CardData` for a card without one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum Subtype {
+    /// An aura (Quicken).
+    Aura,
+    /// A disease aura (Exertion, Inertia, Bloodrot Pox): an aura that is
+    /// also a disease.
+    DiseaseAura
+}
+
+impl Subtype {
+    /// True for every aura, disease or not.
+    #[allow(dead_code)] // no rule reads a subtype yet; exercised by the tests
+    pub const fn is_aura(self) -> bool {
+        matches!(self, Subtype::Aura | Subtype::DiseaseAura)
+    }
+
+    /// True for a disease aura only.
+    #[allow(dead_code)] // no rule reads a subtype yet; exercised by the tests
+    pub const fn is_disease(self) -> bool {
+        matches!(self, Subtype::DiseaseAura)
+    }
+}
+
 bitflags! {
     pub struct Keyword : u8 {
         const GoAgain = 0b1;
@@ -84,6 +110,8 @@ pub struct CardData {
     pub card_class: CardClass,
     #[allow(dead_code)] // no rule reads a talent yet; exercised by the tests
     pub talent: Option<Talent>,
+    #[allow(dead_code)] // no rule reads a subtype yet; exercised by the tests
+    pub subtype: Option<Subtype>,
     pub keyword: Keyword,
     pub hero_life: u8,
     pub hero_intellect: u8,
@@ -163,12 +191,18 @@ pub enum Card {
     /// The Quicken token Flock of the Feather Walkers creates. Not part of any
     /// decklist: it only ever exists in a player's token zone.
     QuickenToken,
+    /// The disease aura tokens of the Outbreak set (see `outbreak`). Like
+    /// Quicken they are in no decklist and only ever exist in a player's
+    /// token zone.
+    ExertionToken,
+    InertiaToken,
+    BloodrotPoxToken,
 }
 
 impl Card {
     /// How many cards the game has: one more than the last variant, so
-    /// `QuickenToken` must stay last. `card as usize` is below this for every
+    /// `BloodrotPoxToken` must stay last. `card as usize` is below this for every
     /// card, which makes it an index into a per-card array (see `observation`).
-    pub const COUNT: usize = Card::QuickenToken as usize + 1;
+    pub const COUNT: usize = Card::BloodrotPoxToken as usize + 1;
 }
 

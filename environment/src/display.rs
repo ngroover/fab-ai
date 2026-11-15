@@ -300,9 +300,16 @@ fn render_player(out: &mut String, p: &Player, viewer: Option<PlayerIndex>) {
     };
     let _ = writeln!(out, "  Weapon: {}", weapon);
     let _ = writeln!(out, "  Equipment: {}", list_cards(p, p.equipment, true));
-    let quickens = p.token_count(TokenCard::QuickenToken);
-    if quickens > 0 {
-        let _ = writeln!(out, "  Tokens: {}x Quicken", quickens);
+    if !p.tokens.is_empty() {
+        let tokens = p.tokens.iter()
+            .map(|(id, n)| {
+                let name = card_name(TokenCard::from_id(id).card());
+                let name = name.strip_suffix(" Token").unwrap_or(&name).to_string();
+                if n > 1 { format!("{}x {}", n, name) } else { name }
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        let _ = writeln!(out, "  Tokens: {}", tokens);
     }
     let _ = writeln!(out, "  Pitch zone: {}", list_cards(p, p.pitch, false));
     let _ = writeln!(out, "  Graveyard ({}): {}", p.graveyard.len(), list_cards(p, p.graveyard, false));

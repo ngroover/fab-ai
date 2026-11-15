@@ -221,10 +221,18 @@ deck_cards! {
 #[repr(u8)]
 pub enum TokenCard {
     QuickenToken,
+    ExertionToken,
+    InertiaToken,
+    BloodrotPoxToken,
 }
 
 impl TokenCard {
-    pub const ALL: &'static [TokenCard] = &[TokenCard::QuickenToken];
+    pub const ALL: &'static [TokenCard] = &[
+        TokenCard::QuickenToken,
+        TokenCard::ExertionToken,
+        TokenCard::InertiaToken,
+        TokenCard::BloodrotPoxToken,
+    ];
     pub const COUNT: usize = Self::ALL.len();
 
     /// This token's field position in `Player::tokens`.
@@ -244,6 +252,9 @@ impl TokenCard {
     pub const fn card(self) -> Card {
         match self {
             TokenCard::QuickenToken => Card::QuickenToken,
+            TokenCard::ExertionToken => Card::ExertionToken,
+            TokenCard::InertiaToken => Card::InertiaToken,
+            TokenCard::BloodrotPoxToken => Card::BloodrotPoxToken,
         }
     }
 }

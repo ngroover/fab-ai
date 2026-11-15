@@ -871,6 +871,7 @@ mod tests {
             slot: None,
             card_class: CardClass::Generic,
             talent: None,
+            subtype: None,
             keyword: Keyword::empty(),
             hero_life: 0,
             hero_intellect: 0,
