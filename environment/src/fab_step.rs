@@ -25,6 +25,7 @@ pub fn step(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
         Phase::ActionPitch | Phase::ReactionPitch | Phase::DefendPitch
             | Phase::BloodrotPoxPitch => handle_pitch_phase(gs, rng, act),
         Phase::BloodrotPox => handle_bloodrot_pox_phase(gs, act),
+        Phase::InertiaOrder => handle_inertia_order_phase(gs, act),
         Phase::ActionInstant => handle_action_instant_phase(gs, rng, act),
         Phase::Defend => handle_defend_phase(gs, act),
         Phase::DefendTriggers | Phase::Reaction => handle_reaction_phase(gs, rng, act),
@@ -254,7 +255,7 @@ fn handle_action_phase(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
         }
         // Passing ends the action phase; nothing is pending. The combat chain
         // closes and the end phase begins: any Bloodrot Pox the turn player
-        // controls resolves, then comes their Arsenal phase.
+        // controls resolves, then any Inertia, then comes their Arsenal phase.
         ActionType::Pass => {
             if gs.logging_enabled() {
                 gs.log_public(format!("{} passes", player_name(gs.active_player)));
@@ -439,8 +440,8 @@ fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
 /// `BLOODROT_POX_COST`. A token they could pay for — from banked resources
 /// plus what their hand pitches for — stops here in the `BloodrotPox` phase
 /// for their choice; one they could not is destroyed and deals its damage
-/// outright. With no token left the Arsenal phase begins, unless the damage
-/// ended the game.
+/// outright. With no token left Inertia resolves (`resolve_inertia`), unless
+/// the damage ended the game.
 fn resolve_bloodrot_pox(gs: &mut Gamestate) {
     let pid = gs.turn_player;
     gs.active_player = pid;
@@ -458,7 +459,98 @@ fn resolve_bloodrot_pox(gs: &mut Gamestate) {
             return;
         }
     }
-    gs.phase = Phase::Arsenal;
+    resolve_inertia(gs);
+}
+
+/// The beginning of the end phase, after any Bloodrot Pox: every Inertia the
+/// turn player controls is destroyed and all the cards in their hand and
+/// arsenal go to the bottom of their deck, in the order they choose (see
+/// `continue_inertia`). Several Inertias do no more than one — the first
+/// leaves nothing for the rest to move. Without an Inertia the Arsenal phase
+/// begins.
+fn resolve_inertia(gs: &mut Gamestate) {
+    let pid = gs.turn_player;
+    gs.active_player = pid;
+    let player = gs.player_mut(pid);
+    if player.token_count(TokenCard::InertiaToken) == 0 {
+        gs.phase = Phase::Arsenal;
+        return;
+    }
+    while player.token_count(TokenCard::InertiaToken) > 0 {
+        player.remove_token(TokenCard::InertiaToken);
+    }
+    if gs.logging_enabled() {
+        gs.log_public(format!(
+            "{}'s Inertia is destroyed: their hand and arsenal go to the bottom of their deck",
+            player_name(pid)
+        ));
+    }
+    continue_inertia(gs);
+}
+
+/// Carry on putting the turn player's hand and arsenal under their deck for
+/// Inertia. With two or more cards left the `InertiaOrder` phase asks which
+/// goes next; a last card has only one place to go and is bottomed outright;
+/// with none left the Arsenal phase begins.
+fn continue_inertia(gs: &mut Gamestate) {
+    let pid = gs.turn_player;
+    let player = gs.player(pid);
+    match player.hand_size() as usize + player.arsenal.is_some() as usize {
+        0 => gs.phase = Phase::Arsenal,
+        1 => {
+            let (id, zone) = match player.arsenal {
+                Some(id) => (id, Zone::Arsenal),
+                None => (player.hand.nth(0).expect("the hand holds a card"), Zone::Hand),
+            };
+            bottom_card_for_inertia(gs, id, zone);
+            gs.phase = Phase::Arsenal;
+        }
+        _ => gs.phase = Phase::InertiaOrder,
+    }
+}
+
+/// Move one copy of `id` from the turn player's hand or arsenal (`zone`) to
+/// the bottom of their deck. The card goes face down: its owner knows which
+/// it was, the opponent only if they already knew — a face-up or known
+/// arsenal card, or a hand that was known copies of that one card.
+fn bottom_card_for_inertia(gs: &mut Gamestate, id: DeckCardId, zone: Zone) {
+    let pid = gs.turn_player;
+    let player = gs.player(pid);
+    let known = match zone {
+        Zone::Arsenal => player.arsenal_face_up() || player.arsenal_known(),
+        _ => player.hand_is_one_known_card(),
+    };
+    if gs.logging_enabled() {
+        let named = format!("{} puts {:?} from their {} on the bottom of their deck",
+            player_name(pid), player.card(id), if zone == Zone::Arsenal { "arsenal" } else { "hand" });
+        let hidden = format!("{} puts a card from their {} on the bottom of their deck",
+            player_name(pid), if zone == Zone::Arsenal { "arsenal" } else { "hand" });
+        let seen = if known { named.clone() } else { hidden };
+        let (p1_msg, p2_msg) = if pid == PlayerIndex::P1 {
+            (named.clone(), seen)
+        } else {
+            (seen, named.clone())
+        };
+        gs.log_views(named, p1_msg, p2_msg);
+    }
+    let player = gs.player_mut(pid);
+    if zone == Zone::Hand {
+        player.remove_from_hand_face_down(id);
+    } else {
+        take_from_zone(player, id, zone);
+    }
+    player.deck.push_back(if known { DeckSlot::known(id) } else { DeckSlot::hidden(id) });
+}
+
+/// Handle an action during the InertiaOrder phase: the turn player's chosen
+/// card goes under their deck, and the rest follow (see `continue_inertia`).
+fn handle_inertia_order_phase(gs: &mut Gamestate, act: Action) {
+    if act.typ != ActionType::BottomCard {
+        return;
+    }
+    let card = act.card_ref();
+    bottom_card_for_inertia(gs, card.id, card.zone);
+    continue_inertia(gs);
 }
 
 /// Destroy one of the turn player's Bloodrot Pox unpaid: it deals them

@@ -309,7 +309,14 @@ pub enum Phase {
     /// Pitching to cover a Bloodrot Pox payment the banked resources fall
     /// short of, returning to `BloodrotPox` handling once 3 are banked.
     BloodrotPoxPitch,
-    /// The turn player's end phase, after any Bloodrot Pox: the combat chain
+    /// The beginning of the turn player's end phase, after any Bloodrot Pox,
+    /// when Inertia is sending two or more cards from their hand and arsenal
+    /// to the bottom of their deck: they choose the order, one `BottomCard`
+    /// action at a time. The Arsenal phase follows once every card is under
+    /// the deck. (A single card has only one possible order, so it is
+    /// bottomed without entering this phase.)
+    InertiaOrder,
+    /// The turn player's end phase, after any Bloodrot Pox and Inertia: the combat chain
     /// has closed, and they may now move a card into their arsenal.
     Arsenal,
     /// After the Arsenal phase, when two or more cards sit in a player's pitch

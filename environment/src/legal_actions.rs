@@ -33,6 +33,7 @@ pub fn legal_actions(gs: &Gamestate) -> LegalActions {
         Phase::DefendPayment => legal_defend_payment_phase(gs),
         Phase::RevealChoice => legal_reveal_choice_phase(gs),
         Phase::Reaction => legal_reaction_phase(gs),
+        Phase::InertiaOrder => legal_inertia_order_phase(gs),
         Phase::Arsenal => legal_arsenal_phase(gs),
         Phase::PitchOrder => legal_pitch_order_phase(gs),
         Phase::Start => LegalActions::new(),
@@ -129,6 +130,20 @@ fn legal_arsenal_phase(gs: &Gamestate) -> LegalActions {
         card: None,
     });
 
+    actions
+}
+
+/// Inertia is putting the turn player's hand and arsenal under their deck:
+/// every distinct card in hand, and the arsenal card, is a choice for the
+/// next one to go. There is no pass — the phase ends once all are bottomed.
+fn legal_inertia_order_phase(gs: &Gamestate) -> LegalActions {
+    let player = gs.player(gs.active_player);
+    let mut actions: LegalActions = player.hand.iter()
+        .map(|(id, _)| Action::new(ActionType::BottomCard, CardRef::new(id, Zone::Hand)))
+        .collect();
+    if let Some(id) = player.arsenal {
+        actions.push(Action::new(ActionType::BottomCard, CardRef::new(id, Zone::Arsenal)));
+    }
     actions
 }
 

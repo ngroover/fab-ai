@@ -43,6 +43,10 @@ pub enum ConstantEffect {
     /// it; it deals 2 damage to them unless they pay 3 resources. Resolved
     /// one token at a time by `fab_step::resolve_bloodrot_pox`.
     OnEndPhaseDestroy2DamageUnlessPay3,
+    /// Inertia: "At the beginning of your end phase, destroy this. Put all
+    /// cards from your hand and arsenal on the bottom of your deck." Resolved
+    /// by `fab_step::resolve_inertia`; the controller chooses the order.
+    OnEndPhaseDestroyBottomHandAndArsenal,
 }
 
 /// What a mentor does with its lessons, on top of its constant effect. A

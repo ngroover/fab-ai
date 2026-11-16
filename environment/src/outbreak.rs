@@ -40,8 +40,8 @@ pub const MORTIMER: CardData = CardData {
 };
 
 /// What the three disease aura tokens share: a Generic token that cannot
-/// block. Exertion and Inertia have no effect implemented yet, and nothing
-/// creates any of the three yet.
+/// block. Exertion has no effect implemented yet, and nothing creates any of
+/// the three yet.
 const DISEASE_AURA_TOKEN: CardData = CardData {
     typ: CardType::Token,
     weapon_type: None,
@@ -72,8 +72,13 @@ const DISEASE_AURA_TOKEN: CardData = CardData {
 /// Exertion — disease aura token. `classic_battles::CARD_CATALOG` holds this
 /// at `Card::ExertionToken`'s index, and likewise the two below.
 pub const EXERTION_TOKEN: CardData = DISEASE_AURA_TOKEN;
-/// Inertia — disease aura token.
-pub const INERTIA_TOKEN: CardData = DISEASE_AURA_TOKEN;
+/// Inertia — disease aura token. "At the beginning of your end phase,
+/// destroy this. Put all cards from your hand and arsenal on the bottom of
+/// your deck."
+pub const INERTIA_TOKEN: CardData = CardData {
+    constant_effect: Some(ConstantEffect::OnEndPhaseDestroyBottomHandAndArsenal),
+    ..DISEASE_AURA_TOKEN
+};
 /// Bloodrot Pox — disease aura token. At the beginning of its controller's
 /// end phase it is destroyed, and deals 2 damage to them unless they pay 3.
 pub const BLOODROT_POX_TOKEN: CardData = CardData {
@@ -194,7 +199,7 @@ mod tests {
     use crate::deck_cards::TokenCard;
     use crate::game_state::{Phase, PlayerIndex, Zone};
     use crate::legal_actions::legal_actions;
-    use crate::test_support::{hand_cards, new_game, set_hand, step_card, step_card_from, step_plain, TestGame};
+    use crate::test_support::{deck_cards, hand_cards, new_game, put_in_arsenal, set_hand, step_card, step_card_from, step_plain, TestGame};
 
     /// Rhinar against Dorinthea with the first turn's Action phase open, the
     /// turn player holding `pox` Bloodrot Pox. Returns the game and the turn
@@ -316,6 +321,135 @@ mod tests {
         assert_eq!((pox(&gs, other), gs.player(other).life), (1, 20));
     }
 
+    // ── Inertia ─────────────────────────────────────────────────────────
+
+    /// As `turn_player_with_pox`, with `inertia` Inertia tokens instead.
+    fn turn_player_with_inertia(inertia: u8) -> (TestGame, PlayerIndex) {
+        let (mut gs, pid) = turn_player_with_pox(0);
+        for _ in 0..inertia {
+            gs.player_mut(pid).add_token(TokenCard::InertiaToken);
+        }
+        (gs, pid)
+    }
+
+    /// The bottom `n` cards of `pid`'s deck, the last one bottommost.
+    fn deck_bottom(gs: &TestGame, pid: PlayerIndex, n: usize) -> Vec<Card> {
+        let deck = deck_cards(gs, pid);
+        deck[deck.len() - n..].to_vec()
+    }
+
+    #[test]
+    fn inertia_puts_hand_and_arsenal_under_the_deck_in_the_chosen_order() {
+        let (mut gs, pid) = turn_player_with_inertia(1);
+        // `put_in_arsenal` moves the Wild Ride out of the hand.
+        set_hand(&mut gs, pid, &[Card::DodgeB, Card::MuscleMuttY, Card::PackCallY, Card::WildRideR]);
+        put_in_arsenal(&mut gs, pid, Card::WildRideR);
+        let deck_before = gs.player(pid).deck.len();
+        step_plain(&mut gs, ActionType::Pass);
+
+        // The token is gone and its controller orders the four cards.
+        assert_eq!(gs.player(pid).token_count(TokenCard::InertiaToken), 0);
+        assert_eq!((gs.phase, gs.active_player), (Phase::InertiaOrder, pid));
+        let legal = legal_actions(&gs);
+        assert_eq!(legal.len(), 4, "three hand cards and the arsenal card: {legal:?}");
+        assert!(legal.iter().all(|a| a.typ == ActionType::BottomCard));
+
+        step_card(&mut gs, ActionType::BottomCard, Card::PackCallY);
+        step_card_from(&mut gs, ActionType::BottomCard, Card::WildRideR, Zone::Arsenal);
+        assert_eq!(gs.phase, Phase::InertiaOrder);
+        step_card(&mut gs, ActionType::BottomCard, Card::DodgeB);
+        // The last card has nowhere else to go: it follows without asking.
+        assert_eq!((gs.phase, gs.active_player), (Phase::Arsenal, pid));
+        assert_eq!(gs.player(pid).hand_size(), 0);
+        assert_eq!(gs.player(pid).arsenal, None);
+        assert_eq!(gs.player(pid).deck.len(), deck_before + 4);
+        assert_eq!(deck_bottom(&gs, pid, 4),
+            vec![Card::PackCallY, Card::WildRideR, Card::DodgeB, Card::MuscleMuttY]);
+        gs.debug_check_card_totals();
+
+        // Nothing is left to arsenal; the turn ends with a fresh hand.
+        assert_eq!(types(&gs), vec![ActionType::Pass]);
+        step_plain(&mut gs, ActionType::Pass);
+        assert_eq!(gs.turn_player, pid.opponent());
+        assert_eq!(gs.player(pid).hand_size(), 4, "drawn back up to intellect");
+    }
+
+    #[test]
+    fn inertia_with_a_single_card_asks_nothing() {
+        let (mut gs, pid) = turn_player_with_inertia(1);
+        set_hand(&mut gs, pid, &[Card::DodgeB]);
+        step_plain(&mut gs, ActionType::Pass);
+        assert_eq!(gs.phase, Phase::Arsenal);
+        assert_eq!(gs.player(pid).hand_size(), 0);
+        assert_eq!(deck_bottom(&gs, pid, 1), vec![Card::DodgeB]);
+    }
+
+    #[test]
+    fn inertia_with_no_cards_is_just_destroyed() {
+        let (mut gs, pid) = turn_player_with_inertia(1);
+        set_hand(&mut gs, pid, &[]);
+        let deck_before = gs.player(pid).deck.len();
+        step_plain(&mut gs, ActionType::Pass);
+        assert_eq!(gs.phase, Phase::Arsenal);
+        assert_eq!(gs.player(pid).token_count(TokenCard::InertiaToken), 0);
+        assert_eq!(gs.player(pid).deck.len(), deck_before);
+    }
+
+    #[test]
+    fn several_inertias_are_all_destroyed_and_do_no_more_than_one() {
+        let (mut gs, pid) = turn_player_with_inertia(3);
+        set_hand(&mut gs, pid, &[Card::DodgeB, Card::MuscleMuttY]);
+        step_plain(&mut gs, ActionType::Pass);
+        assert_eq!(gs.player(pid).token_count(TokenCard::InertiaToken), 0);
+        assert_eq!(gs.phase, Phase::InertiaOrder);
+        step_card(&mut gs, ActionType::BottomCard, Card::MuscleMuttY);
+        assert_eq!(gs.phase, Phase::Arsenal);
+        assert_eq!(deck_bottom(&gs, pid, 2), vec![Card::MuscleMuttY, Card::DodgeB]);
+    }
+
+    #[test]
+    fn bloodrot_pox_resolves_before_inertia_so_the_hand_can_still_pay() {
+        let (mut gs, pid) = turn_player_with_inertia(1);
+        gs.player_mut(pid).add_token(TokenCard::BloodrotPoxToken);
+        set_hand(&mut gs, pid, &[Card::DodgeB, Card::MuscleMuttY, Card::PackCallY]);
+        step_plain(&mut gs, ActionType::Pass);
+        assert_eq!(gs.phase, Phase::BloodrotPox);
+        assert_eq!(gs.player(pid).token_count(TokenCard::InertiaToken), 1, "Inertia waits its turn");
+        step_plain(&mut gs, ActionType::Pay);
+        step_card(&mut gs, ActionType::Pitch, Card::DodgeB);
+        // Paid with the blue; Inertia then takes the two cards left in hand.
+        assert_eq!((gs.phase, gs.player(pid).life), (Phase::InertiaOrder, 20));
+        step_card(&mut gs, ActionType::BottomCard, Card::PackCallY);
+        assert_eq!(gs.phase, Phase::Arsenal);
+        assert_eq!(gs.player(pid).hand_size(), 0);
+        // The pitched blue goes under after them, when the turn winds down.
+        step_plain(&mut gs, ActionType::Pass);
+        assert_eq!(deck_bottom(&gs, pid, 3), vec![Card::PackCallY, Card::MuscleMuttY, Card::DodgeB]);
+    }
+
+    #[test]
+    fn only_the_turn_players_inertia_resolves() {
+        let (mut gs, pid) = turn_player_with_inertia(0);
+        let other = pid.opponent();
+        gs.player_mut(other).add_token(TokenCard::InertiaToken);
+        step_plain(&mut gs, ActionType::Pass);
+        assert_eq!(gs.phase, Phase::Arsenal);
+        assert_eq!(gs.player(other).token_count(TokenCard::InertiaToken), 1);
+        assert_eq!(gs.player(other).hand_size(), 4);
+    }
+
+    #[test]
+    fn cards_inertia_puts_under_the_deck_stay_hidden_from_the_opponent() {
+        let (mut gs, pid) = turn_player_with_inertia(1);
+        set_hand(&mut gs, pid, &[Card::DodgeB, Card::MuscleMuttY]);
+        step_plain(&mut gs, ActionType::Pass);
+        step_card(&mut gs, ActionType::BottomCard, Card::DodgeB);
+        let deck = &gs.player(pid).deck;
+        let n = deck.len();
+        assert!(!deck.get(n - 1).unwrap().is_known());
+        assert!(!deck.get(n - 2).unwrap().is_known());
+    }
+
     /// Random play to the end of the game, in either seat and against either
     /// hero: the debug-build card conservation check runs on every step.
     #[test]
@@ -329,11 +463,14 @@ mod tests {
             };
             let mut rng = SmallRng::seed_from_u64(seed);
             game.reset(false);
-            // Each player starts with Bloodrot Pox, so its end phase step is
-            // played through too.
+            // Each player starts with disease tokens, so their end phase steps
+            // are played through too.
             for p in [&mut game.state.p1, &mut game.state.p2] {
                 for _ in 0..(seed % 4) {
                     p.add_token(TokenCard::BloodrotPoxToken);
+                }
+                if seed % 3 == 0 {
+                    p.add_token(TokenCard::InertiaToken);
                 }
             }
             let mut steps = 0;

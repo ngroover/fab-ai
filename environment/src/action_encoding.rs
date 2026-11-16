@@ -45,6 +45,10 @@ pub enum ActionKind {
     Arsenal,
     FlipFaceUp,
     Reveal,
+    /// A hand card put under the deck for Inertia.
+    BottomFromHand,
+    /// The arsenal card put under the deck for Inertia.
+    BottomFromArsenal,
 }
 
 impl ActionKind {
@@ -61,6 +65,8 @@ impl ActionKind {
         ActionKind::Arsenal,
         ActionKind::FlipFaceUp,
         ActionKind::Reveal,
+        ActionKind::BottomFromHand,
+        ActionKind::BottomFromArsenal,
     ];
 
     /// The action type and card zone this kind stands for.
@@ -78,6 +84,8 @@ impl ActionKind {
             ActionKind::Arsenal => (ActionType::Arsenal, Zone::Hand),
             ActionKind::FlipFaceUp => (ActionType::FlipFaceUp, Zone::Arsenal),
             ActionKind::Reveal => (ActionType::Reveal, Zone::Hand),
+            ActionKind::BottomFromHand => (ActionType::BottomCard, Zone::Hand),
+            ActionKind::BottomFromArsenal => (ActionType::BottomCard, Zone::Arsenal),
         }
     }
 
@@ -89,7 +97,7 @@ impl ActionKind {
 }
 
 /// How many `ActionKind`s there are.
-pub const KINDS: usize = ActionKind::Reveal as usize + 1;
+pub const KINDS: usize = ActionKind::BottomFromArsenal as usize + 1;
 
 /// The actions that name no card, in the order of their slots.
 const CARDLESS: [ActionType; 5] = [
@@ -183,6 +191,15 @@ mod tests {
             }
             let mut choose = new_rng(Some(seed ^ 0x5EED));
             while !game.is_over() {
+                // Likewise Inertia, handed out now and then through the game
+                // so it also catches a player with a card in arsenal.
+                if rand::RngExt::random_range(&mut choose, 0..40) == 0 {
+                    let pid = game.state.active_player;
+                    let player = game.state.player_mut(pid);
+                    if player.token_count(crate::deck_cards::TokenCard::InertiaToken) == 0 {
+                        player.add_token(crate::deck_cards::TokenCard::InertiaToken);
+                    }
+                }
                 visit(&game);
                 let legal = game.legal_actions();
                 let pick = rand::RngExt::random_range(&mut choose, 0..legal.len());
