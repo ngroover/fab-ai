@@ -1659,10 +1659,11 @@ static CARD_CATALOG: [CardData; Card::COUNT] = [
             play_effects: &[],
             mentor_effect: None,
         },
-        // Exertion, Inertia, Bloodrot Pox (tokens; data in `outbreak`)
+        // Exertion, Inertia, Bloodrot Pox, Frailty (tokens; data in `outbreak`)
         crate::outbreak::EXERTION_TOKEN,
         crate::outbreak::INERTIA_TOKEN,
         crate::outbreak::BLOODROT_POX_TOKEN,
+        crate::outbreak::FRAILTY_TOKEN,
 ];
 
 /// Returns a reference to the shared card catalog.

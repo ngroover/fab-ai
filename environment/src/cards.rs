@@ -66,7 +66,7 @@ pub enum Talent {
 pub enum Subtype {
     /// An aura (Quicken).
     Aura,
-    /// A disease aura (Exertion, Inertia, Bloodrot Pox): an aura that is
+    /// A disease aura (Exertion, Inertia, Bloodrot Pox, Frailty): an aura that is
     /// also a disease.
     DiseaseAura
 }
@@ -197,12 +197,13 @@ pub enum Card {
     ExertionToken,
     InertiaToken,
     BloodrotPoxToken,
+    FrailtyToken,
 }
 
 impl Card {
     /// How many cards the game has: one more than the last variant, so
-    /// `BloodrotPoxToken` must stay last. `card as usize` is below this for every
+    /// `FrailtyToken` must stay last. `card as usize` is below this for every
     /// card, which makes it an index into a per-card array (see `observation`).
-    pub const COUNT: usize = Card::BloodrotPoxToken as usize + 1;
+    pub const COUNT: usize = Card::FrailtyToken as usize + 1;
 }
 

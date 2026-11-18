@@ -46,7 +46,7 @@ const ZONES: usize = Zone::Stack as usize + 1;
 /// Width of a hero one-hot.
 const HEROES: usize = DeckKind::Mortimer as usize + 1;
 /// How many `PlayerFlags` bits there are; each is written as its own 0/1.
-const FLAGS: usize = 14;
+const FLAGS: usize = 15;
 const _: () = assert!(
     PlayerFlags::all().bits() == (1 << FLAGS) - 1,
     "PlayerFlags changed: update observation::FLAGS",
@@ -62,7 +62,7 @@ const LAYER_SIZE: usize = 2 + CARDS + LAYER_TYPES + ZONES;
 const PLAYER_PLANES: usize = 15;
 /// Scalars per player: the single ones, plus one per weapon attack ordinal and
 /// per equipment slot; see `encode_player`.
-const PLAYER_SCALARS: usize = 26 + WEAPON_ATTACK_ORDINALS + EQUIPMENT_SLOTS;
+const PLAYER_SCALARS: usize = 27 + WEAPON_ATTACK_ORDINALS + EQUIPMENT_SLOTS;
 const PLAYER_SIZE: usize = HEROES + PLAYER_PLANES * CARDS + PLAYER_SCALARS + FLAGS;
 const GLOBAL_SIZE: usize = 2 * PHASES + 4;
 
@@ -325,7 +325,8 @@ fn encode_player(gs: &Gamestate, p: &Player, own: bool, link: usize, prefix: &st
     w.flag(arsenal_public);
     w.scalar(p.arsenal_lesson_counters as f32);
     w.scalar(p.token_count(TokenCard::QuickenToken) as f32 / MAX_QUICKENS as f32);
-    for token in [TokenCard::ExertionToken, TokenCard::InertiaToken, TokenCard::BloodrotPoxToken] {
+    for token in [TokenCard::ExertionToken, TokenCard::InertiaToken, TokenCard::BloodrotPoxToken,
+                  TokenCard::FrailtyToken] {
         w.scalar(p.token_count(token) as f32 / MAX_TOKEN_COPIES as f32);
     }
     w.scalar(p.attack_power_bonus as f32);

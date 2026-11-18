@@ -114,6 +114,8 @@ fn begin_turn(gs: &mut Gamestate) {
     // never leak into this turn's attacks.
     gs.p1.attack_power_bonus = 0;
     gs.p2.attack_power_bonus = 0;
+    gs.p1.set_attack_from_arsenal(false);
+    gs.p2.set_attack_from_arsenal(false);
     // Likewise clear any unconsumed conditional Go Again so it cannot leak into
     // this turn's attacks.
     gs.p1.set_attack_go_again_bonus(false);
@@ -254,8 +256,9 @@ fn handle_action_phase(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
             close_combat_chain(gs);
         }
         // Passing ends the action phase; nothing is pending. The combat chain
-        // closes and the end phase begins: any Bloodrot Pox the turn player
-        // controls resolves, then any Inertia, then comes their Arsenal phase.
+        // closes and the end phase begins: any Frailty the turn player
+        // controls is destroyed, any Bloodrot Pox resolves, then any Inertia,
+        // then comes their Arsenal phase.
         ActionType::Pass => {
             if gs.logging_enabled() {
                 gs.log_public(format!("{} passes", player_name(gs.active_player)));
@@ -266,6 +269,7 @@ fn handle_action_phase(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
             // into the end phase, every Intimidate-banished card returns to its
             // owner's hand (the ordinary banished zone is left untouched).
             return_intimidate_banished_to_hands(gs);
+            destroy_frailty(gs);
             resolve_bloodrot_pox(gs);
         }
         _ => {}
@@ -432,6 +436,23 @@ fn handle_defend_phase(gs: &mut Gamestate, act: Action) {
             gs.active_player = gs.turn_player;
         }
         _ => {}
+    }
+}
+
+/// The beginning of the end phase: every Frailty the turn player controls is
+/// destroyed. Nothing to choose, so it goes first, before Bloodrot Pox.
+fn destroy_frailty(gs: &mut Gamestate) {
+    let pid = gs.turn_player;
+    let player = gs.player_mut(pid);
+    let frailty = player.token_count(TokenCard::FrailtyToken);
+    if frailty == 0 {
+        return;
+    }
+    for _ in 0..frailty {
+        player.remove_token(TokenCard::FrailtyToken);
+    }
+    if gs.logging_enabled() {
+        gs.log_public(format!("{}'s Frailty is destroyed", player_name(pid)));
     }
 }
 
@@ -2067,6 +2088,10 @@ fn finish_commit(gs: &mut Gamestate, rng: &mut GameRng, pending: PendingCard) {
     // Playing an attack action card or attacking with a weapon sets off every
     // Quicken its owner holds.
     if commits_as_attack(pending.typ, data) {
+        // Frailty takes power off an attack action card played from the
+        // arsenal; record where this attack came from for combat damage.
+        gs.player_mut(owner).set_attack_from_arsenal(
+            pending.typ == ActionType::PlayCard && pending.from == Zone::Arsenal);
         trigger_quickens(gs, owner, pending.card);
         // Driving Blade's banked "your next weapon attack gains go again" is
         // spent as that attack is made, like a Quicken.
@@ -2246,6 +2271,14 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // The block is the blockers' defense — printed, less any -1 defense
     // counters on a Battleworn piece of equipment — plus whatever was granted
     // to them during the combat (Rally the Rearguard's +3 block).
+    // Frailty: "Your attack action cards played from arsenal and weapon
+    // attacks have -1 power", once for each Frailty the attacker controls.
+    let frailty = if attack_is_weapon || (attack_is_attack_action && attacker.attack_from_arsenal()) {
+        attacker.token_count(TokenCard::FrailtyToken)
+    } else {
+        0
+    };
+    let power = power.saturating_sub(frailty);
     let blocked = chain_link_total(defender, link, |d| defender.defense_of(d))
         .saturating_add(defender.chain_defense_bonus[link]);
     let damage = power.saturating_sub(blocked);
@@ -2338,6 +2371,7 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
     // (e.g. after Go Again) doesn't inherit it.
     let attacker = gs.player_mut(attacker_id);
     attacker.attack_power_bonus = 0;
+    attacker.set_attack_from_arsenal(false);
     attacker.set_attack_go_again_bonus(false);
     // The brute power bonus is single-use, but only a brute attack consumes it:
     // a non-brute attack leaves it banked for a later brute attack this turn.

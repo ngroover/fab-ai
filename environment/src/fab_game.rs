@@ -211,6 +211,7 @@ fn place_cards_for(player: &mut Player, start: &StartingCards) {
     player.set_arsenal_known(false);
     player.set_extra_weapon_attack(false);
     player.set_defended_from_hand(false);
+    player.set_attack_from_arsenal(false);
     player.set_next_weapon_on_hit_go_again(false);
     player.set_next_weapon_go_again(false);
     player.set_next_dawnblade_go_again(false);

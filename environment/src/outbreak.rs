@@ -1,5 +1,5 @@
 //! Outbreak: Mortimer, Living Virus — his hero card and his decklist — and
-//! the set's disease aura tokens (Exertion, Inertia, Bloodrot Pox).
+//! the set's disease aura tokens (Exertion, Inertia, Bloodrot Pox, Frailty).
 //!
 //! No Assassin cards are implemented yet, so for now his deck is a placeholder
 //! built from the Generic cards of the Rhinar vs Dorinthea classic battle
@@ -39,9 +39,9 @@ pub const MORTIMER: CardData = CardData {
     mentor_effect: None,
 };
 
-/// What the three disease aura tokens share: a Generic token that cannot
+/// What the disease aura tokens share: a Generic token that cannot
 /// block. Exertion has no effect implemented yet, and nothing creates any of
-/// the three yet.
+/// them yet.
 const DISEASE_AURA_TOKEN: CardData = CardData {
     typ: CardType::Token,
     weapon_type: None,
@@ -83,6 +83,14 @@ pub const INERTIA_TOKEN: CardData = CardData {
 /// end phase it is destroyed, and deals 2 damage to them unless they pay 3.
 pub const BLOODROT_POX_TOKEN: CardData = CardData {
     constant_effect: Some(ConstantEffect::OnEndPhaseDestroy2DamageUnlessPay3),
+    ..DISEASE_AURA_TOKEN
+};
+
+/// Frailty — disease aura token. "Your attack action cards played from
+/// arsenal and weapon attacks have -1 power. At the beginning of your end
+/// phase, destroy this."
+pub const FRAILTY_TOKEN: CardData = CardData {
+    constant_effect: Some(ConstantEffect::AttacksFromArsenalAndWeaponsMinus1Power),
     ..DISEASE_AURA_TOKEN
 };
 
@@ -161,7 +169,8 @@ mod tests {
 
     #[test]
     fn the_disease_tokens_are_disease_auras_and_quicken_is_a_plain_aura() {
-        for token in [TokenCard::ExertionToken, TokenCard::InertiaToken, TokenCard::BloodrotPoxToken] {
+        for token in [TokenCard::ExertionToken, TokenCard::InertiaToken, TokenCard::BloodrotPoxToken,
+                      TokenCard::FrailtyToken] {
             let data = token.card().data();
             assert_eq!(data.typ, CardType::Token, "{:?}", token);
             assert_eq!(data.subtype, Some(Subtype::DiseaseAura), "{:?}", token);
@@ -450,6 +459,119 @@ mod tests {
         assert!(!deck.get(n - 2).unwrap().is_known());
     }
 
+    // ── Frailty ─────────────────────────────────────────────────────────
+
+    use crate::action::Action;
+    use crate::test_support::step;
+
+    /// Rhinar (P1) against Dorinthea with Rhinar's first turn open and his
+    /// hand set to `hand`; `frailty` Frailty tokens are his.
+    fn rhinar_turn_with_frailty(frailty: u8, hand: &[Card]) -> TestGame {
+        let mut gs = new_game(&build_rhinar_deck(), &build_dorinthea_deck(), Some(42), false);
+        let choice = if gs.active_player == PlayerIndex::P1 { ActionType::ChooseFirst } else { ActionType::ChooseSecond };
+        step_plain(&mut gs, choice);
+        assert_eq!((gs.phase, gs.turn_player), (Phase::Action, PlayerIndex::P1));
+        set_hand(&mut gs, PlayerIndex::P1, hand);
+        for _ in 0..frailty {
+            gs.p1.add_token(TokenCard::FrailtyToken);
+        }
+        gs
+    }
+
+    /// Make the attack `act`, paying with whatever pitch is offered first, and
+    /// play it through to combat damage with nobody blocking or reacting.
+    /// Returns the damage Dorinthea took.
+    fn attack_unblocked(gs: &mut TestGame, act: Action) -> u8 {
+        let life = gs.p2.life;
+        step(gs, act);
+        while gs.phase != Phase::Action {
+            let legal = legal_actions(gs);
+            let pass = legal.iter().copied().find(|a| a.typ == ActionType::Pass);
+            step(gs, pass.unwrap_or(legal[0]));
+        }
+        life - gs.p2.life
+    }
+
+    fn bone_basher_swing(gs: &TestGame) -> Action {
+        *legal_actions(gs).iter()
+            .find(|a| a.typ == ActionType::Activate && a.card.is_some_and(|c| c.zone == Zone::Weapon))
+            .expect("Bone Basher can attack")
+    }
+
+    const HAND: [Card; 4] = [Card::MuscleMuttY, Card::DodgeB, Card::DodgeB, Card::ClearingBellowB];
+
+    #[test]
+    fn frailty_takes_1_power_off_a_weapon_attack_per_token() {
+        let damage = |frailty| {
+            let mut gs = rhinar_turn_with_frailty(frailty, &HAND);
+            let swing = bone_basher_swing(&gs);
+            attack_unblocked(&mut gs, swing)
+        };
+        let full = damage(0);
+        assert!(full >= 3, "Bone Basher should hit for a few: {full}");
+        assert_eq!(damage(1), full - 1);
+        assert_eq!(damage(2), full - 2);
+    }
+
+    #[test]
+    fn frailty_takes_1_power_off_an_attack_action_played_from_arsenal() {
+        let damage = |frailty| {
+            let mut gs = rhinar_turn_with_frailty(frailty, &HAND);
+            put_in_arsenal(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
+            let play = crate::test_support::act_from(&gs, ActionType::PlayCard, Card::MuscleMuttY, Zone::Arsenal);
+            attack_unblocked(&mut gs, play)
+        };
+        assert_eq!(damage(0), 6);
+        assert_eq!(damage(1), 5);
+    }
+
+    #[test]
+    fn frailty_leaves_an_attack_action_played_from_hand_alone() {
+        let mut gs = rhinar_turn_with_frailty(1, &HAND);
+        let play = crate::test_support::act(&gs, ActionType::PlayCard, Card::MuscleMuttY);
+        assert_eq!(attack_unblocked(&mut gs, play), 6);
+        assert!(!gs.p1.attack_from_arsenal());
+    }
+
+    #[test]
+    fn frailty_from_arsenal_does_not_carry_to_the_next_attack() {
+        // Muscle Mutt from arsenal, then a second Muscle Mutt from hand, made
+        // possible by giving the first go again.
+        let mut gs = rhinar_turn_with_frailty(1, &[Card::MuscleMuttY, Card::MuscleMuttY,
+            Card::DodgeB, Card::DodgeB]);
+        put_in_arsenal(&mut gs, PlayerIndex::P1, Card::MuscleMuttY);
+        gs.p1.set_attack_go_again_bonus(true);
+        // Paid from banked resources, so the second Muscle Mutt stays in hand.
+        gs.p1.resources = 3;
+        let play = crate::test_support::act_from(&gs, ActionType::PlayCard, Card::MuscleMuttY, Zone::Arsenal);
+        assert_eq!(attack_unblocked(&mut gs, play), 5);
+        assert!(!gs.p1.attack_from_arsenal(), "cleared once damage is dealt");
+        // The arsenal is empty now; this one comes from hand at full power.
+        gs.p1.resources = 3;
+        let play = crate::test_support::act(&gs, ActionType::PlayCard, Card::MuscleMuttY);
+        assert_eq!(attack_unblocked(&mut gs, play), 6);
+    }
+
+    #[test]
+    fn frailty_cannot_take_power_below_0() {
+        let mut gs = rhinar_turn_with_frailty(3, &HAND);
+        // Bone Basher's printed power less three Frailty, against no block,
+        // never wraps round to a huge number.
+        let swing = bone_basher_swing(&gs);
+        assert!(attack_unblocked(&mut gs, swing) <= 20);
+    }
+
+    #[test]
+    fn frailty_is_destroyed_at_the_beginning_of_its_controllers_end_phase() {
+        let mut gs = rhinar_turn_with_frailty(2, &HAND);
+        gs.p2.add_token(TokenCard::FrailtyToken);
+        step_plain(&mut gs, ActionType::Pass);
+        assert_eq!(gs.phase, Phase::Arsenal);
+        assert_eq!(gs.p1.token_count(TokenCard::FrailtyToken), 0);
+        assert_eq!(gs.p2.token_count(TokenCard::FrailtyToken), 1,
+            "the opponent's Frailty lasts until their own end phase");
+    }
+
     /// Random play to the end of the game, in either seat and against either
     /// hero: the debug-build card conservation check runs on every step.
     #[test]
@@ -471,6 +593,9 @@ mod tests {
                 }
                 if seed % 3 == 0 {
                     p.add_token(TokenCard::InertiaToken);
+                }
+                if seed % 2 == 0 {
+                    p.add_token(TokenCard::FrailtyToken);
                 }
             }
             let mut steps = 0;

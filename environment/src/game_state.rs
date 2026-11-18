@@ -416,6 +416,11 @@ bitflags::bitflags! {
         /// Knife Edge). Spent as that attack is made; cleared each turn and on
         /// reset.
         const NEXT_SWORD_GO_AGAIN = 1 << 13;
+        /// This player's current attack is an attack action card played from
+        /// their arsenal, which Frailty gives -1 power. Set or cleared as each
+        /// attack is made (`fab_step::finish_commit`); cleared after combat
+        /// damage, each turn and on reset.
+        const ATTACK_FROM_ARSENAL = 1 << 14;
         /// All four of the above.
         /// Whether the opponent knows the face-down card in this player's
         /// arsenal: it was arsenaled from a hand made entirely of known copies
@@ -482,7 +487,7 @@ pub struct Player {
     /// four. The weapon zone is not an equipment zone; see `weapon`.
     pub equipment : CardCounts,
     /// The tokens this player controls (Quicken, and the disease auras
-    /// Exertion, Inertia and Bloodrot Pox), counted by `TokenCard` id —
+    /// Exertion, Inertia, Bloodrot Pox and Frailty), counted by `TokenCard` id —
     /// not by deck card id, so read and change it through `token_count`,
     /// `add_token` and `remove_token`. Public, and not counted among the
     /// player's cards (`cards_in_zones`): tokens are created here and cease to
@@ -1040,6 +1045,17 @@ impl Player {
     /// Set or clear `PlayerFlags::DEFENDED_FROM_HAND`.
     pub fn set_defended_from_hand(&mut self, on: bool) {
         self.flags.set(PlayerFlags::DEFENDED_FROM_HAND, on);
+    }
+
+    /// Whether the current attack is an attack action card played from the
+    /// arsenal. See `PlayerFlags::ATTACK_FROM_ARSENAL`.
+    pub const fn attack_from_arsenal(&self) -> bool {
+        self.flags.contains(PlayerFlags::ATTACK_FROM_ARSENAL)
+    }
+
+    /// Set or clear `PlayerFlags::ATTACK_FROM_ARSENAL`.
+    pub fn set_attack_from_arsenal(&mut self, on: bool) {
+        self.flags.set(PlayerFlags::ATTACK_FROM_ARSENAL, on);
     }
 
     /// Whether the opponent knows the face-down arsenal card

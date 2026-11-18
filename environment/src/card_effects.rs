@@ -47,6 +47,12 @@ pub enum ConstantEffect {
     /// cards from your hand and arsenal on the bottom of your deck." Resolved
     /// by `fab_step::resolve_inertia`; the controller chooses the order.
     OnEndPhaseDestroyBottomHandAndArsenal,
+    /// Frailty: "Your attack action cards played from arsenal and weapon
+    /// attacks have -1 power. At the beginning of your end phase, destroy
+    /// this." The -1 is taken off at combat damage
+    /// (`fab_step::resolve_combat_damage`), once per Frailty; the token is
+    /// destroyed by `fab_step::destroy_frailty`.
+    AttacksFromArsenalAndWeaponsMinus1Power,
 }
 
 /// What a mentor does with its lessons, on top of its constant effect. A

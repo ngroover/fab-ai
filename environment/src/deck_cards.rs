@@ -224,6 +224,7 @@ pub enum TokenCard {
     ExertionToken,
     InertiaToken,
     BloodrotPoxToken,
+    FrailtyToken,
 }
 
 impl TokenCard {
@@ -232,6 +233,7 @@ impl TokenCard {
         TokenCard::ExertionToken,
         TokenCard::InertiaToken,
         TokenCard::BloodrotPoxToken,
+        TokenCard::FrailtyToken,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -255,6 +257,7 @@ impl TokenCard {
             TokenCard::ExertionToken => Card::ExertionToken,
             TokenCard::InertiaToken => Card::InertiaToken,
             TokenCard::BloodrotPoxToken => Card::BloodrotPoxToken,
+            TokenCard::FrailtyToken => Card::FrailtyToken,
         }
     }
 }
