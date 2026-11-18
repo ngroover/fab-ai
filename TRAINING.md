@@ -70,6 +70,18 @@ On a 4-core machine with no GPU a round takes about 5 to 7 minutes.
 same command again carries on after the last finished round. To train further,
 run it again with a larger `--rounds`.
 
+**Changing the anchor.** A resumed run can be measured against another fixed
+opponent with `--anchor` (`ismcts`, `puct`, `random` or `net:FILE`). Rounds
+finished under the old anchor then show `-` in the summary's anchor column; add
+`--backfill` to play those rounds against the new anchor first:
+
+```sh
+python3 train_loop.py --dir runs/first --rounds 5 --anchor puct --backfill
+```
+
+Each backfilled round costs one evaluation match, and the old anchor's scores
+stay in `results.jsonl`.
+
 **The result.** The networks are `runs/first/net_000.bin`, `net_001.bin`, and so
 on; the highest number is the newest. `runs/first/results.jsonl` has every
 round's scores.

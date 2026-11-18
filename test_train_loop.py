@@ -9,6 +9,8 @@ what the loop asked for.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import stat
@@ -165,6 +167,44 @@ class TrainLoopTest(unittest.TestCase):
         self.assertEqual(new_calls[0][1]["--network"], tl.net_path(self.dir, 1))
         self.assertEqual([r["round"] for r in tl.load_results(self.dir)], [0, 1, 2])
         self.assertEqual(self.net_bytes(0), first_net)
+
+    def test_backfill_scores_finished_rounds_against_a_new_anchor(self):
+        self.loop(2)  # measured against ismcts
+        before = len(self.calls())
+        ismcts_seeds = [m["--seed"] for c, m in self.calls() if c == "match" and m["--b"] == "ismcts"]
+
+        os.environ["FAKE_SCORE"] = "0.8"
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.loop(2, "--anchor", "puct", "--backfill")
+        # One match per finished round, the new network as A, on the seed
+        # the round's anchor match was played on.
+        backfilled = self.calls()[before:]
+        self.assertEqual([(c, m["--a"], m["--b"]) for c, m in backfilled],
+                         [("match", f"net:{tl.net_path(self.dir, r)}", "puct") for r in range(2)])
+        self.assertEqual([m["--seed"] for _, m in backfilled], ismcts_seeds)
+
+        # The old anchor's scores are kept beside the new one's.
+        results = tl.load_results(self.dir)
+        self.assertEqual([sorted(r["matches"]) for r in results],
+                         [["ismcts", "puct"], ["ismcts", "previous", "puct"]])
+        self.assertEqual([r["matches"]["ismcts"]["score"] for r in results], [0.6, 0.6])
+        self.assertEqual([r["matches"]["puct"]["score"] for r in results], [0.8, 0.8])
+        self.assertFalse([name for name in os.listdir(self.dir) if name.endswith(".partial")])
+
+        # The summary has the one anchor column, filled in for every round.
+        table = out.getvalue().split("\n\n")[-1].splitlines()
+        self.assertEqual(table[0].split()[:3], ["round", "vs", "puct"])
+        self.assertEqual([line.split()[1] for line in table[1:]], ["80.0%", "80.0%"])
+
+        # Already backfilled: nothing more to play. A new round is measured
+        # against the new anchor as usual.
+        before = len(self.calls())
+        self.loop(2, "--anchor", "puct", "--backfill")
+        self.assertEqual(len(self.calls()), before)
+        self.loop(3, "--anchor", "puct", "--backfill")
+        self.assertEqual([m["--b"] for c, m in self.calls()[before:] if c == "match"][0], "puct")
+        self.assertEqual(sorted(tl.load_results(self.dir)[2]["matches"]), ["first", "previous", "puct"])
 
     def test_a_failed_round_is_reported_and_redone(self):
         self.loop(1)

@@ -21,6 +21,9 @@ and match scores. Running the same command again carries on after the last
 finished round, so a run can be stopped and resumed, or extended with a
 larger `--rounds`.
 
+A run can switch to another `--anchor` when it resumes; adding `--backfill`
+also scores the rounds already finished against the new anchor.
+
 The evaluation matches are only measurements: their games are not trained on,
 and the newest network is used for self-play whatever it scored.
 """
@@ -124,27 +127,54 @@ def train_round(directory: str, round_: int, args: argparse.Namespace) -> dict:
     }
 
 
+def evaluation_match(directory: str, round_: int, opponent: str, i: int,
+                     args: argparse.Namespace) -> dict:
+    """Round `round_`'s network against `opponent`, the round's `i`th
+    yardstick (the anchor is always the 0th), as recorded in results.jsonl."""
+    # A seed of its own per round and opponent, apart from self-play's.
+    seed = args.seed + 500_000_000 + 1_000_003 * round_ + 7919 * i
+    result = play_match(args.binary, f"net:{net_path(directory, round_)}", opponent,
+                        args.eval_games, args.eval_iterations, args.threads, seed)
+    return {
+        "score": result["a_score"],
+        "games": int(result["games"]),
+        "as_rhinar": f"{int(result['a_rhinar_wins'])}/{int(result['a_rhinar_games'])}",
+        "as_dorinthea": f"{int(result['a_dorinthea_wins'])}/{int(result['a_dorinthea_games'])}",
+    }
+
+
 def evaluate_round(directory: str, round_: int, args: argparse.Namespace) -> Dict[str, dict]:
     """Round `round_`'s network against each yardstick."""
-    new = f"net:{net_path(directory, round_)}"
     opponents = {args.anchor: args.anchor}
     if round_ >= 1:
         opponents["previous"] = f"net:{net_path(directory, round_ - 1)}"
     if round_ >= 2:
         opponents["first"] = f"net:{net_path(directory, 0)}"
-    matches = {}
-    for i, (name, opponent) in enumerate(opponents.items()):
-        # A seed of its own per round and opponent, apart from self-play's.
-        seed = args.seed + 500_000_000 + 1_000_003 * round_ + 7919 * i
-        result = play_match(args.binary, new, opponent, args.eval_games, args.eval_iterations,
-                            args.threads, seed)
-        matches[name] = {
-            "score": result["a_score"],
-            "games": int(result["games"]),
-            "as_rhinar": f"{int(result['a_rhinar_wins'])}/{int(result['a_rhinar_games'])}",
-            "as_dorinthea": f"{int(result['a_dorinthea_wins'])}/{int(result['a_dorinthea_games'])}",
-        }
-    return matches
+    return {name: evaluation_match(directory, round_, opponent, i, args)
+            for i, (name, opponent) in enumerate(opponents.items())}
+
+
+def backfill_anchor(directory: str, args: argparse.Namespace, log=print) -> None:
+    """Score every finished round that has no score against `args.anchor` —
+    rounds evaluated under another anchor — with the match the round would
+    have played had it been run with this one. Earlier anchors' scores stay
+    in results.jsonl. Each score is saved as soon as it is played, so a
+    backfill stopped mid-way carries on where it left off."""
+    results = load_results(directory)
+    for result in results:
+        if args.anchor in result["matches"]:
+            continue
+        round_ = result["round"]
+        match = evaluation_match(directory, round_, args.anchor, 0, args)
+        result["matches"][args.anchor] = match
+        log(f"round {round_}: vs {args.anchor:8s} {100 * match['score']:5.1f}% of {match['games']} games  "
+            f"(as Rhinar {match['as_rhinar']}, as Dorinthea {match['as_dorinthea']})  [backfilled]")
+        # Rewritten under another name first, so a stop mid-write never
+        # loses the finished rounds.
+        partial = results_path(directory) + ".partial"
+        with open(partial, "w") as f:
+            f.writelines(json.dumps(r) + "\n" for r in results)
+        os.replace(partial, results_path(directory))
 
 
 def run_round(directory: str, round_: int, args: argparse.Namespace, log=print) -> dict:
@@ -208,6 +238,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     parser.add_argument("--eval-iterations", type=int, default=400)
     parser.add_argument("--anchor", default="ismcts",
                         help="the fixed yardstick every round is measured against: ismcts, puct or random")
+    parser.add_argument("--backfill", action="store_true",
+                        help="first score finished rounds that were measured against another anchor "
+                             "against this one, so the summary's anchor column is complete")
     parser.add_argument("--threads", type=int, default=os.cpu_count() or 1)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--binary", default=DEFAULT_BINARY,
@@ -223,6 +256,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     done = len(load_results(args.dir))
     if done:
         print(f"{done} rounds already finished in {args.dir}; carrying on")
+    if args.backfill:
+        backfill_anchor(args.dir, args)
     for round_ in range(done, args.rounds):
         run_round(args.dir, round_, args)
 
