@@ -1632,6 +1632,8 @@ static CARD_CATALOG: [CardData; Card::COUNT] = [
         },
         // Mortimer, Living Virus (data in `outbreak`)
         crate::outbreak::MORTIMER,
+        // Bloodrot Courier (data in `outbreak`)
+        crate::outbreak::BLOODROT_COURIER_R,
         // Quicken (token)
         CardData {
             typ: CardType::Token,

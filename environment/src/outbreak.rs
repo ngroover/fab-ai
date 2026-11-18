@@ -1,13 +1,13 @@
 //! Outbreak: Mortimer, Living Virus — his hero card and his decklist — and
 //! the set's disease aura tokens (Exertion, Inertia, Bloodrot Pox, Frailty).
 //!
-//! No Assassin cards are implemented yet, so for now his deck is a placeholder
-//! built from the Generic cards of the Rhinar vs Dorinthea classic battle
-//! (`classic_battles`). It is smaller than a full Blitz list: 20 deck cards,
-//! four pieces of equipment and no weapon.
+//! Bloodrot Courier is the only Assassin card implemented so far, so the rest
+//! of his deck is a placeholder built from the Generic cards of the Rhinar vs
+//! Dorinthea classic battle (`classic_battles`). It is smaller than a full
+//! Blitz list: 22 deck cards, four pieces of equipment and no weapon.
 
 use crate::card_effects::ConstantEffect;
-use crate::cards::{Card, CardClass, CardData, CardType, Keyword, Subtype, Talent};
+use crate::cards::{Card, CardClass, CardData, CardType, Color, Keyword, Subtype, Talent};
 
 /// Mortimer, Living Virus — Chaos Assassin hero, 20 life, intellect 4.
 /// `classic_battles::CARD_CATALOG` holds this at `Card::Mortimer`'s index.
@@ -29,6 +29,36 @@ pub const MORTIMER: CardData = CardData {
     hero_life: 20,
     hero_intellect: 4,
     constant_effect: None,
+    ability: None,
+    defend_effect: None,
+    next_attack_effect: None,
+    additional_cost: None,
+    attack_effect: None,
+    play_condition: None,
+    play_effects: &[],
+    mentor_effect: None,
+};
+
+/// Bloodrot Courier (red) — Chaos Assassin attack action, cost 2, pitch 1,
+/// power 4, defense 3, go again. "When this hits a hero, create a Bloodrot
+/// Pox under the attacking and the defending hero's control."
+pub const BLOODROT_COURIER_R: CardData = CardData {
+    typ: CardType::AttackAction,
+    weapon_type: None,
+    cost: 2,
+    pitch: 1,
+    power: 4,
+    defense: 3,
+    color: Some(Color::Red),
+    no_block: false,
+    slot: None,
+    card_class: CardClass::Assassin,
+    talent: Some(Talent::Chaos),
+    subtype: None,
+    keyword: Keyword::GoAgain,
+    hero_life: 0,
+    hero_intellect: 0,
+    constant_effect: Some(ConstantEffect::OnHitBothHeroesCreateBloodrotPox),
     ability: None,
     defend_effect: None,
     next_attack_effect: None,
@@ -94,7 +124,8 @@ pub const FRAILTY_TOKEN: CardData = CardData {
     ..DISEASE_AURA_TOKEN
 };
 
-/// Mortimer's placeholder deck: the hero, four pieces of Generic equipment and
+/// Mortimer's deck: the hero, four pieces of Generic equipment, two Bloodrot
+/// Couriers, and as placeholders until more Assassin cards are implemented
 /// two copies each of ten Generic cards that do not need a weapon. Every card
 /// here must have a variant in `deck_cards::MortimerCard`.
 pub fn build_mortimer_deck() -> Vec<Card> {
@@ -105,6 +136,8 @@ pub fn build_mortimer_deck() -> Vec<Card> {
         Card::IronhideGauntlet,
         Card::IronrotLegs,
         // ── RED ──
+        Card::BloodrotCourierR,
+        Card::BloodrotCourierR,
         Card::FlockOfTheFeatherWalkersR,
         Card::FlockOfTheFeatherWalkersR,
         // ── YELLOW ──
@@ -150,9 +183,9 @@ mod tests {
     }
 
     #[test]
-    fn his_deck_is_generic_cards_only() {
+    fn his_deck_is_assassin_and_generic_cards_only() {
         for card in build_mortimer_deck().into_iter().filter(|&c| c != Card::Mortimer) {
-            assert_eq!(card.data().card_class, CardClass::Generic, "{:?}", card);
+            assert!(matches!(card.data().card_class, CardClass::Generic | CardClass::Assassin), "{:?}", card);
         }
     }
 
@@ -164,7 +197,7 @@ mod tests {
         assert_eq!((p.life, p.intellect), (20, 4));
         assert_eq!(p.weapon, None);
         assert_eq!(p.equipment.len(), 4);
-        assert_eq!(p.owned_cards, 24);
+        assert_eq!(p.owned_cards, 26);
     }
 
     #[test]
@@ -570,6 +603,77 @@ mod tests {
         assert_eq!(gs.p1.token_count(TokenCard::FrailtyToken), 0);
         assert_eq!(gs.p2.token_count(TokenCard::FrailtyToken), 1,
             "the opponent's Frailty lasts until their own end phase");
+    }
+
+    // ── Bloodrot Courier ────────────────────────────────────────────────
+
+    /// Mortimer (P1) against Rhinar with Mortimer's first turn open, his hand
+    /// set to `hand` and 2 resources banked to pay for a Courier.
+    fn mortimer_turn(hand: &[Card]) -> TestGame {
+        let mut gs = new_game(&build_mortimer_deck(), &build_rhinar_deck(), Some(42), false);
+        let choice = if gs.active_player == PlayerIndex::P1 { ActionType::ChooseFirst } else { ActionType::ChooseSecond };
+        step_plain(&mut gs, choice);
+        assert_eq!((gs.phase, gs.turn_player), (Phase::Action, PlayerIndex::P1));
+        set_hand(&mut gs, PlayerIndex::P1, hand);
+        gs.p1.resources = 2;
+        gs
+    }
+
+    #[test]
+    fn bloodrot_courier_is_a_red_chaos_assassin_attack_with_go_again() {
+        let d = Card::BloodrotCourierR.data();
+        assert_eq!(d.typ, CardType::AttackAction);
+        assert_eq!((d.cost, d.pitch, d.power, d.defense), (2, 1, 4, 3));
+        assert!(matches!(d.color, Some(Color::Red)));
+        assert_eq!((d.card_class, d.talent), (CardClass::Assassin, Some(Talent::Chaos)));
+        assert!(d.keyword.contains(Keyword::GoAgain));
+        assert_eq!(crate::display::card_name(Card::BloodrotCourierR), "Bloodrot Courier (red)");
+        assert_eq!(build_mortimer_deck().iter().filter(|&&c| c == Card::BloodrotCourierR).count(), 2);
+    }
+
+    #[test]
+    fn a_bloodrot_courier_hit_gives_both_heroes_a_bloodrot_pox_and_go_again() {
+        let mut gs = mortimer_turn(&[Card::BloodrotCourierR, Card::DodgeB]);
+        let play = crate::test_support::act(&gs, ActionType::PlayCard, Card::BloodrotCourierR);
+        assert_eq!(attack_unblocked(&mut gs, play), 4);
+        assert_eq!(gs.p1.token_count(TokenCard::BloodrotPoxToken), 1);
+        assert_eq!(gs.p2.token_count(TokenCard::BloodrotPoxToken), 1);
+        assert_eq!(gs.p1.action_points, 1, "go again keeps the action point");
+        // Mortimer's own Pox comes due at the beginning of this end phase.
+        step_plain(&mut gs, ActionType::Pass);
+        assert_eq!(gs.phase, Phase::BloodrotPox);
+    }
+
+    #[test]
+    fn a_blocked_bloodrot_courier_creates_no_bloodrot_pox() {
+        let mut gs = mortimer_turn(&[Card::BloodrotCourierR, Card::DodgeB]);
+        step_card(&mut gs, ActionType::PlayCard, Card::BloodrotCourierR);
+        // Rhinar blocks with enough to stop all 4.
+        while gs.phase != Phase::Defend {
+            step_plain(&mut gs, ActionType::Pass);
+        }
+        set_hand(&mut gs, PlayerIndex::P2, &[Card::RagingOnslaughtY, Card::WreckerRompB]);
+        step_card(&mut gs, ActionType::Defend, Card::RagingOnslaughtY);
+        step_card(&mut gs, ActionType::Defend, Card::WreckerRompB);
+        let life = gs.p2.life;
+        while gs.phase != Phase::Action {
+            step_plain(&mut gs, ActionType::Pass);
+        }
+        assert_eq!(gs.p2.life, life, "fully blocked");
+        assert_eq!(gs.p1.token_count(TokenCard::BloodrotPoxToken), 0);
+        assert_eq!(gs.p2.token_count(TokenCard::BloodrotPoxToken), 0);
+    }
+
+    #[test]
+    fn a_bloodrot_courier_hit_creates_no_bloodrot_pox_past_the_token_limit() {
+        let mut gs = mortimer_turn(&[Card::BloodrotCourierR, Card::DodgeB]);
+        for _ in 0..crate::game_state::MAX_TOKEN_COPIES {
+            gs.p2.add_token(TokenCard::BloodrotPoxToken);
+        }
+        let play = crate::test_support::act(&gs, ActionType::PlayCard, Card::BloodrotCourierR);
+        attack_unblocked(&mut gs, play);
+        assert_eq!(gs.p2.token_count(TokenCard::BloodrotPoxToken), crate::game_state::MAX_TOKEN_COPIES);
+        assert_eq!(gs.p1.token_count(TokenCard::BloodrotPoxToken), 1);
     }
 
     /// Random play to the end of the game, in either seat and against either

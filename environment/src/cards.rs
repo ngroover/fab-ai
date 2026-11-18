@@ -188,6 +188,8 @@ pub enum Card {
     IronrotLegs,
     /// Mortimer, Living Virus — the Chaos Assassin hero (see `outbreak`).
     Mortimer,
+    /// Bloodrot Courier (red) — Chaos Assassin attack action (see `outbreak`).
+    BloodrotCourierR,
     /// The Quicken token Flock of the Feather Walkers creates. Not part of any
     /// decklist: it only ever exists in a player's token zone.
     QuickenToken,

@@ -1,6 +1,6 @@
 use crate::action::{Action,ActionType};
 use crate::card_counts::{CardCounts, DeckCardId};
-use crate::game_state::{BLOODROT_POX_COST,BLOODROT_POX_DAMAGE,CHAIN_LINKS,MAX_QUICKENS,WEAPON_ATTACK_ORDINALS,DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
+use crate::game_state::{BLOODROT_POX_COST,BLOODROT_POX_DAMAGE,CHAIN_LINKS,MAX_QUICKENS,MAX_TOKEN_COPIES,WEAPON_ATTACK_ORDINALS,DeckSlot,Gamestate,Phase,Player,PendingCard,PlayerIndex,Zone};
 use crate::cards::{Card,CardClass,CardData,CardType,Keyword,WeaponType};
 use crate::card_effects::{Ability,NextAttackEffect,NextAttackEffectType,NextAttackType,OnPlayEffect,OnPlayConditionType,OnPlayEffectType,AdditionalCostType,ConstantEffect,DefendEffect,PlayCondition,AttackEffect,AttackEffectType,AttackKind};
 use crate::fab_game::{shuffle_deck_for, GameRng};
@@ -1453,6 +1453,19 @@ fn create_quicken(gs: &mut Gamestate, owner: PlayerIndex) {
     }
 }
 
+/// Create a Bloodrot Pox under `owner`'s control. The token zone counts at
+/// most `MAX_TOKEN_COPIES` of a token, so one past that is not created.
+fn create_bloodrot_pox(gs: &mut Gamestate, owner: PlayerIndex) {
+    let player = gs.player_mut(owner);
+    if player.token_count(TokenCard::BloodrotPoxToken) >= MAX_TOKEN_COPIES {
+        return;
+    }
+    player.add_token(TokenCard::BloodrotPoxToken);
+    if gs.logging_enabled() {
+        gs.log_public(format!("{} creates a Bloodrot Pox token", player_name(owner)));
+    }
+}
+
 /// `owner` has just played an attack action card or attacked with a weapon:
 /// each Quicken they hold triggers, is destroyed, and gives the attack go
 /// again. Every Quicken triggers on the same attack, so all are spent at once.
@@ -2358,6 +2371,13 @@ fn resolve_combat_damage(gs: &mut Gamestate) {
         ));
     }
 
+    // Bloodrot Courier, once its damage is dealt: "When this hits a hero, create a Bloodrot Pox under
+    // the attacking and the defending hero's control."
+    if damage > 0 && attack_data.is_some_and(|d| matches!(d.constant_effect,
+        Some(ConstantEffect::OnHitBothHeroesCreateBloodrotPox))) {
+        create_bloodrot_pox(gs, attacker_id);
+        create_bloodrot_pox(gs, defender_id);
+    }
     // A hero reduced to 0 ends the game in the attacker's favour.
     gs.check_game_end();
 

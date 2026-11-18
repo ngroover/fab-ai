@@ -53,6 +53,10 @@ pub enum ConstantEffect {
     /// (`fab_step::resolve_combat_damage`), once per Frailty; the token is
     /// destroyed by `fab_step::destroy_frailty`.
     AttacksFromArsenalAndWeaponsMinus1Power,
+    /// Bloodrot Courier: "When this hits a hero, create a Bloodrot Pox under
+    /// the attacking and the defending hero's control." Fired as combat
+    /// damage resolves (`fab_step::resolve_combat_damage`).
+    OnHitBothHeroesCreateBloodrotPox,
 }
 
 /// What a mentor does with its lessons, on top of its constant effect. A

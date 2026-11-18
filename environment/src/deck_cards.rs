@@ -192,6 +192,7 @@ deck_cards! {
     /// `outbreak::build_mortimer_deck`, one variant per distinct card,
     /// followed by the equipment. He has no weapon yet.
     pub enum MortimerCard for Mortimer {
+        BloodrotCourierR,
         FlockOfTheFeatherWalkersR,
         MuscleMuttY,
         RagingOnslaughtY,
@@ -399,7 +400,7 @@ mod tests {
         }
         check::<RhinarCard>(21);
         check::<DorintheaCard>(21);
-        check::<MortimerCard>(10);
+        check::<MortimerCard>(11);
     }
 
     #[test]
