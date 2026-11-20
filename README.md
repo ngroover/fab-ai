@@ -33,7 +33,9 @@ random, ISMCTS, or a trained network with `cargo play --network FILE`). A human 
 an action at every decision. A decision with only one legal action is played
 automatically (it still shows up in the log), so players and agents are only
 asked when there is a real choice. Options: `cargo play --seed 7` for a reproducible
-game, `cargo play --reveal` to also show hidden information (the opponent's hand,
+game, `cargo play --log game.log` to write the whole game (both players' views,
+and the network's value and policy at each of its decisions) to a file,
+`cargo play --reveal` to also show hidden information (the opponent's hand,
 the full log).
 
 The game log is compiled in by default. To compile it out when measuring raw

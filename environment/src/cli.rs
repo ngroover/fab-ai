@@ -39,6 +39,19 @@ impl Agent<FabGame> for Seat {
     }
 }
 
+impl Seat {
+    /// A short name for the agent in this seat, for the game log.
+    fn label(&self, network_path: Option<&str>) -> String {
+        match self {
+            Seat::Human(_) => "human".into(),
+            Seat::Random(_) => "random".into(),
+            Seat::Ismcts(_) => "ismcts".into(),
+            Seat::Puct(_) => "puct".into(),
+            Seat::Net(_) => format!("net:{}", network_path.unwrap_or("?")),
+        }
+    }
+}
+
 /// Show a setup menu on the terminal; quits if the input ends.
 fn ask(title: &str, options: &[&str]) -> usize {
     menu(&mut StdinLines, &mut std::io::stdout(), title, options).unwrap_or_else(|| {
@@ -80,12 +93,14 @@ fn choose_seat(
 /// hidden information too (the opponent's hand, the omniscient log),
 /// `--iterations N` for how hard an ISMCTS or network seat searches each
 /// decision, `--network FILE` to offer the trained network in `FILE` as an
-/// agent.
+/// agent, `--log FILE` to write the game to `FILE` (see `match_log`).
 pub fn play(args: &[String], default_seed: u64) {
     let mut seed = default_seed;
     let mut reveal = false;
     let mut iterations = DEFAULT_ISMCTS_ITERATIONS;
     let mut network = None;
+    let mut network_path: Option<String> = None;
+    let mut log_file: Option<(String, std::fs::File)> = None;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -104,8 +119,23 @@ pub fn play(args: &[String], default_seed: u64) {
                     // Fail on a network of the wrong sizes before the menus.
                     crate::network::evaluator_or_exit(&loaded);
                     network = Some(loaded);
+                    network_path = Some(path.clone());
                 }
                 None => usage_error("--network needs a file"),
+            },
+            "--log" => match args.next() {
+                Some(path) => {
+                    if !cfg!(feature = "logging") {
+                        usage_error("--log needs the game log, which this build compiled out; \
+                            rebuild without `--no-default-features`");
+                    }
+                    // Fail on a file that cannot be written before the menus.
+                    match std::fs::File::create(path) {
+                        Ok(file) => log_file = Some((path.clone(), file)),
+                        Err(error) => usage_error(&format!("cannot write the game log {path}: {error}")),
+                    }
+                }
+                None => usage_error("--log needs a file"),
             },
             other => usage_error(&format!("unknown option {}", other)),
         }
@@ -118,7 +148,24 @@ pub fn play(args: &[String], default_seed: u64) {
 
     let game = FabGame::new(p1_deck, p2_deck, Some(seed));
     let mut sim = Simulator::new(game, p1_seat, p2_seat);
-    sim.run(true);
+    match log_file {
+        Some((path, file)) => {
+            let labels = [sim.p1_agent.label(network_path.as_deref()), sim.p2_agent.label(network_path.as_deref())];
+            let header = format!("Play-mode game (seed {seed}, {iterations} iterations per search)");
+            let Simulator { game, p1_agent, p2_agent } = &mut sim;
+            // Written as the game goes, so quitting part way keeps the log so far.
+            let mut out = std::io::LineWriter::new(file);
+            crate::match_log::play_logged(
+                game, [p1_agent, p2_agent], [labels[0].as_str(), labels[1].as_str()], &header, &mut out);
+            match out.flush() {
+                Ok(()) => println!("\nGame log written to {path}."),
+                Err(error) => eprintln!("\ncannot write the game log {path}: {error}"),
+            }
+        }
+        None => {
+            sim.run(true);
+        }
+    }
 
     // Show how the game ended: each human sees what happened since their last
     // decision; a game with no human prints its whole log.
@@ -154,6 +201,6 @@ pub fn play(args: &[String], default_seed: u64) {
 }
 
 fn usage_error(msg: &str) -> ! {
-    eprintln!("{}\nusage: environment play [--seed N] [--reveal] [--iterations N] [--network FILE]", msg);
+    eprintln!("{}\nusage: environment play [--seed N] [--reveal] [--iterations N] [--network FILE] [--log FILE]", msg);
     std::process::exit(1);
 }
