@@ -133,7 +133,15 @@ Options:
 | `--iterations N` | How hard the network (or ISMCTS) searches each move. 400 answers instantly; 2000 is stronger and still quick |
 | `--seed N` | Replays the same deal |
 | `--reveal` | Also shows you the hidden information: the opponent's hand and the full log. Useful for checking what the network was looking at |
-| `--log FILE` | Writes the game to `FILE`: the whole game with hidden cards shown, the network's value and policy at each of its decisions, and each player's view. Same format as [`match --log`](#logging-the-games). Written as the game goes, so quitting part way keeps the log so far |
+| `--log FILE` | Logs the game to `FILE` instead of the default file (see below) |
+| `--no-log` | Plays without writing a log |
+
+Every game is logged by default, to `logs/play_YYYYMMDD_HHMMSS_seedN.log` (the
+time in UTC, `logs/` under the folder you run from). The log has the whole game
+with hidden cards shown, the network's value and policy at each of its
+decisions, and each player's view; it is the same format as
+[`match --log`](#logging-the-games). It is written as the game goes, so quitting
+part way keeps the log so far.
 
 Without `--network` the menu offers only human, random and ISMCTS. To watch the
 network play itself or ISMCTS, pick non-human agents for both players; the whole
@@ -221,8 +229,9 @@ a network better only if it scores above 55% over 400 games.
 
 #### Logging the games
 
-Add `--log DIR` to write every game of a match to `DIR/game_NNNN.log`
-(`play --log FILE` writes its one game in the same format):
+A match writes no logs unless asked. Add `--log DIR` to write every game of a
+match to `DIR/game_NNNN.log` (`play` logs its game in the same format, by
+default):
 
 ```sh
 $ENV match --a net:net1.bin --b ismcts --games 4 --iterations 400 --log logs/net1_vs_ismcts

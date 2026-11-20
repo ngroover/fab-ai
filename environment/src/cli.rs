@@ -93,14 +93,16 @@ fn choose_seat(
 /// hidden information too (the opponent's hand, the omniscient log),
 /// `--iterations N` for how hard an ISMCTS or network seat searches each
 /// decision, `--network FILE` to offer the trained network in `FILE` as an
-/// agent, `--log FILE` to write the game to `FILE` (see `match_log`).
+/// agent. The game is logged (see `match_log`) to `default_log_path` unless
+/// `--log FILE` names another file or `--no-log` turns logging off.
 pub fn play(args: &[String], default_seed: u64) {
     let mut seed = default_seed;
     let mut reveal = false;
     let mut iterations = DEFAULT_ISMCTS_ITERATIONS;
     let mut network = None;
     let mut network_path: Option<String> = None;
-    let mut log_file: Option<(String, std::fs::File)> = None;
+    // `None`: the default file; `Some(None)`: no log; `Some(Some(path))`: `--log`.
+    let mut log_choice: Option<Option<String>> = None;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -129,19 +131,45 @@ pub fn play(args: &[String], default_seed: u64) {
                         usage_error("--log needs the game log, which this build compiled out; \
                             rebuild without `--no-default-features`");
                     }
-                    // Fail on a file that cannot be written before the menus.
-                    match std::fs::File::create(path) {
-                        Ok(file) => log_file = Some((path.clone(), file)),
-                        Err(error) => usage_error(&format!("cannot write the game log {path}: {error}")),
-                    }
+                    log_choice = Some(Some(path.clone()));
                 }
                 None => usage_error("--log needs a file"),
             },
+            "--no-log" => log_choice = Some(None),
             other => usage_error(&format!("unknown option {}", other)),
         }
     }
 
+    // Open the log before the menus: a `--log` file that cannot be written
+    // stops here, while the default one only warns and plays on unlogged.
+    let log_file = match log_choice {
+        Some(None) => None,
+        Some(Some(path)) => match std::fs::File::create(&path) {
+            Ok(file) => Some((path, file)),
+            Err(error) => usage_error(&format!("cannot write the game log {path}: {error}")),
+        },
+        // A build without the game log plays unlogged unless asked to log.
+        None if !cfg!(feature = "logging") => None,
+        None => {
+            let path = default_log_path(seed, default_seed);
+            let opened = std::path::Path::new(&path)
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::File::create(&path));
+            match opened {
+                Ok(file) => Some((path, file)),
+                Err(error) => {
+                    eprintln!("cannot write the game log {path}: {error}; playing without a log");
+                    None
+                }
+            }
+        }
+    };
+
     println!("Flesh and Blood - Blitz");
+    if let Some((path, _)) = &log_file {
+        println!("Logging this game to {path} (--no-log to turn off).");
+    }
     let (p1_deck, p1_seat) = choose_seat(PlayerIndex::P1, seed, reveal, iterations, network.as_ref());
     let (p2_deck, p2_seat) = choose_seat(PlayerIndex::P2, seed, reveal, iterations, network.as_ref());
     println!("\nStarting game (seed {}).", seed);
@@ -200,7 +228,46 @@ pub fn play(args: &[String], default_seed: u64) {
     let _ = std::io::stdout().flush();
 }
 
+/// Where a play-mode game is logged by default:
+/// `logs/play_YYYYMMDD_HHMMSS_seedN.log`, the time in UTC. `clock_nanos` is
+/// the time the run started, in nanoseconds since the Unix epoch.
+fn default_log_path(seed: u64, clock_nanos: u64) -> String {
+    let secs = clock_nanos / 1_000_000_000;
+    let (year, month, day) = civil_from_days((secs / 86_400) as i64);
+    let time = secs % 86_400;
+    format!("logs/play_{year:04}{month:02}{day:02}_{:02}{:02}{:02}_seed{seed}.log",
+        time / 3600, time / 60 % 60, time % 60)
+}
+
+/// The calendar date `days` days after 1970-01-01 (Howard Hinnant's
+/// `civil_from_days`).
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (era * 400 + yoe + (month <= 2) as i64, month, day)
+}
+
 fn usage_error(msg: &str) -> ! {
-    eprintln!("{}\nusage: environment play [--seed N] [--reveal] [--iterations N] [--network FILE] [--log FILE]", msg);
+    eprintln!("{}\nusage: environment play [--seed N] [--reveal] [--iterations N] [--network FILE] [--log FILE | --no-log]", msg);
     std::process::exit(1);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_default_log_is_named_by_utc_time_and_seed() {
+        assert_eq!(default_log_path(7, 0), "logs/play_19700101_000000_seed7.log");
+        // 2026-11-26 03:30:12 UTC.
+        assert_eq!(default_log_path(42, 1_795_663_812_123_456_789), "logs/play_20261126_033012_seed42.log");
+        // A leap day.
+        assert_eq!(civil_from_days(19_782), (2024, 2, 29));
+    }
 }
