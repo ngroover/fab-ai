@@ -35,7 +35,8 @@ automatically (it still shows up in the log), so players and agents are only
 asked when there is a real choice. Options: `cargo play --seed 7` for a reproducible
 game, `cargo play --log game.log` to choose where the game is logged (by default
 `logs/play_<UTC time>_seed<N>.log`: the whole game, both players' views, and the
-network's value and policy at each of its decisions), `cargo play --no-log` to
+network's value and policy at each of its decisions, and with `--network` its
+review of each human decision, shown only in the file), `cargo play --no-log` to
 play without a log, `cargo play --reveal` to also show hidden information (the opponent's hand,
 the full log).
 

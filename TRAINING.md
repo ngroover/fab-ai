@@ -143,6 +143,14 @@ decisions, and each player's view; it is the same format as
 [`match --log`](#logging-the-games). It is written as the game goes, so quitting
 part way keeps the log so far.
 
+With `--network`, the log also reviews **your** decisions: after each one the
+network judges the position as if it were playing your seat, and the log shows
+its value, its policy and search over your options with `*` on the one you
+picked, and the move it would have played (or "the network would play the
+same"). This goes only to the file; nothing extra is shown in the terminal, so
+it doesn't give you hints during the game. Each review runs a search of
+`--iterations`, the same as a network seat's.
+
 Without `--network` the menu offers only human, random and ISMCTS. To watch the
 network play itself or ISMCTS, pick non-human agents for both players; the whole
 game log is printed at the end.

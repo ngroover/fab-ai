@@ -183,8 +183,16 @@ pub fn play(args: &[String], default_seed: u64) {
             let Simulator { game, p1_agent, p2_agent } = &mut sim;
             // Written as the game goes, so quitting part way keeps the log so far.
             let mut out = std::io::LineWriter::new(file);
+            // With a network, it reviews each human decision in the log (not
+            // on screen): its own agent, searching as hard as a network seat.
+            let any_human = matches!(p1_agent, Seat::Human(_)) || matches!(p2_agent, Seat::Human(_));
+            let mut advisor = network.as_ref().filter(|_| any_human).map(|network| {
+                crate::puct::PuctAgent::new(
+                    crate::network::evaluator_or_exit(network), iterations, Some(seed ^ 0xAD71_5E5F_00D5_EED5))
+            });
             crate::match_log::play_logged(
-                game, [p1_agent, p2_agent], [labels[0].as_str(), labels[1].as_str()], &header, &mut out);
+                game, [p1_agent, p2_agent], [labels[0].as_str(), labels[1].as_str()], &header, &mut out,
+                advisor.as_mut());
             match out.flush() {
                 Ok(()) => println!("\nGame log written to {path}."),
                 Err(error) => eprintln!("\ncannot write the game log {path}: {error}"),

@@ -18,7 +18,8 @@ use crate::display::{card_name, describe_action, phase_name, player_name};
 use crate::fab_game::FabGame;
 use crate::game_state::{Phase, PlayerIndex};
 use crate::human_agent::game_log;
-use crate::puct::{Evaluator, RootStat};
+use crate::network::NetworkEvaluator;
+use crate::puct::{Evaluator, PuctAgent, RootStat};
 use crate::simulator::Game;
 
 /// Where a match writes its game logs, and the agents' names for them.
@@ -37,34 +38,55 @@ impl MatchLog {
 
 /// What an agent knew when it chose: the network's raw opinion of the position
 /// (network agents only) and the search's statistics (searching agents only).
+/// For a human's decision reviewed by an advisor, the network's opinion and
+/// search, and the action its search would have played.
 #[derive(Default)]
 struct Insight {
     /// The network's value for the player to act, and its policy over the
     /// legal actions (in the order of the legal-action list), summing to 1.
     network: Option<(f32, Vec<f32>)>,
     search: Vec<RootStat>,
+    /// The action the advising network would have played instead.
+    advice: Option<Action>,
 }
 
-/// Ask `seat` for its action in `game`, and what it based the choice on.
-fn decide(seat: &mut Seat, game: &FabGame, legal: &[Action]) -> (Action, Insight) {
-    match seat {
-        Seat::Net(agent) => {
-            // The network's judgement of the real position. It reads only the
-            // mover's observation, so this tells it nothing the mover may not
-            // know, and it changes nothing the search does.
-            let mut priors = [0.0f32; MAX_LEGAL_ACTIONS];
-            let priors = &mut priors[..legal.len()];
-            let value = agent.evaluator.evaluate(game, legal, priors);
-            let total: f32 = priors.iter().sum();
-            let policy = priors.iter().map(|p| if total > 0.0 { p / total } else { 0.0 }).collect();
+/// The action a network agent plays in `game`, with the network's own value
+/// and policy for the position and the search's statistics.
+fn network_decision(agent: &mut PuctAgent<NetworkEvaluator>, game: &FabGame, legal: &[Action]) -> (Action, Insight) {
+    // The network's judgement of the real position. It reads only the
+    // mover's observation, so this tells it nothing the mover may not
+    // know, and it changes nothing the search does.
+    let mut priors = [0.0f32; MAX_LEGAL_ACTIONS];
+    let priors = &mut priors[..legal.len()];
+    let value = agent.evaluator.evaluate(game, legal, priors);
+    let total: f32 = priors.iter().sum();
+    let policy = priors.iter().map(|p| if total > 0.0 { p / total } else { 0.0 }).collect();
+    let (action, search) = agent.choose(game, legal);
+    (action, Insight { network: Some((value, policy)), search, advice: None })
+}
+
+/// Ask `seat` for its action in `game`, and what it based the choice on. A
+/// human's decision is reviewed by `advisor`, if there is one, once the human
+/// has chosen; the review goes only to the log.
+fn decide(
+    seat: &mut Seat,
+    advisor: Option<&mut PuctAgent<NetworkEvaluator>>,
+    game: &FabGame,
+    legal: &[Action],
+) -> (Action, Insight) {
+    match (seat, advisor) {
+        (Seat::Net(agent), _) => network_decision(agent, game, legal),
+        (Seat::Puct(agent), _) => {
             let (action, search) = agent.choose(game, legal);
-            (action, Insight { network: Some((value, policy)), search })
+            (action, Insight { search, ..Insight::default() })
         }
-        Seat::Puct(agent) => {
-            let (action, search) = agent.choose(game, legal);
-            (action, Insight { network: None, search })
+        (seat @ Seat::Human(_), Some(advisor)) => {
+            let action = seat.select_action(game, legal);
+            let (advice, mut insight) = network_decision(advisor, game, legal);
+            insight.advice = Some(advice);
+            (action, insight)
         }
-        other => (other.select_action(game, legal), Insight::default()),
+        (other, _) => (other.select_action(game, legal), Insight::default()),
     }
 }
 
@@ -72,6 +94,13 @@ fn decide(seat: &mut Seat, game: &FabGame, legal: &[Action]) -> (Action, Insight
 fn write_insight(out: &mut dyn Write, game: &FabGame, legal: &[Action], chosen: Action, insight: &Insight) {
     let gs = &game.state;
     let mover = player_name(gs.active_player);
+    if let Some(advice) = insight.advice {
+        if advice == chosen {
+            let _ = writeln!(out, "       the network would play the same");
+        } else {
+            let _ = writeln!(out, "       the network would play: {}", describe_action(gs, &advice));
+        }
+    }
     if let Some((value, _)) = &insight.network {
         let _ = writeln!(out, "       network value {value:+.3} for {mover} (expected score {:.1}%)",
             50.0 * (value + 1.0));
@@ -135,12 +164,17 @@ fn write_new_entries(out: &mut dyn Write, game: &FabGame, shown: &mut usize) {
 /// name each seat's agent; `header` opens the log. Written decision by
 /// decision, so a game cut short (a human quitting) keeps its log so far.
 /// Errors writing are ignored; the caller checks the sink afterwards.
+///
+/// With `advisor`, every human decision is also judged by that network agent:
+/// the log gets the network's value and policy for the position, its search,
+/// and what it would have played. None of it is shown to the human.
 pub fn play_logged(
     game: &mut FabGame,
     seats: [&mut Seat; 2],
     labels: [&str; 2],
     header: &str,
     out: &mut dyn Write,
+    mut advisor: Option<&mut PuctAgent<NetworkEvaluator>>,
 ) -> Phase {
     let [p1_seat, p2_seat] = seats;
     let _ = writeln!(out, "{header}");
@@ -161,7 +195,7 @@ pub fn play_logged(
         write_new_entries(&mut *out, game, &mut shown);
         let mover = game.player_to_act();
         let seat: &mut Seat = if mover == 0 { &mut *p1_seat } else { &mut *p2_seat };
-        let (action, insight) = decide(seat, game, &legal);
+        let (action, insight) = decide(seat, advisor.as_deref_mut(), game, &legal);
         decisions += 1;
         let gs = &game.state;
         let _ = writeln!(out, "  >> decision {decisions}: {} ({}) - turn {}, {}, life P1 {} / P2 {}, {} options",

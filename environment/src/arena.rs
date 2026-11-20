@@ -130,7 +130,7 @@ fn play_game(
             let header = format!("Match game {index} (game seed {game_seed}, match seed {seed}, \
                 {iterations} iterations per search)");
             let mut text = Vec::new();
-            let phase = play_logged(&mut game, seats, labels, &header, &mut text);
+            let phase = play_logged(&mut game, seats, labels, &header, &mut text, None);
             let path = log.path(index);
             if let Err(error) = std::fs::write(&path, text) {
                 eprintln!("cannot write the game log {}: {error}", path.display());
