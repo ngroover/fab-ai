@@ -13,6 +13,7 @@ use crate::game_state::{Phase, PlayerIndex};
 use crate::human_agent::{game_log, menu, HumanAgent, StdinLines};
 use crate::ismcts::IsmctsAgent;
 use crate::simulator::Simulator;
+use crate::tutor::Tutor;
 
 /// The agent in one seat, chosen at run time.
 pub enum Seat {
@@ -21,6 +22,8 @@ pub enum Seat {
     Ismcts(IsmctsAgent),
     Puct(crate::puct::PuctAgent<crate::puct::RolloutEvaluator>),
     Net(crate::puct::PuctAgent<crate::network::NetworkEvaluator>),
+    /// A human checked move by move by the network (`--tutor`).
+    Tutored(Tutor<HumanAgent<StdinLines, Stdout>, crate::puct::PuctAgent<crate::network::NetworkEvaluator>, Stdout>),
 }
 
 /// How many search iterations an ISMCTS seat runs per decision unless told
@@ -35,6 +38,7 @@ impl Agent<FabGame> for Seat {
             Seat::Ismcts(agent) => agent.select_action(game, legal_actions),
             Seat::Puct(agent) => agent.select_action(game, legal_actions),
             Seat::Net(agent) => agent.select_action(game, legal_actions),
+            Seat::Tutored(agent) => agent.select_action(game, legal_actions),
         }
     }
 }
@@ -48,6 +52,7 @@ impl Seat {
             Seat::Ismcts(_) => "ismcts".into(),
             Seat::Puct(_) => "puct".into(),
             Seat::Net(_) => format!("net:{}", network_path.unwrap_or("?")),
+            Seat::Tutored(_) => format!("human (tutored by net:{})", network_path.unwrap_or("?")),
         }
     }
 }
@@ -66,6 +71,7 @@ fn choose_seat(
     reveal: bool,
     iterations: u32,
     network: Option<&std::sync::Arc<crate::network::Network>>,
+    tutor: bool,
 ) -> ([Card; 46], Seat) {
     let name = player_name(pid);
     let deck = match ask(&format!("{}: choose a hero", name), &["Rhinar", "Dorinthea"]) {
@@ -73,12 +79,18 @@ fn choose_seat(
         _ => build_dorinthea_deck(),
     };
     // The network is only on the menu when one was given (`--network`).
-    let mut agents = vec!["Human (terminal input)", "Random", "ISMCTS (tree search)"];
+    let human_label = if tutor { "Human (terminal input, tutored by the network)" } else { "Human (terminal input)" };
+    let mut agents = vec![human_label, "Random", "ISMCTS (tree search)"];
     if network.is_some() {
         agents.push("Network (tree search with the trained network)");
     }
     let agent_seed = Some(seed.wrapping_add(1 + pid.index() as u64));
     let seat = match (ask(&format!("{}: choose an agent", name), &agents), network) {
+        (0, Some(network)) if tutor => Seat::Tutored(Tutor::new(
+            HumanAgent::new(StdinLines, std::io::stdout(), reveal),
+            crate::puct::PuctAgent::new(crate::network::evaluator_or_exit(network), iterations, agent_seed),
+            std::io::stdout(),
+        )),
         (0, _) => Seat::Human(HumanAgent::new(StdinLines, std::io::stdout(), reveal)),
         (1, _) => Seat::Random(RandomAgent::new(agent_seed)),
         (3, Some(network)) => Seat::Net(crate::puct::PuctAgent::new(
@@ -93,8 +105,10 @@ fn choose_seat(
 /// hidden information too (the opponent's hand, the omniscient log),
 /// `--iterations N` for how hard an ISMCTS or network seat searches each
 /// decision, `--network FILE` to offer the trained network in `FILE` as an
-/// agent. The game is logged (see `match_log`) to `default_log_path` unless
-/// `--log FILE` names another file or `--no-log` turns logging off.
+/// agent, `--tutor` to have that network check every move a human makes
+/// (needs `--network`; see `crate::tutor`). The game is logged (see
+/// `match_log`) to `default_log_path` unless `--log FILE` names another file
+/// or `--no-log` turns logging off.
 pub fn play(args: &[String], default_seed: u64) {
     let mut seed = default_seed;
     let mut reveal = false;
@@ -103,10 +117,12 @@ pub fn play(args: &[String], default_seed: u64) {
     let mut network_path: Option<String> = None;
     // `None`: the default file; `Some(None)`: no log; `Some(Some(path))`: `--log`.
     let mut log_choice: Option<Option<String>> = None;
+    let mut tutor = false;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--reveal" => reveal = true,
+            "--tutor" => tutor = true,
             "--seed" => match args.next().and_then(|s| s.parse().ok()) {
                 Some(s) => seed = s,
                 None => usage_error("--seed needs a number"),
@@ -139,6 +155,9 @@ pub fn play(args: &[String], default_seed: u64) {
             other => usage_error(&format!("unknown option {}", other)),
         }
     }
+    if tutor && network.is_none() {
+        usage_error("--tutor needs --network FILE: the network is the tutor");
+    }
 
     // Open the log before the menus: a `--log` file that cannot be written
     // stops here, while the default one only warns and plays on unlogged.
@@ -170,8 +189,8 @@ pub fn play(args: &[String], default_seed: u64) {
     if let Some((path, _)) = &log_file {
         println!("Logging this game to {path} (--no-log to turn off).");
     }
-    let (p1_deck, p1_seat) = choose_seat(PlayerIndex::P1, seed, reveal, iterations, network.as_ref());
-    let (p2_deck, p2_seat) = choose_seat(PlayerIndex::P2, seed, reveal, iterations, network.as_ref());
+    let (p1_deck, p1_seat) = choose_seat(PlayerIndex::P1, seed, reveal, iterations, network.as_ref(), tutor);
+    let (p2_deck, p2_seat) = choose_seat(PlayerIndex::P2, seed, reveal, iterations, network.as_ref(), tutor);
     println!("\nStarting game (seed {}).", seed);
 
     let game = FabGame::new(p1_deck, p2_deck, Some(seed));
@@ -209,14 +228,17 @@ pub fn play(args: &[String], default_seed: u64) {
     let gs = &game.state;
     println!();
     let mut any_human = false;
-    for (pid, seat) in [(PlayerIndex::P1, p1_agent), (PlayerIndex::P2, p2_agent)] {
-        if let Seat::Human(agent) = seat {
-            if any_human {
-                println!("  ({}'s view of the ending)", player_name(pid));
-            }
-            agent.show_new_events(gs, pid);
-            any_human = true;
+    for (pid, seat) in [(PlayerIndex::P1, &mut *p1_agent), (PlayerIndex::P2, &mut *p2_agent)] {
+        let human = match seat {
+            Seat::Human(agent) => agent,
+            Seat::Tutored(tutor) => &mut tutor.human,
+            _ => continue,
+        };
+        if any_human {
+            println!("  ({}'s view of the ending)", player_name(pid));
         }
+        human.show_new_events(gs, pid);
+        any_human = true;
     }
     if !any_human {
         match game_log(gs, None) {
@@ -233,6 +255,11 @@ pub fn play(args: &[String], default_seed: u64) {
         _ => "The game stopped before finishing.".to_string(),
     };
     println!("\n{} Final life: P1 {} - P2 {} after {} turns.", result, gs.p1.life, gs.p2.life, gs.turn_count);
+    for (pid, seat) in [(PlayerIndex::P1, &*p1_agent), (PlayerIndex::P2, &*p2_agent)] {
+        if let Seat::Tutored(tutor) = seat {
+            println!("{} - {}", player_name(pid), tutor.score_line());
+        }
+    }
     let _ = std::io::stdout().flush();
 }
 
@@ -262,7 +289,7 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 }
 
 fn usage_error(msg: &str) -> ! {
-    eprintln!("{}\nusage: environment play [--seed N] [--reveal] [--iterations N] [--network FILE] [--log FILE | --no-log]", msg);
+    eprintln!("{}\nusage: environment play [--seed N] [--reveal] [--iterations N] [--network FILE [--tutor]] [--log FILE | --no-log]", msg);
     std::process::exit(1);
 }
 

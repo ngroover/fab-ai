@@ -133,6 +133,7 @@ Options:
 | `--iterations N` | How hard the network (or ISMCTS) searches each move. 400 answers instantly; 2000 is stronger and still quick |
 | `--seed N` | Replays the same deal |
 | `--reveal` | Also shows you the hidden information: the opponent's hand and the full log. Useful for checking what the network was looking at |
+| `--tutor` | Off by default; needs `--network`. The network checks every move a human makes. If yours differs from the network's, you are told, it counts as a mistake, and the game continues with the network's move. Your score (mistakes out of decisions) is printed at the end |
 | `--log FILE` | Logs the game to `FILE` instead of the default file (see below) |
 | `--no-log` | Plays without writing a log |
 

@@ -38,7 +38,9 @@ game, `cargo play --log game.log` to choose where the game is logged (by default
 network's value and policy at each of its decisions, and with `--network` its
 review of each human decision, shown only in the file), `cargo play --no-log` to
 play without a log, `cargo play --reveal` to also show hidden information (the opponent's hand,
-the full log).
+the full log). `cargo play --network FILE --tutor` has the network check every human
+move: a move that differs from the network's is reported as a mistake and replaced
+by the network's move, and the mistake count is shown at the end of the game.
 
 The game log is compiled in by default. To compile it out when measuring raw
 simulation speed: `cargo run --release --no-default-features -- 100000`
