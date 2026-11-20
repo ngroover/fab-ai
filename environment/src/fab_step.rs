@@ -306,7 +306,8 @@ fn commit_card_to_pending(gs: &mut Gamestate, rng: &mut GameRng, act: Action) {
     // Committing a card reveals it, so the announcement is public.
     if gs.logging_enabled() {
         let verb = if act.typ == ActionType::Activate { "activates" } else { "plays" };
-        gs.log_public(format!("{} {} {:?}", player_name(owner), verb, card));
+        let from = if card_ref.zone == Zone::Arsenal { " from arsenal" } else { "" };
+        gs.log_public(format!("{} {} {:?}{}", player_name(owner), verb, card, from));
     }
 
     let already_paid = gs.player(owner).resources >= cost;
@@ -4320,6 +4321,24 @@ mod tests {
             assert_eq!(log.len(), 5);
             assert_eq!(log[3], "P1 plays MuscleMuttY");
             assert_eq!(log[4], "P1 pitches ClearingBellowB");
+        }
+    }
+
+    #[cfg(feature = "logging")]
+    #[test]
+    fn test_logging_a_card_played_from_arsenal() {
+        let mut gs = new_game(build_rhinar_deck(), build_dorinthea_deck(), Some(42), true);
+        step(&mut gs, Action{ typ: ActionType::ChooseFirst, card: None});
+
+        // Stage Muscle Mutt in the arsenal and play it from there.
+        let mm = expect_in(&gs, PlayerIndex::P1, Card::MuscleMuttY, Zone::Hand, "Muscle Mutt should be in the opening hand");
+        let mm_id = id(&gs, PlayerIndex::P1, mm);
+        move_card(&mut gs.p1, mm_id, Zone::Hand, Zone::Arsenal);
+        step_card_from(&mut gs, ActionType::PlayCard, mm, Zone::Arsenal);
+
+        for log in [&gs.log, &gs.p1.log, &gs.p2.log] {
+            let log = log.as_ref().expect("logging is enabled");
+            assert_eq!(log.last().unwrap(), "P1 plays MuscleMuttY from arsenal");
         }
     }
 
