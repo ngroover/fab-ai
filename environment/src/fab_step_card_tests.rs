@@ -4112,6 +4112,37 @@ fn the_next_attack_after_breaking_the_chain_opens_a_fresh_chain() {
 }
 
 #[test]
+fn close_chain_is_the_only_option_when_the_alternative_is_passing() {
+    // Nothing left to play: the choice would be break-or-pass, which lead to
+    // the same place, so only breaking the chain is offered.
+    let (mut gs, _) = swing_bone_basher_unblocked();
+    gs.p1.action_points = 1;
+    set_hand(&mut gs, PlayerIndex::P1, &[]);
+    // Retire the equipment too, so no activation is on offer either.
+    let worn: Vec<_> = gs.p1.equipment.iter().map(|(id, _)| id).collect();
+    for id in worn {
+        move_card(&mut gs.p1, id, Zone::Equipment, Zone::Graveyard);
+    }
+    let legal = legal_actions(&gs);
+    assert_eq!(legal.len(), 1, "{:?}", legal);
+    assert_eq!(legal[0].typ, ActionType::CloseChain);
+
+    // Once the chain is broken, passing is offered again.
+    step(&mut gs, Action{ typ: ActionType::CloseChain, card: None});
+    assert!(legal_actions(&gs).iter().any(|a| a.typ == ActionType::Pass));
+}
+
+#[test]
+fn pass_is_still_offered_alongside_close_chain_when_a_card_is_playable() {
+    let (mut gs, _) = swing_bone_basher_unblocked_keeping(
+        &[Card::SmashWithBigTreeY, Card::ClearingBellowB]);
+    gs.p1.action_points = 1;
+    let legal = legal_actions(&gs);
+    assert!(legal.iter().any(|a| a.typ == ActionType::CloseChain));
+    assert!(legal.iter().any(|a| a.typ == ActionType::Pass));
+}
+
+#[test]
 fn passing_still_closes_the_chain_and_ends_the_action_phase() {
     let (mut gs, weapon) = swing_bone_basher_unblocked();
     step(&mut gs, Action{ typ: ActionType::Pass, card: None});

@@ -227,10 +227,20 @@ fn legal_action_phase(gs: &Gamestate) -> LegalActions {
     // nothing: passing closes the chain anyway as the action phase ends.
     let player = gs.player(gs.turn_player);
     if combat_chain_open(gs) && player.action_points > 0 {
-        actions.push(Action {
+        let close = Action {
             typ: ActionType::CloseChain,
             card: None,
-        });
+        };
+        // When passing is the only other choice, breaking the chain is the
+        // sole option offered: the two lead to the same place (the chain
+        // closes either way), so there is no decision worth presenting.
+        // Passing stays available afterwards, once the chain is gone.
+        if actions.len() == 1 && actions[0].typ == ActionType::Pass {
+            let mut only = LegalActions::new();
+            only.push(close);
+            return only;
+        }
+        actions.push(close);
     }
     actions
 }
