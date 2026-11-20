@@ -18,6 +18,7 @@ use crate::decks::{build_dorinthea_deck, build_rhinar_deck};
 use crate::fab_game::FabGame;
 use crate::game_state::Phase;
 use crate::ismcts::IsmctsAgent;
+use crate::match_log::{play_logged, MatchLog};
 use crate::network::{evaluator_or_exit, Network, NetworkEvaluator};
 use crate::puct::{PuctAgent, RolloutEvaluator};
 use crate::simulator::Simulator;
@@ -103,21 +104,48 @@ impl MatchResult {
 }
 
 /// Play game `index` of a match and return its one-game result. A plays
-/// Rhinar (seat 0) in even games and Dorinthea (seat 1) in odd ones.
-fn play_game(a: &AgentSpec, b: &AgentSpec, iterations: u32, seed: u64, index: u32) -> MatchResult {
+/// Rhinar (seat 0) in even games and Dorinthea (seat 1) in odd ones. With
+/// `log`, the game is also written to its log file (see `match_log`).
+fn play_game(
+    a: &AgentSpec,
+    b: &AgentSpec,
+    iterations: u32,
+    seed: u64,
+    index: u32,
+    log: Option<&MatchLog>,
+) -> MatchResult {
     let game_seed = seed.wrapping_add(index as u64);
-    let game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(game_seed));
-    let a_seat = a.seat(iterations, game_seed ^ 0x9E37_79B9_7F4A_7C15);
-    let b_seat = b.seat(iterations, game_seed ^ 0xC2B2_AE3D_27D4_EB4F);
+    let mut game = FabGame::new(build_rhinar_deck(), build_dorinthea_deck(), Some(game_seed));
+    let mut a_seat = a.seat(iterations, game_seed ^ 0x9E37_79B9_7F4A_7C15);
+    let mut b_seat = b.seat(iterations, game_seed ^ 0xC2B2_AE3D_27D4_EB4F);
     let a_hero = (index % 2) as usize;
-    let phase = if a_hero == 0 {
-        let mut sim = Simulator::new(game, a_seat, b_seat);
-        sim.run(false);
-        sim.game.state.phase
-    } else {
-        let mut sim = Simulator::new(game, b_seat, a_seat);
-        sim.run(false);
-        sim.game.state.phase
+    let phase = match log {
+        Some(log) => {
+            let (a_label, b_label) = (format!("A ({})", log.names[0]), format!("B ({})", log.names[1]));
+            let (seats, labels) = if a_hero == 0 {
+                ([&mut a_seat, &mut b_seat], [a_label.as_str(), b_label.as_str()])
+            } else {
+                ([&mut b_seat, &mut a_seat], [b_label.as_str(), a_label.as_str()])
+            };
+            let header = format!("Match game {index} (game seed {game_seed}, match seed {seed}, \
+                {iterations} iterations per search)");
+            let (phase, text) = play_logged(&mut game, seats, labels, &header);
+            let path = log.path(index);
+            if let Err(error) = std::fs::write(&path, text) {
+                eprintln!("cannot write the game log {}: {error}", path.display());
+            }
+            phase
+        }
+        None if a_hero == 0 => {
+            let mut sim = Simulator::new(game, a_seat, b_seat);
+            sim.run(false);
+            sim.game.state.phase
+        }
+        None => {
+            let mut sim = Simulator::new(game, b_seat, a_seat);
+            sim.run(false);
+            sim.game.state.phase
+        }
     };
 
     let mut result = MatchResult::default();
@@ -137,6 +165,7 @@ fn play_game(a: &AgentSpec, b: &AgentSpec, iterations: u32, seed: u64, index: u3
 
 /// Play `games` games between `a` and `b` on `threads` threads, both
 /// searching `iterations` iterations per decision, and return the score.
+/// With `log`, every game is also written to a log file.
 pub fn play_match(
     a: &AgentSpec,
     b: &AgentSpec,
@@ -144,6 +173,7 @@ pub fn play_match(
     iterations: u32,
     threads: usize,
     seed: u64,
+    log: Option<&MatchLog>,
 ) -> MatchResult {
     let next_game = AtomicU32::new(0);
     std::thread::scope(|scope| {
@@ -156,7 +186,7 @@ pub fn play_match(
                         if index >= games {
                             break result;
                         }
-                        result.add(&play_game(a, b, iterations, seed, index));
+                        result.add(&play_game(a, b, iterations, seed, index, log));
                     }
                 })
             })
@@ -170,13 +200,15 @@ pub fn play_match(
 }
 
 /// `environment match --a AGENT --b AGENT [--games N] [--iterations N]
-/// [--threads N] [--seed N]`: play a match and print the score. The last line
-/// printed, starting `RESULT`, is the score as `key=value` pairs for scripts.
+/// [--threads N] [--seed N] [--log DIR]`: play a match and print the score.
+/// The last line printed, starting `RESULT`, is the score as `key=value`
+/// pairs for scripts. `--log DIR` writes each game to `DIR/game_NNNN.log`.
 pub fn main(args: &[String], time_seed: u64) {
     let usage = || -> ! {
         eprintln!("usage: environment match --a AGENT --b AGENT [--games N] [--iterations N] \
-            [--threads N] [--seed N]");
+            [--threads N] [--seed N] [--log DIR]");
         eprintln!("       AGENT is random, ismcts, puct or net:FILE; each plays both heroes equally often");
+        eprintln!("       --log DIR writes every game, both players' views and each network decision to DIR/game_NNNN.log");
         std::process::exit(1);
     };
     let mut names: [Option<&str>; 2] = [None, None];
@@ -184,6 +216,7 @@ pub fn main(args: &[String], time_seed: u64) {
     let mut iterations = 400u32;
     let mut threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     let mut seed = time_seed;
+    let mut log_dir: Option<std::path::PathBuf> = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         let Some(value) = rest.next() else { usage() };
@@ -200,6 +233,10 @@ pub fn main(args: &[String], time_seed: u64) {
             "--iterations" => value.parse().map(|n| iterations = n).is_ok(),
             "--threads" => value.parse().map(|n| threads = n).is_ok(),
             "--seed" => value.parse().map(|n| seed = n).is_ok(),
+            "--log" => {
+                log_dir = Some(value.into());
+                true
+            }
             _ => false,
         };
         if !parsed {
@@ -214,9 +251,20 @@ pub fn main(args: &[String], time_seed: u64) {
         })
     };
     let (a, b) = (spec(a_name), spec(b_name));
+    let log = log_dir.map(|dir| {
+        if !cfg!(feature = "logging") {
+            eprintln!("--log needs the game log, which this build compiled out; rebuild without `--no-default-features`");
+            std::process::exit(1);
+        }
+        if let Err(error) = std::fs::create_dir_all(&dir) {
+            eprintln!("cannot create the log directory {}: {error}", dir.display());
+            std::process::exit(1);
+        }
+        MatchLog { dir, names: [a_name.to_string(), b_name.to_string()] }
+    });
 
     let start = Instant::now();
-    let r = play_match(&a, &b, games, iterations, threads, seed);
+    let r = play_match(&a, &b, games, iterations, threads, seed, log.as_ref());
     let seconds = start.elapsed().as_secs_f64();
     let (a_total, b_total): (u32, u32) = (r.a_wins.iter().sum(), r.b_wins.iter().sum());
     println!("Games played:  {}  ({iterations} iterations, seed {seed}, {threads} threads, {seconds:.1}s)", r.games());
@@ -226,6 +274,9 @@ pub fn main(args: &[String], time_seed: u64) {
         r.b_wins[0], r.a_games[1], r.b_wins[1], r.a_games[0]);
     println!("Draws:         {}", r.draws);
     println!("A's score:     {:.1}%", 100.0 * r.a_score());
+    if let Some(log) = &log {
+        println!("Game logs:     {}", log.path(0).with_file_name("game_NNNN.log").display());
+    }
     println!("RESULT games={} a_wins={a_total} b_wins={b_total} draws={} a_score={:.4} \
         a_rhinar_wins={} a_rhinar_games={} a_dorinthea_wins={} a_dorinthea_games={}",
         r.games(), r.draws, r.a_score(), r.a_wins[0], r.a_games[0], r.a_wins[1], r.a_games[1]);
@@ -250,15 +301,15 @@ mod tests {
     #[test]
     fn a_match_accounts_for_every_game() {
         let (a, b) = (AgentSpec::Random, AgentSpec::Random);
-        let result = play_match(&a, &b, 30, 1, 3, 7);
+        let result = play_match(&a, &b, 30, 1, 3, 7, None);
         assert_eq!(result.a_games, [15, 15]);
         let decided: u32 = result.a_wins.iter().chain(&result.b_wins).sum();
         assert_eq!(decided + result.draws, 30);
         // B's wins as a hero come out of the games A played the other one.
         assert!(result.a_wins[0] + result.b_wins[1] <= 15);
         assert!(result.a_wins[1] + result.b_wins[0] <= 15);
-        assert_eq!(play_match(&a, &b, 30, 1, 1, 7), result);
-        assert_ne!(play_match(&a, &b, 30, 1, 3, 8), result);
+        assert_eq!(play_match(&a, &b, 30, 1, 1, 7, None), result);
+        assert_ne!(play_match(&a, &b, 30, 1, 3, 8, None), result);
     }
 
     /// The score tells a strong agent from a weak one whichever is "A", and
@@ -266,13 +317,36 @@ mod tests {
     #[test]
     fn a_search_outscores_random_play_from_either_side() {
         let search = AgentSpec::Puct;
-        let forward = play_match(&search, &AgentSpec::Random, 8, 40, 4, 3);
-        let backward = play_match(&AgentSpec::Random, &search, 8, 40, 4, 3);
+        let forward = play_match(&search, &AgentSpec::Random, 8, 40, 4, 3, None);
+        let backward = play_match(&AgentSpec::Random, &search, 8, 40, 4, 3, None);
         assert!(forward.a_score() >= 0.75, "{forward:?}");
         assert!(backward.a_score() <= 0.25, "{backward:?}");
 
         let net = AgentSpec::Net(crate::network::tests::random_network(1));
-        assert_eq!(play_match(&net, &AgentSpec::Random, 4, 10, 2, 3).games(), 4);
+        assert_eq!(play_match(&net, &AgentSpec::Random, 4, 10, 2, 3, None).games(), 4);
+    }
+
+    /// `--log` writes one file per game holding the whole game, both
+    /// players' views and the network's value and policy at each of its
+    /// decisions, and logging does not change how the games go.
+    #[cfg(feature = "logging")]
+    #[test]
+    fn a_logged_match_writes_every_game_and_scores_the_same() {
+        let dir = std::env::temp_dir().join(format!("fab_match_log_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = MatchLog { dir: dir.clone(), names: ["net:test".into(), "random".into()] };
+        let net = AgentSpec::Net(crate::network::tests::random_network(1));
+        let logged = play_match(&net, &AgentSpec::Random, 2, 10, 2, 3, Some(&log));
+        assert_eq!(logged, play_match(&net, &AgentSpec::Random, 2, 10, 2, 3, None));
+        for index in 0..2 {
+            let text = std::fs::read_to_string(log.path(index)).expect("each game has a log");
+            for section in ["== The whole game", "== P1's view", "== P2's view", "== Result =="] {
+                assert!(text.contains(section), "game {index} lacks {section:?}");
+            }
+            assert!(text.contains("A (net:test)") && text.contains("B (random)"));
+            assert!(text.contains("network value") && text.contains("policy"));
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

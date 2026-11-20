@@ -17,6 +17,7 @@ mod game_state;
 mod human_agent;
 mod ismcts;
 mod legal_actions;
+mod match_log;
 mod network;
 mod observation;
 mod puct;
@@ -69,7 +70,7 @@ fn main() {
         eprintln!("usage: environment [num_games] [--p1 AGENT] [--p2 AGENT] [--iterations N] [--network FILE]");
         eprintln!("       AGENT is random, ismcts, puct (the search with random playouts) or net (the search with --network)");
         eprintln!("       environment play [--seed N] [--reveal] [--iterations N] [--network FILE]");
-        eprintln!("       environment match --a AGENT --b AGENT [--games N] [--iterations N] [--threads N] [--seed N]");
+        eprintln!("       environment match --a AGENT --b AGENT [--games N] [--iterations N] [--threads N] [--seed N] [--log DIR]");
         eprintln!("       environment selfplay --out FILE [--games N] [--iterations N] [--threads N] [--seed N] [--network FILE]");
         std::process::exit(1);
     };

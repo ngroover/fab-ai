@@ -410,20 +410,31 @@ pub fn policy_target(game: &FabGame, stats: &[RootStat], out: &mut [f32; ACTION_
     }
 }
 
-impl<E: Evaluator> Agent<FabGame> for PuctAgent<E> {
-    /// The most-visited root action.
-    fn select_action(&mut self, game: &FabGame, legal_actions: &[Action]) -> Action {
+impl<E: Evaluator> PuctAgent<E> {
+    /// The action `select_action` plays, with the search's statistics for
+    /// every root action (empty when the choice was forced, and no search
+    /// ran), for logging what the agent saw.
+    pub fn choose(&mut self, game: &FabGame, legal_actions: &[Action]) -> (Action, Vec<RootStat>) {
         if legal_actions.len() == 1 {
-            return legal_actions[0];
+            return (legal_actions[0], Vec::new());
         }
-        self.search(game)
-            .into_iter()
+        let stats = self.search(game);
+        let action = stats
+            .iter()
             // Re-dealing never changes what the searching player may do, so
             // every root action is legal; the filter only guards that.
             .filter(|stat| legal_actions.contains(&stat.action))
             .max_by_key(|stat| stat.visits)
             .map(|stat| stat.action)
-            .unwrap_or(legal_actions[0])
+            .unwrap_or(legal_actions[0]);
+        (action, stats)
+    }
+}
+
+impl<E: Evaluator> Agent<FabGame> for PuctAgent<E> {
+    /// The most-visited root action.
+    fn select_action(&mut self, game: &FabGame, legal_actions: &[Action]) -> Action {
+        self.choose(game, legal_actions).0
     }
 }
 

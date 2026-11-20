@@ -218,6 +218,32 @@ How many games to play: a score from 100 games is only good to about ±10
 points, 400 games to about ±5, 1,000 games to about ±3. A common rule is to call
 a network better only if it scores above 55% over 400 games.
 
+#### Logging the games
+
+Add `--log DIR` to write every game of a match to `DIR/game_NNNN.log`:
+
+```sh
+$ENV match --a net:net1.bin --b ismcts --games 4 --iterations 400 --log logs/net1_vs_ismcts
+```
+
+Each file has:
+
+- **The whole game** with every hidden card shown, and each agent decision
+  written in where it was made: who chose, the turn, phase and life totals, and
+  the action taken.
+- For a **`net:` agent**, at every decision: the network's value for the
+  position (from the mover's side, -1 to 1, with the matching expected score),
+  and for each legal action the network's policy, the search's visits and the
+  search's value. `*` marks the action played. A `puct` agent's decisions show
+  the search's columns only.
+- **P1's view** and **P2's view**: the game as each player saw it, with the
+  opponent's hidden cards redacted.
+- **The result.**
+
+Logging does not change how the games go: a match scores the same with or
+without it. Logs are a few thousand lines per game, so log a few games rather
+than a whole 400-game match.
+
 ## Agents
 
 The names `match` accepts for `--a` and `--b`:
